@@ -128,11 +128,11 @@ const toneStyles: Record<Tone, { icon: string; badge: string }> = {
   red: { icon: "text-rose-200", badge: "border-rose-300/25 bg-rose-300/10 text-rose-200" },
 };
 
-function IconButton({ label, children, onClick }: { label: string; children: ReactNode; onClick?: () => void }) {
+function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
   return (
     <button
       aria-label={label}
-      className="grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300"
+      className={`grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${className}`}
       onClick={onClick}
       type="button"
     >
@@ -282,7 +282,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+    <main className="authority-page min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.07),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
       <div className="relative flex min-h-screen">
         <aside className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
@@ -312,8 +312,8 @@ export default function OnboardingPage() {
         {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
 
         <section className="min-w-0 flex-1">
-          <header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
-            <IconButton label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton>
+          <header className="authority-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
+            <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
             <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca ruoli e capability" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca ruolo, capability, tenant…" value={query} /></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">AUTHORITY</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
@@ -324,10 +324,22 @@ export default function OnboardingPage() {
             </div>
           </header>
 
-          <div className="mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / EVENTS / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">Authority & onboarding</h1><p className="mt-1 text-xs text-slate-500">Identità server-owned, tenant context e capability matrix · superficie S02</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><DatabaseZap className="mr-2 size-3.5 text-cyan-300" />{authorityContext ? "Readback Sites verificato" : "Readback in corso"}</span><Button className="h-9 border border-lime-300/30 bg-lime-300 px-3 text-xs font-semibold text-[#060806] shadow-[0_0_18px_rgba(190,255,60,0.16)] hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Crea profilo accesso</Button></div></div>
+          <div className="authority-content mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
+            <div className="authority-hero mb-5">
+              <div className="authority-hero-grid" aria-hidden="true" />
+              <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                <div className="flex items-center gap-4">
+                  <span className="authority-mark"><span className="absolute inset-x-3 top-5 h-0.5 rotate-[-16deg] bg-lime-300" /><span className="absolute inset-x-3 top-7 h-0.5 rotate-[-16deg] bg-lime-300/75" /><span className="absolute inset-x-3 top-9 h-0.5 rotate-[-16deg] bg-lime-300/45" />Z</span>
+                  <div><p className="authority-kicker">COMMAND / AUTHORITY CONTROL PLANE</p><p className="mt-1 text-sm font-medium tracking-wide text-slate-200 sm:text-base">Access matrix <span className="text-slate-600">·</span> tenant boundary <span className="text-slate-600">·</span> governed profiles</p><p className="mt-2 text-xs text-slate-500">S02 is locked for the Sites-native operating scope.</p></div>
+                </div>
+                <div className="authority-hero-meta grid grid-cols-3 gap-2 sm:min-w-[330px]">
+                  <div><span>STATE</span><strong>LOCKED</strong></div><div><span>STORE</span><strong>D1 / SITES</strong></div><div><span>EDGE</span><strong>OWNER PRIVATE</strong></div>
+                </div>
+              </div>
+            </div>
+            <div className="authority-title-block mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / EVENTS / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[30px]">Authority & onboarding</h1><p className="mt-1 text-xs text-slate-500">Identità server-owned, tenant context e capability matrix · superficie S02</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><DatabaseZap className="mr-2 size-3.5 text-cyan-300" />{authorityContext ? "Readback Sites verificato" : "Readback in corso"}</span><Button className="h-10 border border-lime-300/30 bg-lime-300 px-4 text-xs font-semibold text-[#060806] shadow-[0_0_22px_rgba(190,255,60,0.18)] transition hover:-translate-y-0.5 hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Crea profilo accesso</Button></div></div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Ruoli canonici" value="13" detail="SITES CATALOG" icon={UserRoundCog} tone="lime" /><MetricCard label="TenantContext fields" value="12" detail="SERVER-OWNED" icon={KeyRound} tone="cyan" /><MetricCard label="Capability catalog" value="28+" detail="IMMUTABLE ARRAYS" icon={ShieldCheck} tone="lime" /><MetricCard label="Profili salvati" value={String(profiles.length)} detail={authorityContext ? "D1 READBACK" : "READBACK PENDING"} icon={DatabaseZap} tone={authorityContext ? "lime" : "amber"} /></div>
+            <div className="authority-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Ruoli canonici" value="13" detail="SITES CATALOG" icon={UserRoundCog} tone="lime" /><MetricCard label="TenantContext fields" value="12" detail="SERVER-OWNED" icon={KeyRound} tone="cyan" /><MetricCard label="Capability catalog" value="28+" detail="IMMUTABLE ARRAYS" icon={ShieldCheck} tone="lime" /><MetricCard label="Profili salvati" value={String(profiles.length)} detail={authorityContext ? "D1 READBACK" : "READBACK PENDING"} icon={DatabaseZap} tone={authorityContext ? "lime" : "amber"} /></div>
 
             <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
               <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><SectionTitle eyebrow="SITE SESSION / BOUNDARY" title="Contesto corrente" /><p className="mt-1 text-[11px] text-slate-500">Identità, membership e tenant derivano dal server Sites.</p></div><StatusBadge tone={authorityContext ? "lime" : "amber"}>{authorityContext ? "SITES NATIVE" : "READBACK PENDING"}</StatusBadge></div><div className="carbon-card-neon mt-4 rounded-xl border p-4"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl border border-lime-300/30 bg-lime-300/10 text-lime-200"><LockKeyhole className="size-5" /></span><div><p className="text-sm font-semibold text-slate-100">Owner-only Site access</p><p className="mt-1 text-[11px] text-slate-500">Accesso verificato dal perimetro privato Sites</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Account</p><p className="mt-1 truncate text-xs text-lime-200">{authorityContext?.actorEmail ?? "owner"}</p></div><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">App role</p><p className="mt-1 text-xs text-lime-200">{authorityContext?.role ?? "readback pending"}</p></div></div></div><div className="mt-4 space-y-2"><div className="flex items-center gap-2 rounded-lg border border-cyan-300/15 bg-cyan-300/5 px-3 py-2.5 text-[11px] text-cyan-100/80"><ShieldCheck className="size-4 shrink-0 text-cyan-200" /><span>Client identity: <strong className="font-medium text-cyan-100">server-owned</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><LockKeyhole className="size-4 shrink-0 text-lime-200" /><span>Tenant isolation: <strong className="font-medium text-lime-100">assertTenantScope</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><CheckCircle2 className="size-4 shrink-0 text-lime-200" /><span>Resolver runtime: <strong className="font-medium text-lime-100">Sites auth + D1 active</strong></span></div></div></section>
