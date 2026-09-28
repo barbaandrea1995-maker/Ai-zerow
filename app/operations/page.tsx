@@ -221,6 +221,10 @@ export default function OperationsPage() {
       return;
     }
     if (id === "operations") return;
+    if (id === "events_authority") {
+      window.location.href = "/onboarding";
+      return;
+    }
     notify(`${label}: superficie prevista nel prossimo adapter`);
   };
 
