@@ -19,7 +19,7 @@ Static route, schema and source evidence is not runtime certification. Unknown i
 
 ## Initial scope
 
-The first Site slice implements the shared evidence console and route-aware shell. Auth, Neon, domain services, event consumers, object storage, OpenAI runtime, service worker exact-build identity, camera, GPS and native mobile remain explicit adapter boundaries from the reconstruction blueprint.
+The first Site slice implements the shared evidence console and route-aware shell. Sites-native workspace auth and D1 authority persistence are now implemented for S02. Neon, external multi-tenant identity, domain services, event consumers, object storage, OpenAI runtime, service worker exact-build identity, camera, GPS and native mobile remain explicit adapter boundaries from the reconstruction blueprint.
 
 ## S01 closure in Sites
 
@@ -36,3 +36,11 @@ Closure evidence for this Sites scope:
 - private Sites publication succeeds from the exact packaged source.
 
 The labels `ADAPTER_REQUIRED`, `NOT_RUN` and `UNKNOWN` remain visible only where they describe future runtime capabilities; they do not reopen S01.
+
+## S02 closure in Sites
+
+S02 is closed for the Sites execution scope. The Authority/Onboarding surface now uses the Sites workspace identity headers server-side, derives the owner-private Site tenant context, applies the canonical `tenant.manage` permission gate and persists access profiles in the Sites D1 binding `DB`.
+
+The browser submits only a profile label and one canonical base role. The server supplies the actor, tenant, creator and capability array; cross-tenant resource scope is guarded by `assertTenantScope`. The UI readback is served by `GET /api/authority/access-profiles`, and profile creation by `POST /api/authority/access-profiles`.
+
+S02 closure is intentionally limited to the Sites-only tenant model. The source-research multi-tenant adapter, external identity provider and Neon runtime remain deferred and are not represented as completed capabilities.

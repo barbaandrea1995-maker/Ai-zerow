@@ -4,7 +4,6 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
@@ -29,7 +28,6 @@ import {
   Send,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Truck,
   Users,
   Wrench,
@@ -40,6 +38,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useRouter } from "next/navigation";
 
 type JobStatus = "In corso" | "Pianificata" | "Completata";
 type JobFilter = "TUTTE" | "IN CORSO" | "PIANIFICATE" | "COMPLETATE";
@@ -183,6 +182,7 @@ function ActivityState({ state }: { state: JobActivity["state"] }) {
 }
 
 export default function OperationsPage() {
+  const router = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
   const [filter, setFilter] = useState<JobFilter>("TUTTE");
   const [query, setQuery] = useState("");
@@ -217,12 +217,12 @@ export default function OperationsPage() {
   const navigate = (id: string, label: string) => {
     setMobileMenu(false);
     if (id === "command") {
-      window.location.href = "/";
+      router.push("/");
       return;
     }
     if (id === "operations") return;
     if (id === "events_authority") {
-      window.location.href = "/onboarding";
+      router.push("/onboarding");
       return;
     }
     notify(`${label}: superficie prevista nel prossimo adapter`);
