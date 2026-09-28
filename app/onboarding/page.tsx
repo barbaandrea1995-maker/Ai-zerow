@@ -288,7 +288,7 @@ export default function OnboardingPage() {
         <aside className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center justify-between px-2">
             <button className="flex items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
-              <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black font-mono text-[18px] font-black italic text-lime-200"><span className="absolute inset-x-2 top-3 h-0.5 rotate-[-16deg] bg-lime-300" /><span className="absolute inset-x-2 top-5 h-0.5 rotate-[-16deg] bg-lime-300/80" /><span className="absolute inset-x-2 top-7 h-0.5 rotate-[-16deg] bg-lime-300/60" />Z</span>
+              <span className="brand-mark neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
               <span><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
             </button>
             <button className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button" aria-label="Chiudi menu"><X className="size-4" /></button>
@@ -329,7 +329,7 @@ export default function OnboardingPage() {
               <div className="authority-hero-grid" aria-hidden="true" />
               <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                 <div className="flex items-center gap-4">
-                  <span className="authority-mark"><span className="absolute inset-x-3 top-5 h-0.5 rotate-[-16deg] bg-lime-300" /><span className="absolute inset-x-3 top-7 h-0.5 rotate-[-16deg] bg-lime-300/75" /><span className="absolute inset-x-3 top-9 h-0.5 rotate-[-16deg] bg-lime-300/45" />Z</span>
+                  <span className="authority-mark"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
                   <div><p className="authority-kicker">COMMAND / AUTHORITY CONTROL PLANE</p><p className="mt-1 text-sm font-medium tracking-wide text-slate-200 sm:text-base">Access matrix <span className="text-slate-600">·</span> tenant boundary <span className="text-slate-600">·</span> governed profiles</p><p className="mt-2 text-xs text-slate-500">S02 is locked for the Sites-native operating scope.</p></div>
                 </div>
                 <div className="authority-hero-meta grid grid-cols-3 gap-2 sm:min-w-[330px]">
