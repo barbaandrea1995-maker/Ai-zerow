@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI-ZEROW-COMMAND",
-  description: "ZEROW reconstruction workspace with evidence states, route surfaces and adapter boundaries.",
+  title: "AI-ZEROW COMMAND · Control Center",
+  description: "Operational command center for jobs, assets, teams and governed AI workflows.",
   other: {
     "codex-preview": "development",
   },

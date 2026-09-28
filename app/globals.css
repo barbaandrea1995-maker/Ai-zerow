@@ -15,26 +15,26 @@
 }
 
 :root {
-  --background: #111518;
-  --foreground: #eef3f3;
-  --card: #1a2024;
+  --background: #050607;
+  --foreground: #eef7ef;
+  --card: #0a0d0e;
   --card-foreground: #edf2f2;
-  --popover: #1a2024;
+  --popover: #0a0d0e;
   --popover-foreground: #eef3f3;
   --primary: #d8ff52;
-  --primary-foreground: #101416;
-  --secondary: #20272b;
+  --primary-foreground: #060806;
+  --secondary: #111617;
   --secondary-foreground: #eef3f3;
-  --muted: #20272b;
-  --muted-foreground: #9ba6aa;
-  --accent: #2a3439;
+  --muted: #111617;
+  --muted-foreground: #869495;
+  --accent: #17201e;
   --accent-foreground: #eef3f3;
   --destructive: #f66b7c;
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.12);
+  --border: rgba(210, 231, 222, 0.11);
+  --input: rgba(210, 231, 222, 0.12);
   --ring: #d8ff52;
   --radius: 0.75rem;
-  --sidebar: #171c20;
+  --sidebar: #050607;
   --sidebar-foreground: #eef3f3;
   --sidebar-primary: #d8ff52;
   --sidebar-primary-foreground: #101416;
@@ -84,15 +84,15 @@
 }
 
 html {
-  background: #111518;
+  background: #050607;
 }
 
 body {
   background:
-    repeating-linear-gradient(125deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 11px),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 32%),
-    radial-gradient(circle at 78% -12%, rgba(216, 255, 82, 0.08), transparent 34%),
-    linear-gradient(115deg, #0f1316 0%, #1a2125 48%, #101416 100%);
+    repeating-linear-gradient(125deg, rgba(196, 217, 208, 0.018) 0 1px, transparent 1px 11px),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.024), transparent 32%),
+    radial-gradient(circle at 78% -12%, rgba(190, 255, 60, 0.07), transparent 34%),
+    linear-gradient(115deg, #040506 0%, #0a0d0e 48%, #030405 100%);
   background-attachment: fixed;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
@@ -101,15 +101,15 @@ body {
 .carbon-card {
   position: relative;
   overflow: hidden;
-  border-color: rgba(209, 226, 229, 0.14) !important;
+  border-color: rgba(183, 205, 197, 0.14) !important;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.065), transparent 24%),
-    repeating-linear-gradient(125deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 8px),
-    linear-gradient(145deg, #222b30 0%, #171e22 52%, #0e1316 100%) !important;
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 24%),
+    repeating-linear-gradient(125deg, rgba(209, 229, 220, 0.018) 0 1px, transparent 1px 8px),
+    linear-gradient(145deg, #101414 0%, #090c0d 52%, #040506 100%) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset 0 -18px 38px rgba(0, 0, 0, 0.2),
-    0 18px 50px rgba(0, 0, 0, 0.22);
+    inset 0 1px 0 rgba(229, 255, 241, 0.06),
+    inset 0 -18px 38px rgba(0, 0, 0, 0.4),
+    0 18px 50px rgba(0, 0, 0, 0.36);
 }
 
 .carbon-card::after {
@@ -140,29 +140,45 @@ body {
     inset 0 1px 0 rgba(216, 255, 82, 0.22),
     inset 0 -18px 38px rgba(0, 0, 0, 0.18),
     0 0 0 1px rgba(216, 255, 82, 0.08),
-    0 18px 50px rgba(0, 0, 0, 0.24),
+    0 18px 50px rgba(0, 0, 0, 0.42),
     0 0 34px rgba(216, 255, 82, 0.08);
 }
 
 .carbon-card-neon {
   border-color: rgba(216, 255, 82, 0.42) !important;
   background:
-    linear-gradient(135deg, rgba(216, 255, 82, 0.12), transparent 28%),
-    repeating-linear-gradient(125deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 8px),
-    linear-gradient(145deg, #26331f 0%, #182018 54%, #101612 100%) !important;
+    linear-gradient(135deg, rgba(216, 255, 82, 0.075), transparent 28%),
+    repeating-linear-gradient(125deg, rgba(209, 229, 220, 0.018) 0 1px, transparent 1px 8px),
+    linear-gradient(145deg, #11170f 0%, #090e0a 54%, #040605 100%) !important;
   box-shadow:
     inset 0 1px 0 rgba(216, 255, 82, 0.18),
     inset 0 -20px 40px rgba(0, 0, 0, 0.2),
     0 0 42px rgba(216, 255, 82, 0.08),
-    0 18px 50px rgba(0, 0, 0, 0.22);
+    0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.carbon-card-cyan {
+  border-color: rgba(62, 222, 255, 0.25) !important;
+  background:
+    linear-gradient(135deg, rgba(62, 222, 255, 0.045), transparent 28%),
+    repeating-linear-gradient(125deg, rgba(209, 229, 220, 0.018) 0 1px, transparent 1px 8px),
+    linear-gradient(145deg, #0d1314 0%, #080c0d 54%, #040506 100%) !important;
 }
 
 .carbon-inset {
   border: 1px solid rgba(255, 255, 255, 0.09);
   background:
-    repeating-linear-gradient(125deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 7px),
-    linear-gradient(150deg, rgba(7, 10, 12, 0.34), rgba(39, 49, 54, 0.42));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -12px 24px rgba(0, 0, 0, 0.16);
+    repeating-linear-gradient(125deg, rgba(209, 229, 220, 0.015) 0 1px, transparent 1px 7px),
+    linear-gradient(150deg, rgba(3, 5, 6, 0.82), rgba(17, 24, 23, 0.55));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), inset 0 -12px 24px rgba(0, 0, 0, 0.28);
+}
+
+.map-grid {
+  background-image:
+    linear-gradient(rgba(182, 218, 198, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(182, 218, 198, 0.055) 1px, transparent 1px),
+    repeating-linear-gradient(135deg, rgba(190, 255, 60, 0.018) 0 1px, transparent 1px 13px);
+  background-size: 44px 44px, 44px 44px, 13px 13px;
 }
 
 .metal-rule {
