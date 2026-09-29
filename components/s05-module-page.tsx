@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, Plus, Search, Send, Settings2, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";
+import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, Network, Plus, Search, Send, Settings2, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -26,6 +26,7 @@ const nav: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "DOCUMENTS", href: "/documents", icon: FileText },
   { label: "GOVERNANCE", href: "/governance", icon: ShieldCheck },
+  { label: "EXTERNALS", href: "/externals", icon: Network },
   { label: "EVENTS / AUTHORITY", href: "/events", icon: BookOpen },
   { label: "PWA / DIAGNOSTICS", href: "/pwa/diagnostics", icon: Activity },
 ];
