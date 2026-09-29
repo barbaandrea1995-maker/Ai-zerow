@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  Activity,
   ArrowUpRight,
+  AlertTriangle,
   Bell,
   BriefcaseBusiness,
   Building2,
@@ -15,6 +17,7 @@ import {
   CircleX,
   DatabaseZap,
   FileText,
+  Filter,
   Gauge,
   HardHat,
   KeyRound,
@@ -22,6 +25,7 @@ import {
   LockKeyhole,
   Map as MapIcon,
   Menu,
+  MoreHorizontal,
   MessageSquareText,
   Package,
   Plus,
@@ -82,6 +86,88 @@ type AccessProfile = {
   createdAt: string;
   updatedAt: string;
 };
+
+type AuthorityTabId = "overview" | "users" | "roles" | "permissions" | "teams" | "access" | "audit" | "policies";
+
+type AuthorityUser = {
+  initials: string;
+  name: string;
+  email: string;
+  role: string;
+  team: string;
+  status: "Online" | "Offline";
+  lastAccess: string;
+  tone: "lime" | "amber" | "cyan" | "violet";
+};
+
+const authorityTabs: Array<{ id: AuthorityTabId; label: string; target: string }> = [
+  { id: "overview", label: "Panoramica", target: "authority-overview" },
+  { id: "users", label: "Utenti", target: "authority-users" },
+  { id: "roles", label: "Ruoli", target: "authority-roles" },
+  { id: "permissions", label: "Permessi", target: "authority-permissions" },
+  { id: "teams", label: "Team", target: "authority-teams" },
+  { id: "access", label: "Accessi", target: "authority-policies" },
+  { id: "audit", label: "Audit Log", target: "authority-activity" },
+  { id: "policies", label: "Politiche", target: "authority-policies" },
+];
+
+const authorityUsers: AuthorityUser[] = [
+  { initials: "MR", name: "Marco Rossi", email: "marco.rossi@azienda.it", role: "Operatore", team: "Team Alpha", status: "Online", lastAccess: "Oggi, 10:24", tone: "lime" },
+  { initials: "GV", name: "Giulia Verdi", email: "giulia.verdi@azienda.it", role: "Team Leader", team: "Team Beta", status: "Online", lastAccess: "Oggi, 09:18", tone: "lime" },
+  { initials: "LB", name: "Luca Bianchi", email: "luca.bianchi@azienda.it", role: "Manager", team: "Team Alpha", status: "Offline", lastAccess: "Ieri, 17:32", tone: "cyan" },
+  { initials: "SC", name: "Sara Conti", email: "sara.conti@azienda.it", role: "Amministratore", team: "HQ", status: "Online", lastAccess: "Oggi, 11:05", tone: "violet" },
+  { initials: "DR", name: "Davide Romano", email: "davide.romano@azienda.it", role: "Tecnico", team: "Team Gamma", status: "Online", lastAccess: "Oggi, 08:45", tone: "cyan" },
+];
+
+const authorityRoleDistribution = [
+  { label: "Operatore", value: 18, share: "38%", tone: "lime" },
+  { label: "Team Leader", value: 8, share: "17%", tone: "green" },
+  { label: "Manager", value: 6, share: "13%", tone: "yellow" },
+  { label: "Amministratore", value: 4, share: "8%", tone: "orange" },
+  { label: "Tecnico", value: 8, share: "17%", tone: "blue" },
+  { label: "Viewer", value: 4, share: "8%", tone: "slate" },
+];
+
+const accessLevels = [
+  { label: "Lettura", value: 186 },
+  { label: "Inserimento", value: 142 },
+  { label: "Modifica", value: 98 },
+  { label: "Approvazione", value: 36 },
+  { label: "Amministrazione", value: 12 },
+];
+
+const authorityActivity = [
+  { icon: Users, title: "Nuovo utente aggiunto", detail: "mario.rossi@azienda.it", time: "5 min fa", tone: "lime" as Tone },
+  { icon: KeyRound, title: "Ruolo modificato", detail: "Luca Bianchi → Team Leader", time: "18 min fa", tone: "lime" as Tone },
+  { icon: ShieldCheck, title: "Permesso aggiornato", detail: "commesse.approva", time: "1 ora fa", tone: "lime" as Tone },
+  { icon: Users, title: "Utente rimosso dal team", detail: "Giulia Verdi → Team Beta", time: "3 ore fa", tone: "lime" as Tone },
+  { icon: AlertTriangle, title: "Accesso non autorizzato", detail: "Tentativo fallito", time: "5 ore fa", tone: "red" as Tone },
+];
+
+const authorityTeams = [
+  { label: "Team Alpha", members: 8, initials: "TA", tone: "lime" },
+  { label: "Team Beta", members: 6, initials: "TB", tone: "lime" },
+  { label: "Team Gamma", members: 5, initials: "TG", tone: "lime" },
+  { label: "Headquarters", members: 4, initials: "HQ", tone: "violet" },
+];
+
+const permissionMatrix = [
+  { module: "Commesse", values: ["Lettura", "Modifica", "Approvazione", "Amministrazione", "Modifica", "Lettura"] },
+  { module: "Lavori", values: ["Lettura", "Modifica", "Modifica", "Amministrazione", "Modifica", "Lettura"] },
+  { module: "Asset", values: ["Lettura", "Modifica", "Modifica", "Amministrazione", "Modifica", "Lettura"] },
+  { module: "Pianificazione", values: ["Lettura", "Modifica", "Approvazione", "Amministrazione", "Modifica", "Lettura"] },
+  { module: "Team", values: ["Nessun accesso", "Lettura", "Modifica", "Amministrazione", "Lettura", "Nessun accesso"] },
+  { module: "Documenti", values: ["Lettura", "Modifica", "Modifica", "Amministrazione", "Modifica", "Lettura"] },
+  { module: "Analisi", values: ["Lettura", "Lettura", "Modifica", "Amministrazione", "Lettura", "Lettura"] },
+];
+
+const authorityPolicies = [
+  { icon: LockKeyhole, title: "Autenticazione a due fattori", detail: "Richiesta per ruoli amministrativi", state: "Attiva" },
+  { icon: CircleGauge, title: "Sessione massima", detail: "Timeout automatico", state: "8 ore" },
+  { icon: ShieldCheck, title: "Accesso da dispositivi", detail: "Solo dispositivi autorizzati", state: "Limitato" },
+  { icon: Activity, title: "Log attività", detail: "Tracciamento completo", state: "Attivo" },
+  { icon: KeyRound, title: "Politica password", detail: "Scadenza ogni 90 giorni", state: "Attiva" },
+];
 
 const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText },
@@ -187,9 +273,103 @@ function CapabilityPill({ capability }: { capability: string }) {
   return <span className={`rounded-md border px-2 py-1 font-mono text-[10px] ${action ? "border-lime-300/20 bg-lime-300/5 text-lime-200" : "border-white/10 bg-black/20 text-slate-400"}`}>{capability}</span>;
 }
 
+function AuthorityVisualDashboard({
+  activeTab,
+  filteredUsers,
+  onNotify,
+  onNewUser,
+  onSelectTab,
+}: {
+  activeTab: AuthorityTabId;
+  filteredUsers: AuthorityUser[];
+  onNotify: (message: string) => void;
+  onNewUser: () => void;
+  onSelectTab: (tab: AuthorityTabId, target: string) => void;
+}) {
+  return (
+    <>
+      <div className="authority-tabbar mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/45 p-1" role="tablist" aria-label="Authority sections">
+        <div className="flex min-w-max gap-1">
+          {authorityTabs.map((tab) => (
+            <button
+              className={`rounded-lg px-3 py-2 text-[11px] font-medium transition ${activeTab === tab.id ? "bg-lime-300 text-[#071006] shadow-[0_0_18px_rgba(190,255,60,0.2)]" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-100"}`}
+              key={tab.id}
+              onClick={() => onSelectTab(tab.id, tab.target)}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)_minmax(330px,0.72fr)]" id="authority-overview">
+        <section className="carbon-card rounded-2xl p-4 sm:p-5">
+          <SectionTitle eyebrow="AUTHORITY / ROLE DISTRIBUTION" title="Distribuzione ruoli" />
+          <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="authority-donut" style={{ background: "conic-gradient(#a8f22f 0 38%, #54c32a 38% 55%, #e6ee59 55% 68%, #f6ad2a 68% 76%, #7aa4ff 76% 93%, #657080 93% 100%)" }}>
+              <div className="authority-donut-hole"><strong>48</strong><span>Utenti</span></div>
+            </div>
+            <div className="w-full space-y-2 sm:max-w-[210px]">
+              {authorityRoleDistribution.map((item) => <div className="flex items-center gap-2 text-[11px]" key={item.label}><span className={`authority-legend-dot authority-legend-${item.tone}`} /><span className="min-w-0 flex-1 truncate text-slate-300">{item.label}</span><span className="font-mono text-slate-500">{item.value} ({item.share})</span></div>)}
+            </div>
+          </div>
+        </section>
+
+        <section className="carbon-card rounded-2xl p-4 sm:p-5">
+          <SectionTitle eyebrow="AUTHORITY / ACCESS LEVELS" title="Livelli di accesso" />
+          <div className="authority-bar-chart mt-5">
+            {accessLevels.map((item) => <div className="authority-bar-item" key={item.label}><div className="authority-bar-value">{item.value}</div><div className="authority-bar-track"><span style={{ height: `${Math.max(12, (item.value / 186) * 100)}%` }} /></div><div className="authority-bar-label">{item.label}</div></div>)}
+          </div>
+        </section>
+
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-activity">
+          <SectionTitle eyebrow="AUTHORITY / AUDIT STREAM" title="Attività recenti" action="Vedi tutte" onAction={() => onNotify("Audit Log: read model visuale pronto per il collegamento agli eventi")} />
+          <div className="mt-4 divide-y divide-white/[0.07]">
+            {authorityActivity.map((item) => { const Icon = item.icon; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={item.title} onClick={() => onNotify(`${item.title}: ${item.detail}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${item.tone === "red" ? "border-rose-300/25 bg-rose-300/10 text-rose-200" : "border-lime-300/20 bg-lime-300/10 text-lime-200"}`}><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">{item.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{item.detail}</span></span><span className="shrink-0 text-[10px] text-slate-500">{item.time}</span></button>; })}
+          </div>
+        </section>
+      </div>
+
+      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.38fr)_minmax(330px,0.62fr)]">
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-users">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="AUTHORITY / USER DIRECTORY" title="Utenti" /><p className="mt-1 text-[11px] text-slate-500">Read model visivo · identità e membership restano server-owned.</p></div><button className="text-[11px] font-medium text-lime-300 transition hover:text-lime-100" onClick={() => onNotify("Utenti: elenco completo disponibile con il relativo adapter")} type="button">Vedi tutti</button></div>
+          <div className="mt-4 flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><div className="h-9 rounded-lg border border-white/10 bg-black/35 pl-9 pr-3 text-[11px] leading-9 text-slate-600">Filtra dalla ricerca Authority in alto</div></div><button className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("Filtri utenti: read model visuale")} type="button"><Filter className="size-3.5" />Filtri</button></div>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20"><table className="w-full min-w-[720px] text-left"><thead className="border-b border-white/[0.08] text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-600"><tr><th className="w-10 px-3 py-3"><span className="sr-only">Seleziona</span>□</th><th className="px-3 py-3">Nome</th><th className="px-3 py-3">Email</th><th className="px-3 py-3">Ruolo</th><th className="px-3 py-3">Team</th><th className="px-3 py-3">Stato</th><th className="px-3 py-3">Ultimo accesso</th><th className="w-8 px-2 py-3" /></tr></thead><tbody className="divide-y divide-white/[0.07]">{filteredUsers.map((user) => <tr className="transition hover:bg-lime-300/[0.035]" key={user.email}><td className="px-3 py-3 text-slate-600">□</td><td className="px-3 py-3"><div className="flex items-center gap-2.5"><span className={`grid size-7 place-items-center rounded-full border text-[9px] font-bold ${user.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : user.tone === "cyan" ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-lime-300/30 bg-lime-300/15 text-lime-100"}`}>{user.initials}</span><span className="whitespace-nowrap text-xs font-medium text-slate-200">{user.name}</span></div></td><td className="whitespace-nowrap px-3 py-3 text-[11px] text-slate-500">{user.email}</td><td className="px-3 py-3"><span className="rounded-md border border-lime-300/20 bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">{user.role}</span></td><td className="whitespace-nowrap px-3 py-3 text-[11px] text-slate-400">{user.team}</td><td className="px-3 py-3"><span className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={`size-1.5 rounded-full ${user.status === "Online" ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-rose-300"}`} />{user.status}</span></td><td className="whitespace-nowrap px-3 py-3 text-[10px] text-slate-500">{user.lastAccess}</td><td className="px-2 py-3"><button className="grid size-7 place-items-center rounded-md text-slate-600 hover:bg-white/5 hover:text-lime-200" onClick={() => onNotify(`${user.name}: azioni utente disponibili con l'adapter Authority`)} type="button" aria-label={`Azioni per ${user.name}`}><MoreHorizontal className="size-4" /></button></td></tr>)}{filteredUsers.length === 0 && <tr><td className="px-3 py-8 text-center text-xs text-slate-500" colSpan={8}>Nessun utente corrisponde alla ricerca.</td></tr>}</tbody></table></div>
+        </section>
+
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-teams">
+          <SectionTitle eyebrow="AUTHORITY / WORKFORCE GROUPS" title="Team" action="Vedi tutti" onAction={() => onNotify("Team: read model visuale pronto per l'adapter Workforce")} />
+          <div className="mt-4 space-y-2">{authorityTeams.map((team) => <button className="flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-black/15 p-2.5 text-left transition hover:border-lime-300/25 hover:bg-lime-300/[0.04]" key={team.label} onClick={() => onNotify(`${team.label}: ${team.members} membri nel read model`)} type="button"><span className={`grid size-9 place-items-center rounded-full border text-[10px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}>{team.initials}</span><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-slate-200">{team.label}</span><span className="mt-1 block text-[10px] text-slate-600">{team.members} membri</span></span><Users className="size-4 text-slate-600" /></button>)}</div>
+        </section>
+      </div>
+
+      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.38fr)_minmax(330px,0.62fr)]">
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-permissions">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="AUTHORITY / CAPABILITY MATRIX" title="Matrice permessi" /><p className="mt-1 text-[11px] text-slate-500">Vista comparativa del catalogo · il resolver canonico resta server-owned.</p></div><button className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("Gestione permessi: capability catalogo pronto")} type="button"><Settings2 className="size-3.5" />Gestisci permessi</button></div>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20"><table className="w-full min-w-[760px] text-left"><thead className="border-b border-white/[0.08] text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600"><tr><th className="px-3 py-3">Modulo</th>{["Operatore", "Team Leader", "Manager", "Amministratore", "Tecnico", "Viewer"].map((role) => <th className="px-2 py-3 text-center" key={role}>{role}</th>)}</tr></thead><tbody className="divide-y divide-white/[0.07]">{permissionMatrix.map((row) => <tr key={row.module}><td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-slate-300">{row.module}</td>{row.values.map((value, index) => <td className="px-2 py-2.5 text-center" key={`${row.module}-${index}`}><span className={`inline-flex min-w-[64px] justify-center rounded-md border px-1.5 py-1 text-[9px] ${value === "Amministrazione" ? "border-violet-300/25 bg-violet-300/15 text-violet-100" : value === "Approvazione" ? "border-blue-300/25 bg-blue-300/15 text-blue-100" : value === "Modifica" ? "border-amber-300/25 bg-amber-300/15 text-amber-100" : value === "Nessun accesso" ? "border-white/10 bg-white/[0.04] text-slate-600" : "border-lime-300/20 bg-lime-300/10 text-lime-200"}`}>{value}</span></td>)}</tr>)}</tbody></table></div>
+        </section>
+
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-policies">
+          <SectionTitle eyebrow="AUTHORITY / GOVERNANCE" title="Politiche di accesso" action="Vedi tutte" onAction={() => onNotify("Politiche: configurazione pronta per l'adapter Security")} />
+          <div className="mt-4 space-y-3">{authorityPolicies.map((policy) => { const Icon = policy.icon; return <button className="flex w-full items-center gap-3 text-left" key={policy.title} onClick={() => onNotify(`${policy.title}: ${policy.state}`)} type="button"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-slate-200">{policy.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{policy.detail}</span></span><span className="flex items-center gap-2 text-[10px] text-lime-200">{policy.state}<ChevronRight className="size-3.5 text-slate-600" /></span></button>; })}</div>
+        </section>
+      </div>
+
+      <section className="authority-assistant-panel carbon-card carbon-card-neon mt-4 rounded-2xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Activity className="size-4" /></span><div><p className="text-sm font-semibold text-slate-100">AI Assistant</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">authority / governed preview</p></div></div><StatusBadge>READ ONLY</StatusBadge></div>
+        <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("AI Assistant: quali utenti sono offline?")} type="button">Quali utenti sono offline?</button><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("AI Assistant: analisi accessi sospetti in sola lettura")} type="button">Analizza accessi sospetti</button><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={onNewUser} type="button">Crea nuovo profilo</button></div>
+      </section>
+    </>
+  );
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [activeTab, setActiveTab] = useState<AuthorityTabId>("overview");
   const [selectedRole, setSelectedRole] = useState<AuthorityRole>("owner");
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -200,6 +380,11 @@ export default function OnboardingPage() {
   const [profileSubmitting, setProfileSubmitting] = useState(false);
 
   const filteredRoles = useMemo(() => AUTHORITY_ROLES.filter((role) => role.toLowerCase().includes(query.trim().toLowerCase())), [query]);
+  const filteredUsers = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return authorityUsers;
+    return authorityUsers.filter((user) => `${user.name} ${user.email} ${user.role} ${user.team}`.toLowerCase().includes(normalized));
+  }, [query]);
   const selectedCapabilities = ROLE_CAPABILITIES[selectedRole];
   const contextFields = authorityContext ? [
     { key: "actorId", value: authorityContext.actorId, detail: "Sites auth header", tone: "lime" as Tone },
@@ -248,6 +433,11 @@ export default function OnboardingPage() {
     if (id === "operations") { router.push("/operations"); return; }
     if (id === "events_authority") return;
     notify(`${label}: superficie prevista nel prossimo modulo`);
+  };
+
+  const selectAuthorityTab = (tab: AuthorityTabId, target: string) => {
+    setActiveTab(tab);
+    window.requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
 
   const createProfile = async () => {
@@ -314,7 +504,7 @@ export default function OnboardingPage() {
         <section className="min-w-0 flex-1">
           <header className="authority-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
-            <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca ruoli e capability" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca ruolo, capability, tenant…" value={query} /></div>
+            <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca utenti, ruoli, permessi, team" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca utenti, ruoli, permessi, team…" value={query} /></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">AUTHORITY</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
               <span className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:flex ${authorityContext ? "border-lime-300/20 bg-lime-300/5 text-lime-200" : "border-amber-300/20 bg-amber-300/5 text-amber-200"}`}><span className={`size-1.5 rounded-full shadow-[0_0_9px_currentColor] ${authorityContext ? "bg-lime-300" : "bg-amber-300"}`} />{authorityContext ? "Sites native / verified" : "Readback pending"}</span>
@@ -325,7 +515,7 @@ export default function OnboardingPage() {
           </header>
 
           <div className="authority-content mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="authority-hero mb-5">
+            <div className="authority-hero mb-5 hidden">
               <div className="authority-hero-grid" aria-hidden="true" />
               <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                 <div className="flex items-center gap-4">
@@ -337,9 +527,11 @@ export default function OnboardingPage() {
                 </div>
               </div>
             </div>
-            <div className="authority-title-block mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / EVENTS / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[30px]">Authority & onboarding</h1><p className="mt-1 text-xs text-slate-500">Identità server-owned, tenant context e capability matrix · superficie S02</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><DatabaseZap className="mr-2 size-3.5 text-cyan-300" />{authorityContext ? "Readback Sites verificato" : "Readback in corso"}</span><Button className="h-10 border border-lime-300/30 bg-lime-300 px-4 text-xs font-semibold text-[#060806] shadow-[0_0_22px_rgba(190,255,60,0.18)] transition hover:-translate-y-0.5 hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Crea profilo accesso</Button></div></div>
+            <div className="authority-title-block mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / COMMAND / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[30px]">Authority</h1><p className="mt-1 text-xs text-slate-500">Gestione utenti, ruoli, permessi e accessi · control center S02</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><DatabaseZap className="mr-2 size-3.5 text-cyan-300" />{authorityContext ? "Readback Sites verificato" : "Readback in corso"}</span><Button className="h-10 border border-lime-300/30 bg-lime-300 px-4 text-xs font-semibold text-[#060806] shadow-[0_0_22px_rgba(190,255,60,0.18)] transition hover:-translate-y-0.5 hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Nuovo utente</Button></div></div>
 
-            <div className="authority-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Ruoli canonici" value="13" detail="SITES CATALOG" icon={UserRoundCog} tone="lime" /><MetricCard label="TenantContext fields" value="12" detail="SERVER-OWNED" icon={KeyRound} tone="cyan" /><MetricCard label="Capability catalog" value="28+" detail="IMMUTABLE ARRAYS" icon={ShieldCheck} tone="lime" /><MetricCard label="Profili salvati" value={String(profiles.length)} detail={authorityContext ? "D1 READBACK" : "READBACK PENDING"} icon={DatabaseZap} tone={authorityContext ? "lime" : "amber"} /></div>
+            <div className="authority-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Utenti attivi" value="48" detail="+12%" icon={Users} tone="lime" /><MetricCard label="Ruoli definiti" value="12" detail="+0%" icon={Package} tone="lime" /><MetricCard label="Permessi" value="186" detail="+6%" icon={KeyRound} tone="lime" /><MetricCard label="Team operativi" value="8" detail="+0%" icon={Users} tone="lime" /></div>
+
+            <AuthorityVisualDashboard activeTab={activeTab} filteredUsers={filteredUsers} onNewUser={() => setProfileOpen(true)} onNotify={notify} onSelectTab={selectAuthorityTab} />
 
             <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
               <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><SectionTitle eyebrow="SITE SESSION / BOUNDARY" title="Contesto corrente" /><p className="mt-1 text-[11px] text-slate-500">Identità, membership e tenant derivano dal server Sites.</p></div><StatusBadge tone={authorityContext ? "lime" : "amber"}>{authorityContext ? "SITES NATIVE" : "READBACK PENDING"}</StatusBadge></div><div className="carbon-card-neon mt-4 rounded-xl border p-4"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl border border-lime-300/30 bg-lime-300/10 text-lime-200"><LockKeyhole className="size-5" /></span><div><p className="text-sm font-semibold text-slate-100">Owner-only Site access</p><p className="mt-1 text-[11px] text-slate-500">Accesso verificato dal perimetro privato Sites</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Account</p><p className="mt-1 truncate text-xs text-lime-200">{authorityContext?.actorEmail ?? "owner"}</p></div><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">App role</p><p className="mt-1 text-xs text-lime-200">{authorityContext?.role ?? "readback pending"}</p></div></div></div><div className="mt-4 space-y-2"><div className="flex items-center gap-2 rounded-lg border border-cyan-300/15 bg-cyan-300/5 px-3 py-2.5 text-[11px] text-cyan-100/80"><ShieldCheck className="size-4 shrink-0 text-cyan-200" /><span>Client identity: <strong className="font-medium text-cyan-100">server-owned</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><LockKeyhole className="size-4 shrink-0 text-lime-200" /><span>Tenant isolation: <strong className="font-medium text-lime-100">assertTenantScope</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><CheckCircle2 className="size-4 shrink-0 text-lime-200" /><span>Resolver runtime: <strong className="font-medium text-lime-100">Sites auth + D1 active</strong></span></div></div></section>
@@ -347,7 +539,7 @@ export default function OnboardingPage() {
             </div>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-              <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="ROLE CATALOG / 13" title="Ruoli canonici" /><p className="mt-1 text-[11px] text-slate-500">Catalogo server condiviso con il profilo accesso.</p></div><StatusBadge>SITES CATALOG</StatusBadge></div><div className="mt-4 space-y-1.5">{filteredRoles.map((role) => { const active = role === selectedRole; return <button className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${active ? "border-lime-300/35 bg-lime-300/10" : "border-white/[0.07] bg-black/15 hover:border-lime-300/20 hover:bg-white/[0.035]"}`} key={role} onClick={() => setSelectedRole(role)} type="button"><span className={`grid size-8 place-items-center rounded-lg border ${active ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : "border-white/10 bg-black/20 text-slate-600"}`}><UserRoundCog className="size-3.5" /></span><span className="min-w-0 flex-1"><span className={`block text-xs font-medium ${active ? "text-lime-100" : "text-slate-300"}`}>{role}</span><span className="mt-1 block text-[10px] text-slate-600">{ROLE_CAPABILITIES[role].length} capability</span></span>{active && <Check className="size-4 text-lime-200" />}</button>; })}{filteredRoles.length === 0 && <div className="rounded-xl border border-white/10 p-5 text-center text-xs text-slate-500">Nessun ruolo trovato nel catalogo.</div>}</div></section>
+              <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-roles"><div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="ROLE CATALOG / 13" title="Ruoli canonici" /><p className="mt-1 text-[11px] text-slate-500">Catalogo server condiviso con il profilo accesso.</p></div><StatusBadge>SITES CATALOG</StatusBadge></div><div className="mt-4 space-y-1.5">{filteredRoles.map((role) => { const active = role === selectedRole; return <button className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${active ? "border-lime-300/35 bg-lime-300/10" : "border-white/[0.07] bg-black/15 hover:border-lime-300/20 hover:bg-white/[0.035]"}`} key={role} onClick={() => setSelectedRole(role)} type="button"><span className={`grid size-8 place-items-center rounded-lg border ${active ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : "border-white/10 bg-black/20 text-slate-600"}`}><UserRoundCog className="size-3.5" /></span><span className="min-w-0 flex-1"><span className={`block text-xs font-medium ${active ? "text-lime-100" : "text-slate-300"}`}>{role}</span><span className="mt-1 block text-[10px] text-slate-600">{ROLE_CAPABILITIES[role].length} capability</span></span>{active && <Check className="size-4 text-lime-200" />}</button>; })}{filteredRoles.length === 0 && <div className="rounded-xl border border-white/10 p-5 text-center text-xs text-slate-500">Nessun ruolo trovato nel catalogo.</div>}</div></section>
               <section className="carbon-card carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="CAPABILITY RESOLVER / READ MODEL" title={selectedRole} /><p className="mt-1 text-[11px] text-slate-500">Array canonico esposto dal resolver condiviso.</p></div><div className="flex items-center gap-2"><StatusBadge>SITES VERIFIED</StatusBadge><button className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-lime-300 hover:text-lime-100" onClick={() => notify(`Capability ${selectedRole}: catalogo Sites verificato`)} type="button">Readback <ArrowUpRight className="size-3.5" /></button></div></div><div className="carbon-inset mt-4 rounded-xl p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[0.14em] text-slate-600">Capability count</p><p className="mt-1 font-mono text-3xl font-semibold tracking-[-0.07em] text-slate-50">{selectedCapabilities.length}</p></div><div className="text-right"><p className="text-[11px] text-slate-500">Source</p><p className="mt-1 font-mono text-[10px] text-cyan-200">authority-catalog</p></div></div><div className="mt-4 flex flex-wrap gap-2">{selectedCapabilities.map((capability) => <CapabilityPill capability={capability} key={capability} />)}</div></div><div className="mt-4 flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-lime-200" />Il client può selezionare solo un ruolo canonico; capability, tenant e creator vengono ricostruiti dal server.</div></section>
             </div>
 
@@ -359,6 +551,14 @@ export default function OnboardingPage() {
             <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600"><span>AI-ZEROW AUTHORITY · S02 CLOSED</span><span className="flex items-center gap-2"><span>black carbon core</span><span className="size-1 rounded-full bg-lime-300" /><span>Sites-only authority</span></span></footer>
           </div>
         </section>
+      </div>
+
+      <div className="authority-mobile-nav fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 items-center rounded-2xl border border-lime-300/20 bg-[#070a09]/95 p-2 shadow-[0_0_28px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden">
+        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => selectAuthorityTab("overview", "authority-overview")} type="button"><Building2 className="size-4" />Home</button>
+        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => selectAuthorityTab("users", "authority-users")} type="button"><Users className="size-4" />Utenti</button>
+        <button className="grid size-12 -translate-y-3 place-items-center rounded-full border border-lime-200/70 bg-lime-300 text-[#071006] shadow-[0_0_24px_rgba(190,255,60,0.35)]" onClick={() => setProfileOpen(true)} type="button" aria-label="Nuovo utente"><Plus className="size-5" /></button>
+        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-lime-200" onClick={() => selectAuthorityTab("roles", "authority-roles")} type="button"><ShieldCheck className="size-4" />Authority</button>
+        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => setMobileMenu(true)} type="button"><Menu className="size-4" />Menu</button>
       </div>
 
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}><DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]"><DialogHeader><DialogTitle className="text-slate-100">Crea profilo accesso</DialogTitle><DialogDescription className="text-slate-500">Il profilo viene salvato nel database Sites con tenant, creator e capability ricostruiti dal server.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-2"><label className="text-xs text-slate-400" htmlFor="profile-label">Etichetta profilo</label><Input id="profile-label" className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setProfileLabel(event.target.value)} placeholder="Es. Responsabile operativo" value={profileLabel} /></div><div className="space-y-2"><p className="text-xs text-slate-400">Ruolo base</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{AUTHORITY_ROLES.slice(0, 6).map((role) => <button className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${selectedRole === role ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/10 bg-black/20 text-slate-400 hover:border-lime-300/25"}`} key={role} onClick={() => setSelectedRole(role)} type="button">{role}</button>)}</div></div><div className="flex items-start gap-2 rounded-xl border border-lime-300/15 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />Il client invia solo etichetta e ruolo canonico. Il server applica tenant, creator e capability.</div></div><DialogFooter><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button type="button" disabled={profileSubmitting} className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => void createProfile()}><Send className="size-3.5" />{profileSubmitting ? "Salvataggio…" : "Salva profilo"}</Button></DialogFooter></DialogContent></Dialog>
