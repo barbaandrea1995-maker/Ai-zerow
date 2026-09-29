@@ -1,7 +1,7 @@
-const BUILD_ID = "ai-zerow-sites-s08-v17";
+const BUILD_ID = "ai-zerow-sites-s08-v19";
 const SHELL_CACHE = `zerow-shell-${BUILD_ID}`;
 const OFFLINE_URL = "/offline";
-const PRECACHE = ["/command", "/", OFFLINE_URL, "/manifest.webmanifest", "/ai-zerow-icon.jpeg"];
+const PRECACHE = ["/command", "/", OFFLINE_URL, "/manifest.webmanifest", "/icons/ai-zerow-192.png", "/icons/ai-zerow-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting()));

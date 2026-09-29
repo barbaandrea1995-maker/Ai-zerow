@@ -9,8 +9,12 @@ export const metadata: Metadata = {
     "codex-preview": "development",
   },
   icons: {
-    icon: "/ai-zerow-icon.jpeg",
-    shortcut: "/ai-zerow-icon.jpeg",
+    icon: [
+      { url: "/icons/ai-zerow-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icons/ai-zerow-512.png", type: "image/png", sizes: "512x512" },
+    ],
+    shortcut: "/icons/ai-zerow-192.png",
+    apple: [{ url: "/icons/ai-zerow-180.png", type: "image/png", sizes: "180x180" }],
   },
   manifest: "/manifest.webmanifest",
 };
