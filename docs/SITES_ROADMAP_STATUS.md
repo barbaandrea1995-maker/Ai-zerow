@@ -31,7 +31,16 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 
 - S02: closed in Sites-only scope; external multi-tenant adapter remains deferred.
 - S03: COMMAND shell and route-aware presentation implemented.
-- S04: paused until explicitly resumed; Operations static surface remains in the checkout.
+- S04: static surface tranche implemented; adapter/readback gate remains open.
+
+### S04 evidence in Sites
+
+- Canonical static surfaces are available at `/operations`, `/workforce`, `/warehouse`, `/mission` and `/assets`.
+- The new surfaces share the CONTROL/Authority carbon-metal shell, neon-lime hierarchy, responsive navigation and explicit `STATIC READ MODEL` / `ADAPTER REQUIRED` states.
+- Local interactions are presentation-safe: filters, selection, assistant prompts and CTAs report the pending adapter boundary instead of simulating domain mutations.
+- Domain API readback, state-machine certification and reconciliation remain `NOT_RUN` until the canonical adapters are connected.
+
+S04 is therefore not marked closed yet: the Sites composition gate is complete, while the canonical operations/workforce/warehouse/mission/assets readback gate is still open.
 
 ## Sites-only rule
 

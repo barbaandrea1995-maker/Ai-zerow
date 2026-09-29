@@ -221,6 +221,22 @@ export default function OperationsPage() {
       return;
     }
     if (id === "operations") return;
+    if (id === "workforce") {
+      router.push("/workforce");
+      return;
+    }
+    if (id === "assets") {
+      router.push("/assets");
+      return;
+    }
+    if (id === "warehouse") {
+      router.push("/warehouse");
+      return;
+    }
+    if (id === "mission") {
+      router.push("/mission");
+      return;
+    }
     if (id === "events_authority") {
       router.push("/onboarding");
       return;

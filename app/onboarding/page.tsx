@@ -444,6 +444,10 @@ export default function OnboardingPage() {
     setMobileMenu(false);
     if (id === "command") { router.push("/"); return; }
     if (id === "operations") { router.push("/operations"); return; }
+    if (id === "workforce") { router.push("/workforce"); return; }
+    if (id === "assets") { router.push("/assets"); return; }
+    if (id === "warehouse") { router.push("/warehouse"); return; }
+    if (id === "mission") { router.push("/mission"); return; }
     if (id === "events_authority") return;
     notify(`${label}: superficie prevista nel prossimo modulo`);
   };
