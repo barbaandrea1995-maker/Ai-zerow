@@ -302,7 +302,11 @@ const routes: Record<string, string> = {
   assets: "/assets",
   warehouse: "/warehouse",
   mission: "/mission",
-  events_authority: "/onboarding",
+  finance: "/finance",
+  documents: "/documents",
+  governance: "/governance",
+  events_authority: "/events",
+  pwa: "/pwa/diagnostics",
 };
 
 function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {

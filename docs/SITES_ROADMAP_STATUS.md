@@ -33,8 +33,14 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.
 - S03: **CLOSED · Sites native** — COMMAND shell, canonical `/command` alias, responsive navigation and S01–S04 route surfaces implemented.
 - S04: **CLOSED · Sites adapter tranche** — five domain surfaces, tenant-scoped readback and Operations write path verified.
+- S05: **CLOSED · Sites adapter tranche** — Documents, Finance, Procurement and Governance pages plus bounded D1 append-only read/write contracts.
+- S06: **CLOSED · Sites adapter tranche** — event store, idempotency/aggregate-version uniqueness, durable outbox and reconciliation readback.
+- S07: **CLOSED · Sites adapter tranche** — governed Command preview, approval ledger and explicit no-direct-write boundary.
+- S08: **CLOSED · Sites presentation tranche** — manifest, service worker, offline fallback, IndexedDB FIFO replay surface and diagnostics.
 
-The four closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
+The closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
+
+The S05–S08 closures below are the same kind of Sites-scoped closure: they certify the implemented Sites surface, D1 readback and server-owned boundaries. They do not claim that the unavailable canonical external services, workers, AI runtime or device/browser certification have been executed.
 
 ### S04 evidence in Sites
 
@@ -47,6 +53,18 @@ The four closures above are Sites-native closures. They do not rewrite the origi
 - The original canonical domain-service readback, state-machine certification, external reconciliation and event parity remain `NOT_RUN` because those services are not present in the Sites-only execution boundary.
 
 S01–S04 are therefore closed for the Sites reconstruction scope. The original external operations/workforce/warehouse/mission/assets services, state machines, reconciliation and event parity remain explicit deferred boundaries rather than silently invented behavior.
+
+### S05–S08 evidence in Sites
+
+- `/documents`, `/finance`, `/procurement` and `/governance` use one shared COMMAND carbon-metal shell with real tenant-scoped D1 readback and bounded append-only proposals.
+- Canonical route aliases are available for the reconstructed document, finance, procurement, governance, forecast, approvals and Command timeline surfaces; they all preserve the same server authority boundary.
+- `s05_records` contains seeded read models/proposals and an explicit adapter-contract record for each S05 domain. Destructive update routes are not exposed.
+- `/events` and `/api/events` persist append-only events, enforce tenant idempotency and aggregate-version uniqueness, create durable outbox rows and write a Sites reconciliation readback. `/api/events/outbox` and `/api/events/reconciliation` expose the same snapshot.
+- `/api/command/ask`, `/api/command/approval` and `/api/command/overview` persist preview, approval-decision and readback entries in `s07_ai_ledger`. No direct domain write or provider secret is used.
+- `/pwa/diagnostics`, `/mobile/diagnostics`, `/offline`, `/manifest.webmanifest` and `/sw.js` implement the Sites presentation contract. IndexedDB queue items are replayed sequentially and removed only after a successful HTTP readback.
+- The Sites deployment remains owner-only and all work stays inside @Sites; no Vercel, GitHub or Neon operating workflow is required.
+
+The deferred boundaries are explicit: external document storage/OCR, accounting and PO executors, policy engine, event consumers/retry-DLQ workers, OpenAI runtime/tool gateway, exact production SHA/browser/device certification, native mobile and the original B0–B10/PRE00/W20 matrix.
 
 ## Sites-only rule
 

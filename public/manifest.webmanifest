@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "AI-ZEROW COMMAND",
+  "short_name": "ZEROW",
+  "description": "AI-ZEROW operational command center.",
+  "start_url": "/command",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050607",
+  "theme_color": "#050607",
+  "orientation": "any",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/ai-zerow-icon.jpeg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable" }
+  ]
+}
