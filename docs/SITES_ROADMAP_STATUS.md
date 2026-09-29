@@ -29,21 +29,24 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 
 ## Current continuation
 
-- S02: closed in Sites-only scope; external multi-tenant adapter remains deferred.
-- S03: COMMAND shell and route-aware presentation implemented.
-- S04: Sites adapter tranche implemented; canonical domain-service gate remains open.
+- S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
+- S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.
+- S03: **CLOSED · Sites native** — COMMAND shell, canonical `/command` alias, responsive navigation and S01–S04 route surfaces implemented.
+- S04: **CLOSED · Sites adapter tranche** — five domain surfaces, tenant-scoped readback and Operations write path verified.
+
+The four closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
 
 ### S04 evidence in Sites
 
 - Canonical static surfaces are available at `/operations`, `/workforce`, `/warehouse`, `/mission` and `/assets`.
-- The new surfaces share the CONTROL/Authority carbon-metal shell, neon-lime hierarchy, responsive navigation and explicit `STATIC READ MODEL` / `ADAPTER REQUIRED` states.
+- The new surfaces share the CONTROL/Authority carbon-metal shell, neon-lime hierarchy, responsive navigation and explicit Sites adapter/readback states.
 - Sites now exposes the server-side S04 adapter contract through `/api/:module` for the five canonical modules, backed by the tenant-scoped D1 table `s04_records`.
 - The adapter enforces Sites workspace identity, canonical capability checks, tenant scope and bounded read/write payloads; the Operations create flow performs a real server-side D1 write.
 - The local D1 migration/readback was verified with four seeded records per module and one explicit adapter-contract record per module.
 - The UI consumes adapter readback when available and visibly falls back to the static contract only when the adapter is unavailable.
 - The original canonical domain-service readback, state-machine certification, external reconciliation and event parity remain `NOT_RUN` because those services are not present in the Sites-only execution boundary.
 
-S04 is therefore closed for the Sites adapter tranche, but not closed end-to-end against the canonical external operations/workforce/warehouse/mission/assets services.
+S01–S04 are therefore closed for the Sites reconstruction scope. The original external operations/workforce/warehouse/mission/assets services, state machines, reconciliation and event parity remain explicit deferred boundaries rather than silently invented behavior.
 
 ## Sites-only rule
 

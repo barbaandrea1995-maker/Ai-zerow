@@ -138,7 +138,7 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     subtitle: "Presenze, turni e qualifiche · superficie statica allineata a COMMAND",
     cta: "Nuovo turno",
     registerTitle: "Registro workforce",
-    registerHint: "People, turni e qualifiche · workforce adapter non collegato",
+    registerHint: "People, turni e qualifiche · Sites adapter / readback",
     secondaryTitle: "Presidio operativo",
     secondaryHint: "Read model statico della copertura",
     metrics: [
@@ -175,7 +175,7 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     subtitle: "Scorte, richieste e riconciliazione · superficie statica allineata a COMMAND",
     cta: "Nuova richiesta",
     registerTitle: "Registro materiali",
-    registerHint: "Inventory, richieste e soglie · warehouse adapter non collegato",
+    registerHint: "Inventory, richieste e soglie · Sites adapter / readback",
     secondaryTitle: "Stato scorte",
     secondaryHint: "Read model statico delle disponibilità",
     metrics: [
@@ -212,7 +212,7 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     subtitle: "Carichi, assegnazioni ed evidenze · superficie statica allineata a COMMAND",
     cta: "Nuova missione",
     registerTitle: "Registro missioni",
-    registerHint: "Trasporti, carichi ed evidenze · mission adapter non collegato",
+    registerHint: "Trasporti, carichi ed evidenze · Sites adapter / readback",
     secondaryTitle: "Flotta in movimento",
     secondaryHint: "Read model statico delle assegnazioni",
     metrics: [
@@ -249,7 +249,7 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     subtitle: "Flotta, manutenzione e capacità · superficie statica allineata a COMMAND",
     cta: "Nuovo asset",
     registerTitle: "Registro asset",
-    registerHint: "Asset, capacità e manutenzione · assets adapter non collegato",
+    registerHint: "Asset, capacità e manutenzione · Sites adapter / readback",
     secondaryTitle: "Capacità flotta",
     secondaryHint: "Read model statico della disponibilità",
     metrics: [
@@ -296,7 +296,7 @@ const navItems: { label: string; id: string; icon: LucideIcon }[] = [
 ];
 
 const routes: Record<string, string> = {
-  command: "/",
+  command: "/command",
   operations: "/operations",
   workforce: "/workforce",
   assets: "/assets",
