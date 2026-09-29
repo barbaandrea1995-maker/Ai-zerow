@@ -37,6 +37,7 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 - S06: **CLOSED · Sites adapter tranche** — event store, idempotency/aggregate-version uniqueness, durable outbox and reconciliation readback.
 - S07: **CLOSED · Sites adapter tranche** — governed Command preview, approval ledger and explicit no-direct-write boundary.
 - S08: **CLOSED · Sites presentation tranche** — manifest, service worker, offline fallback, IndexedDB FIFO replay surface and diagnostics.
+- S09: **PARTIALLY VERIFIED · Sites browser QA** — desktop COMMAND screenshot, sidebar scroll, primary dialog interaction, route sweep and PWA diagnostics readback verified; mobile/device golden baseline remains open.
 - External adapter control: **IMPLEMENTED · Sites declarative boundary** — S10–S14 catalogo, capability contract, append-only check log e roadmap gate visible at `/externals`.
 
 The closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
