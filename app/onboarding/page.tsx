@@ -10,33 +10,38 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Clock3,
   ChevronDown,
   ChevronRight,
   CircleGauge,
   CircleHelp,
   CircleX,
+  Crosshair,
   DatabaseZap,
   FileText,
-  Filter,
   Gauge,
   HardHat,
   KeyRound,
-  Layers3,
+  LocateFixed,
   LockKeyhole,
   Map as MapIcon,
   Menu,
-  MoreHorizontal,
   MessageSquareText,
+  Navigation,
   Package,
+  PanelRight,
   Plus,
   Search,
   Send,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Truck,
   UserRoundCog,
   Users,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +54,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
 import {
   AUTHORITY_ROLES,
@@ -169,6 +175,13 @@ const authorityPolicies = [
   { icon: KeyRound, title: "Politica password", detail: "Scadenza ogni 90 giorni", state: "Attiva" },
 ];
 
+const authorityKpis = [
+  { label: "Utenti attivi", value: "48", delta: "+12%", icon: Users, tone: "lime" as const, data: "12,18,16,24,20,28,25,35,34,46,51,58" },
+  { label: "Ruoli definiti", value: "13", delta: "+0%", icon: UserRoundCog, tone: "cyan" as const, data: "14,22,20,32,28,26,36,44,40,53,58,62" },
+  { label: "Permessi", value: "186", delta: "+6%", icon: KeyRound, tone: "lime" as const, data: "12,18,22,20,32,28,25,41,40,50,48,54" },
+  { label: "Team operativi", value: "8", delta: "+0%", icon: Users, tone: "lime" as const, data: "18,15,24,22,30,28,32,44,39,54,58,67" },
+];
+
 const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText },
   { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness },
@@ -176,7 +189,7 @@ const navItems = [
   { label: "WORKFORCE", id: "workforce", icon: Users },
   { label: "FINANCE", id: "finance", icon: Gauge },
   { label: "ASSETS", id: "assets", icon: Package },
-  { label: "WAREHOUSE", id: "warehouse", icon: Layers3 },
+  { label: "WAREHOUSE", id: "warehouse", icon: Package },
   { label: "MISSION", id: "mission", icon: Truck },
   { label: "DOCUMENTS", id: "documents", icon: FileText },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
@@ -207,11 +220,11 @@ const negativeCases = [
   { title: "Tenant A / B", expected: "external multi-tenant adapter deferred", status: "DEFERRED", tone: "amber" as Tone, icon: CircleX },
 ];
 
-const toneStyles: Record<Tone, { icon: string; badge: string }> = {
-  lime: { icon: "text-lime-200", badge: "border-lime-300/25 bg-lime-300/10 text-lime-200" },
-  cyan: { icon: "text-cyan-200", badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-200" },
-  amber: { icon: "text-amber-200", badge: "border-amber-300/25 bg-amber-300/5 text-amber-200" },
-  red: { icon: "text-rose-200", badge: "border-rose-300/25 bg-rose-300/10 text-rose-200" },
+const toneStyles: Record<Tone, { icon: string; badge: string; glow: string; line: string }> = {
+  lime: { icon: "text-lime-300", badge: "border-lime-300/25 bg-lime-300/10 text-lime-200", glow: "shadow-[0_0_18px_rgba(190,255,60,0.22)]", line: "rgba(203,255,73,0.76)" },
+  cyan: { icon: "text-cyan-300", badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-200", glow: "shadow-[0_0_18px_rgba(62,222,255,0.18)]", line: "rgba(62,222,255,0.72)" },
+  amber: { icon: "text-amber-300", badge: "border-amber-300/25 bg-amber-300/5 text-amber-200", glow: "shadow-[0_0_18px_rgba(255,188,66,0.18)]", line: "rgba(255,188,66,0.72)" },
+  red: { icon: "text-rose-300", badge: "border-rose-300/25 bg-rose-300/10 text-rose-200", glow: "shadow-[0_0_18px_rgba(255,84,111,0.18)]", line: "rgba(255,84,111,0.72)" },
 };
 
 function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
@@ -231,10 +244,22 @@ function StatusBadge({ children, tone = "lime" }: { children: ReactNode; tone?: 
   const styles = toneStyles[tone];
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold tracking-[0.05em] ${styles.badge}`}>
-      <span className="size-1.5 rounded-full bg-current shadow-[0_0_9px_currentColor]" />
+      <span className={`size-1.5 rounded-full bg-current ${styles.glow}`} />
       {children}
     </span>
   );
+}
+
+function Sparkline({ data, tone }: { data: string; tone: Tone }) {
+  const points = data.split(",").map(Number);
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const coordinates = points.map((point, index) => {
+    const x = (index / (points.length - 1)) * 100;
+    const y = 30 - ((point - min) / Math.max(max - min, 1)) * 23;
+    return `${x},${y}`;
+  }).join(" ");
+  return <svg className="h-10 w-full overflow-visible" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" points={coordinates} stroke={toneStyles[tone].line} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" /><polyline fill="none" opacity="0.22" points={`0,32 ${coordinates} 100,32`} stroke={toneStyles[tone].line} strokeWidth="6" /></svg>;
 }
 
 function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; title: string; action?: string; onAction?: () => void }) {
@@ -249,23 +274,8 @@ function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; 
   );
 }
 
-function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof ShieldCheck; tone: Tone }) {
-  const style = toneStyles[tone];
-  return (
-    <article className="carbon-card rounded-2xl p-4">
-      <div className="flex items-start justify-between gap-3">
-        <span className={`grid size-9 place-items-center rounded-xl border border-current/20 bg-current/10 ${style.icon}`}><Icon className="size-[18px]" /></span>
-        <StatusBadge tone={tone}>{detail}</StatusBadge>
-      </div>
-      <p className="mt-4 text-xs text-slate-500">{label}</p>
-      <p className="mt-1 font-mono text-[29px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p>
-      <div className="mt-4 flex items-end gap-1.5 opacity-80">
-        {[18, 26, 20, 35, 28, 48, 42, 57, 53, 66, 61, 75].map((height, index) => (
-          <span className={`flex-1 rounded-t-sm ${tone === "cyan" ? "bg-cyan-300" : tone === "amber" ? "bg-amber-300" : "bg-lime-300"}`} key={index} style={{ height: `${height / 2}px`, opacity: 0.25 + index * 0.05 }} />
-        ))}
-      </div>
-    </article>
-  );
+function MetricCard({ label, value, delta, icon: Icon, tone, data }: (typeof authorityKpis)[number]) {
+  return <article className={`carbon-card carbon-card-neon min-w-0 rounded-2xl p-4 ${tone === "cyan" ? "carbon-card-cyan" : ""}`}><div className="flex items-start justify-between gap-3"><span className={`grid size-9 place-items-center rounded-xl border border-current/20 bg-current/10 ${toneStyles[tone].icon}`}><Icon className="size-[18px]" /></span><StatusBadge tone={tone}>{delta}</StatusBadge></div><p className="mt-4 text-xs text-slate-500">{label}</p><div className="mt-1 flex items-end justify-between gap-4"><p className="font-mono text-[30px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><span className="pb-1 text-[10px] uppercase tracking-[0.12em] text-lime-300/60">live</span></div><div className="mt-2"><Sparkline data={data} tone={tone} /></div></article>;
 }
 
 function CapabilityPill({ capability }: { capability: string }) {
@@ -275,93 +285,96 @@ function CapabilityPill({ capability }: { capability: string }) {
 
 function AuthorityVisualDashboard({
   activeTab,
+  filteredRoles,
   filteredUsers,
   onNotify,
   onNewUser,
+  onSelectRole,
   onSelectTab,
+  selectedRole,
 }: {
   activeTab: AuthorityTabId;
+  filteredRoles: AuthorityRole[];
   filteredUsers: AuthorityUser[];
   onNotify: (message: string) => void;
   onNewUser: () => void;
+  onSelectRole: (role: AuthorityRole) => void;
   onSelectTab: (tab: AuthorityTabId, target: string) => void;
+  selectedRole: AuthorityRole;
 }) {
+  const roleNodePositions = [
+    { left: "18%", top: "24%" },
+    { left: "48%", top: "18%" },
+    { left: "78%", top: "30%" },
+    { left: "25%", top: "72%" },
+    { left: "69%", top: "75%" },
+  ];
+  const handleTabChange = (value: string) => {
+    const tab = authorityTabs.find((item) => item.id === value);
+    if (tab) onSelectTab(tab.id, tab.target);
+  };
+
   return (
     <>
-      <div className="authority-tabbar mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/45 p-1" role="tablist" aria-label="Authority sections">
-        <div className="flex min-w-max gap-1">
-          {authorityTabs.map((tab) => (
-            <button
-              className={`rounded-lg px-3 py-2 text-[11px] font-medium transition ${activeTab === tab.id ? "bg-lime-300 text-[#071006] shadow-[0_0_18px_rgba(190,255,60,0.2)]" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-100"}`}
-              key={tab.id}
-              onClick={() => onSelectTab(tab.id, tab.target)}
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)_minmax(330px,0.72fr)]" id="authority-overview">
-        <section className="carbon-card rounded-2xl p-4 sm:p-5">
-          <SectionTitle eyebrow="AUTHORITY / ROLE DISTRIBUTION" title="Distribuzione ruoli" />
-          <div className="mt-5 flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="authority-donut" style={{ background: "conic-gradient(#a8f22f 0 38%, #54c32a 38% 55%, #e6ee59 55% 68%, #f6ad2a 68% 76%, #7aa4ff 76% 93%, #657080 93% 100%)" }}>
-              <div className="authority-donut-hole"><strong>48</strong><span>Utenti</span></div>
-            </div>
-            <div className="w-full space-y-2 sm:max-w-[210px]">
-              {authorityRoleDistribution.map((item) => <div className="flex items-center gap-2 text-[11px]" key={item.label}><span className={`authority-legend-dot authority-legend-${item.tone}`} /><span className="min-w-0 flex-1 truncate text-slate-300">{item.label}</span><span className="font-mono text-slate-500">{item.value} ({item.share})</span></div>)}
-            </div>
+      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.65fr)]" id="authority-overview">
+        <section className="carbon-card rounded-2xl p-3 sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-3">
+            <div className="flex items-center gap-3"><span className="grid size-8 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200"><ShieldCheck className="size-4" /></span><div><SectionTitle eyebrow="AUTHORITY / LIVE" title="Authority control" /><p className="mt-0.5 text-[11px] text-slate-500">Utenti, ruoli e accessi sotto controllo</p></div></div>
+            <div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-lime-300/15 bg-lime-300/5 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.9)]" />S02 · Sites native</span><IconButton label="Schermo intero" onClick={() => onNotify("Authority overview: preview control plane")}><PanelRight className="size-4" /></IconButton></div>
           </div>
-        </section>
-
-        <section className="carbon-card rounded-2xl p-4 sm:p-5">
-          <SectionTitle eyebrow="AUTHORITY / ACCESS LEVELS" title="Livelli di accesso" />
-          <div className="authority-bar-chart mt-5">
-            {accessLevels.map((item) => <div className="authority-bar-item" key={item.label}><div className="authority-bar-value">{item.value}</div><div className="authority-bar-track"><span style={{ height: `${Math.max(12, (item.value / 186) * 100)}%` }} /></div><div className="authority-bar-label">{item.label}</div></div>)}
+          <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-white/10 bg-[#050607] sm:min-h-[430px]">
+            <div className="map-grid absolute inset-0 opacity-80" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_52%_48%,rgba(190,255,60,0.12),transparent_25%),radial-gradient(circle_at_16%_80%,rgba(65,224,255,0.07),transparent_22%)]" />
+            <svg className="absolute inset-0 h-full w-full" viewBox="0 0 900 500" preserveAspectRatio="none" aria-hidden="true"><path d="M110 118L420 245L760 145M205 390L420 245L705 385" fill="none" stroke="rgba(190,255,60,0.66)" strokeDasharray="5 8" strokeLinecap="round" strokeWidth="2" /><path d="M110 118L420 245L760 145M205 390L420 245L705 385" fill="none" opacity="0.2" stroke="rgba(190,255,60,0.85)" strokeLinecap="round" strokeWidth="12" /><circle cx="420" cy="245" r="7" fill="#d6ff4c" /><circle cx="420" cy="245" r="28" fill="none" opacity="0.35" stroke="#d6ff4c" strokeDasharray="3 7" /><circle cx="110" cy="118" r="4" fill="#d6ff4c" /><circle cx="760" cy="145" r="4" fill="#d6ff4c" /><circle cx="205" cy="390" r="4" fill="#d6ff4c" /><circle cx="705" cy="385" r="4" fill="#d6ff4c" /></svg>
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">TENANT / OWNER-PRIVATE</span></div>
+            <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur"><IconButton label="Zoom in" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority graph: zoom in disponibile nel modulo runtime")}><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority graph: zoom out disponibile nel modulo runtime")}><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra Authority" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority core centrato sul tenant Sites")}><LocateFixed className="size-3.5" /></IconButton></div>
+            <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center"><span className="grid size-16 place-items-center rounded-full border border-lime-200/70 bg-lime-300/15 text-lime-200 shadow-[0_0_34px_rgba(190,255,60,0.25)]"><ShieldCheck className="size-7" /></span><span className="mt-2 rounded-lg border border-lime-300/25 bg-black/75 px-3 py-1.5 text-[11px] font-semibold text-slate-100 backdrop-blur">Authority core</span><span className="mt-1 text-[10px] text-lime-200">13 ruoli · 186 permessi</span></div>
+            {authorityRoleDistribution.slice(0, 5).map((role, index) => <button className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" key={role.label} style={roleNodePositions[index]} onClick={() => onNotify(`${role.label}: ${role.value} utenti · ${role.share}`)} type="button"><span className="relative flex items-center gap-2 rounded-lg border border-white/15 bg-black/75 px-2 py-1.5 backdrop-blur-md transition hover:border-lime-300/40"><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${index === 2 ? "text-amber-200" : "text-lime-200"}`}><UserRoundCog className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{role.label}</span><span className="block text-[10px] text-lime-200">{role.value} utenti</span></span></span></button>)}
+            <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 overflow-x-auto"><Tabs className="min-w-max" value={activeTab} onValueChange={handleTabChange}><TabsList className="h-9 rounded-lg border border-white/10 bg-black/80 p-1 backdrop-blur" aria-label="Sezioni Authority">{authorityTabs.slice(0, 5).map((tab) => <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" key={tab.id} value={tab.id}>{tab.label}</TabsTrigger>)}</TabsList></Tabs><span className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-500"><Crosshair className="size-3 text-lime-300" />S02 active</span></div>
           </div>
         </section>
 
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-activity">
-          <SectionTitle eyebrow="AUTHORITY / AUDIT STREAM" title="Attività recenti" action="Vedi tutte" onAction={() => onNotify("Audit Log: read model visuale pronto per il collegamento agli eventi")} />
-          <div className="mt-4 divide-y divide-white/[0.07]">
-            {authorityActivity.map((item) => { const Icon = item.icon; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={item.title} onClick={() => onNotify(`${item.title}: ${item.detail}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${item.tone === "red" ? "border-rose-300/25 bg-rose-300/10 text-rose-200" : "border-lime-300/20 bg-lime-300/10 text-lime-200"}`}><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">{item.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{item.detail}</span></span><span className="shrink-0 text-[10px] text-slate-500">{item.time}</span></button>; })}
-          </div>
+          <SectionTitle eyebrow="EVENT STREAM" title="Attività recenti" action="Vedi tutte" onAction={() => onNotify("Audit Log: read model visuale pronto per il collegamento agli eventi")} />
+          <div className="mt-4 divide-y divide-white/[0.07]">{authorityActivity.map((item) => { const Icon = item.icon; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={item.title} onClick={() => onNotify(`${item.title}: ${item.detail}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">{item.title}</span><span className="mt-1 block truncate text-[11px] text-slate-500">{item.detail}</span></span><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></button>; })}</div>
         </section>
       </div>
 
-      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.38fr)_minmax(330px,0.62fr)]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)_minmax(320px,0.9fr)]">
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-users">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="AUTHORITY / USER DIRECTORY" title="Utenti" /><p className="mt-1 text-[11px] text-slate-500">Read model visivo · identità e membership restano server-owned.</p></div><button className="text-[11px] font-medium text-lime-300 transition hover:text-lime-100" onClick={() => onNotify("Utenti: elenco completo disponibile con il relativo adapter")} type="button">Vedi tutti</button></div>
-          <div className="mt-4 flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><div className="h-9 rounded-lg border border-white/10 bg-black/35 pl-9 pr-3 text-[11px] leading-9 text-slate-600">Filtra dalla ricerca Authority in alto</div></div><button className="flex h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("Filtri utenti: read model visuale")} type="button"><Filter className="size-3.5" />Filtri</button></div>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20"><table className="w-full min-w-[720px] text-left"><thead className="border-b border-white/[0.08] text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-600"><tr><th className="w-10 px-3 py-3"><span className="sr-only">Seleziona</span>□</th><th className="px-3 py-3">Nome</th><th className="px-3 py-3">Email</th><th className="px-3 py-3">Ruolo</th><th className="px-3 py-3">Team</th><th className="px-3 py-3">Stato</th><th className="px-3 py-3">Ultimo accesso</th><th className="w-8 px-2 py-3" /></tr></thead><tbody className="divide-y divide-white/[0.07]">{filteredUsers.map((user) => <tr className="transition hover:bg-lime-300/[0.035]" key={user.email}><td className="px-3 py-3 text-slate-600">□</td><td className="px-3 py-3"><div className="flex items-center gap-2.5"><span className={`grid size-7 place-items-center rounded-full border text-[9px] font-bold ${user.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : user.tone === "cyan" ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-lime-300/30 bg-lime-300/15 text-lime-100"}`}>{user.initials}</span><span className="whitespace-nowrap text-xs font-medium text-slate-200">{user.name}</span></div></td><td className="whitespace-nowrap px-3 py-3 text-[11px] text-slate-500">{user.email}</td><td className="px-3 py-3"><span className="rounded-md border border-lime-300/20 bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">{user.role}</span></td><td className="whitespace-nowrap px-3 py-3 text-[11px] text-slate-400">{user.team}</td><td className="px-3 py-3"><span className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={`size-1.5 rounded-full ${user.status === "Online" ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-rose-300"}`} />{user.status}</span></td><td className="whitespace-nowrap px-3 py-3 text-[10px] text-slate-500">{user.lastAccess}</td><td className="px-2 py-3"><button className="grid size-7 place-items-center rounded-md text-slate-600 hover:bg-white/5 hover:text-lime-200" onClick={() => onNotify(`${user.name}: azioni utente disponibili con l'adapter Authority`)} type="button" aria-label={`Azioni per ${user.name}`}><MoreHorizontal className="size-4" /></button></td></tr>)}{filteredUsers.length === 0 && <tr><td className="px-3 py-8 text-center text-xs text-slate-500" colSpan={8}>Nessun utente corrisponde alla ricerca.</td></tr>}</tbody></table></div>
+          <div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="USER DIRECTORY" title="Utenti" action="Vedi tutti" onAction={() => onNotify("Utenti: elenco completo disponibile con il relativo adapter")} /><Button className="h-8 border border-lime-300/25 bg-lime-300/10 px-2.5 text-[11px] text-lime-200 hover:bg-lime-300/20" onClick={onNewUser}><Plus className="size-3.5" />Nuovo</Button></div>
+          <Tabs className="mt-4" defaultValue="TUTTI"><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ONLINE">Online</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="OFFLINE">Offline</TabsTrigger></TabsList></Tabs>
+          <div className="mt-3 divide-y divide-white/[0.07]">{filteredUsers.slice(0, 5).map((user) => <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={user.email} onClick={() => onNotify(`${user.name}: ${user.role} · ${user.team}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-full border text-[9px] font-bold ${user.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : user.tone === "cyan" ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-lime-300/30 bg-lime-300/15 text-lime-100"}`}>{user.initials}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-slate-200">{user.name}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{user.role} · {user.team}</span></span><span className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={`size-1.5 rounded-full ${user.status === "Online" ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-rose-300"}`} />{user.status}</span></button>)}{filteredUsers.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun utente corrisponde alla ricerca.</div>}</div>
+        </section>
+
+        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-roles">
+          <div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="ROLE CATALOG / 13" title="Ruoli" action="Vedi tutti" onAction={() => onSelectTab("roles", "authority-roles")} /><StatusBadge>SITES CATALOG</StatusBadge></div>
+          <Tabs className="mt-4" defaultValue="CANONICI"><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="CANONICI">Canonici</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="CAPABILITY">Capability</TabsTrigger></TabsList></Tabs>
+          <div className="mt-3 divide-y divide-white/[0.07]">{filteredRoles.slice(0, 5).map((role) => { const active = role === selectedRole; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={role} onClick={() => onSelectRole(role)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${active ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : "border-white/10 bg-black/20 text-slate-600"}`}><UserRoundCog className="size-3.5" /></span><span className="min-w-0 flex-1"><span className={`block truncate text-[11px] font-medium ${active ? "text-lime-100" : "text-slate-300"}`}>{role}</span><span className="mt-1 block text-[10px] text-slate-600">{ROLE_CAPABILITIES[role].length} capability</span></span>{active && <Check className="size-4 text-lime-200" />}</button>; })}</div>
         </section>
 
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-teams">
-          <SectionTitle eyebrow="AUTHORITY / WORKFORCE GROUPS" title="Team" action="Vedi tutti" onAction={() => onNotify("Team: read model visuale pronto per l'adapter Workforce")} />
-          <div className="mt-4 space-y-2">{authorityTeams.map((team) => <button className="flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-black/15 p-2.5 text-left transition hover:border-lime-300/25 hover:bg-lime-300/[0.04]" key={team.label} onClick={() => onNotify(`${team.label}: ${team.members} membri nel read model`)} type="button"><span className={`grid size-9 place-items-center rounded-full border text-[10px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}>{team.initials}</span><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-slate-200">{team.label}</span><span className="mt-1 block text-[10px] text-slate-600">{team.members} membri</span></span><Users className="size-4 text-slate-600" /></button>)}</div>
+          <div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="ACCESS CONTROL" title="Livelli accesso" action="Vedi tutti" onAction={() => onNotify("Accessi: read model pronto per l'adapter Security")} /><button className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[10px] text-slate-400 hover:border-lime-300/30 hover:text-lime-200" onClick={() => onNotify("Access levels: catalogo visuale")} type="button">Live<ChevronDown className="size-3" /></button></div>
+          <div className="mt-4 flex h-[142px] items-end gap-1 border-b border-white/10 px-1 pb-0">{accessLevels.map((item) => <span className="group relative flex-1 rounded-t-sm bg-lime-300/85 transition hover:bg-lime-200" key={item.label} style={{ height: `${Math.max(12, (item.value / 186) * 100)}%` }}><span className="pointer-events-none absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-black px-1.5 py-1 text-[9px] text-lime-200 group-hover:block">{item.value}</span></span>)}</div>
+          <div className="mt-2 flex justify-between gap-1 text-[8px] text-slate-600"><span>Lettura</span><span>Inserimento</span><span>Modifica</span><span>Admin</span></div>
+          <div className="mt-4 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-lime-300">186</p><p className="mt-1 text-[10px] text-slate-500">permessi attivi</p></div><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-cyan-300">8</p><p className="mt-1 text-[10px] text-slate-500">team operativi</p></div></div>
+          <div className="mt-4 grid grid-cols-2 gap-1.5">{authorityTeams.map((team) => <button className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/15 px-2 py-2 text-left transition hover:border-lime-300/25" key={team.label} onClick={() => onNotify(`${team.label}: ${team.members} membri nel read model`)} type="button"><span className={`grid size-6 place-items-center rounded-full border text-[8px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}>{team.initials}</span><span className="min-w-0 truncate text-[9px] text-slate-400">{team.label}</span></button>)}</div>
         </section>
       </div>
 
-      <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.38fr)_minmax(330px,0.62fr)]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-permissions">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="AUTHORITY / CAPABILITY MATRIX" title="Matrice permessi" /><p className="mt-1 text-[11px] text-slate-500">Vista comparativa del catalogo · il resolver canonico resta server-owned.</p></div><button className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("Gestione permessi: capability catalogo pronto")} type="button"><Settings2 className="size-3.5" />Gestisci permessi</button></div>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20"><table className="w-full min-w-[760px] text-left"><thead className="border-b border-white/[0.08] text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600"><tr><th className="px-3 py-3">Modulo</th>{["Operatore", "Team Leader", "Manager", "Amministratore", "Tecnico", "Viewer"].map((role) => <th className="px-2 py-3 text-center" key={role}>{role}</th>)}</tr></thead><tbody className="divide-y divide-white/[0.07]">{permissionMatrix.map((row) => <tr key={row.module}><td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-slate-300">{row.module}</td>{row.values.map((value, index) => <td className="px-2 py-2.5 text-center" key={`${row.module}-${index}`}><span className={`inline-flex min-w-[64px] justify-center rounded-md border px-1.5 py-1 text-[9px] ${value === "Amministrazione" ? "border-violet-300/25 bg-violet-300/15 text-violet-100" : value === "Approvazione" ? "border-blue-300/25 bg-blue-300/15 text-blue-100" : value === "Modifica" ? "border-amber-300/25 bg-amber-300/15 text-amber-100" : value === "Nessun accesso" ? "border-white/10 bg-white/[0.04] text-slate-600" : "border-lime-300/20 bg-lime-300/10 text-lime-200"}`}>{value}</span></td>)}</tr>)}</tbody></table></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="CAPABILITY MATRIX" title="Matrice permessi" /><p className="mt-1 text-[11px] text-slate-500">Catalogo visuale · resolver canonico server-owned.</p></div><button className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("Gestione permessi: capability catalogo pronto")} type="button"><Settings2 className="size-3.5" />Gestisci</button></div>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/20"><table className="w-full min-w-[720px] text-left"><thead className="border-b border-white/[0.08] text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-600"><tr><th className="px-3 py-3">Modulo</th>{["Operatore", "Team Leader", "Manager", "Amministratore", "Tecnico", "Viewer"].map((role) => <th className="px-2 py-3 text-center" key={role}>{role}</th>)}</tr></thead><tbody className="divide-y divide-white/[0.07]">{permissionMatrix.map((row) => <tr key={row.module}><td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-slate-300">{row.module}</td>{row.values.map((value, index) => <td className="px-2 py-2.5 text-center" key={`${row.module}-${index}`}><span className={`inline-flex min-w-[64px] justify-center rounded-md border px-1.5 py-1 text-[9px] ${value === "Amministrazione" ? "border-violet-300/25 bg-violet-300/15 text-violet-100" : value === "Approvazione" ? "border-blue-300/25 bg-blue-300/15 text-blue-100" : value === "Modifica" ? "border-amber-300/25 bg-amber-300/15 text-amber-100" : value === "Nessun accesso" ? "border-white/10 bg-white/[0.04] text-slate-600" : "border-lime-300/20 bg-lime-300/10 text-lime-200"}`}>{value}</span></td>)}</tr>)}</tbody></table></div>
         </section>
 
-        <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-policies">
-          <SectionTitle eyebrow="AUTHORITY / GOVERNANCE" title="Politiche di accesso" action="Vedi tutte" onAction={() => onNotify("Politiche: configurazione pronta per l'adapter Security")} />
-          <div className="mt-4 space-y-3">{authorityPolicies.map((policy) => { const Icon = policy.icon; return <button className="flex w-full items-center gap-3 text-left" key={policy.title} onClick={() => onNotify(`${policy.title}: ${policy.state}`)} type="button"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-slate-200">{policy.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{policy.detail}</span></span><span className="flex items-center gap-2 text-[10px] text-lime-200">{policy.state}<ChevronRight className="size-3.5 text-slate-600" /></span></button>; })}</div>
+        <section className="carbon-card carbon-card-neon rounded-2xl p-4 sm:p-5" id="authority-policies">
+          <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><span className="neon-pulse grid size-9 place-items-center rounded-xl bg-lime-300 text-[#060806]"><Sparkles className="size-[18px]" /></span><div><p className="text-[15px] font-semibold text-slate-50">AI Assistant</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">authority / governed preview</p></div></div><StatusBadge>READ ONLY</StatusBadge></div>
+          <div className="carbon-inset mt-5 rounded-xl p-3"><div className="flex items-center gap-2 text-[10px] text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.9)]" />SYSTEM READY<span className="ml-auto font-mono text-[9px] text-slate-600">S02</span></div><p className="mt-3 text-sm leading-6 text-slate-300">Posso interrogare utenti, ruoli e accessi quando l’adapter Authority sarà collegato.</p></div>
+          <div className="mt-4 space-y-2"><button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200" onClick={() => onNotify("AI Assistant: utenti offline · read model Authority")} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>Quali utenti sono offline?</button><button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200" onClick={() => onNotify("AI Assistant: analisi accessi sospetti in sola lettura")} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>Analizza accessi sospetti</button><button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200" onClick={onNewUser} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>Crea nuovo profilo</button></div>
+          <div className="mt-5 border-t border-white/10 pt-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-200/60">POLITICHE</p><div className="mt-3 space-y-2">{authorityPolicies.slice(0, 3).map((policy) => { const Icon = policy.icon; return <button className="flex w-full items-center gap-2 text-left" key={policy.title} onClick={() => onNotify(`${policy.title}: ${policy.state}`)} type="button"><Icon className="size-3.5 text-lime-300" /><span className="min-w-0 flex-1 truncate text-[10px] text-slate-400">{policy.title}</span><span className="text-[9px] text-lime-200">{policy.state}</span></button>; })}</div></div>
         </section>
       </div>
-
-      <section className="authority-assistant-panel carbon-card carbon-card-neon mt-4 rounded-2xl p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Activity className="size-4" /></span><div><p className="text-sm font-semibold text-slate-100">AI Assistant</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">authority / governed preview</p></div></div><StatusBadge>READ ONLY</StatusBadge></div>
-        <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("AI Assistant: quali utenti sono offline?")} type="button">Quali utenti sono offline?</button><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={() => onNotify("AI Assistant: analisi accessi sospetti in sola lettura")} type="button">Analizza accessi sospetti</button><button className="rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] text-slate-400 transition hover:border-lime-300/25 hover:text-lime-200" onClick={onNewUser} type="button">Crea nuovo profilo</button></div>
-      </section>
     </>
   );
 }
@@ -472,13 +485,13 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="authority-page min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.07),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
+    <main className="min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.08),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
       <div className="relative flex min-h-screen">
         <aside className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center justify-between px-2">
             <button className="flex items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
-              <span className="brand-mark neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
+              <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
               <span><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
             </button>
             <button className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button" aria-label="Chiudi menu"><X className="size-4" /></button>
@@ -502,12 +515,12 @@ export default function OnboardingPage() {
         {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
 
         <section className="min-w-0 flex-1">
-          <header className="authority-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
+          <header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
             <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca utenti, ruoli, permessi, team" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca utenti, ruoli, permessi, team…" value={query} /></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">AUTHORITY</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
-              <span className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] sm:flex ${authorityContext ? "border-lime-300/20 bg-lime-300/5 text-lime-200" : "border-amber-300/20 bg-amber-300/5 text-amber-200"}`}><span className={`size-1.5 rounded-full shadow-[0_0_9px_currentColor] ${authorityContext ? "bg-lime-300" : "bg-amber-300"}`} />{authorityContext ? "Sites native / verified" : "Readback pending"}</span>
+              <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />Sites native</span>
               <IconButton label="Notifiche"><Bell className="size-4" /></IconButton>
               <span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">AB</span>
               <div className="hidden text-right lg:block"><p className="text-xs font-medium text-slate-200">{authorityContext?.actorName ?? "Operatore"}</p><p className="text-[10px] text-slate-600">{authorityContext ? `${authorityContext.role} · Sites owner` : "Site owner · readback pending"}</p></div><ChevronDown className="hidden size-3.5 text-slate-500 lg:block" />
@@ -527,11 +540,11 @@ export default function OnboardingPage() {
                 </div>
               </div>
             </div>
-            <div className="authority-title-block mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / COMMAND / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[30px]">Authority</h1><p className="mt-1 text-xs text-slate-500">Gestione utenti, ruoli, permessi e accessi · control center S02</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><DatabaseZap className="mr-2 size-3.5 text-cyan-300" />{authorityContext ? "Readback Sites verificato" : "Readback in corso"}</span><Button className="h-10 border border-lime-300/30 bg-lime-300 px-4 text-xs font-semibold text-[#060806] shadow-[0_0_22px_rgba(190,255,60,0.18)] transition hover:-translate-y-0.5 hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Nuovo utente</Button></div></div>
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / AUTHORITY</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">Authority</h1><p className="mt-1 text-xs text-slate-500">Gestione utenti, ruoli, permessi e accessi · {authorityContext ? "readback Sites verificato" : "readback in corso"}</p></div><div className="flex items-center gap-2"><span className="hidden rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><Clock3 className="mr-2 size-3.5 text-lime-300" />S02 · owner private</span><Button className="h-9 border border-lime-300/30 bg-lime-300 px-3 text-xs font-semibold text-[#060806] shadow-[0_0_18px_rgba(190,255,60,0.16)] hover:bg-lime-200" onClick={() => setProfileOpen(true)}><Plus className="size-3.5" />Nuovo utente</Button></div></div>
 
-            <div className="authority-metrics grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Utenti attivi" value="48" detail="+12%" icon={Users} tone="lime" /><MetricCard label="Ruoli definiti" value="12" detail="+0%" icon={Package} tone="lime" /><MetricCard label="Permessi" value="186" detail="+6%" icon={KeyRound} tone="lime" /><MetricCard label="Team operativi" value="8" detail="+0%" icon={Users} tone="lime" /></div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{authorityKpis.map((kpi) => <MetricCard key={kpi.label} {...kpi} />)}</div>
 
-            <AuthorityVisualDashboard activeTab={activeTab} filteredUsers={filteredUsers} onNewUser={() => setProfileOpen(true)} onNotify={notify} onSelectTab={selectAuthorityTab} />
+            <AuthorityVisualDashboard activeTab={activeTab} filteredRoles={filteredRoles} filteredUsers={filteredUsers} onNewUser={() => setProfileOpen(true)} onNotify={notify} onSelectRole={setSelectedRole} onSelectTab={selectAuthorityTab} selectedRole={selectedRole} />
 
             <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
               <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><SectionTitle eyebrow="SITE SESSION / BOUNDARY" title="Contesto corrente" /><p className="mt-1 text-[11px] text-slate-500">Identità, membership e tenant derivano dal server Sites.</p></div><StatusBadge tone={authorityContext ? "lime" : "amber"}>{authorityContext ? "SITES NATIVE" : "READBACK PENDING"}</StatusBadge></div><div className="carbon-card-neon mt-4 rounded-xl border p-4"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl border border-lime-300/30 bg-lime-300/10 text-lime-200"><LockKeyhole className="size-5" /></span><div><p className="text-sm font-semibold text-slate-100">Owner-only Site access</p><p className="mt-1 text-[11px] text-slate-500">Accesso verificato dal perimetro privato Sites</p></div></div><div className="mt-4 grid grid-cols-2 gap-2"><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Account</p><p className="mt-1 truncate text-xs text-lime-200">{authorityContext?.actorEmail ?? "owner"}</p></div><div className="rounded-lg border border-white/10 bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">App role</p><p className="mt-1 text-xs text-lime-200">{authorityContext?.role ?? "readback pending"}</p></div></div></div><div className="mt-4 space-y-2"><div className="flex items-center gap-2 rounded-lg border border-cyan-300/15 bg-cyan-300/5 px-3 py-2.5 text-[11px] text-cyan-100/80"><ShieldCheck className="size-4 shrink-0 text-cyan-200" /><span>Client identity: <strong className="font-medium text-cyan-100">server-owned</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><LockKeyhole className="size-4 shrink-0 text-lime-200" /><span>Tenant isolation: <strong className="font-medium text-lime-100">assertTenantScope</strong></span></div><div className="flex items-center gap-2 rounded-lg border border-lime-300/15 bg-lime-300/5 px-3 py-2.5 text-[11px] text-lime-100/80"><CheckCircle2 className="size-4 shrink-0 text-lime-200" /><span>Resolver runtime: <strong className="font-medium text-lime-100">Sites auth + D1 active</strong></span></div></div></section>
@@ -551,14 +564,6 @@ export default function OnboardingPage() {
             <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600"><span>AI-ZEROW AUTHORITY · S02 CLOSED</span><span className="flex items-center gap-2"><span>black carbon core</span><span className="size-1 rounded-full bg-lime-300" /><span>Sites-only authority</span></span></footer>
           </div>
         </section>
-      </div>
-
-      <div className="authority-mobile-nav fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 items-center rounded-2xl border border-lime-300/20 bg-[#070a09]/95 p-2 shadow-[0_0_28px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden">
-        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => selectAuthorityTab("overview", "authority-overview")} type="button"><Building2 className="size-4" />Home</button>
-        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => selectAuthorityTab("users", "authority-users")} type="button"><Users className="size-4" />Utenti</button>
-        <button className="grid size-12 -translate-y-3 place-items-center rounded-full border border-lime-200/70 bg-lime-300 text-[#071006] shadow-[0_0_24px_rgba(190,255,60,0.35)]" onClick={() => setProfileOpen(true)} type="button" aria-label="Nuovo utente"><Plus className="size-5" /></button>
-        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-lime-200" onClick={() => selectAuthorityTab("roles", "authority-roles")} type="button"><ShieldCheck className="size-4" />Authority</button>
-        <button className="flex flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[9px] text-slate-500" onClick={() => setMobileMenu(true)} type="button"><Menu className="size-4" />Menu</button>
       </div>
 
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}><DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]"><DialogHeader><DialogTitle className="text-slate-100">Crea profilo accesso</DialogTitle><DialogDescription className="text-slate-500">Il profilo viene salvato nel database Sites con tenant, creator e capability ricostruiti dal server.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-2"><label className="text-xs text-slate-400" htmlFor="profile-label">Etichetta profilo</label><Input id="profile-label" className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setProfileLabel(event.target.value)} placeholder="Es. Responsabile operativo" value={profileLabel} /></div><div className="space-y-2"><p className="text-xs text-slate-400">Ruolo base</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{AUTHORITY_ROLES.slice(0, 6).map((role) => <button className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${selectedRole === role ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/10 bg-black/20 text-slate-400 hover:border-lime-300/25"}`} key={role} onClick={() => setSelectedRole(role)} type="button">{role}</button>)}</div></div><div className="flex items-start gap-2 rounded-xl border border-lime-300/15 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />Il client invia solo etichetta e ruolo canonico. Il server applica tenant, creator e capability.</div></div><DialogFooter><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button type="button" disabled={profileSubmitting} className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => void createProfile()}><Send className="size-3.5" />{profileSubmitting ? "Salvataggio…" : "Salva profilo"}</Button></DialogFooter></DialogContent></Dialog>
