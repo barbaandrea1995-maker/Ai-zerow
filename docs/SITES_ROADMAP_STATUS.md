@@ -7,7 +7,7 @@ Scope: Sites-only reconstruction baseline.
 - Project: `AI-ZEROW-COMMAND`
 - Access: owner-only private Site
 - Baseline/evidence policy: locked
-- External platforms: intentionally not used as operating dependencies
+- External platforms: not used as operating dependencies; Neon project usage is separately authorized
 - S01 blockers: none within Sites scope
 
 The source research labels remain evidence labels. `ADAPTER_REQUIRED`, `NOT_RUN` and `UNKNOWN` describe capabilities that will be implemented or certified later; they are not open S01 work items.
@@ -25,7 +25,7 @@ Scope: Sites-native authority and onboarding contract.
 - UI: `/onboarding` reads and creates persistent access profiles through the server endpoint
 - S02 blockers: none within Sites scope
 
-The external multi-tenant identity adapter remains outside this Sites-only execution scope. It is not a blocker for S02 closure here.
+The external multi-tenant identity adapter remains outside this Sites-only execution scope. Neon usage is now authorized for the project, but the adapter and runtime evidence remain deferred; this is not a blocker for S02 closure here.
 
 ## Current continuation
 
@@ -73,7 +73,8 @@ The deferred boundaries are explicit: external document storage/OCR, accounting 
 - `/externals` and `/api/externals` expose a source-defined registry for identity, canonical domains, storage/OCR, Neon schema binding, event consumers, AI/voice, policy, runtime parity, native mobile, certification and promotion.
 - The registry stores no endpoint, credential or provider secret. A user can append only a declarative CONTRACT, HEALTH, READBACK or GATE check; the check log is tenant-scoped and append-only in the existing s05_records D1 surface.
 - DECLARATIVE_PASS means only that the Sites contract was recorded/read back. It never upgrades a canonical external service from DEFERRED, BLOCKED or NOT RUN to a falsely certified runtime.
-- Neon, Vercel and GitHub remain visible as explicit blocked operating dependencies because the owner requested a Sites-only workflow. Native iOS/Android and B0–B10/W20 remain NOT RUN until a separate authorized harness exists.
+- Neon project usage is `AUTHORIZED` for AI-ZEROW-COMMAND and is recorded in `docs/NEON_USAGE_AUTHORIZATION.md`; its S10 adapter remains `DEFERRED` until fingerprint, migration-marker, environment and runtime readback evidence exists.
+- Vercel and GitHub remain outside the Sites-only operating workflow. Native iOS/Android and B0–B10/W20 remain NOT RUN until a separate authorized harness exists.
 
 ## Sites-only rule
 

@@ -33,7 +33,7 @@ with unavailable external ZEROW services.
 - Each S04 module contains one explicit `adapter-contract` record.
 - Operations accepts a bounded server-side create request and reads the inserted record back.
 - Browser-provided tenant and identity values are not trusted by the server routes.
-- The published Site remains owner-only and uses no Vercel, GitHub or Neon operating workflow.
+- The published Site remains owner-only and uses no Vercel or GitHub operating workflow; Neon project usage is authorized but its runtime adapter remains deferred.
 - S05–S08 are backed by migration `0002`: 12 seeded S05 records, 2 event-store records, 2 outbox records, 2 reconciliation records and 2 AI ledger entries; the published readback is checked after deployment.
 
 ## Preserved boundaries
@@ -41,7 +41,7 @@ with unavailable external ZEROW services.
 The following remain `ADAPTER_REQUIRED`, `UNKNOWN`, `NOT_RUN` or `NOT_VERIFIED`
 according to the supplied research and are intentionally not relabeled:
 
-- external multi-tenant identity and Neon Auth;
+- external multi-tenant identity, Neon Auth and Neon runtime/readback certification;
 - canonical external domain services and their state machines;
 - event store, outbox, retry/DLQ and reconciliation parity;
 - original runtime behavior of the 418 catalogued controls;

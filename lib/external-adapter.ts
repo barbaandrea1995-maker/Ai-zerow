@@ -11,6 +11,7 @@ import {
 export const EXTERNALS_MODULE = "externals";
 
 export type ExternalStatus = "READY" | "DEFERRED" | "BLOCKED" | "NOT_RUN";
+export type ExternalAuthorization = "AUTHORIZED" | "NOT_AUTHORIZED";
 export type ExternalCheckResult = "DECLARATIVE_PASS" | "BLOCKED" | "NOT_RUN";
 export type ExternalCheckType = "contract" | "health" | "readback" | "gate";
 
@@ -22,6 +23,7 @@ export type ExternalAdapterDefinition = {
   provider: string;
   boundary: "sites-native" | "adapter-required" | "forbidden-dependency" | "not-in-sites-scope";
   status: ExternalStatus;
+  authorization?: ExternalAuthorization;
   contract: string;
   gate: string;
   capabilities: string[];
@@ -102,12 +104,13 @@ export const EXTERNAL_ADAPTERS: ExternalAdapterDefinition[] = [
     family: "data",
     title: "Canonical schema and migrations",
     provider: "Neon",
-    boundary: "forbidden-dependency",
-    status: "BLOCKED",
-    contract: "Schema fingerprint, migration markers 0016/0017 and environment binding",
-    gate: "Fingerprint + applied markers + environment proof",
+    boundary: "adapter-required",
+    status: "DEFERRED",
+    authorization: "AUTHORIZED",
+    contract: "Authorized Neon project binding → schema fingerprint, migration markers 0016/0017 and environment binding",
+    gate: "Project authorization recorded; fingerprint + applied markers + environment proof still required",
     capabilities: ["schema fingerprint", "migration markers", "environment binding"],
-    nextAction: "Reopen only after explicit approval to use Neon",
+    nextAction: "Run the authorized Neon adapter readback before promoting runtime state",
   },
   {
     key: "event-consumer",
