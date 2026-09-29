@@ -154,3 +154,25 @@ export const s07AiLedger = sqliteTable("s07_ai_ledger", {
   tenantCreatedIdx: index("s07_ai_ledger_tenant_created_idx").on(table.tenantId, table.createdAt),
   relatedActionIdx: index("s07_ai_ledger_related_action_idx").on(table.tenantId, table.relatedActionId),
 }));
+
+/**
+ * Sites-native registry for generated operational codes. The payload is a
+ * canonical, opaque token that can be decoded locally and resolved against
+ * the tenant-scoped record context without a third-party QR service.
+ */
+export const qrCodes = sqliteTable("qr_codes", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  format: text("format").notNull().default("QR"),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  label: text("label").notNull(),
+  payload: text("payload").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastScannedAt: text("last_scanned_at"),
+}, (table) => ({
+  tenantPayloadUnique: uniqueIndex("qr_codes_tenant_payload_uq").on(table.tenantId, table.payload),
+  tenantEntityUpdatedIdx: index("qr_codes_tenant_entity_updated_idx").on(table.tenantId, table.entityType, table.entityId, table.updatedAt),
+}));

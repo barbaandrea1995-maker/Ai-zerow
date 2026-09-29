@@ -24,6 +24,7 @@ import {
   MessageSquareText,
   Package,
   Plus,
+  QrCode,
   Search,
   Send,
   Settings2,
@@ -87,6 +88,7 @@ const navItems = [
   { label: "WAREHOUSE", id: "warehouse", icon: Layers3 },
   { label: "MISSION", id: "mission", icon: Truck },
   { label: "DOCUMENTS", id: "documents", icon: FileText },
+  { label: "QR / BARCODE", id: "qr", icon: QrCode },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge },
 ];
@@ -309,6 +311,10 @@ export default function OperationsPage() {
     }
     if (id === "mission") {
       router.push("/mission");
+      return;
+    }
+    if (id === "qr") {
+      router.push("/qr");
       return;
     }
     if (id === "events_authority") {

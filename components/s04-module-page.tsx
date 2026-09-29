@@ -24,6 +24,7 @@ import {
   MessageSquareText,
   Package,
   Plus,
+  QrCode,
   Search,
   Send,
   Settings2,
@@ -291,6 +292,7 @@ const navItems: { label: string; id: string; icon: LucideIcon }[] = [
   { label: "WAREHOUSE", id: "warehouse", icon: Layers3 },
   { label: "MISSION", id: "mission", icon: Truck },
   { label: "DOCUMENTS", id: "documents", icon: FileText },
+  { label: "QR / BARCODE", id: "qr", icon: QrCode },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge },
 ];
@@ -304,6 +306,7 @@ const routes: Record<string, string> = {
   mission: "/mission",
   finance: "/finance",
   documents: "/documents",
+  qr: "/qr",
   governance: "/governance",
   events_authority: "/events",
   pwa: "/pwa/diagnostics",
