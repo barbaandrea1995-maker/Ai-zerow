@@ -98,6 +98,46 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Shared Command shell: keep the sidebar fixed while its navigation scrolls internally. */
+aside > nav {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-color: rgba(216, 255, 82, 0.34) transparent;
+  scrollbar-width: thin;
+}
+
+aside > nav::-webkit-scrollbar {
+  width: 5px;
+}
+
+aside > nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+aside > nav::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(216, 255, 82, 0.3);
+}
+
+@media (min-width: 1024px) {
+  aside:has(> nav) {
+    align-self: flex-start;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 1023px) {
+  aside:has(> nav) {
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
 .carbon-card {
   position: relative;
   overflow: hidden;
