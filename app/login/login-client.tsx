@@ -1,6 +1,7 @@
 "use client";
 
 import { createAuthClient } from "@neondatabase/auth/next";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 const authClient = createAuthClient();
@@ -14,6 +15,7 @@ export default function LoginClient({
   initialState: LoginState;
   actor: { email: string; name: string } | null;
 }) {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,7 +32,7 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_in_failed");
         return;
       }
-      window.location.assign("/command");
+      router.push("/command");
     } catch {
       setMessage("auth_sign_in_failed");
     } finally {
