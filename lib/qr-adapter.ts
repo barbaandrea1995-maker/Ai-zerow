@@ -80,13 +80,13 @@ export function directoryMatch(entityType: QrEntityType, entityId: string): QrDi
   const entry = DIRECTORY[entityType][entityId];
   if (entry) return { entityType, entityId, ...entry };
   const labels: Record<QrEntityType, string> = { asset: "Asset", warehouse: "Materiale", commessa: "Commessa" };
-  const module: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "warehouse" ? "warehouse" : "operations";
+  const moduleKey: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "warehouse" ? "warehouse" : "operations";
   return {
     entityType,
     entityId,
     title: `${labels[entityType]} ${entityId}`,
     detail: "Elemento riconosciuto · readback directory",
-    module,
+    module: moduleKey,
   };
 }
 

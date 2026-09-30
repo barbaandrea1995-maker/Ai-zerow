@@ -5,7 +5,6 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   AlertTriangle,
   ArrowUpRight,
   Bell,
@@ -217,7 +216,6 @@ export default function QrBarcodeControl() {
   };
 
   const loadRegistry = async () => {
-    setRegistryStatus("loading");
     try {
       const response = await fetch("/api/qr", { cache: "no-store" });
       if (!response.ok) throw new Error("qr_registry_unavailable");
@@ -232,20 +230,23 @@ export default function QrBarcodeControl() {
   };
 
   useEffect(() => {
-    void loadRegistry();
+    const videoElement = videoRef.current;
+    queueMicrotask(() => void loadRegistry());
     return () => {
       controlsRef.current?.stop();
       readerRef.current = null;
-      const stream = videoRef.current?.srcObject;
+      const stream = videoElement?.srcObject;
       if (stream instanceof MediaStream) stream.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- form defaults follow the selected QR domain. */
   useEffect(() => {
     const target = starterTargets[entityType];
     setEntityId(target.id);
     setLabel(target.label);
   }, [entityType]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     return () => {
