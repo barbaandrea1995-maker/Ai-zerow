@@ -2,6 +2,44 @@ import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
+ * Canonical Cloudflare/D1 tenant directory. The Sites project tenant keeps
+ * the existing read-model rows addressable while giving the application a
+ * durable tenant record for membership and provisioning flows.
+ */
+export const tenants = sqliteTable("tenants", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull(),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("active"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  slugUnique: uniqueIndex("tenants_slug_uq").on(table.slug),
+  statusIdx: index("tenants_status_idx").on(table.status),
+}));
+
+/**
+ * Sites identity → D1 tenant membership projection. Identity values are
+ * sourced from the server auth headers; the browser never supplies actorId.
+ */
+export const tenantMemberships = sqliteTable("tenant_memberships", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  actorId: text("actor_id").notNull(),
+  actorEmail: text("actor_email").notNull(),
+  displayName: text("display_name").notNull(),
+  role: text("role").notNull().default("owner"),
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantActorUnique: uniqueIndex("tenant_memberships_tenant_actor_uq").on(table.tenantId, table.actorId),
+  actorStatusIdx: index("tenant_memberships_actor_status_idx").on(table.actorId, table.status),
+  tenantStatusIdx: index("tenant_memberships_tenant_status_idx").on(table.tenantId, table.status),
+}));
+
+/**
  * Sites-native authority profiles.
  *
  * The tenant and creator are always supplied by the server authority context;

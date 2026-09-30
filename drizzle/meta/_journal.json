@@ -29,6 +29,13 @@
       "when": 1790699056671,
       "tag": "0003_open_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790782461231,
+      "tag": "0004_colorful_giant_man",
+      "breakpoints": true
     }
   ]
 }
