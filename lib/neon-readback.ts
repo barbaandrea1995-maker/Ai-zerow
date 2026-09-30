@@ -107,7 +107,7 @@ export async function getNeonReadback() {
     );
     const permissionRows = await readOnlyQuery(
       "permissions",
-      "SELECT current_user AS runtime_role, has_schema_privilege(current_user, 'zerow', 'USAGE') AS zerow_schema_usage, has_schema_privilege(current_user, 'neon_auth', 'USAGE') AS neon_auth_schema_usage, has_table_privilege(current_user, 'zerow.event_store', 'SELECT') AS event_store_select, has_table_privilege(current_user, 'zerow.outbox', 'SELECT') AS outbox_select, has_table_privilege(current_user, 'neon_auth.user', 'SELECT') AS auth_user_select, has_table_privilege(current_user, 'neon_auth.session', 'SELECT') AS auth_session_select",
+      "SELECT current_user AS runtime_role, has_schema_privilege(current_user, 'zerow', 'USAGE') AS zerow_schema_usage, has_schema_privilege(current_user, 'neon_auth', 'USAGE') AS neon_auth_schema_usage, has_table_privilege(current_user, 'zerow.event_store', 'SELECT') AS event_store_select, has_table_privilege(current_user, 'zerow.outbox', 'SELECT') AS outbox_select, COALESCE((SELECT has_table_privilege(current_user, c.oid, 'SELECT') FROM pg_class AS c JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'neon_auth' AND c.relname = 'user' LIMIT 1), false) AS auth_user_select, COALESCE((SELECT has_table_privilege(current_user, c.oid, 'SELECT') FROM pg_class AS c JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'neon_auth' AND c.relname = 'session' LIMIT 1), false) AS auth_session_select",
     );
     const readModelCount = async (label: string, statement: string): Promise<number | null> => {
       try {
