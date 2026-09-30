@@ -62,3 +62,12 @@ Non ci sono attività aperte nel perimetro S01–S10 Sites + binding Neon autori
 D1 resta il control plane canonico Sites; Neon è collegato e verificato in
 read-only runtime. Qualunque estensione Auth/tenant o certificazione esterna dovrà
 aprire un gate distinto, senza retrocedere questi checkpoint.
+
+## Addendum — produzione identity bridge
+
+Readback successivo al checkpoint iniziale, `2026-09-30`: il tenant EMS in D1
+è attivo e `tenant_memberships` contiene due membership `owner` attive, una
+`identity_provider = sites` e una `identity_provider = neon`. Questo chiude il
+provisioning production dell'owner-mediated bridge descritto nei checkpoint
+Auth; non promuove Neon a control plane e non certifica ancora A/B production,
+revoca membership, capability insufficiente o cross-tenant `403`.

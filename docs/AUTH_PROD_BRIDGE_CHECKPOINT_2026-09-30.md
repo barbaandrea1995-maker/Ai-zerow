@@ -38,15 +38,19 @@ considerato una prova di identità, ruolo o tenant.
 - Deploy Sites: completato sul Site privato owner-only.
 - D1 binding `DB`: presente.
 - D1 `tenants`: tenant EMS attivo.
-- D1 `tenant_memberships`: membership Sites owner attiva, provider `sites`.
+- D1 `tenant_memberships`: due membership `owner` attive sul tenant EMS,
+  una `identity_provider = sites` e una `identity_provider = neon`, confermate
+  dal readback live dopo il collegamento esplicito dell'owner.
 - TypeScript: `PASS` dopo il provisioning bridge.
 - Build Vinext: `PASS`; route `/api/auth/neon-membership` presente.
+- Readback production: `2026-09-30`, tenant attivo e membership Neon reale
+  presente; nessun actor, ruolo o tenant è stato scelto dal browser.
 
 ## Confini ancora aperti
 
-- La membership Neon reale verrà creata al primo collegamento eseguito da
-  Andrea dopo accesso/signup Neon; il percorso server-side è ora pronto e non
-  crea identità o password inventate.
+- La membership Neon reale è stata creata dal collegamento esplicito
+  dell'owner dopo accesso Neon; il percorso server-side non crea identità o
+  password inventate.
 - Il Site resta `custom` owner-only; non è stata cambiata la visibilità per
   utenti esterni.
 - Il test live A/B con due identità Neon e rifiuto cross-tenant `403` resta un
@@ -55,8 +59,8 @@ considerato una prova di identità, ruolo o tenant.
 
 ## Regola di promozione
 
-Nessun cutover pubblico viene considerato chiuso finché non sono presenti le
-membership Neon reali in D1 e non sono verificati `401`, accesso A/B,
-membership revocata, capability insufficiente e cross-tenant `403`. Il codice
-per il primo provisioning è chiuso; l’attivazione dell’identità reale resta
-un’azione esplicita dell’owner.
+Il bridge production Neon → D1 è ora verificato per l'identità owner collegata.
+Il cutover pubblico completo resta un gate distinto finché non sono verificati
+`401`, accesso A/B con due identità Neon, membership revocata, capability
+insufficiente e cross-tenant `403`. Il Site resta owner-only e D1 resta il
+control plane canonico.

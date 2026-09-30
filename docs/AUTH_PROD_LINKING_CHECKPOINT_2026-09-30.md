@@ -4,12 +4,12 @@ Recorded: `2026-09-30` (`Europe/Rome`)
 
 ## Esito
 
-`IMPLEMENTED · V47 · OWNER-MEDIATED PROVISIONING`
+`VERIFIED · V49 · OWNER-MEDIATED PROVISIONING`
 
-Il ponte Neon Auth → D1 è ora operativo come percorso applicativo. La
-membership reale non viene creata automaticamente dal deploy: viene creata
-solo quando l’owner Sites, già autenticato, collega la propria sessione Neon
-attiva dal Tenant directory.
+Il ponte Neon Auth → D1 è operativo e verificato in production. La membership
+reale non viene creata automaticamente dal deploy: è stata creata quando
+l’owner Sites, già autenticato, ha collegato la propria sessione Neon attiva
+dal Tenant directory.
 
 ## Percorso
 
@@ -41,15 +41,17 @@ La membership creata è `identity_provider = neon`, `status = active` e ruolo
 ## Evidenza di pubblicazione
 
 - Site: `AI-ZEROW-COMMAND`
-- Versione: `47`
+- Versione: `49`
 - URL: `https://ai-zerow-command.barba-andrea-1995.chatgpt.site`
 - Accesso: `custom`, owner-only invariato
 - TypeScript: `PASS`
 - Lint: `PASS`, 13 warning preesistenti non bloccanti
 - Build: `PASS`
 - D1 schema: `tenant_memberships.identity_provider` presente
-- Membership Neon: non ancora presente nel readback al momento del deploy;
-  richiede l’azione esplicita descritta sopra.
+- Readback D1 production: tenant EMS attivo e due membership `owner` attive,
+  una `identity_provider = sites` e una `identity_provider = neon`.
+- Membership Neon: `VERIFIED` dopo l’azione esplicita dell’owner; il browser
+  non ha fornito actor, ruolo o tenant.
 
 ## Confini
 
