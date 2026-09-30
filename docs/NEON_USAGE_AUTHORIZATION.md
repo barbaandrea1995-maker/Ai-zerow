@@ -24,8 +24,9 @@ to `DATABASE_URL`; it is evidence of binding, not a migration or tenant-isolatio
 certification.
 
 No secret, token, connection string or provider credential is stored in this
-record. The canonical status is exposed in the S10 external adapter registry as
-`AUTHORIZED` + `DEFERRED`.
+record. The S10 binding gate is exposed in the external adapter registry as
+`AUTHORIZED` + `READY`; Neon Auth/tenant fixtures remain a separate identity and
+certification boundary, and D1 remains the canonical Sites control plane.
 
 ## S10 readback checkpoint
 

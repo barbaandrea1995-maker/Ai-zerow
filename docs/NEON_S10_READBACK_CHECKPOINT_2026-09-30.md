@@ -2,7 +2,7 @@
 
 ## Esito
 
-`PARTIALLY_VERIFIED · DIRECT + SITES RUNTIME READBACK`
+`CLOSED · S10 BINDING GATE · DIRECT + SITES RUNTIME READBACK`
 
 Recorded: `2026-09-30` (`Europe/Rome`). This checkpoint uses only the
 authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
@@ -54,7 +54,7 @@ nel source commit `f4d142159e390801c24a10d4276d9096e73c4b60`.
   risultano visibili anche al readback; la pagina non li interpreta come un
   migration ledger inventato
 
-## Gate ancora aperto
+## Confini conservati senza riaprire S10
 
 La ricerca originale identifica `db/migrations/0016_operation_reconciliation.sql` e
 `db/migrations/0017_append_only_upsert_compatibility.sql`, mentre il relativo
@@ -66,12 +66,18 @@ dominio/evento, non un migration ledger.
 
 Il Site conserva `DATABASE_URL` come secret e gli endpoint Neon Auth corretti nella
 revision runtime 3. Il percorso Sites read-only è verificato sulla pubblicazione
-owner-only corrente, ma D1 resta il readback canonico. Non è stato eseguito alcun
-cutover automatico né alcuna scrittura su Neon.
+owner-only corrente, ma D1 resta il readback canonico. Il ruolo runtime non legge
+`neon_auth.user/session`: è il confine least-privilege corrente, non un errore del
+gate S10. Non è stato eseguito alcun cutover automatico né alcuna scrittura su Neon.
+
+La provenienza storica dai file `0016/0017` del repository forense e le fixture
+Auth/tenant negative-case restano `UNKNOWN/NOT_RUN` nel registro esterno. Non sono
+necessarie per chiudere il binding S10 verificato sul progetto autorizzato; saranno
+necessarie solo per una successiva certificazione d'identità o di parità canonica.
 
 ## Decisione
 
-S10 resta `AUTHORIZED + DEFERRED`, non `READY`. Il binding runtime read-only è
-`PARTIALLY_VERIFIED`; restano da definire il read scope least-privilege per
-`neon_auth`, la provenienza esatta dei marker e le fixture Auth/tenant con casi
-negativi cross-tenant.
+S10 è `CLOSED` per il gate di binding Neon autorizzato: progetto, branch, database,
+fingerprint, marker strutturali 0016/0017, binding `DATABASE_URL` e readback runtime
+sono verificati. Il Site non promuove questa chiusura a certificazione esterna di
+Auth/tenant, migration provenance o W20.
