@@ -108,9 +108,9 @@ export const EXTERNAL_ADAPTERS: ExternalAdapterDefinition[] = [
     status: "DEFERRED",
     authorization: "AUTHORIZED",
     contract: "Authorized Neon project binding → schema fingerprint, migration markers 0016/0017 and environment binding",
-    gate: "Project authorization recorded; fingerprint + applied markers + environment proof still required",
+    gate: "Project authorization and direct schema readback recorded; applied markers + exact-SHA environment proof still required",
     capabilities: ["schema fingerprint", "migration markers", "environment binding"],
-    nextAction: "Run the authorized Neon adapter readback before promoting runtime state",
+    nextAction: "Bind marker verification and Neon readback to an exact Site deployment SHA; keep D1 canonical until then",
   },
   {
     key: "event-consumer",

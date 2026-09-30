@@ -24,3 +24,9 @@ completed.
 No secret, token, connection string or provider credential is stored in this
 record. The canonical status is exposed in the S10 external adapter registry as
 `AUTHORIZED` + `DEFERRED`.
+
+## S10 readback checkpoint
+
+Il primo readback diretto è documentato in `docs/NEON_S10_READBACK_CHECKPOINT_2026-09-30.md`.
+L'autorizzazione resta valida; il checkpoint non certifica ancora il runtime Sites né
+l'applicazione dei marker di migrazione `0016/0017`.

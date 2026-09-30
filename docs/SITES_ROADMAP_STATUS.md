@@ -39,6 +39,7 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 - S08: **CLOSED · Sites presentation tranche** — manifest, service worker, offline fallback, IndexedDB FIFO replay surface and diagnostics.
 - S09: **PARTIALLY VERIFIED · Sites browser QA** — desktop COMMAND screenshot, sidebar scroll, primary dialog interaction, route sweep and PWA diagnostics readback verified; mobile/device golden baseline remains open.
 - External adapter control: **IMPLEMENTED · Sites declarative boundary** — S10–S14 catalogo, capability contract, append-only check log e roadmap gate visible at `/externals`.
+- S10 Neon binding: **PARTIALLY VERIFIED · direct Neon readback** — progetto/branch/database/Auth e fingerprint schema verificati; marker `0016/0017` non provati nel progetto corretto e runtime Sites ancora su D1.
 
 The closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
 
