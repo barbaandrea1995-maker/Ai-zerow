@@ -29,6 +29,22 @@ authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
 - `zerow_app` e `zerow_runtime`: login attivo, superuser/createdb/createrole/replication/bypassrls disattivati
 - Uso schema `zerow`: concesso a entrambi i ruoli applicativi
 
+## Sites runtime readback
+
+La deployment Sites con source SHA `909e790af67f7a2510a7ce61df703fb197194a1c`
+espone il readback owner-only in `/s10/readback` e `/api/neon/readback`. Il driver
+HTTP Neon usa `DATABASE_URL` come binding secret e forza transazioni `READ ONLY`;
+non esegue scritture né sostituisce il readback D1 canonico.
+
+- Runtime role: `zerow_runtime`; database: `neondb`; PostgreSQL `18.6`
+- Schema visibile al ruolo runtime: `zerow` con 18 tabelle base e 16 viste
+- Fingerprint runtime visibile: 564 colonne, `061c00fae688a52a4ec036d177436cf5`
+- `zerow.event_store`: 0 righe; `zerow.outbox`: 0 righe
+- Gap espliciti: `neon_auth.user` e `neon_auth.session` non leggibili dal ruolo
+  runtime (`insufficient_privilege`); non vengono stimati né simulati
+- Candidati marker runtime: `zerow.ai_action_ledger` e
+  `zerow.ai_action_ledger_latest`; nessuno dimostra `0016/0017`
+
 ## Gate ancora aperto
 
 La ricerca originale identifica `db/migrations/0016_operation_reconciliation.sql` e
@@ -39,12 +55,13 @@ dedicata con nome migration/schema/marker/version che dimostri l'applicazione di
 sono versioni di dominio/evento, non un migration ledger.
 
 Il Site conserva `DATABASE_URL` come secret e gli endpoint Neon Auth corretti nella
-revision runtime 3, ma il codice Sites usa ancora D1 come readback canonico. Non
-è stato eseguito alcun cutover automatico né alcuna scrittura su Neon.
+revision runtime 3. Il percorso Sites read-only è ora verificato sul deployment
+SHA indicato sopra, ma D1 resta il readback canonico. Non è stato eseguito alcun
+cutover automatico né alcuna scrittura su Neon.
 
 ## Decisione
 
-S10 resta `AUTHORIZED + DEFERRED`, non `READY`. Il prossimo lavoro è implementare
-un adapter Neon read-only compatibile con il runtime Sites, collegare la verifica
-dei marker a uno SHA di deployment preciso e poi eseguire fixture Auth/tenant e
-casi negativi cross-tenant.
+S10 resta `AUTHORIZED + DEFERRED`, non `READY`. Il binding runtime read-only è
+`PARTIALLY_VERIFIED`; restano da definire il read scope least-privilege per
+`neon_auth`, la provenienza applicata dei marker `0016/0017` e le fixture
+Auth/tenant con casi negativi cross-tenant.

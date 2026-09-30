@@ -18,8 +18,10 @@ the existing approval and tenant-scope boundaries.
 Authorization is a project permission, not runtime evidence. It does not by
 itself certify a live Neon readback, migration parity, production cutover,
 tenant isolation, Auth session flow or external writes. The Sites D1 adapter
-remains the current verified control-plane readback until those checks are
-completed.
+remains the current canonical control-plane readback until those checks are
+completed. A separate owner-only, read-only Neon runtime readback is now wired
+to `DATABASE_URL`; it is evidence of binding, not a migration or tenant-isolation
+certification.
 
 No secret, token, connection string or provider credential is stored in this
 record. The canonical status is exposed in the S10 external adapter registry as
@@ -27,6 +29,7 @@ record. The canonical status is exposed in the S10 external adapter registry as
 
 ## S10 readback checkpoint
 
-Il primo readback diretto è documentato in `docs/NEON_S10_READBACK_CHECKPOINT_2026-09-30.md`.
-L'autorizzazione resta valida; il checkpoint non certifica ancora il runtime Sites né
-l'applicazione dei marker di migrazione `0016/0017`.
+Il readback diretto e il checkpoint runtime sono documentati in
+`docs/NEON_S10_READBACK_CHECKPOINT_2026-09-30.md`. L'autorizzazione resta valida;
+il runtime è `PARTIALLY_VERIFIED`, mentre i marker `0016/0017`, il read scope
+`neon_auth` e la parità Auth/tenant restano aperti.
