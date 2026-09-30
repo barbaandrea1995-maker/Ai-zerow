@@ -1,23 +1,15 @@
 import LoginClient from "@/app/login/login-client";
-import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
-  const identity = await getNeonAuthIdentity();
-
+export default function LoginPage() {
+  // Keep the public login surface independent from an upstream Neon session
+  // read. Protected routes and the account menu still verify the session
+  // server-side; this page must always be able to render the sign-in form.
   return (
     <LoginClient
-      initialState={
-        identity.status === "authenticated"
-          ? "authenticated"
-          : identity.status === "not_configured"
-            ? "not_configured"
-            : identity.status === "error"
-              ? "error"
-              : "ready"
-      }
-      actor={identity.status === "authenticated" ? identity.actor : null}
+      initialState="ready"
+      actor={null}
     />
   );
 }
