@@ -66,25 +66,39 @@ export async function getNeonReadback() {
 
   try {
     const sql = neon(connectionString, { readOnly: true });
-    const [runtimeRows, relationRows, fingerprintRows, markerRows, readModelRows] = await sql.transaction(
-      (transaction) => [
-        transaction.query(
-          "SELECT current_database() AS database_name, current_user AS current_role, current_setting('server_version') AS postgres_version",
-        ),
-        transaction.query(
-          "SELECT table_schema, count(*) FILTER (WHERE table_type = 'BASE TABLE')::int AS base_tables, count(*) FILTER (WHERE table_type = 'VIEW')::int AS views, count(*)::int AS relations FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') GROUP BY table_schema ORDER BY table_schema",
-        ),
-        transaction.query(
-          "WITH columns AS (SELECT table_schema, table_name, ordinal_position, column_name, data_type, is_nullable, COALESCE(character_maximum_length::text, '') AS character_maximum_length, COALESCE(numeric_precision::text, '') AS numeric_precision, COALESCE(numeric_scale::text, '') AS numeric_scale, COALESCE(datetime_precision::text, '') AS datetime_precision FROM information_schema.columns WHERE table_schema IN ('zerow', 'neon_auth')) SELECT count(*)::int AS column_count, md5(string_agg(concat_ws('|', table_schema, table_name, ordinal_position, column_name, data_type, is_nullable, character_maximum_length, numeric_precision, numeric_scale, datetime_precision), E'\\n' ORDER BY table_schema, table_name, ordinal_position)) AS fingerprint FROM columns",
-        ),
-        transaction.query(
-          "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') AND (lower(table_name) LIKE '%migration%' OR lower(table_name) LIKE '%schema%' OR lower(table_name) LIKE '%version%' OR lower(table_name) LIKE '%marker%' OR lower(table_name) LIKE '%ledger%') ORDER BY table_schema, table_name",
-        ),
-        transaction.query(
-          "SELECT (SELECT count(*)::int FROM zerow.event_store) AS event_store_rows, (SELECT count(*)::int FROM zerow.outbox) AS outbox_rows, (SELECT count(*)::int FROM neon_auth.\"user\") AS auth_user_rows, (SELECT count(*)::int FROM neon_auth.session) AS auth_session_rows",
-        ),
-      ],
-      { readOnly: true },
+    const readOnlyQuery = async (label: string, statement: string): Promise<unknown> => {
+      try {
+        const [rows] = await sql.transaction(
+          (transaction) => [transaction.query(statement)],
+          { readOnly: true },
+        );
+        return rows;
+      } catch (error) {
+        const code = classifyNeonError(error);
+        console.error("neon_readback_failed", `${code}_${label}`);
+        throw new NeonReadbackError(`${code}_${label}`);
+      }
+    };
+
+    const runtimeRows = await readOnlyQuery(
+      "runtime",
+      "SELECT current_database() AS database_name, current_user AS current_role, current_setting('server_version') AS postgres_version",
+    );
+    const relationRows = await readOnlyQuery(
+      "relations",
+      "SELECT table_schema, count(*) FILTER (WHERE table_type = 'BASE TABLE')::int AS base_tables, count(*) FILTER (WHERE table_type = 'VIEW')::int AS views, count(*)::int AS relations FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') GROUP BY table_schema ORDER BY table_schema",
+    );
+    const fingerprintRows = await readOnlyQuery(
+      "fingerprint",
+      "WITH columns AS (SELECT table_schema, table_name, ordinal_position, column_name, data_type, is_nullable, COALESCE(character_maximum_length::text, '') AS character_maximum_length, COALESCE(numeric_precision::text, '') AS numeric_precision, COALESCE(numeric_scale::text, '') AS numeric_scale, COALESCE(datetime_precision::text, '') AS datetime_precision FROM information_schema.columns WHERE table_schema IN ('zerow', 'neon_auth')) SELECT count(*)::int AS column_count, md5(string_agg(concat_ws('|', table_schema, table_name, ordinal_position, column_name, data_type, is_nullable, character_maximum_length, numeric_precision, numeric_scale, datetime_precision), E'\\n' ORDER BY table_schema, table_name, ordinal_position)) AS fingerprint FROM columns",
+    );
+    const markerRows = await readOnlyQuery(
+      "markers",
+      "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') AND (lower(table_name) LIKE '%migration%' OR lower(table_name) LIKE '%schema%' OR lower(table_name) LIKE '%version%' OR lower(table_name) LIKE '%marker%' OR lower(table_name) LIKE '%ledger%') ORDER BY table_schema, table_name",
+    );
+    const readModelRows = await readOnlyQuery(
+      "read_models",
+      "SELECT (SELECT count(*)::int FROM zerow.event_store) AS event_store_rows, (SELECT count(*)::int FROM zerow.outbox) AS outbox_rows, (SELECT count(*)::int FROM neon_auth.\"user\") AS auth_user_rows, (SELECT count(*)::int FROM neon_auth.session) AS auth_session_rows",
     );
 
     const runtime = asRows(runtimeRows)[0] ?? {};
