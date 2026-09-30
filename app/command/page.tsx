@@ -1,7 +1,19 @@
-import CommandPage from "@/app/page";
+import { redirect } from "next/navigation";
+import CommandSurface from "@/app/page-client";
+import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 
 /**
  * Canonical COMMAND route from the reconstruction catalog.
- * The root route remains the primary entry point for the Sites shell.
+ * Keep the same Neon Auth gate as the PWA root.
  */
-export default CommandPage;
+export const dynamic = "force-dynamic";
+
+export default async function CommandPage() {
+  const identity = await getNeonAuthIdentity();
+
+  if (identity.status !== "authenticated") {
+    redirect("/login");
+  }
+
+  return <CommandSurface />;
+}
