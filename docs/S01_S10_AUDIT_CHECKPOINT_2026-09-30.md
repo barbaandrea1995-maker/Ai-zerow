@@ -19,18 +19,18 @@ I gate S01–S10 sono chiusi nel perimetro operativo autorizzato Sites + Neon:
 | S06 | `CLOSED · SITES ADAPTER` | event store, idempotenza, aggregate-version, outbox e reconciliation readback |
 | S07 | `CLOSED · SITES ADAPTER` | Command preview, approval ledger e confine no-direct-write |
 | S08 | `CLOSED · SITES PRESENTATION` | manifest, service worker, offline fallback, IndexedDB FIFO e diagnostics |
-| S09 | `CLOSED · SITES BROWSER QA` | v37, route sweep completo, headings, PWA diagnostics e assenza di errori applicativi |
+| S09 | `CLOSED · SITES BROWSER QA` | v39, route sweep completo, headings, PWA diagnostics e assenza di errori applicativi |
 | S10 | `CLOSED · NEON BINDING` | progetto/branch/database corretti, fingerprint, marker 0016/0017 e readback runtime |
 
 ## Verifiche eseguite
 
-- Sorgente pubblicato: `d589fd5d90663097152f5ff5e338b4b6c30bec34`.
-- Site v37 pubblicato con deployment riuscita `appgdep_6abcfb145960819197c7aab01f099b80`.
+- Sorgente pubblicato: `4e5cbfb64a03ea23e98263e198cd2a3f9d2183c0`.
+- Site v39 pubblicato con deployment riuscita `appgdep_6abcfce859748191ad0a2bfbd80125a8`.
 - `pnpm exec tsc --noEmit`: PASS.
 - `pnpm lint`: PASS, 0 errori; 13 warning non bloccanti già classificati come immagini/navigazione interna.
 - `pnpm build`: PASS.
 - `git diff --check`: PASS.
-- Route browser v37: 19 route applicative verificate; nessun `404`, `Application error`, `Unhandled` o `Internal Server Error`.
+- Route browser v39: 19 route applicative verificate; nessun `404`, `Application error`, `Unhandled` o `Internal Server Error`.
 - Worker logs Sites, finestra 180 minuti, `errors_only=true`: nessun evento.
 - Secret scan sui file tracciati: nessun pattern di secret e nessun file env tracciato.
 

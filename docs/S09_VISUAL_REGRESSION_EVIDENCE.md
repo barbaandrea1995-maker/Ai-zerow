@@ -2,7 +2,7 @@
 
 Data verifica: 2026-09-30 14:03 Europe/Rome
 Site: `AI-ZEROW-COMMAND`  
-Versione pubblicata verificata: `v37`
+Versione pubblicata verificata: `v39`
 URL: `https://ai-zerow-command.barba-andrea-1995.chatgpt.site`
 
 ## Esito Sites
@@ -15,13 +15,13 @@ S09 è **CLOSED · SITES BROWSER QA** nel perimetro browser Sites.
 - `pnpm exec tsc --noEmit` completato senza errori.
 - `pnpm lint` completato senza errori (13 warning non bloccanti di immagini/navigazione interna).
 - `git diff --check` pulito.
-- Commit pubblicato: `d589fd5d90663097152f5ff5e338b4b6c30bec34`.
-- Deployment Sites riuscita: `appgdep_6abcfb145960819197c7aab01f099b80`.
+- Commit pubblicato: `4e5cbfb64a03ea23e98263e198cd2a3f9d2183c0`.
+- Deployment Sites riuscita: `appgdep_6abcfce859748191ad0a2bfbd80125a8`.
 - Route verificate: `/`, `/command`, `/onboarding`, `/operations`, `/workforce`, `/warehouse`, `/mission`, `/assets`, `/documents`, `/finance`, `/procurement`, `/governance`, `/events`, `/externals`, `/offline`, `/pwa/diagnostics`, `/mobile/diagnostics`, `/qr`, `/s10/readback`.
 - Ogni route ha restituito il proprio heading principale.
 - Nessuna route ha restituito `404`, `Application error`, `Unhandled` o `Internal Server Error`.
 - Readback S10 verificato sul deployment: `ownerOnly=true`, `status=partial` per il solo gap Auth esplicitato, progetto Neon corretto e ruolo runtime `zerow_runtime`.
-- Dialogo `Nuovo lavoro` aperto e chiuso senza creare dati nel precedente giro QA; lo sweep v37 non ha introdotto regressioni applicative.
+- Dialogo `Nuovo lavoro` aperto e chiuso senza creare dati nel precedente giro QA; lo sweep v39 non ha introdotto regressioni applicative.
 - `/pwa/diagnostics`: `Network ONLINE`, `Manifest AVAILABLE`, `Service worker ACTIVE`, coda locale vuota.
 - Nessun errore console proveniente dal Site durante il giro QA; gli eventi residui provengono dall’estensione del browser.
 
