@@ -2,7 +2,7 @@
 
 ## Esito
 
-`PARTIALLY_VERIFIED · DIRECT NEON READBACK`
+`PARTIALLY_VERIFIED · DIRECT + SITES RUNTIME READBACK`
 
 Recorded: `2026-09-30` (`Europe/Rome`). This checkpoint uses only the
 authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
@@ -36,7 +36,7 @@ authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
 
 ## Sites runtime readback
 
-La deployment Sites con source SHA `909e790af67f7a2510a7ce61df703fb197194a1c`
+La deployment Sites con source SHA `406f545ea050ff8f152adfe0c86593e0f76fd37f`
 espone il readback owner-only in `/s10/readback` e `/api/neon/readback`. Il driver
 HTTP Neon usa `DATABASE_URL` come binding secret e forza transazioni `READ ONLY`;
 non esegue scritture né sostituisce il readback D1 canonico.
