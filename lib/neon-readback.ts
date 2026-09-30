@@ -64,7 +64,7 @@ export async function getNeonReadback() {
           "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') AND (lower(table_name) LIKE '%migration%' OR lower(table_name) LIKE '%schema%' OR lower(table_name) LIKE '%version%' OR lower(table_name) LIKE '%marker%' OR lower(table_name) LIKE '%ledger%') ORDER BY table_schema, table_name",
         ),
         transaction.query(
-          "SELECT (SELECT count(*)::int FROM zerow.event_store) AS event_store_rows, (SELECT count(*)::int FROM zerow.outbox) AS outbox_rows, (SELECT count(*)::int FROM neon_auth.user) AS auth_user_rows, (SELECT count(*)::int FROM neon_auth.session) AS auth_session_rows",
+          "SELECT (SELECT count(*)::int FROM zerow.event_store) AS event_store_rows, (SELECT count(*)::int FROM zerow.outbox) AS outbox_rows, (SELECT count(*)::int FROM neon_auth.\"user\") AS auth_user_rows, (SELECT count(*)::int FROM neon_auth.session) AS auth_session_rows",
         ),
       ],
       { readOnly: true },
