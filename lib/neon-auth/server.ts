@@ -12,14 +12,23 @@ export const neonAuthConfiguration = {
   cookieSecretConfigured: cookieSecret.length >= 32,
 } as const;
 
-export const neonAuth: NeonAuth | null = neonAuthConfiguration.configured
-  ? createNeonAuth({
+function initializeNeonAuth(): NeonAuth | null {
+  if (!neonAuthConfiguration.configured) return null;
+
+  try {
+    return createNeonAuth({
       baseUrl,
       cookies: {
         secret: cookieSecret,
         sessionDataTtl: 300,
       },
       logLevel: "silent",
-    })
-  : null;
+    });
+  } catch {
+    // Auth bootstrap must fail closed and let the UI render a controlled
+    // unavailable state instead of crashing every server-rendered route.
+    return null;
+  }
+}
 
+export const neonAuth = initializeNeonAuth();

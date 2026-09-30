@@ -22,7 +22,7 @@ export type AccountActor = {
 };
 
 function getInitials(actor: AccountActor) {
-  const source = actor.name.trim() || actor.email;
+  const source = actor.name?.trim() || actor.email;
   const parts = source.split(/\s+/).filter(Boolean);
   const initials = parts.length > 1
     ? `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`

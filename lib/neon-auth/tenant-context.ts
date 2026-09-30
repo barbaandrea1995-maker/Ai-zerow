@@ -54,6 +54,10 @@ export type NeonAuthContextResult =
       context: NeonTenantContext;
     };
 
+function safeActorName(name: unknown, email: string) {
+  return typeof name === "string" && name.trim() ? name.trim() : email;
+}
+
 /**
  * Reads only the Neon Auth identity. Tenant authorization is resolved by the
  * Sites/D1 control plane, so the main application must not use Neon
@@ -97,7 +101,7 @@ export async function getNeonAuthIdentity(): Promise<NeonAuthIdentityResult> {
       actor: {
         id: sessionData.user.id,
         email: sessionData.user.email,
-        name: sessionData.user.name,
+        name: safeActorName(sessionData.user.name, sessionData.user.email),
       },
       sessionId: sessionData.session.id,
     };
@@ -186,7 +190,7 @@ export async function getNeonAuthContext(): Promise<NeonAuthContextResult> {
         actor: {
           id: sessionData.user.id,
           email: sessionData.user.email,
-          name: sessionData.user.name,
+          name: safeActorName(sessionData.user.name, sessionData.user.email),
         },
         sessionId: sessionData.session.id,
         tenants,
