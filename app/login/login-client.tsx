@@ -1,28 +1,29 @@
 "use client";
 
 import { createAuthClient } from "@neondatabase/auth/next";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-
-const authClient = createAuthClient();
 
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
 type AuthMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
+function getAuthClient() {
+  return createAuthClient();
+}
+
 export default function LoginClient({
   initialState,
   actor,
+  initialMode,
+  resetToken,
 }: {
   initialState: LoginState;
   actor: { email: string; name: string } | null;
+  initialMode: AuthMode;
+  resetToken: string | null;
 }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const resetToken = searchParams.get("token");
-  const requestedMode = searchParams.get("mode");
-  const [mode, setMode] = useState<AuthMode>(
-    requestedMode === "forgotPassword" ? "forgotPassword" : "signIn",
-  );
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -38,6 +39,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
+      const authClient = getAuthClient();
       const result = await authClient.signIn.email({ email, password });
       if (result.error) {
         setMessage(result.error.message ?? "auth_sign_in_failed");
@@ -57,6 +59,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
+      const authClient = getAuthClient();
       const result = await authClient.signUp.email({ name, email, password });
       if (result.error) {
         setMessage(result.error.message ?? "auth_sign_up_failed");
@@ -76,6 +79,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
+      const authClient = getAuthClient();
       const result = await authClient.requestPasswordReset({
         email,
         redirectTo: `${window.location.origin}/login`,
@@ -108,6 +112,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
+      const authClient = getAuthClient();
       const result = await authClient.resetPassword({
         newPassword: password,
         token: resetToken,
@@ -130,6 +135,7 @@ export default function LoginClient({
     setBusy(true);
     setMessage(null);
     try {
+      const authClient = getAuthClient();
       await authClient.signOut();
       window.location.reload();
     } catch {
