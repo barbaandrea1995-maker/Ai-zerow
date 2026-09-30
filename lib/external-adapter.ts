@@ -108,7 +108,7 @@ export const EXTERNAL_ADAPTERS: ExternalAdapterDefinition[] = [
     status: "DEFERRED",
     authorization: "AUTHORIZED",
     contract: "Authorized Neon project binding → read-only Sites runtime, schema fingerprint, migration markers 0016/0017 and environment binding",
-    gate: "Direct schema and exact-SHA runtime readback recorded; applied markers, neon_auth read scope and Auth/tenant fixtures still required",
+    gate: "Direct schema, structural 0016/0017 markers and exact-SHA runtime readback recorded; marker provenance, neon_auth read scope and Auth/tenant fixtures still required",
     capabilities: ["schema fingerprint", "migration markers", "environment binding"],
     nextAction: "Resolve the least-privilege neon_auth read scope and marker provenance; keep D1 canonical until Auth/tenant fixtures pass",
   },

@@ -26,6 +26,11 @@ authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
 - `zerow.outbox`: 0 righe
 - `neon_auth.user`: 0 righe
 - `neon_auth.session`: 0 righe
+- Marker strutturali verificati nel progetto corretto: `zerow.operation_revisions`,
+  `zerow.reject_append_only_mutation()` e i trigger
+  `company_timeline_append_only_mutation` / `company_projection_append_only_mutation`
+- `operation_revisions` espone 19 colonne attese; i trigger 0017 sono attivi su
+  `zerow.company_timeline_entries` e `zerow.company_projection_revisions`
 - `zerow_app` e `zerow_runtime`: login attivo, superuser/createdb/createrole/replication/bypassrls disattivati
 - Uso schema `zerow`: concesso a entrambi i ruoli applicativi
 
@@ -42,17 +47,19 @@ non esegue scritture né sostituisce il readback D1 canonico.
 - `zerow.event_store`: 0 righe; `zerow.outbox`: 0 righe
 - Gap espliciti: `neon_auth.user` e `neon_auth.session` non leggibili dal ruolo
   runtime (`insufficient_privilege`); non vengono stimati né simulati
-- Candidati marker runtime: `zerow.ai_action_ledger` e
-  `zerow.ai_action_ledger_latest`; nessuno dimostra `0016/0017`
+- Marker runtime: `operation_revisions`, funzione di blocco e due trigger 0017
+  risultano visibili anche al readback; la pagina non li interpreta come un
+  migration ledger inventato
 
 ## Gate ancora aperto
 
 La ricerca originale identifica `db/migrations/0016_operation_reconciliation.sql` e
-`db/migrations/0017_append_only_upsert_compatibility.sql`, ma il relativo progetto
-di ricerca è diverso. Nel progetto autorizzato non è stata trovata una relazione
-dedicata con nome migration/schema/marker/version che dimostri l'applicazione di
-`0016/0017`. I campi `schema_version` e `aggregate_version` di `zerow.event_store`
-sono versioni di dominio/evento, non un migration ledger.
+`db/migrations/0017_append_only_upsert_compatibility.sql`, mentre il relativo
+progetto forense è diverso. Nel progetto autorizzato la presenza strutturale dei
+marker 0016/0017 è ora verificata; resta però non provata la provenienza esatta
+da quei file/SHA e non esiste un migration ledger formale da interrogare. I campi
+`schema_version` e `aggregate_version` di `zerow.event_store` sono versioni di
+dominio/evento, non un migration ledger.
 
 Il Site conserva `DATABASE_URL` come secret e gli endpoint Neon Auth corretti nella
 revision runtime 3. Il percorso Sites read-only è ora verificato sul deployment
@@ -63,5 +70,5 @@ cutover automatico né alcuna scrittura su Neon.
 
 S10 resta `AUTHORIZED + DEFERRED`, non `READY`. Il binding runtime read-only è
 `PARTIALLY_VERIFIED`; restano da definire il read scope least-privilege per
-`neon_auth`, la provenienza applicata dei marker `0016/0017` e le fixture
-Auth/tenant con casi negativi cross-tenant.
+`neon_auth`, la provenienza esatta dei marker e le fixture Auth/tenant con casi
+negativi cross-tenant.

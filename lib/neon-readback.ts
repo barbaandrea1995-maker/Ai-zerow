@@ -48,6 +48,10 @@ function asNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function asBoolean(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
 function getRuntimeEnv(): SitesRuntimeEnv {
   return env as unknown as SitesRuntimeEnv;
 }
@@ -97,6 +101,10 @@ export async function getNeonReadback() {
       "markers",
       "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') AND (lower(table_name) LIKE '%migration%' OR lower(table_name) LIKE '%schema%' OR lower(table_name) LIKE '%version%' OR lower(table_name) LIKE '%marker%' OR lower(table_name) LIKE '%ledger%') ORDER BY table_schema, table_name",
     );
+    const migrationMarkerRows = await readOnlyQuery(
+      "migration_markers",
+      "SELECT to_regclass('zerow.operation_revisions')::text AS operation_revisions, EXISTS (SELECT 1 FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace WHERE n.nspname = 'zerow' AND p.proname = 'reject_append_only_mutation') AS reject_append_only_mutation, EXISTS (SELECT 1 FROM pg_trigger AS t JOIN pg_class AS c ON c.oid = t.tgrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'zerow' AND t.tgname = 'company_timeline_append_only_mutation' AND NOT t.tgisinternal) AS company_timeline_append_only_mutation, EXISTS (SELECT 1 FROM pg_trigger AS t JOIN pg_class AS c ON c.oid = t.tgrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'zerow' AND t.tgname = 'company_projection_append_only_mutation' AND NOT t.tgisinternal) AS company_projection_append_only_mutation",
+    );
     const readModelCount = async (label: string, statement: string): Promise<number | null> => {
       try {
         const rows = await readOnlyQuery(label, statement);
@@ -130,6 +138,7 @@ export async function getNeonReadback() {
 
     const runtime = asRows(runtimeRows)[0] ?? {};
     const fingerprint = asRows(fingerprintRows)[0] ?? {};
+    const migrationMarkers = asRows(migrationMarkerRows)[0] ?? {};
 
     return {
       status: privilegeGaps.length ? "partial" as const : "ok" as const,
@@ -165,6 +174,12 @@ export async function getNeonReadback() {
         name: asString(row.table_name),
         type: asString(row.table_type),
       })),
+      migrationMarkers: {
+        operationRevisions: asString(migrationMarkers.operation_revisions),
+        rejectAppendOnlyMutation: asBoolean(migrationMarkers.reject_append_only_mutation),
+        companyTimelineAppendOnlyMutation: asBoolean(migrationMarkers.company_timeline_append_only_mutation),
+        companyProjectionAppendOnlyMutation: asBoolean(migrationMarkers.company_projection_append_only_mutation),
+      },
       privilegeGaps,
       readModels,
     };
