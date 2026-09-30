@@ -14,35 +14,46 @@ export default async function S10ReadbackPage() {
     return <ReadbackState title="S10 Neon readback" message="forbidden" />;
   }
 
+  let readback: Awaited<ReturnType<typeof getNeonReadback>> | null = null;
+  let errorMessage = "neon_runtime_readback_failed";
+
   try {
-    const readback = await getNeonReadback();
-    return (
-      <main className="min-h-screen bg-[#050607] px-5 py-10 font-mono text-slate-200 sm:px-10">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / S10</p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50">Neon readback</h1>
-              <p className="mt-2 text-xs text-slate-500">Owner-only, read-only runtime evidence · no external writes</p>
-            </div>
-            <a className="text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4" href="/externals">Torna agli adapter</a>
-          </div>
-          <pre className="overflow-x-auto rounded-2xl border border-lime-300/20 bg-black/30 p-5 text-[11px] leading-6 text-lime-100/90 shadow-[0_0_30px_rgba(190,255,60,0.06)]">
-            {JSON.stringify({
-              ownerOnly: true,
-              runtimeBinding: "DATABASE_URL",
-              ...readback,
-            }, null, 2)}
-          </pre>
-        </div>
-      </main>
-    );
+    readback = await getNeonReadback();
   } catch (error) {
-    const message = error instanceof NeonReadbackError
+    errorMessage = error instanceof NeonReadbackError
       ? error.code
       : "neon_runtime_readback_failed";
-    return <ReadbackState title="S10 Neon readback" message={message} />;
   }
+
+  if (!readback) {
+    return <ReadbackState title="S10 Neon readback" message={errorMessage} />;
+  }
+
+  return <NeonReadbackView readback={readback} />;
+}
+
+function NeonReadbackView({ readback }: { readback: Awaited<ReturnType<typeof getNeonReadback>> }) {
+  return (
+    <main className="min-h-screen bg-[#050607] px-5 py-10 font-mono text-slate-200 sm:px-10">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / S10</p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50">Neon readback</h1>
+            <p className="mt-2 text-xs text-slate-500">Owner-only, read-only runtime evidence · no external writes</p>
+          </div>
+          <a className="text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4" href="/externals">Torna agli adapter</a>
+        </div>
+        <pre className="overflow-x-auto rounded-2xl border border-lime-300/20 bg-black/30 p-5 text-[11px] leading-6 text-lime-100/90 shadow-[0_0_30px_rgba(190,255,60,0.06)]">
+          {JSON.stringify({
+            ownerOnly: true,
+            runtimeBinding: "DATABASE_URL",
+            ...readback,
+          }, null, 2)}
+        </pre>
+      </div>
+    </main>
+  );
 }
 
 function ReadbackState({ title, message }: { title: string; message: string }) {

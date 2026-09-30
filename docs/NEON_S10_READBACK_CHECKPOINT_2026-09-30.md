@@ -36,10 +36,11 @@ authorized Neon project for AI-ZEROW-COMMAND; the forensic source project
 
 ## Sites runtime readback
 
-La deployment Sites con source SHA `406f545ea050ff8f152adfe0c86593e0f76fd37f`
-espone il readback owner-only in `/s10/readback` e `/api/neon/readback`. Il driver
-HTTP Neon usa `DATABASE_URL` come binding secret e forza transazioni `READ ONLY`;
-non esegue scritture né sostituisce il readback D1 canonico.
+La deployment Sites owner-only espone il readback in `/s10/readback` e
+`/api/neon/readback`. Il driver HTTP Neon usa `DATABASE_URL` come binding secret
+e forza transazioni `READ ONLY`; non esegue scritture né sostituisce il readback
+D1 canonico. La permission probe runtime è stata resa esplicita e privilege-safe
+nel source commit `f4d142159e390801c24a10d4276d9096e73c4b60`.
 
 - Runtime role: `zerow_runtime`; database: `neondb`; PostgreSQL `18.6`
 - Schema visibile al ruolo runtime: `zerow` con 18 tabelle base e 16 viste
@@ -64,8 +65,8 @@ da quei file/SHA e non esiste un migration ledger formale da interrogare. I camp
 dominio/evento, non un migration ledger.
 
 Il Site conserva `DATABASE_URL` come secret e gli endpoint Neon Auth corretti nella
-revision runtime 3. Il percorso Sites read-only è ora verificato sul deployment
-SHA indicato sopra, ma D1 resta il readback canonico. Non è stato eseguito alcun
+revision runtime 3. Il percorso Sites read-only è verificato sulla pubblicazione
+owner-only corrente, ma D1 resta il readback canonico. Non è stato eseguito alcun
 cutover automatico né alcuna scrittura su Neon.
 
 ## Decisione
