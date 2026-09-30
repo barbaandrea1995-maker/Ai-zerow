@@ -17,6 +17,25 @@ export type NeonTenantContext = {
   tenants: NeonTenantMembership[];
 };
 
+export type NeonAuthIdentityResult =
+  | {
+      status: "not_configured";
+      code: "neon_auth_not_configured";
+    }
+  | {
+      status: "unauthenticated";
+      code: "neon_auth_unauthenticated";
+    }
+  | {
+      status: "error";
+      code: "neon_auth_context_unavailable";
+    }
+  | {
+      status: "authenticated";
+      actor: NeonTenantContext["actor"];
+      sessionId: string;
+    };
+
 export type NeonAuthContextResult =
   | {
       status: "not_configured";
@@ -34,6 +53,61 @@ export type NeonAuthContextResult =
       status: "authenticated";
       context: NeonTenantContext;
     };
+
+/**
+ * Reads only the Neon Auth identity. Tenant authorization is resolved by the
+ * Sites/D1 control plane, so the main application must not use Neon
+ * organization membership as its role source.
+ */
+export async function getNeonAuthIdentity(): Promise<NeonAuthIdentityResult> {
+  if (!neonAuth) {
+    return {
+      status: "not_configured",
+      code: "neon_auth_not_configured",
+    };
+  }
+
+  try {
+    const sessionResult = await neonAuth.getSession();
+
+    if (sessionResult.error) {
+      if (sessionResult.error.status === 401) {
+        return {
+          status: "unauthenticated",
+          code: "neon_auth_unauthenticated",
+        };
+      }
+
+      return {
+        status: "error",
+        code: "neon_auth_context_unavailable",
+      };
+    }
+
+    const sessionData = sessionResult.data;
+    if (!sessionData?.user || !sessionData.session) {
+      return {
+        status: "unauthenticated",
+        code: "neon_auth_unauthenticated",
+      };
+    }
+
+    return {
+      status: "authenticated",
+      actor: {
+        id: sessionData.user.id,
+        email: sessionData.user.email,
+        name: sessionData.user.name,
+      },
+      sessionId: sessionData.session.id,
+    };
+  } catch {
+    return {
+      status: "error",
+      code: "neon_auth_context_unavailable",
+    };
+  }
+}
 
 export async function getNeonAuthContext(): Promise<NeonAuthContextResult> {
   if (!neonAuth) {
@@ -125,4 +199,3 @@ export async function getNeonAuthContext(): Promise<NeonAuthContextResult> {
     };
   }
 }
-

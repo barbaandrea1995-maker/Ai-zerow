@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { tenantMemberships, tenants } from "@/db/schema";
 import {
+  type IdentityProvider,
   getAuthorityContext,
   hasCapability,
   publicAuthorityContext,
@@ -25,7 +26,7 @@ function errorCode(error: unknown) {
   return "tenant_directory_unavailable";
 }
 
-function tenantRows(actorId: string) {
+function tenantRows(identityProvider: IdentityProvider, actorId: string) {
   const db = getDb();
   return db
     .select({
@@ -44,6 +45,7 @@ function tenantRows(actorId: string) {
     .innerJoin(tenants, eq(tenantMemberships.tenantId, tenants.id))
     .where(
       and(
+        eq(tenantMemberships.identityProvider, identityProvider),
         eq(tenantMemberships.actorId, actorId),
         eq(tenantMemberships.status, "active"),
         eq(tenants.status, "active"),
@@ -90,7 +92,7 @@ export async function GET() {
   if (response) return response;
 
   try {
-    const rows = await tenantRows(context!.actorId);
+    const rows = await tenantRows(context!.identityProvider, context!.actorId);
     return Response.json({
       context: publicAuthorityContext(context!),
       canonicalTenantId: context!.tenantId,
@@ -129,7 +131,7 @@ export async function POST(request: Request) {
 
   try {
     const db = getDb();
-    const existing = await tenantRows(context!.actorId);
+    const existing = await tenantRows(context!.identityProvider, context!.actorId);
     if (existing.length > 0) {
       return Response.json({
         context: publicAuthorityContext(context!),
@@ -158,6 +160,7 @@ export async function POST(request: Request) {
       .values({
         id: `site-owner:${context!.tenantId}:${context!.actorId}`,
         tenantId: context!.tenantId,
+        identityProvider: context!.identityProvider,
         actorId: context!.actorId,
         actorEmail: context!.actorEmail,
         displayName: context!.actorName,
@@ -168,7 +171,7 @@ export async function POST(request: Request) {
       })
       .onConflictDoNothing();
 
-    const rows = await tenantRows(context!.actorId);
+    const rows = await tenantRows(context!.identityProvider, context!.actorId);
     return Response.json(
       {
         context: publicAuthorityContext(context!),

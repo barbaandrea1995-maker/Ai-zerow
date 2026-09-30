@@ -26,6 +26,7 @@ export const tenants = sqliteTable("tenants", {
 export const tenantMemberships = sqliteTable("tenant_memberships", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  identityProvider: text("identity_provider").notNull().default("sites"),
   actorId: text("actor_id").notNull(),
   actorEmail: text("actor_email").notNull(),
   displayName: text("display_name").notNull(),
@@ -34,7 +35,7 @@ export const tenantMemberships = sqliteTable("tenant_memberships", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
-  tenantActorUnique: uniqueIndex("tenant_memberships_tenant_actor_uq").on(table.tenantId, table.actorId),
+  tenantActorUnique: uniqueIndex("tenant_memberships_tenant_provider_actor_uq").on(table.tenantId, table.identityProvider, table.actorId),
   actorStatusIdx: index("tenant_memberships_actor_status_idx").on(table.actorId, table.status),
   tenantStatusIdx: index("tenant_memberships_tenant_status_idx").on(table.tenantId, table.status),
 }));

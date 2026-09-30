@@ -36,6 +36,13 @@
       "when": 1790782461231,
       "tag": "0004_colorful_giant_man",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790787224182,
+      "tag": "0005_chunky_patch",
+      "breakpoints": true
     }
   ]
 }
