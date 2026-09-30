@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowUpRight,
-  AlertTriangle,
   Bell,
   BriefcaseBusiness,
   Building2,
@@ -117,45 +116,15 @@ const authorityTabs: Array<{ id: AuthorityTabId; label: string; target: string }
   { id: "policies", label: "Politiche", target: "authority-policies" },
 ];
 
-const authorityUsers: AuthorityUser[] = [
-  { initials: "MR", name: "Marco Rossi", email: "marco.rossi@azienda.it", role: "Operatore", team: "Team Alpha", status: "Online", lastAccess: "Oggi, 10:24", tone: "lime" },
-  { initials: "GV", name: "Giulia Verdi", email: "giulia.verdi@azienda.it", role: "Team Leader", team: "Team Beta", status: "Online", lastAccess: "Oggi, 09:18", tone: "lime" },
-  { initials: "LB", name: "Luca Bianchi", email: "luca.bianchi@azienda.it", role: "Manager", team: "Team Alpha", status: "Offline", lastAccess: "Ieri, 17:32", tone: "cyan" },
-  { initials: "SC", name: "Sara Conti", email: "sara.conti@azienda.it", role: "Amministratore", team: "HQ", status: "Online", lastAccess: "Oggi, 11:05", tone: "violet" },
-  { initials: "DR", name: "Davide Romano", email: "davide.romano@azienda.it", role: "Tecnico", team: "Team Gamma", status: "Online", lastAccess: "Oggi, 08:45", tone: "cyan" },
-];
+const authorityUsers: AuthorityUser[] = [];
 
-const authorityRoleDistribution = [
-  { label: "Operatore", value: 18, share: "38%", tone: "lime" },
-  { label: "Team Leader", value: 8, share: "17%", tone: "green" },
-  { label: "Manager", value: 6, share: "13%", tone: "yellow" },
-  { label: "Amministratore", value: 4, share: "8%", tone: "orange" },
-  { label: "Tecnico", value: 8, share: "17%", tone: "blue" },
-  { label: "Viewer", value: 4, share: "8%", tone: "slate" },
-];
+const authorityRoleDistribution: Array<{ label: string; value: number; share: string; tone: string }> = [];
 
-const accessLevels = [
-  { label: "Lettura", value: 186 },
-  { label: "Inserimento", value: 142 },
-  { label: "Modifica", value: 98 },
-  { label: "Approvazione", value: 36 },
-  { label: "Amministrazione", value: 12 },
-];
+const accessLevels: Array<{ label: string; value: number }> = [];
 
-const authorityActivity = [
-  { icon: Users, title: "Nuovo utente aggiunto", detail: "mario.rossi@azienda.it", time: "5 min fa", tone: "lime" as Tone },
-  { icon: KeyRound, title: "Ruolo modificato", detail: "Luca Bianchi → Team Leader", time: "18 min fa", tone: "lime" as Tone },
-  { icon: ShieldCheck, title: "Permesso aggiornato", detail: "commesse.approva", time: "1 ora fa", tone: "lime" as Tone },
-  { icon: Users, title: "Utente rimosso dal team", detail: "Giulia Verdi → Team Beta", time: "3 ore fa", tone: "lime" as Tone },
-  { icon: AlertTriangle, title: "Accesso non autorizzato", detail: "Tentativo fallito", time: "5 ore fa", tone: "red" as Tone },
-];
+const authorityActivity: Array<{ icon: typeof Users; title: string; detail: string; time: string; tone: Tone }> = [];
 
-const authorityTeams = [
-  { label: "Team Alpha", members: 8, initials: "TA", tone: "lime" },
-  { label: "Team Beta", members: 6, initials: "TB", tone: "lime" },
-  { label: "Team Gamma", members: 5, initials: "TG", tone: "lime" },
-  { label: "Headquarters", members: 4, initials: "HQ", tone: "violet" },
-];
+const authorityTeams: Array<{ label: string; members: number; initials: string; tone: string }> = [];
 
 const permissionMatrix = [
   { module: "Commesse", values: ["Lettura", "Modifica", "Approvazione", "Amministrazione", "Modifica", "Lettura"] },
@@ -176,10 +145,10 @@ const authorityPolicies = [
 ];
 
 const authorityKpis = [
-  { label: "Utenti attivi", value: "48", delta: "+12%", icon: Users, tone: "lime" as const, data: "12,18,16,24,20,28,25,35,34,46,51,58" },
-  { label: "Ruoli definiti", value: "13", delta: "+0%", icon: UserRoundCog, tone: "cyan" as const, data: "14,22,20,32,28,26,36,44,40,53,58,62" },
-  { label: "Permessi", value: "186", delta: "+6%", icon: KeyRound, tone: "lime" as const, data: "12,18,22,20,32,28,25,41,40,50,48,54" },
-  { label: "Team operativi", value: "8", delta: "+0%", icon: Users, tone: "lime" as const, data: "18,15,24,22,30,28,32,44,39,54,58,67" },
+  { label: "Utenti attivi", value: "0", delta: "Nessun dato", icon: Users, tone: "lime" as const, data: "" },
+  { label: "Ruoli definiti", value: "—", delta: "Catalogo", icon: UserRoundCog, tone: "cyan" as const, data: "" },
+  { label: "Permessi", value: "—", delta: "Catalogo", icon: KeyRound, tone: "lime" as const, data: "" },
+  { label: "Team operativi", value: "0", delta: "Nessun dato", icon: Users, tone: "lime" as const, data: "" },
 ];
 
 const navItems = [
@@ -250,18 +219,6 @@ function StatusBadge({ children, tone = "lime" }: { children: ReactNode; tone?: 
   );
 }
 
-function Sparkline({ data, tone }: { data: string; tone: Tone }) {
-  const points = data.split(",").map(Number);
-  const max = Math.max(...points);
-  const min = Math.min(...points);
-  const coordinates = points.map((point, index) => {
-    const x = (index / (points.length - 1)) * 100;
-    const y = 30 - ((point - min) / Math.max(max - min, 1)) * 23;
-    return `${x},${y}`;
-  }).join(" ");
-  return <svg className="h-10 w-full overflow-visible" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" points={coordinates} stroke={toneStyles[tone].line} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" /><polyline fill="none" opacity="0.22" points={`0,32 ${coordinates} 100,32`} stroke={toneStyles[tone].line} strokeWidth="6" /></svg>;
-}
-
 function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; title: string; action?: string; onAction?: () => void }) {
   return (
     <div className="flex items-start justify-between gap-3">
@@ -275,7 +232,8 @@ function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; 
 }
 
 function MetricCard({ label, value, delta, icon: Icon, tone, data }: (typeof authorityKpis)[number]) {
-  return <article className={`carbon-card carbon-card-neon min-w-0 rounded-2xl p-4 ${tone === "cyan" ? "carbon-card-cyan" : ""}`}><div className="flex items-start justify-between gap-3"><span className={`grid size-9 place-items-center rounded-xl border border-current/20 bg-current/10 ${toneStyles[tone].icon}`}><Icon className="size-[18px]" /></span><StatusBadge tone={tone}>{delta}</StatusBadge></div><p className="mt-4 text-xs text-slate-500">{label}</p><div className="mt-1 flex items-end justify-between gap-4"><p className="font-mono text-[30px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><span className="pb-1 text-[10px] uppercase tracking-[0.12em] text-lime-300/60">live</span></div><div className="mt-2"><Sparkline data={data} tone={tone} /></div></article>;
+  void data;
+  return <article className={`carbon-card carbon-card-neon min-w-0 rounded-2xl p-4 ${tone === "cyan" ? "carbon-card-cyan" : ""}`}><div className="flex items-start justify-between gap-3"><span className={`grid size-9 place-items-center rounded-xl border border-current/20 bg-current/10 ${toneStyles[tone].icon}`}><Icon className="size-[18px]" /></span><StatusBadge tone={tone}>{delta}</StatusBadge></div><p className="mt-4 text-xs text-slate-500">{label}</p><div className="mt-1 flex items-end justify-between gap-4"><p className="font-mono text-[30px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><span className="pb-1 text-[10px] uppercase tracking-[0.12em] text-slate-500">D1 readback</span></div><p className="mt-3 text-[10px] text-slate-600">Nessun dato demo. Il valore arriva dal collegamento Authority.</p></article>;
 }
 
 function CapabilityPill({ capability }: { capability: string }) {
@@ -329,14 +287,14 @@ function AuthorityVisualDashboard({
             <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">TENANT / OWNER-PRIVATE</span></div>
             <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur"><IconButton label="Zoom in" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority graph: zoom in disponibile nel modulo runtime")}><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority graph: zoom out disponibile nel modulo runtime")}><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra Authority" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10" onClick={() => onNotify("Authority core centrato sul tenant Sites")}><LocateFixed className="size-3.5" /></IconButton></div>
             <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center text-center"><span className="grid size-16 place-items-center rounded-full border border-lime-200/70 bg-lime-300/15 text-lime-200 shadow-[0_0_34px_rgba(190,255,60,0.25)]"><ShieldCheck className="size-7" /></span><span className="mt-2 rounded-lg border border-lime-300/25 bg-black/75 px-3 py-1.5 text-[11px] font-semibold text-slate-100 backdrop-blur">Authority core</span><span className="mt-1 text-[10px] text-lime-200">13 ruoli · 186 permessi</span></div>
-            {authorityRoleDistribution.slice(0, 5).map((role, index) => <button className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" key={role.label} style={roleNodePositions[index]} onClick={() => onNotify(`${role.label}: ${role.value} utenti · ${role.share}`)} type="button"><span className="relative flex items-center gap-2 rounded-lg border border-white/15 bg-black/75 px-2 py-1.5 backdrop-blur-md transition hover:border-lime-300/40"><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${index === 2 ? "text-amber-200" : "text-lime-200"}`}><UserRoundCog className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{role.label}</span><span className="block text-[10px] text-lime-200">{role.value} utenti</span></span></span></button>)}
+            {authorityRoleDistribution.slice(0, 5).map((role, index) => <button className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" key={role.label} style={roleNodePositions[index]} onClick={() => onNotify(`${role.label}: ${role.value} utenti · ${role.share}`)} type="button"><span className="relative flex items-center gap-2 rounded-lg border border-white/15 bg-black/75 px-2 py-1.5 backdrop-blur-md transition hover:border-lime-300/40"><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${index === 2 ? "text-amber-200" : "text-lime-200"}`}><UserRoundCog className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{role.label}</span><span className="block text-[10px] text-lime-200">{role.value} utenti</span></span></span></button>)}{authorityRoleDistribution.length === 0 && <p className="absolute left-1/2 top-[68%] -translate-x-1/2 rounded-lg border border-white/10 bg-black/70 px-3 py-2 text-center text-[10px] text-slate-500">Nessuna distribuzione utenti nel readback D1.</p>}
             <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 overflow-x-auto"><Tabs className="min-w-max" value={activeTab} onValueChange={handleTabChange}><TabsList className="h-9 rounded-lg border border-white/10 bg-black/80 p-1 backdrop-blur" aria-label="Sezioni Authority">{authorityTabs.slice(0, 5).map((tab) => <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" key={tab.id} value={tab.id}>{tab.label}</TabsTrigger>)}</TabsList></Tabs><span className="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-500"><Crosshair className="size-3 text-lime-300" />S02 active</span></div>
           </div>
         </section>
 
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-activity">
           <SectionTitle eyebrow="EVENT STREAM" title="Attività recenti" action="Vedi tutte" onAction={() => onNotify("Audit Log: read model visuale pronto per il collegamento agli eventi")} />
-          <div className="mt-4 divide-y divide-white/[0.07]">{authorityActivity.map((item) => { const Icon = item.icon; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={item.title} onClick={() => onNotify(`${item.title}: ${item.detail}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">{item.title}</span><span className="mt-1 block truncate text-[11px] text-slate-500">{item.detail}</span></span><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></button>; })}</div>
+          <div className="mt-4 divide-y divide-white/[0.07]">{authorityActivity.map((item) => { const Icon = item.icon; return <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={item.title} onClick={() => onNotify(`${item.title}: ${item.detail}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">{item.title}</span><span className="mt-1 block truncate text-[11px] text-slate-500">{item.detail}</span></span><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></button>; })}{authorityActivity.length === 0 && <p className="py-6 text-center text-xs text-slate-500">Nessuna attività nel readback D1.</p>} </div>
         </section>
       </div>
 
@@ -344,7 +302,7 @@ function AuthorityVisualDashboard({
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-users">
           <div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="USER DIRECTORY" title="Utenti" action="Vedi tutti" onAction={() => onNotify("Utenti: elenco completo disponibile con il relativo adapter")} /><Button className="h-8 border border-lime-300/25 bg-lime-300/10 px-2.5 text-[11px] text-lime-200 hover:bg-lime-300/20" onClick={onNewUser}><Plus className="size-3.5" />Nuovo</Button></div>
           <Tabs className="mt-4" defaultValue="TUTTI"><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ONLINE">Online</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="OFFLINE">Offline</TabsTrigger></TabsList></Tabs>
-          <div className="mt-3 divide-y divide-white/[0.07]">{filteredUsers.slice(0, 5).map((user) => <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={user.email} onClick={() => onNotify(`${user.name}: ${user.role} · ${user.team}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-full border text-[9px] font-bold ${user.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : user.tone === "cyan" ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-lime-300/30 bg-lime-300/15 text-lime-100"}`}>{user.initials}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-slate-200">{user.name}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{user.role} · {user.team}</span></span><span className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={`size-1.5 rounded-full ${user.status === "Online" ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-rose-300"}`} />{user.status}</span></button>)}{filteredUsers.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun utente corrisponde alla ricerca.</div>}</div>
+          <div className="mt-3 divide-y divide-white/[0.07]">{filteredUsers.slice(0, 5).map((user) => <button className="flex w-full items-center gap-3 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-white/[0.025]" key={user.email} onClick={() => onNotify(`${user.name}: ${user.role} · ${user.team}`)} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-full border text-[9px] font-bold ${user.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : user.tone === "cyan" ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-lime-300/30 bg-lime-300/15 text-lime-100"}`}>{user.initials}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-slate-200">{user.name}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{user.role} · {user.team}</span></span><span className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={`size-1.5 rounded-full ${user.status === "Online" ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-rose-300"}`} />{user.status}</span></button>)}{filteredUsers.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun utente nel readback D1.</div>}</div>
         </section>
 
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-roles">
@@ -355,10 +313,10 @@ function AuthorityVisualDashboard({
 
         <section className="carbon-card rounded-2xl p-4 sm:p-5" id="authority-teams">
           <div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="ACCESS CONTROL" title="Livelli accesso" action="Vedi tutti" onAction={() => onNotify("Accessi: read model pronto per l'adapter Security")} /><button className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[10px] text-slate-400 hover:border-lime-300/30 hover:text-lime-200" onClick={() => onNotify("Access levels: catalogo visuale")} type="button">Live<ChevronDown className="size-3" /></button></div>
-          <div className="mt-4 flex h-[142px] items-end gap-1 border-b border-white/10 px-1 pb-0">{accessLevels.map((item) => <span className="group relative flex-1 rounded-t-sm bg-lime-300/85 transition hover:bg-lime-200" key={item.label} style={{ height: `${Math.max(12, (item.value / 186) * 100)}%` }}><span className="pointer-events-none absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-black px-1.5 py-1 text-[9px] text-lime-200 group-hover:block">{item.value}</span></span>)}</div>
+          <div className="mt-4 flex h-[142px] items-end gap-1 border-b border-white/10 px-1 pb-0">{accessLevels.length ? accessLevels.map((item) => <span className="group relative flex-1 rounded-t-sm bg-lime-300/85 transition hover:bg-lime-200" key={item.label} style={{ height: `${Math.max(12, (item.value / 186) * 100)}%` }}><span className="pointer-events-none absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-black px-1.5 py-1 text-[9px] text-lime-200 group-hover:block">{item.value}</span></span>) : <p className="m-auto text-center text-xs text-slate-500">Nessun livello accesso nel readback D1.</p>}</div>
           <div className="mt-2 flex justify-between gap-1 text-[8px] text-slate-600"><span>Lettura</span><span>Inserimento</span><span>Modifica</span><span>Admin</span></div>
-          <div className="mt-4 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-lime-300">186</p><p className="mt-1 text-[10px] text-slate-500">permessi attivi</p></div><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-cyan-300">8</p><p className="mt-1 text-[10px] text-slate-500">team operativi</p></div></div>
-          <div className="mt-4 grid grid-cols-2 gap-1.5">{authorityTeams.map((team) => <button className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/15 px-2 py-2 text-left transition hover:border-lime-300/25" key={team.label} onClick={() => onNotify(`${team.label}: ${team.members} membri nel read model`)} type="button"><span className={`grid size-6 place-items-center rounded-full border text-[8px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}>{team.initials}</span><span className="min-w-0 truncate text-[9px] text-slate-400">{team.label}</span></button>)}</div>
+          <div className="mt-4 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-lime-300">—</p><p className="mt-1 text-[10px] text-slate-500">permessi nel readback</p></div><div className="carbon-inset rounded-lg p-2.5"><p className="font-mono text-lg font-semibold text-cyan-300">—</p><p className="mt-1 text-[10px] text-slate-500">team nel readback</p></div></div>
+          <div className="mt-4 grid grid-cols-2 gap-1.5">{authorityTeams.map((team) => <button className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/15 px-2 py-2 text-left transition hover:border-lime-300/25" key={team.label} onClick={() => onNotify(`${team.label}: ${team.members} membri nel read model`)} type="button"><span className={`grid size-6 place-items-center rounded-full border text-[8px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}>{team.initials}</span><span className="min-w-0 truncate text-[9px] text-slate-400">{team.label}</span></button>)}<p className="col-span-2 mt-1 text-center text-[10px] text-slate-600">Nessun team nel readback D1.</p></div>
         </section>
       </div>
 
@@ -512,7 +470,7 @@ export default function OnboardingPage() {
           </nav>
           <div className="mt-5 border-t border-white/[0.08] pt-4">
             <div className="flex items-center justify-between px-2 text-[10px] uppercase tracking-[0.14em] text-slate-600"><span>System status</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />online</span></div>
-            <div className="carbon-inset mt-3 rounded-xl p-3"><div className="flex items-center gap-2 text-[10px] text-slate-400"><ShieldCheck className="size-3.5 text-lime-300" />Authority core</div><div className="mt-2 flex items-end gap-0.5">{[18, 26, 23, 36, 31, 46, 40, 56, 50, 64, 59, 73].map((height, index) => <span className="flex-1 rounded-t-sm bg-lime-300/80" key={index} style={{ height: `${height / 2}px` }} />)}</div><p className="mt-3 font-mono text-[9px] text-slate-600">S02 · SITES NATIVE</p></div>
+            <div className="carbon-inset mt-3 rounded-xl p-3"><div className="flex items-center gap-2 text-[10px] text-slate-400"><ShieldCheck className="size-3.5 text-lime-300" />Authority core</div><p className="mt-2 font-mono text-[9px] text-slate-600">D1 · nessun trend senza readback</p><p className="mt-3 font-mono text-[9px] text-slate-600">S02 · SITES NATIVE</p></div>
           </div>
         </aside>
 

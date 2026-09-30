@@ -17,7 +17,7 @@ export default function EventsControlPage() {
   const [loading, setLoading] = useState(true);
   const [composer, setComposer] = useState(false);
   const [toast, setToast] = useState("");
-  const [form, setForm] = useState({ eventType: "operation.signal", aggregateType: "operations", aggregateId: "OP-4587", aggregateVersion: "1", idempotencyKey: "", payload: "{\"source\":\"command\"}" });
+  const [form, setForm] = useState({ eventType: "operation.signal", aggregateType: "operations", aggregateId: "", aggregateVersion: "1", idempotencyKey: "", payload: "{\"source\":\"command\"}" });
 
   async function load() {
     setLoading(true);
@@ -58,5 +58,5 @@ export default function EventsControlPage() {
 }
 
 function Metric({ label, value, detail, icon: MetricIcon }: { label: string; value: string; detail: string; icon: LucideIcon }) {
-  return <article className="carbon-card rounded-2xl p-4"><div className="flex items-start justify-between gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><MetricIcon className="size-[18px]" /></span><span className="rounded-full border border-lime-300/25 bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">{detail}</span></div><p className="mt-4 text-xs text-slate-500">{label}</p><p className="mt-1 font-mono text-[29px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><div className="mt-4 flex items-end gap-1.5 opacity-70">{[18, 26, 20, 35, 28, 48, 42, 57, 53, 66].map((height, index) => <span className="flex-1 rounded-t-sm bg-lime-300" key={index} style={{ height: `${height / 2}px`, opacity: 0.28 + index * 0.05 }} />)}</div></article>;
+  return <article className="carbon-card rounded-2xl p-4"><div className="flex items-start justify-between gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><MetricIcon className="size-[18px]" /></span><span className="rounded-full border border-lime-300/25 bg-lime-300/10 px-2 py-1 text-[10px] text-lime-200">{detail}</span></div><p className="mt-4 text-xs text-slate-500">{label}</p><p className="mt-1 font-mono text-[29px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><p className="mt-4 text-[10px] text-slate-600">Trend disponibile solo con readback D1.</p></article>;
 }

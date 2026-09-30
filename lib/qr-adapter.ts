@@ -23,27 +23,6 @@ type DirectoryRecord = {
   module: "assets" | "warehouse" | "operations";
 };
 
-const DIRECTORY: Record<QrEntityType, Record<string, DirectoryRecord>> = {
-  asset: {
-    "A-021": { title: "Escavatore CAT 320", detail: "Team Alpha · matricola 320-21", module: "assets" },
-    "A-109": { title: "Furgone Fiat Ducato", detail: "Team Beta · Milano", module: "assets" },
-    "A-332": { title: "Piattaforma aerea", detail: "Team Gamma · officina Nord", module: "assets" },
-    "A-447": { title: "Generatore 50kW", detail: "HQ · capacità disponibile", module: "assets" },
-  },
-  warehouse: {
-    "MAT-320": { title: "Filtri idraulici", detail: "Magazzino Nord · scaffale B-04", module: "warehouse" },
-    "MAT-118": { title: "Kit sicurezza", detail: "Magazzino Centrale · scaffale A-12", module: "warehouse" },
-    "REQ-4587": { title: "Richiesta commessa #4587", detail: "Via Roma · Team Alpha", module: "warehouse" },
-    "SCAN-044": { title: "Riconciliazione scansioni", detail: "Ultimo batch da confermare", module: "warehouse" },
-  },
-  commessa: {
-    "4587": { title: "Manutenzione impianto", detail: "Via Roma, Milano · Team Alpha", module: "operations" },
-    "4586": { title: "Controllo sicurezza", detail: "Corso Italia, Milano · Team Beta", module: "operations" },
-    "4585": { title: "Installazione", detail: "Via Dante, Milano · Team Gamma", module: "operations" },
-    "4584": { title: "Ispezione periodica", detail: "Zona Industriale · Team Alpha", module: "operations" },
-  },
-};
-
 export type QrDirectoryMatch = {
   entityType: QrEntityType;
   entityId: string;
@@ -77,15 +56,13 @@ export function canonicalPayload(entityType: QrEntityType, entityId: string): st
 }
 
 export function directoryMatch(entityType: QrEntityType, entityId: string): QrDirectoryMatch {
-  const entry = DIRECTORY[entityType][entityId];
-  if (entry) return { entityType, entityId, ...entry };
   const labels: Record<QrEntityType, string> = { asset: "Asset", warehouse: "Materiale", commessa: "Commessa" };
   const moduleKey: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "warehouse" ? "warehouse" : "operations";
   return {
     entityType,
     entityId,
     title: `${labels[entityType]} ${entityId}`,
-    detail: "Elemento riconosciuto · readback directory",
+    detail: "Identificativo ricevuto · verifica nel readback D1",
     module: moduleKey,
   };
 }

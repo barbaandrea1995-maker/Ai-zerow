@@ -1,35 +1,41 @@
 "use client";
 
-import { createAuthClient } from "@neondatabase/auth/next";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
 type AuthMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
-function getAuthClient() {
+async function getAuthClient() {
+  const { createAuthClient } = await import("@neondatabase/auth/next");
   return createAuthClient();
 }
 
 export default function LoginClient({
   initialState,
   actor,
-  initialMode,
-  resetToken,
 }: {
   initialState: LoginState;
   actor: { email: string; name: string } | null;
-  initialMode: AuthMode;
-  resetToken: string | null;
 }) {
   const router = useRouter();
-  const [mode, setMode] = useState<AuthMode>(initialMode);
+  const [mode, setMode] = useState<AuthMode>("signIn");
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    // The URL is an external input; synchronize the initial auth mode/token
+    // after hydration so the public server render stays Neon-independent.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMode(query.get("mode") === "forgotPassword" ? "forgotPassword" : "signIn");
+    setResetToken(query.get("token"));
+  }, []);
 
   const activeMode: AuthMode = resetToken ? "resetPassword" : mode;
 
@@ -39,7 +45,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
-      const authClient = getAuthClient();
+      const authClient = await getAuthClient();
       const result = await authClient.signIn.email({ email, password });
       if (result.error) {
         setMessage(result.error.message ?? "auth_sign_in_failed");
@@ -59,7 +65,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
-      const authClient = getAuthClient();
+      const authClient = await getAuthClient();
       const result = await authClient.signUp.email({ name, email, password });
       if (result.error) {
         setMessage(result.error.message ?? "auth_sign_up_failed");
@@ -79,7 +85,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
-      const authClient = getAuthClient();
+      const authClient = await getAuthClient();
       const result = await authClient.requestPasswordReset({
         email,
         redirectTo: `${window.location.origin}/login`,
@@ -112,7 +118,7 @@ export default function LoginClient({
     setMessage(null);
 
     try {
-      const authClient = getAuthClient();
+      const authClient = await getAuthClient();
       const result = await authClient.resetPassword({
         newPassword: password,
         token: resetToken,
@@ -135,7 +141,7 @@ export default function LoginClient({
     setBusy(true);
     setMessage(null);
     try {
-      const authClient = getAuthClient();
+      const authClient = await getAuthClient();
       await authClient.signOut();
       window.location.reload();
     } catch {

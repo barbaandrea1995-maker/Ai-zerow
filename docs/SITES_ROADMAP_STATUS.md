@@ -42,6 +42,8 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 - S10 Neon binding: **CLOSED · authorized Neon binding** — `DATABASE_URL`/`zerow_runtime` verificano schema, fingerprint, readback e marker strutturali 0016/0017 del progetto `AI-ZEROW COMMAND`; `neon_auth` resta fuori dal read scope runtime per least privilege, mentre fixture Auth/tenant e provenienza storica dei file restano confini di certificazione separati. D1 resta canonico.
 - AUTH-AB identity gate: **CERTIFIED · isolated Neon branch** — `/auth-ab`, `/api/auth/*` e `/api/auth-ab/readback` usano sessione e membership server-side; fixture A/B hanno login riuscito, un tenant accessibile ciascuno e rifiuto cross-tenant `403`. La branch di certificazione non è il branch production e D1 resta canonico.
 - Production identity bridge: **VERIFIED · owner-mediated provisioning** — `/login` supporta signup/sign-in Neon; `/tenants` e `/api/auth/neon-membership` collegano la sessione Neon corrente alla membership D1 EMS solo quando sono presenti contemporaneamente owner Sites, capability `tenant.manage` e sessione Neon. Il readback production conferma la membership Neon `owner` attiva accanto alla membership Sites `owner`; nessuna identità o password viene inventata dal deploy.
+- U5 Job Workspace: **IMPLEMENTED · Sites/D1 bounded readback** — v56 introduce `/operations/:jobId` e `/api/operations/jobs/:jobId`, conserva `jobId` come chiave cross-domain e legge solo record S04 tenant-scoped; le fasi senza record restano `EMPTY` o `DEFERRED`. Il ciclo completo della commessa resta aperto e non viene dichiarato chiuso.
+- Demo data cleanup: **IMPLEMENTED · Sites/D1 production cleanup** — la migrazione `0006_remove_demo_data.sql` rimuove seed e segnali QA dal tenant senza toccare la commessa reale `OPERATIONS-47363CDE`, tenant, membership o contratti; le superfici UI mostrano il readback vuoto e mantengono i flussi di creazione, scansione QR, eventi, Authority e diagnostica.
 
 The closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
 
@@ -68,6 +70,14 @@ S01–S04 are therefore closed for the Sites reconstruction scope. The original 
 - `/api/command/ask`, `/api/command/approval` and `/api/command/overview` persist preview, approval-decision and readback entries in `s07_ai_ledger`. No direct domain write or provider secret is used.
 - `/pwa/diagnostics`, `/mobile/diagnostics`, `/offline`, `/manifest.webmanifest` and `/sw.js` implement the Sites presentation contract. IndexedDB queue items are replayed sequentially and removed only after a successful HTTP readback.
 - The Sites deployment remains owner-only and all work stays inside @Sites; no Vercel, GitHub or Neon operating workflow is required.
+
+### U5 evidence in Sites
+
+- `/operations/:jobId` is a production Job Workspace backed by a tenant-scoped read model from the existing S04 D1 surface.
+- The Operations portfolio opens the workspace only for a real adapter-backed commessa and preserves the explicit static/fallback boundary otherwise.
+- The live commessa `OPERATIONS-47363CDE` was verified end-to-end in production; the workspace reports its D1 readback and does not invent downstream activity, attendance, field, rapportino or control records.
+- The public login route was hardened in the same production increment: it renders without a server-side Neon session read, while protected-route authorization remains server-verified.
+- Full commessa lifecycle writes, state-machine parity, external executors and later roadmap gates remain deferred; see `docs/U5_JOB_WORKSPACE_CHECKPOINT_2026-09-30.md`.
 
 The deferred boundaries are explicit: external document storage/OCR, accounting and PO executors, policy engine, event consumers/retry-DLQ workers, OpenAI runtime/tool gateway, exact production SHA/browser/device certification, native mobile and the original B0–B10/PRE00/W20 matrix.
 
