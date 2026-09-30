@@ -36,3 +36,15 @@ The real owner-created commessa `OPERATIONS-47363CDE`, the EMS tenant, membershi
 - Runtime identifier sweep: no demo IDs found in `app/`, `components/` or `lib/`.
 
 The production deployment ID and post-deploy D1 counts are appended after publication.
+
+## Production publication
+
+- Version: `57`
+- Commit: `ec9d71aa6df57208c42d15ecb2b34a27e98c2585`
+- Deployment: `appgdep_6abd8ac56bec81918286cb0b2a076196`
+- Status: `succeeded`
+- URL: `https://ai-zerow-command.barba-andrea-1995.chatgpt.site`
+
+Post-deploy D1 readback: `s04_records=1` (the real `OPERATIONS-47363CDE`), `s05_records=0`, `s06_events=0`, `s06_outbox=0`, `s06_reconciliations=0`, `s07_ai_ledger=0`, `qr_codes=0`, `access_profiles=0`, `tenants=1`, `tenant_memberships=2`.
+
+Unauthenticated `/command` correctly redirects to `/login`; the public login surface renders successfully.
