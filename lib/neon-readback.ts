@@ -105,6 +105,10 @@ export async function getNeonReadback() {
       "migration_markers",
       "SELECT to_regclass('zerow.operation_revisions')::text AS operation_revisions, EXISTS (SELECT 1 FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace WHERE n.nspname = 'zerow' AND p.proname = 'reject_append_only_mutation') AS reject_append_only_mutation, EXISTS (SELECT 1 FROM pg_trigger AS t JOIN pg_class AS c ON c.oid = t.tgrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'zerow' AND t.tgname = 'company_timeline_append_only_mutation' AND NOT t.tgisinternal) AS company_timeline_append_only_mutation, EXISTS (SELECT 1 FROM pg_trigger AS t JOIN pg_class AS c ON c.oid = t.tgrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace WHERE n.nspname = 'zerow' AND t.tgname = 'company_projection_append_only_mutation' AND NOT t.tgisinternal) AS company_projection_append_only_mutation",
     );
+    const permissionRows = await readOnlyQuery(
+      "permissions",
+      "SELECT current_user AS runtime_role, has_schema_privilege(current_user, 'zerow', 'USAGE') AS zerow_schema_usage, has_schema_privilege(current_user, 'neon_auth', 'USAGE') AS neon_auth_schema_usage, has_table_privilege(current_user, 'zerow.event_store', 'SELECT') AS event_store_select, has_table_privilege(current_user, 'zerow.outbox', 'SELECT') AS outbox_select, has_table_privilege(current_user, 'neon_auth.user', 'SELECT') AS auth_user_select, has_table_privilege(current_user, 'neon_auth.session', 'SELECT') AS auth_session_select",
+    );
     const readModelCount = async (label: string, statement: string): Promise<number | null> => {
       try {
         const rows = await readOnlyQuery(label, statement);
@@ -139,6 +143,7 @@ export async function getNeonReadback() {
     const runtime = asRows(runtimeRows)[0] ?? {};
     const fingerprint = asRows(fingerprintRows)[0] ?? {};
     const migrationMarkers = asRows(migrationMarkerRows)[0] ?? {};
+    const permissions = asRows(permissionRows)[0] ?? {};
 
     return {
       status: privilegeGaps.length ? "partial" as const : "ok" as const,
@@ -158,6 +163,15 @@ export async function getNeonReadback() {
         databaseName: asString(runtime.database_name),
         currentRole: asString(runtime.current_role),
         postgresVersion: asString(runtime.postgres_version),
+      },
+      permissions: {
+        runtimeRole: asString(permissions.runtime_role),
+        zerowSchemaUsage: asBoolean(permissions.zerow_schema_usage),
+        neonAuthSchemaUsage: asBoolean(permissions.neon_auth_schema_usage),
+        eventStoreSelect: asBoolean(permissions.event_store_select),
+        outboxSelect: asBoolean(permissions.outbox_select),
+        authUserSelect: asBoolean(permissions.auth_user_select),
+        authSessionSelect: asBoolean(permissions.auth_session_select),
       },
       schema: asRows(relationRows).map((row) => ({
         schema: asString(row.table_schema),

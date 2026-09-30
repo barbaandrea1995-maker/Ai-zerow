@@ -44,6 +44,8 @@ non esegue scritture né sostituisce il readback D1 canonico.
 - Runtime role: `zerow_runtime`; database: `neondb`; PostgreSQL `18.6`
 - Schema visibile al ruolo runtime: `zerow` con 18 tabelle base e 16 viste
 - Fingerprint runtime visibile: 564 colonne, `061c00fae688a52a4ec036d177436cf5`
+- Permission probe runtime: `zerow` USAGE e SELECT su `event_store`/`outbox` concessi;
+  `neon_auth` USAGE e SELECT su `user`/`session` non concessi
 - `zerow.event_store`: 0 righe; `zerow.outbox`: 0 righe
 - Gap espliciti: `neon_auth.user` e `neon_auth.session` non leggibili dal ruolo
   runtime (`insufficient_privilege`); non vengono stimati né simulati
