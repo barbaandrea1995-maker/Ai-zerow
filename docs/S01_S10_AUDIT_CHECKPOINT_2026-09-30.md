@@ -21,6 +21,7 @@ I gate S01–S10 sono chiusi nel perimetro operativo autorizzato Sites + Neon:
 | S08 | `CLOSED · SITES PRESENTATION` | manifest, service worker, offline fallback, IndexedDB FIFO e diagnostics |
 | S09 | `CLOSED · SITES BROWSER QA` | v39, route sweep completo, headings, PWA diagnostics e assenza di errori applicativi |
 | S10 | `CLOSED · NEON BINDING` | progetto/branch/database corretti, fingerprint, marker 0016/0017 e readback runtime |
+| AUTH-AB | `CERTIFIED · ISOLATED NEON BRANCH` | login A/B, membership owner, tenant positive readback e rifiuto cross-tenant 403 |
 
 ## Verifiche eseguite
 
@@ -49,8 +50,9 @@ I gate S01–S10 sono chiusi nel perimetro operativo autorizzato Sites + Neon:
 
 La chiusura S01–S10 non riscrive la ricerca forense originale. Restano fuori da
 questa chiusura: provenienza storica esatta dei file migration del repository
-forense, Auth/tenant A/B negative cases, device reale/camera/GPS, golden screenshot
-pixel-perfect, B0–B10/W20, Vercel/GitHub, native mobile e promozione esterna.
+forense, provisioning Auth/tenant sulla branch production e cutover del runtime,
+device reale/camera/GPS, golden screenshot pixel-perfect, B0–B10/W20,
+Vercel/GitHub, native mobile e promozione esterna.
 Sono stati mantenuti come `UNKNOWN`, `NOT_RUN` o `BLOCKED`; non sono stati convertiti
 in PASS per effetto della sola autorizzazione Neon.
 

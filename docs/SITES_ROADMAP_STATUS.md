@@ -25,7 +25,7 @@ Scope: Sites-native authority and onboarding contract.
 - UI: `/onboarding` reads and creates persistent access profiles through the server endpoint
 - S02 blockers: none within Sites scope
 
-The external multi-tenant identity adapter remains outside this Sites-only execution scope. Neon usage is now authorized for the project, but the adapter and runtime evidence remain deferred; this is not a blocker for S02 closure here.
+The Sites-native authority remains canonical for the main command surfaces. A separate Neon Auth tenant adapter is now implemented behind the `AUTH-AB` gate; its evidence is isolated to a Neon certification branch and does not change the S02 Sites tenant boundary.
 
 ## Current continuation
 
@@ -40,6 +40,7 @@ The external multi-tenant identity adapter remains outside this Sites-only execu
 - S09: **CLOSED · Sites browser QA** — v39 exact-source route sweep, desktop shell/readback, primary interaction and PWA diagnostics verified; real-device/golden-image certification remains explicitly outside the Sites browser gate.
 - External adapter control: **IMPLEMENTED · Sites declarative boundary** — S10–S14 catalogo, capability contract, append-only check log e roadmap gate visible at `/externals`.
 - S10 Neon binding: **CLOSED · authorized Neon binding** — `DATABASE_URL`/`zerow_runtime` verificano schema, fingerprint, readback e marker strutturali 0016/0017 del progetto `AI-ZEROW COMMAND`; `neon_auth` resta fuori dal read scope runtime per least privilege, mentre fixture Auth/tenant e provenienza storica dei file restano confini di certificazione separati. D1 resta canonico.
+- AUTH-AB identity gate: **CERTIFIED · isolated Neon branch** — `/auth-ab`, `/api/auth/*` e `/api/auth-ab/readback` usano sessione e membership server-side; fixture A/B hanno login riuscito, un tenant accessibile ciascuno e rifiuto cross-tenant `403`. La branch di certificazione non è il branch production e D1 resta canonico.
 
 The closures above are Sites-native closures. They do not rewrite the original research labels or turn unavailable external runtime evidence into a canonical ZEROW certification.
 
@@ -74,7 +75,7 @@ The deferred boundaries are explicit: external document storage/OCR, accounting 
 - `/externals` and `/api/externals` expose a source-defined registry for identity, canonical domains, storage/OCR, Neon schema binding, event consumers, AI/voice, policy, runtime parity, native mobile, certification and promotion.
 - The registry stores no endpoint, credential or provider secret. A user can append only a declarative CONTRACT, HEALTH, READBACK or GATE check; the check log is tenant-scoped and append-only in the existing s05_records D1 surface.
 - DECLARATIVE_PASS means only that the Sites contract was recorded/read back. It never upgrades a canonical external service from DEFERRED, BLOCKED or NOT RUN to a falsely certified runtime.
-- Neon project usage is `AUTHORIZED` for AI-ZEROW-COMMAND and is recorded in `docs/NEON_USAGE_AUTHORIZATION.md`; the S10 binding gate is `AUTHORIZED + READY`, while external identity/Auth/tenant certification remains a separate deferred boundary.
+- Neon project usage is `AUTHORIZED` for AI-ZEROW-COMMAND and is recorded in `docs/NEON_USAGE_AUTHORIZATION.md`; the S10 binding gate is `AUTHORIZED + READY`, while AUTH-AB is a separate certified identity boundary with production tenant provisioning still pending.
 - Vercel and GitHub remain outside the Sites-only operating workflow. Native iOS/Android and B0–B10/W20 remain NOT RUN until a separate authorized harness exists.
 
 ## Sites-only rule

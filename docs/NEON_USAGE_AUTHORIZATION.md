@@ -25,12 +25,13 @@ certification.
 
 No secret, token, connection string or provider credential is stored in this
 record. The S10 binding gate is exposed in the external adapter registry as
-`AUTHORIZED` + `READY`; Neon Auth/tenant fixtures remain a separate identity and
-certification boundary, and D1 remains the canonical Sites control plane.
+`AUTHORIZED` + `READY`; the separate AUTH-AB identity boundary is recorded in
+`docs/AUTH_AB_CHECKPOINT_2026-09-30.md`, and D1 remains the canonical Sites
+control plane.
 
 ## S10 readback checkpoint
 
 Il readback diretto e il checkpoint runtime sono documentati in
 `docs/NEON_S10_READBACK_CHECKPOINT_2026-09-30.md`. L'autorizzazione resta valida;
-il runtime è `PARTIALLY_VERIFIED`, mentre i marker `0016/0017`, il read scope
-`neon_auth` e la parità Auth/tenant restano aperti.
+il runtime è `PARTIALLY_VERIFIED` per il binding read-only, mentre la parità
+Auth/tenant production e il cutover restano fuori dal gate AUTH-AB isolato.
