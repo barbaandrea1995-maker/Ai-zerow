@@ -66,6 +66,7 @@ export async function getNeonReadback() {
 
   try {
     const sql = neon(connectionString, { readOnly: true });
+    const privilegeGaps: string[] = [];
     const readOnlyQuery = async (label: string, statement: string): Promise<unknown> => {
       try {
         const [rows] = await sql.transaction(
@@ -96,17 +97,42 @@ export async function getNeonReadback() {
       "markers",
       "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_schema IN ('zerow', 'neon_auth') AND (lower(table_name) LIKE '%migration%' OR lower(table_name) LIKE '%schema%' OR lower(table_name) LIKE '%version%' OR lower(table_name) LIKE '%marker%' OR lower(table_name) LIKE '%ledger%') ORDER BY table_schema, table_name",
     );
-    const readModelRows = await readOnlyQuery(
-      "read_models",
-      "SELECT (SELECT count(*)::int FROM zerow.event_store) AS event_store_rows, (SELECT count(*)::int FROM zerow.outbox) AS outbox_rows, (SELECT count(*)::int FROM neon_auth.\"user\") AS auth_user_rows, (SELECT count(*)::int FROM neon_auth.session) AS auth_session_rows",
-    );
+    const readModelCount = async (label: string, statement: string): Promise<number | null> => {
+      try {
+        const rows = await readOnlyQuery(label, statement);
+        return asNumber(asRows(rows)[0]?.row_count);
+      } catch (error) {
+        if (error instanceof NeonReadbackError && error.code.includes("neon_sql_42501")) {
+          privilegeGaps.push(label);
+          return null;
+        }
+        throw error;
+      }
+    };
+    const readModels = {
+      eventStoreRows: await readModelCount(
+        "event_store",
+        "SELECT count(*)::int AS row_count FROM zerow.event_store",
+      ),
+      outboxRows: await readModelCount(
+        "outbox",
+        "SELECT count(*)::int AS row_count FROM zerow.outbox",
+      ),
+      authUserRows: await readModelCount(
+        "auth_user",
+        "SELECT count(*)::int AS row_count FROM neon_auth.\"user\"",
+      ),
+      authSessionRows: await readModelCount(
+        "auth_session",
+        "SELECT count(*)::int AS row_count FROM neon_auth.session",
+      ),
+    };
 
     const runtime = asRows(runtimeRows)[0] ?? {};
     const fingerprint = asRows(fingerprintRows)[0] ?? {};
-    const readModels = asRows(readModelRows)[0] ?? {};
 
     return {
-      status: "ok" as const,
+      status: privilegeGaps.length ? "partial" as const : "ok" as const,
       checkedAt: new Date().toISOString(),
       contract: {
         provider: "Neon",
@@ -139,12 +165,8 @@ export async function getNeonReadback() {
         name: asString(row.table_name),
         type: asString(row.table_type),
       })),
-      readModels: {
-        eventStoreRows: asNumber(readModels.event_store_rows),
-        outboxRows: asNumber(readModels.outbox_rows),
-        authUserRows: asNumber(readModels.auth_user_rows),
-        authSessionRows: asNumber(readModels.auth_session_rows),
-      },
+      privilegeGaps,
+      readModels,
     };
   } catch (error) {
     if (error instanceof NeonReadbackError) throw error;
