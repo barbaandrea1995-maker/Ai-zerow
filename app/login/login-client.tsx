@@ -1,13 +1,13 @@
 "use client";
 
 import { createAuthClient } from "@neondatabase/auth/next";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 const authClient = createAuthClient();
 
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
-type AuthMode = "signIn" | "signUp";
+type AuthMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
 export default function LoginClient({
   initialState,
@@ -17,12 +17,16 @@ export default function LoginClient({
   actor: { email: string; name: string } | null;
 }) {
   const router = useRouter();
+  const resetToken = useSearchParams().get("token");
   const [mode, setMode] = useState<AuthMode>("signIn");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const activeMode: AuthMode = resetToken ? "resetPassword" : mode;
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,6 +66,62 @@ export default function LoginClient({
     }
   }
 
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+
+    try {
+      const result = await authClient.requestPasswordReset({
+        email,
+        redirectTo: `${window.location.origin}/login`,
+      });
+      if (result.error) {
+        setMessage(result.error.message ?? "auth_password_reset_request_failed");
+        return;
+      }
+      setMode("signIn");
+      setMessage("Se l’account esiste, riceverai il link per impostare la password.");
+    } catch {
+      setMessage("auth_password_reset_request_failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resetToken) {
+      setMessage("Link di reset non valido o scaduto.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setMessage("Le password non coincidono.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+
+    try {
+      const result = await authClient.resetPassword({
+        newPassword: password,
+        token: resetToken,
+      });
+      if (result.error) {
+        setMessage(result.error.message ?? "auth_password_reset_failed");
+        return;
+      }
+      setPassword("");
+      setConfirmPassword("");
+      router.replace("/login");
+    } catch {
+      setMessage("auth_password_reset_failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function signOut() {
     setBusy(true);
     setMessage(null);
@@ -79,7 +139,7 @@ export default function LoginClient({
     <main className="grid min-h-screen place-items-center bg-[#040505] px-5 py-10 text-slate-100">
       <section className="w-full max-w-md rounded-2xl border border-lime-300/20 bg-black/30 p-6 shadow-[0_0_40px_rgba(190,255,60,0.06)] sm:p-8">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / PWA AUTH</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-50">{mode === "signIn" ? "Accedi al command center" : "Crea accesso Neon"}</h1>
+          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-50">{activeMode === "signIn" ? "Accedi al command center" : activeMode === "signUp" ? "Crea accesso Neon" : activeMode === "forgotPassword" ? "Recupera accesso" : "Imposta nuova password"}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-500">Neon Auth gestisce la sessione. Tenant, ruolo e capability vengono verificati dal server tramite Cloudflare D1.</p>
 
         {initialState === "authenticated" && actor ? (
@@ -99,29 +159,44 @@ export default function LoginClient({
         ) : initialState === "error" ? (
           <p className="mt-6 rounded-xl border border-rose-300/20 bg-rose-300/5 p-4 text-sm text-rose-100">Servizio Auth temporaneamente non disponibile.</p>
         ) : (
-          <form className="mt-6 grid gap-4" onSubmit={(event) => void (mode === "signIn" ? signIn(event) : signUp(event))}>
-            {mode === "signUp" ? (
+          <form className="mt-6 grid gap-4" onSubmit={(event) => void (activeMode === "signIn" ? signIn(event) : activeMode === "signUp" ? signUp(event) : activeMode === "forgotPassword" ? requestPasswordReset(event) : resetPassword(event))}>
+            {activeMode === "signUp" ? (
               <label className="grid gap-2 text-sm text-slate-400">
                 Nome
                 <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="name" onChange={(event) => setName(event.target.value)} required type="text" value={name} />
               </label>
             ) : null}
-            <label className="grid gap-2 text-sm text-slate-400">
-              Email
-              <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
-            </label>
-            <label className="grid gap-2 text-sm text-slate-400">
-              Password
-              <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
-            </label>
-            <button className="mt-2 rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200 disabled:cursor-wait disabled:opacity-50" disabled={busy} type="submit">{busy ? "Attendi…" : mode === "signIn" ? "Accedi" : "Crea account"}</button>
+            {activeMode !== "resetPassword" ? (
+              <label className="grid gap-2 text-sm text-slate-400">
+                Email
+                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
+              </label>
+            ) : null}
+            {activeMode !== "forgotPassword" ? (
+              <label className="grid gap-2 text-sm text-slate-400">
+                {activeMode === "resetPassword" ? "Nuova password" : "Password"}
+                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete={activeMode === "resetPassword" ? "new-password" : "current-password"} minLength={8} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+              </label>
+            ) : null}
+            {activeMode === "resetPassword" ? (
+              <label className="grid gap-2 text-sm text-slate-400">
+                Conferma password
+                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="new-password" minLength={8} onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
+              </label>
+            ) : null}
+            <button className="mt-2 rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200 disabled:cursor-wait disabled:opacity-50" disabled={busy} type="submit">{busy ? "Attendi…" : activeMode === "signIn" ? "Accedi" : activeMode === "signUp" ? "Crea account" : activeMode === "forgotPassword" ? "Invia link" : "Imposta password"}</button>
           </form>
         )}
 
-        {initialState !== "authenticated" && initialState !== "not_configured" && (
-          <button className="mt-5 text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode(mode === "signIn" ? "signUp" : "signIn"); setMessage(null); }} type="button">
-            {mode === "signIn" ? "Non hai ancora un accesso Neon? Crealo" : "Hai già un accesso? Accedi"}
-          </button>
+        {initialState !== "authenticated" && initialState !== "not_configured" && activeMode !== "resetPassword" && (
+          <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-xs">
+            {activeMode === "signIn" ? (
+              <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode("forgotPassword"); setMessage(null); }} type="button">Password dimenticata?</button>
+            ) : null}
+            <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode(mode === "signIn" || mode === "forgotPassword" ? "signUp" : "signIn"); setMessage(null); }} type="button">
+              {mode === "signIn" || mode === "forgotPassword" ? "Non hai ancora un accesso Neon? Crealo" : "Hai già un accesso? Accedi"}
+            </button>
+          </div>
         )}
 
         {message ? <p className="mt-5 rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-xs text-rose-100">{message}</p> : null}
