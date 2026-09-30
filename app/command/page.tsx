@@ -15,5 +15,5 @@ export default async function CommandPage() {
     redirect("/login");
   }
 
-  return <CommandSurface />;
+  return <CommandSurface actor={identity.actor} />;
 }

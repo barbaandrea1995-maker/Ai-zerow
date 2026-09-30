@@ -17,8 +17,12 @@ export default function LoginClient({
   actor: { email: string; name: string } | null;
 }) {
   const router = useRouter();
-  const resetToken = useSearchParams().get("token");
-  const [mode, setMode] = useState<AuthMode>("signIn");
+  const searchParams = useSearchParams();
+  const resetToken = searchParams.get("token");
+  const requestedMode = searchParams.get("mode");
+  const [mode, setMode] = useState<AuthMode>(
+    requestedMode === "forgotPassword" ? "forgotPassword" : "signIn",
+  );
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
