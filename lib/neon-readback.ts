@@ -13,9 +13,26 @@ const DATABASE_NAME = "neondb";
 const ENDPOINT_ID = "ep-aged-flower-zakdq2d8";
 
 export class NeonReadbackError extends Error {
-  constructor(public readonly code: "neon_runtime_binding_missing" | "neon_runtime_readback_failed") {
+  constructor(public readonly code: string) {
     super(code);
   }
+}
+
+function classifyNeonError(error: unknown): string {
+  if (error && typeof error === "object") {
+    const candidate = error as { code?: unknown; name?: unknown; message?: unknown };
+    if (typeof candidate.code === "string" && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      return `neon_sql_${candidate.code.toLowerCase()}`;
+    }
+    if (candidate.name === "NeonDbError") return "neon_sql_error";
+    if (typeof candidate.message === "string") {
+      if (candidate.message.includes("connection string")) return "neon_binding_invalid";
+      if (candidate.message.includes("Error connecting") || candidate.message.includes("fetch")) {
+        return "neon_transport_error";
+      }
+    }
+  }
+  return "neon_runtime_readback_failed";
 }
 
 function asRows(value: unknown): NeonRow[] {
@@ -117,6 +134,8 @@ export async function getNeonReadback() {
     };
   } catch (error) {
     if (error instanceof NeonReadbackError) throw error;
-    throw new NeonReadbackError("neon_runtime_readback_failed");
+    const code = classifyNeonError(error);
+    console.error("neon_readback_failed", code);
+    throw new NeonReadbackError(code);
   }
 }
