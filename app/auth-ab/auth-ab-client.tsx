@@ -1,7 +1,6 @@
 "use client";
 
 import { createAuthClient } from "@neondatabase/auth/next";
-import Link from "next/link";
 import { useState } from "react";
 import type {
   NeonAuthContextResult,
@@ -95,12 +94,14 @@ export default function AuthAbClient({
               membership tenant e rifiuto cross-tenant.
             </p>
           </div>
-          <Link
+          {/* Vinext's client prefetch is not compatible with this Site runtime. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a
             className="text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4"
             href="/"
           >
             Torna al command center
-          </Link>
+          </a>
         </div>
 
         <section className="carbon-card carbon-card-neon rounded-2xl p-6">
