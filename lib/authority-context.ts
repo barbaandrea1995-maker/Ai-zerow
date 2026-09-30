@@ -135,6 +135,17 @@ async function queryMemberships(
     .orderBy(asc(tenants.createdAt));
 }
 
+/**
+ * Reads the canonical D1 memberships for one server-derived identity.
+ * Callers must construct the identity from an authenticated provider; values
+ * submitted by the browser are never accepted here.
+ */
+export async function getMembershipsForIdentity(
+  identity: AuthenticatedIdentity,
+): Promise<AuthorityMembershipRow[]> {
+  return queryMemberships(identity);
+}
+
 export async function getAccessibleTenantDirectory(): Promise<AccessibleTenantDirectory | null> {
   const identity = await getAuthenticatedIdentity();
   if (!identity) return null;
@@ -214,6 +225,26 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
     expiresAt: null,
     approvalContext: "owner",
   };
+}
+
+/**
+ * Resolves only the Sites owner boundary. This is intentionally separate from
+ * getAuthorityContext so an owner can link a currently authenticated Neon
+ * identity without allowing the Neon identity to self-bootstrap in D1.
+ */
+export async function getSitesAuthorityContext(): Promise<AuthorityContext | null> {
+  const sitesUser = await getChatGPTUser();
+  if (!sitesUser) return null;
+
+  const identity = sitesIdentity(sitesUser);
+  try {
+    const rows = await queryMemberships(identity);
+    return rows.length > 0
+      ? contextFromRow(identity, rows[0])
+      : sitesBootstrapContext(identity);
+  } catch {
+    return null;
+  }
 }
 
 export async function getAuthorityContext(): Promise<AuthorityContext | null> {

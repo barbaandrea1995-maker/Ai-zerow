@@ -19,6 +19,14 @@ considerato una prova di identità, ruolo o tenant.
 - `/api/auth/tenant` permette di selezionare solo un tenant già autorizzato in
   D1 e salva una preferenza `HttpOnly`; il cookie non concede accesso.
 - `/login` espone il login Neon Auth per la superficie PWA.
+- `/login` espone anche la creazione controllata dell’account Neon quando il
+  branch Auth lo consente.
+- `/api/auth/neon-membership` implementa il provisioning della membership Neon
+  solo con doppia prova server-side: owner Sites attivo + sessione Neon attiva.
+  Il browser può chiedere il collegamento, ma non può scegliere actor, ruolo o
+  tenant fuori dal perimetro EMS già autorizzato.
+- `/tenants` espone il collegamento operativo e il readback del risultato senza
+  esporre session ID o segreti.
 - La migration `0005_chunky_patch.sql` aggiunge `identity_provider` alla
   membership esistente e aggiorna il vincolo univoco tenant/provider/actor.
 
@@ -31,19 +39,24 @@ considerato una prova di identità, ruolo o tenant.
 - D1 binding `DB`: presente.
 - D1 `tenants`: tenant EMS attivo.
 - D1 `tenant_memberships`: membership Sites owner attiva, provider `sites`.
+- TypeScript: `PASS` dopo il provisioning bridge.
+- Build Vinext: `PASS`; route `/api/auth/neon-membership` presente.
 
 ## Confini ancora aperti
 
-- La membership dell’utente Neon reale EMS non è stata provisionata sulla
-  production D1, perché non vengono inventate credenziali o identità.
+- La membership Neon reale verrà creata al primo collegamento eseguito da
+  Andrea dopo accesso/signup Neon; il percorso server-side è ora pronto e non
+  crea identità o password inventate.
 - Il Site resta `custom` owner-only; non è stata cambiata la visibilità per
   utenti esterni.
-- Il test live A/B con due identità Neon e rifiuto cross-tenant `403` resta il
-  prossimo gate operativo; la prova già registrata in `AUTH_AB_CHECKPOINT` è
-  isolata su branch di certificazione.
+- Il test live A/B con due identità Neon e rifiuto cross-tenant `403` resta un
+  gate distinto; la prova già registrata in `AUTH_AB_CHECKPOINT` è isolata su
+  branch di certificazione.
 
 ## Regola di promozione
 
 Nessun cutover pubblico viene considerato chiuso finché non sono presenti le
 membership Neon reali in D1 e non sono verificati `401`, accesso A/B,
-membership revocata, capability insufficiente e cross-tenant `403`.
+membership revocata, capability insufficiente e cross-tenant `403`. Il codice
+per il primo provisioning è chiuso; l’attivazione dell’identità reale resta
+un’azione esplicita dell’owner.

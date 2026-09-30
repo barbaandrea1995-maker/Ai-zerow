@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Building2, CheckCircle2, Database, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Building2, CheckCircle2, Database, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
 
 type Tenant = {
   id: string;
@@ -23,12 +23,23 @@ type ApiResponse = {
   error?: string;
 };
 
+type NeonLinkResponse = {
+  ok?: boolean;
+  created?: boolean;
+  linked?: boolean;
+  error?: string;
+  identity?: { email: string; name: string };
+  membership?: { tenantId: string; actorEmail: string; displayName: string; role: string; status: string } | null;
+};
+
 export default function TenantsClient({ actor }: { actor: { displayName: string; email: string } }) {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState("Provisioning D1 in corso…");
+  const [neonLinkBusy, setNeonLinkBusy] = useState(false);
+  const [neonLinkMessage, setNeonLinkMessage] = useState("Accedi con Neon, poi collega qui la sessione al tenant EMS.");
 
   async function load(autoProvision = false) {
     setLoading(true);
@@ -77,6 +88,42 @@ export default function TenantsClient({ actor }: { actor: { displayName: string;
     } finally {
       setBusy(false);
       setLoading(false);
+    }
+  }
+
+  async function linkNeonIdentity() {
+    const tenantId = tenants[0]?.id;
+    if (!tenantId) {
+      setNeonLinkMessage("Prima deve esistere il tenant EMS in D1.");
+      return;
+    }
+
+    setNeonLinkBusy(true);
+    setNeonLinkMessage("Verifico Sites owner + sessione Neon…");
+    try {
+      const response = await fetch("/api/auth/neon-membership", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tenantId }),
+      });
+      const data = (await response.json()) as NeonLinkResponse;
+      if (!response.ok) {
+        if (data.error === "neon_identity_required") {
+          setNeonLinkMessage("Sessione Neon assente: apri Accedi con Neon e torna qui.");
+        } else {
+          setNeonLinkMessage(data.error ?? "Collegamento Neon non riuscito");
+        }
+        return;
+      }
+      setNeonLinkMessage(
+        data.created
+          ? `Identità Neon collegata a EMS come ${data.membership?.role ?? "owner"}.`
+          : "Identità Neon già collegata: readback D1 confermato.",
+      );
+    } catch {
+      setNeonLinkMessage("Servizio di collegamento temporaneamente non disponibile.");
+    } finally {
+      setNeonLinkBusy(false);
     }
   }
 
@@ -138,6 +185,24 @@ export default function TenantsClient({ actor }: { actor: { displayName: string;
               {error && <p className="mt-2 font-mono text-[10px] text-amber-200">{error}</p>}
             </div>
           </div>
+        </section>
+
+        <section className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.03] p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="grid size-10 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><KeyRound className="size-5" /></span>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">NEON AUTH / PRODUCTION BRIDGE</p>
+                <h2 className="mt-1 text-base font-semibold text-slate-50">Collega la sessione al tenant EMS</h2>
+                <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500">L’operazione richiede contemporaneamente il perimetro owner Sites e la sessione Neon corrente. Il server assegna il tenant e il ruolo owner: il browser non può scegliere actor, ruolo o membership.</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a className="rounded-lg border border-cyan-300/25 px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:border-cyan-200/60" href="/login">Accedi con Neon</a>
+              <button className="rounded-lg bg-cyan-200 px-3 py-2 text-[10px] font-semibold text-[#061014] hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-50" disabled={neonLinkBusy || tenants.length === 0} onClick={() => void linkNeonIdentity()} type="button">{neonLinkBusy ? "Verifica…" : "Collega sessione"}</button>
+            </div>
+          </div>
+          <div className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[11px] text-cyan-100/80">{neonLinkMessage}</div>
         </section>
 
         <section className="mt-4 rounded-2xl border border-white/[0.08] bg-black/20 p-5 sm:p-6">
