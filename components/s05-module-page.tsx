@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, Network, Plus, Search, Send, Settings2, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { invalidateReadback, readback } from "@/lib/client-readback";
 
 type ModuleKey = "documents" | "finance" | "procurement" | "governance";
 type Tone = "lime" | "cyan" | "amber" | "red";
@@ -56,12 +57,10 @@ export default function S05ModulePage({ module }: { module: ModuleKey }) {
   const [toast, setToast] = useState("");
   const [form, setForm] = useState({ title: "", detail: "", meta: "Sites proposal", status: "DRAFT" });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ force = true }: { force?: boolean } = {}) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/s05/${module}`, { cache: "no-store" });
-      const data = (await response.json()) as ApiResponse;
-      if (!response.ok) throw new Error(data.error || "s05_readback_failed");
+      const data = await readback<ApiResponse>(`s05:${module}`, `/api/s05/${module}`, { force });
       setRecords(data.records ?? []);
       setApiState("online");
       setSelectedId((current) => current && (data.records ?? []).some((item) => item.id === current) ? current : data.records?.[0]?.id ?? "");
@@ -74,7 +73,7 @@ export default function S05ModulePage({ module }: { module: ModuleKey }) {
   }, [module]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load(); }, 0);
+    const timer = window.setTimeout(() => { void load({ force: false }); }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
 
@@ -94,7 +93,8 @@ export default function S05ModulePage({ module }: { module: ModuleKey }) {
       setComposerOpen(false);
       setForm({ title: "", detail: "", meta: "Sites proposal", status: "DRAFT" });
       setToast("Proposta registrata e verificata nel readback D1.");
-      await load();
+      invalidateReadback(`s05:${module}`);
+      await load({ force: true });
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Scrittura non disponibile");
     } finally {

@@ -45,6 +45,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { readback } from "@/lib/client-readback";
 
 type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "GEOFENCE";
 type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
@@ -101,6 +102,12 @@ type CommandRecord = {
   progress: number;
   payload?: Record<string, unknown>;
   updatedAt?: string;
+};
+
+type CommandDashboardResponse = {
+  records?: CommandRecord[];
+  modules?: string[];
+  requestedModules?: string[];
 };
 
 type KpiData = {
@@ -283,18 +290,15 @@ export default function CommandSurface({ actor }: { actor: AccountActor }) {
   useEffect(() => {
     let active = true;
 
-    Promise.allSettled(commandModules.map(async (module) => {
-      const response = await fetch(`/api/${module}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`${module}_readback_failed`);
-      const payload = (await response.json()) as { records?: CommandRecord[] };
-      return Array.isArray(payload.records) ? payload.records : [];
-    })).then((results) => {
+    readback<CommandDashboardResponse>("command:dashboard", "/api/command/dashboard").then((payload) => {
       if (!active) return;
-      const successful = results.filter((result): result is PromiseFulfilledResult<CommandRecord[]> => result.status === "fulfilled");
-      setRecords(successful.flatMap((result) => result.value));
-      if (successful.length === 0) setReadbackStatus("error");
-      else if (successful.every((result) => result.value.length === 0)) setReadbackStatus("empty");
-      else if (successful.length === commandModules.length) setReadbackStatus("online");
+      const nextRecords = Array.isArray(payload.records) ? payload.records : [];
+      const requestedModules = payload.requestedModules?.length ?? commandModules.length;
+      const readableModules = payload.modules?.length ?? 0;
+      setRecords(nextRecords);
+      if (readableModules === 0) setReadbackStatus("error");
+      else if (nextRecords.length === 0) setReadbackStatus("empty");
+      else if (readableModules === requestedModules) setReadbackStatus("online");
       else setReadbackStatus("partial");
     }).catch(() => {
       if (!active) return;

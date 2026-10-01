@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   Activity,
@@ -37,7 +38,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ServerNamingDialog } from "@/components/server-naming-dialog";
+import { invalidateReadback, readback } from "@/lib/client-readback";
+
+const ServerNamingDialog = dynamic(() => import("@/components/server-naming-dialog").then((module) => module.ServerNamingDialog), { ssr: false });
 
 type ModuleKey = "workforce" | "warehouse" | "mission" | "assets";
 type Tone = "lime" | "cyan" | "amber" | "red";
@@ -323,11 +326,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/${module}`, { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("s04_adapter_readback_failed");
-        return (await response.json()) as AdapterResponse;
-      })
+    readback<AdapterResponse>(`s04:${module}`, `/api/${module}`)
       .then((body) => {
         if (!active) return;
         const records = Array.isArray(body.records) ? body.records : [];
@@ -391,7 +390,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · {config.code} · S04 / D1 READBACK</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />Sites private · owner only · no domain mutation</span></div>
       </div>
     </section>
-  </div>{(module === "assets" || module === "warehouse") && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => setRefreshKey((value) => value + 1)} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
+  </div>{(module === "assets" || module === "warehouse") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
 }
 
 export default S04ModulePage;

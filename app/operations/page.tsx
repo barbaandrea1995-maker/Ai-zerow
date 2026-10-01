@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import {
   Activity,
   AlertTriangle,
@@ -38,7 +39,10 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
 import { jobStatusLabel, normalizeJobStatus } from "@/lib/operations-contract";
-import OperationsCommessaIntake, { type IntakeAdapterRecord, type IntakeCreateResponse } from "@/components/operations-commessa-intake";
+import type { IntakeAdapterRecord, IntakeCreateResponse } from "@/components/operations-commessa-intake";
+import { invalidateReadback, readback } from "@/lib/client-readback";
+
+const OperationsCommessaIntake = dynamic(() => import("@/components/operations-commessa-intake"), { ssr: false });
 
 type JobStatus = "BOZZA" | "PROPOSTA" | "APPROVATA" | "In corso" | "Pianificata" | "BLOCCATA" | "Completata" | "CHIUSA" | "ANNULLATA";
 type JobFilter = "TUTTE" | "IN CORSO" | "PIANIFICATE" | "COMPLETATE" | "BOZZE" | "BLOCCATE";
@@ -202,11 +206,7 @@ export default function OperationsPage() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/operations", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("operations_adapter_readback_failed");
-        return (await response.json()) as OperationsAdapterResponse;
-      })
+    readback<OperationsAdapterResponse>("s04:operations", "/api/operations")
       .then((payload) => {
         if (!active) return;
         const records = Array.isArray(payload.records) ? payload.records : [];
@@ -248,6 +248,7 @@ export default function OperationsPage() {
   };
 
   const handleIntakeCreated = (payload: IntakeCreateResponse) => {
+    invalidateReadback("s04:operations");
     const records = Array.isArray(payload.records) ? payload.records : [];
     const nextJobs = records.length ? jobsFromAdapter(records) : [];
     setAdapterJobs(nextJobs);
@@ -304,7 +305,7 @@ export default function OperationsPage() {
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600"><span>{adapterOnline ? "AI-ZEROW OPERATIONS · S04 adapter surface" : "AI-ZEROW OPERATIONS · S04 static surface"}</span><span className="flex items-center gap-2"><span>black carbon core</span><span className="size-1 rounded-full bg-lime-300" /><span>{adapterOnline ? "D1 adapter read/write" : "no backend write"}</span></span></footer>
       </div></section>
   </div>
-  <OperationsCommessaIntake open={newJobOpen} onOpenChange={setNewJobOpen} onCreated={handleIntakeCreated} />
+  {newJobOpen && <OperationsCommessaIntake open={newJobOpen} onOpenChange={setNewJobOpen} onCreated={handleIntakeCreated} />}
   <Dialog open={planningOpen} onOpenChange={setPlanningOpen}><DialogContent className="border-cyan-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]"><DialogHeader><DialogTitle className="text-slate-100">Pianificazione risorse</DialogTitle><DialogDescription className="text-slate-500">Vista locale per {selectedJob.id}. La verifica delle opzioni risorsa sarà collegata a /api/operations/jobs/[jobId]/planning/resource-options.</DialogDescription></DialogHeader><div className="space-y-3"><div className="carbon-inset flex items-center gap-3 rounded-xl p-3"><Users className="size-4 text-lime-200" /><div><p className="text-xs font-medium text-slate-200">{selectedJob.team}</p><p className="text-[11px] text-slate-500">presidio operativo selezionato</p></div></div><div className="carbon-inset flex items-center gap-3 rounded-xl p-3"><Truck className="size-4 text-cyan-200" /><div><p className="text-xs font-medium text-slate-200">Nessun asset selezionato</p><p className="text-[11px] text-slate-500">Le opzioni arrivano dal readback D1 della commessa.</p></div></div><div className="flex items-start gap-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-[11px] leading-5 text-amber-100/80"><AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-200" />Nessuna modifica verrà salvata: il dominio, le autorizzazioni e il readback non sono ancora collegati.</div></div><DialogFooter><DialogClose asChild><Button className="bg-lime-300 text-[#060806] hover:bg-lime-200">Chiudi</Button></DialogClose></DialogFooter></DialogContent></Dialog>
   {toast && <div className="fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#0b1008]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_30px_rgba(190,255,60,0.14)] backdrop-blur-xl"><CheckCircle2 className="size-4 text-lime-300" />{toast}</div>}
   </main>;
