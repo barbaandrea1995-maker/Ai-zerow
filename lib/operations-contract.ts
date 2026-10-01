@@ -154,6 +154,31 @@ export function clampJobProgress(value: unknown): number {
   return progress(value);
 }
 
+export type JobCompletionRequirement = {
+  key: string;
+  label: string;
+  complete: boolean;
+  detail: string;
+};
+
+export function jobCompletionRequirements(payload: JobPayload): JobCompletionRequirement[] {
+  const rapportino = isRecord(payload.rapportino) && text(payload.rapportino.text).length >= 2;
+  const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
+  const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));
+  const location = text(payload.location);
+  return [
+    { key: "title", label: "Nome commessa", complete: text(payload.title).length >= 2, detail: "Identità della commessa" },
+    { key: "classification", label: "Classificazione", complete: text(payload.openingType).length >= 2 && text(payload.jobType).length >= 2 && text(payload.specialization).length >= 2, detail: "Tipo di apertura, tipo e specializzazione" },
+    { key: "description", label: "Contesto operativo", complete: text(payload.description).length >= 2, detail: "Obiettivo e perimetro dell’intervento" },
+    { key: "worksite", label: "Luogo di intervento", complete: location.length >= 2 && location.toLowerCase() !== "ubicazione da definire", detail: "Cantiere o sede dell’intervento" },
+    { key: "assignment", label: "Assegnazione", complete: assignmentComplete, detail: "Responsabile o squadra operativa" },
+    { key: "activities", label: "Attività completate", complete: activitiesComplete, detail: payload.activities.length ? "Tutte le attività devono essere chiuse" : "Inserisci almeno un’attività operativa" },
+    { key: "evidence", label: "Evidenza operativa", complete: payload.evidence.length > 0, detail: "Almeno una evidenza verificabile" },
+    { key: "rapportino", label: "Rapportino", complete: rapportino, detail: "Rapportino salvato con il consuntivo" },
+    { key: "progress", label: "Avanzamento", complete: clampJobProgress(payload.progress) >= 100, detail: "Porta l’avanzamento al 100% manualmente" },
+  ];
+}
+
 export function parseJobPayload(payloadJson: string): JobPayload {
   let parsed: Record<string, unknown> = {};
   try {

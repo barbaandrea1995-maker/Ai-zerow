@@ -10,6 +10,7 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import {
   canTransitionJob,
   clampJobProgress,
+  jobCompletionRequirements,
   jobStatusLabel,
   normalizeJobStatus,
   parseJobPayload,
@@ -173,6 +174,10 @@ function workspaceResponse(
     workspace: {
       source: "sites-d1-w03-commessa-read-write",
       authority: "server-context",
+      completion: {
+        ready: jobCompletionRequirements(payload).every((requirement) => requirement.complete),
+        requirements: jobCompletionRequirements(payload),
+      },
       requestedJobId,
       sections: {
         activities: section(activities.length ? "readback" : "empty", activities),
@@ -309,6 +314,16 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (!canTransitionJob(current.statusCode, nextStatus)) {
         return Response.json({ error: "invalid_status_transition", from: current.statusCode, to: nextStatus }, { status: 409 });
       }
+      if (nextStatus === "COMPLETED") {
+        const requirements = jobCompletionRequirements(current);
+        if (requirements.some((requirement) => !requirement.complete)) {
+          return Response.json({
+            error: "completion_requirements_unmet",
+            requirements,
+            message: "La commessa resta aperta: completa i requisiti prima del passaggio a COMPLETATA.",
+          }, { status: 422 });
+        }
+      }
       next.statusCode = nextStatus;
       eventType = "operations.job.status_changed";
       change = { from: current.statusCode, to: nextStatus };
@@ -385,7 +400,24 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       }
       if (typeof fields.description === "string") next.description = boundedText(fields.description, 2_000);
       if (typeof fields.client === "string") next.client = boundedText(fields.client, 160);
+      if (typeof fields.clientName === "string") next.clientName = boundedText(fields.clientName, 160);
+      if (typeof fields.clientTaxId === "string") next.clientTaxId = boundedText(fields.clientTaxId, 80);
+      if (typeof fields.clientContact === "string") next.clientContact = boundedText(fields.clientContact, 120);
+      if (typeof fields.clientPhone === "string") next.clientPhone = boundedText(fields.clientPhone, 80);
+      if (typeof fields.clientEmail === "string") next.clientEmail = boundedText(fields.clientEmail, 160);
+      if (typeof fields.clientReference === "string") next.clientReference = boundedText(fields.clientReference, 160);
+      if (typeof fields.clientAddress === "string") next.clientAddress = boundedText(fields.clientAddress, 240);
       if (typeof fields.location === "string") next.location = boundedText(fields.location, 240);
+      if (typeof fields.worksite === "string") {
+        next.worksite = boundedText(fields.worksite, 240);
+        next.location = boundedText(fields.worksite, 240);
+      }
+      if (typeof fields.accessNotes === "string") next.accessNotes = boundedText(fields.accessNotes, 2_000);
+      if (typeof fields.cig === "string") next.cig = boundedText(fields.cig, 80);
+      if (typeof fields.cup === "string") next.cup = boundedText(fields.cup, 80);
+      if (typeof fields.openingType === "string") next.openingType = boundedText(fields.openingType, 80);
+      if (typeof fields.jobType === "string") next.jobType = boundedText(fields.jobType, 120);
+      if (typeof fields.specialization === "string") next.specialization = boundedText(fields.specialization, 120);
       if (typeof fields.category === "string") next.category = boundedText(fields.category, 80);
       if (typeof fields.dueDate === "string") next.dueDate = boundedText(fields.dueDate, 40);
       if (fields.priority === "HIGH" || fields.priority === "STANDARD" || fields.priority === "LOW") next.priority = fields.priority;

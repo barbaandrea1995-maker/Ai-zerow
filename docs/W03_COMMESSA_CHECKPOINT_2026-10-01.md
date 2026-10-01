@@ -26,6 +26,14 @@
 - La UI Operations e il Job Workspace mostrano gli stati `BOZZA`, `PROPOSTA`, `APPROVATA`, `PIANIFICATA`, `IN CORSO`, `BLOCCATA`, `COMPLETATA` e `CHIUSA` con azioni coerenti.
 - La UI mantiene la shell, la palette, i moduli, le card e il linguaggio visuale della baseline v65.
 
+## Riallineamento compilazione e chiusura — fotografie di riferimento
+
+- La nuova commessa parte da una scelta esplicita: `Crea da preventivo con Company AI` oppure `Compila manualmente`.
+- Entrambi i percorsi usano la stessa scheda canonica con classificazione, contesto e dati cliente/cantiere.
+- Company AI produce una preview governata, propone i campi con fonte e confidenza, registra la preview nel ledger S07 e non scrive la commessa senza conferma umana.
+- La scheda resta modificabile e viene salvata inizialmente come `BOZZA`; il 100% dell’avanzamento non cambia automaticamente lo stato.
+- Il passaggio a `COMPLETATA` è rifiutato server-side finché non risultano completi contesto, luogo, assegnazione, attività, evidenza, rapportino e avanzamento.
+
 ## Flusso verificabile
 
 ```text
@@ -39,6 +47,7 @@ crea commessa
 → registra evidenza
 → completa attività
 → salva rapportino
+→ verifica requisiti di completamento
 → completa e chiudi
 → rileggi versione, eventi e stato
 ```
@@ -54,4 +63,3 @@ crea commessa
 ## Confini ancora aperti
 
 W03 non dichiara completati i servizi esterni di planning, workforce, FIELD, asset, warehouse, mission, documents o finance. Le sezioni cross-domain restano `EMPTY` o `DEFERRED` quando non esiste un record adapter-backed verificato. Il prossimo verticale è W04 Planning, già compatibile con il contratto `jobId`, versione e assignment introdotto qui.
-

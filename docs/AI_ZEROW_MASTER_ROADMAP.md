@@ -72,7 +72,7 @@ persona/input
 | W00 Baseline e governance | `FROZEN` | Tag v65 creato e pubblicato nel repository. |
 | W01 Shell e visual system | `CLOSED — Sites` | UI/UX coerente, responsive e mantenuta sulla palette esistente. |
 | W02 Identity, tenant, authority | `CLOSED — Sites / PARTIAL external` | Sites owner-only e authority D1 verificati; identity esterna resta separata. |
-| W03 Commessa e Job Workspace | `IMPLEMENTED — Sites W03 / PARTIAL external` | Creazione, codice, stato, attività, assegnazione, avanzamento, evidenze, rapportino, eventi e readback sono ora chiusi nel bounded Sites adapter; il dominio esterno completo resta aperto. |
+| W03 Commessa e Job Workspace | `IMPLEMENTED — Sites W03 / PARTIAL external` | Creazione manuale o assistita da Company AI, codice, stato, attività, assegnazione, avanzamento, evidenze, rapportino, gate di completamento, eventi e readback sono chiusi nel bounded Sites adapter; il dominio esterno completo resta aperto. |
 | W04 Planning | `DEFERRED / PARTIAL` | Mancano motore di pianificazione, conflitti, revisioni e workers completi. |
 | W05 Workforce e FIELD | `PARTIAL` | Superfici e contratti bounded; runtime operativo, attendance e GPS da certificare. |
 | W06 Assets e manutenzione | `CLOSED — Sites / PARTIAL external` | Registro e codifica Sites presenti; manutenzione e disponibilità reale da chiudere. |

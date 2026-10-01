@@ -1,0 +1,126 @@
+import type { JobStatusCode } from "@/lib/operations-contract";
+
+export type IntakeMode = "MANUAL" | "COMPANY_AI";
+
+export type IntakeDraft = {
+  title: string;
+  statusCode: JobStatusCode;
+  openingType: string;
+  jobType: string;
+  specialization: string;
+  description: string;
+  clientName: string;
+  clientTaxId: string;
+  clientContact: string;
+  clientPhone: string;
+  clientEmail: string;
+  clientReference: string;
+  clientAddress: string;
+  worksite: string;
+  accessNotes: string;
+  cig: string;
+  cup: string;
+  dueDate: string;
+  priority: "HIGH" | "STANDARD" | "LOW";
+};
+
+export type IntakeSuggestion = {
+  key: keyof IntakeDraft;
+  label: string;
+  value: string;
+  confidence: number;
+  source: string;
+};
+
+export type IntakePreview = {
+  previewId: string;
+  mode: IntakeMode;
+  directWrite: false;
+  runtime: string;
+  draft: Partial<IntakeDraft>;
+  suggestions: IntakeSuggestion[];
+  sourceName?: string;
+};
+
+export type IntakeAdapterRecord = {
+  id: string;
+  canonicalCode?: string;
+  title: string;
+  detail: string;
+  meta: string;
+  status: string;
+  progress: number;
+  payload?: Record<string, unknown>;
+};
+
+export type IntakeCreateResponse = {
+  created?: IntakeAdapterRecord;
+  records?: IntakeAdapterRecord[];
+};
+
+export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
+  title: "",
+  statusCode: "DRAFT",
+  openingType: "NUOVA_COMMESSA",
+  jobType: "Edilizia e ristrutturazioni",
+  specialization: "Ristrutturazione interna",
+  description: "",
+  clientName: "",
+  clientTaxId: "",
+  clientContact: "",
+  clientPhone: "",
+  clientEmail: "",
+  clientReference: "",
+  clientAddress: "",
+  worksite: "",
+  accessNotes: "",
+  cig: "",
+  cup: "",
+  dueDate: "",
+  priority: "STANDARD",
+};
+
+export const INTAKE_OPENING_TYPES = [
+  { value: "NUOVA_COMMESSA", label: "Nuova commessa" },
+  { value: "PREVENTIVO_APPROVATO", label: "Preventivo approvato" },
+  { value: "MANUTENZIONE_PROGRAMMATA", label: "Manutenzione programmata" },
+] as const;
+
+export const INTAKE_JOB_TYPES = [
+  "Edilizia e ristrutturazioni",
+  "Impianti e manutenzione",
+  "Logistica e trasporti",
+  "Servizi tecnici",
+  "Altro",
+] as const;
+
+export const INTAKE_SPECIALIZATIONS = [
+  "Ristrutturazione interna",
+  "Sopralluogo e rilievo",
+  "Manutenzione ordinaria",
+  "Manutenzione straordinaria",
+  "Installazione e collaudo",
+  "Da definire",
+] as const;
+
+export const INTAKE_FIELD_LABELS: Record<keyof IntakeDraft, string> = {
+  title: "Nome commessa",
+  statusCode: "Stato",
+  openingType: "Tipo di apertura",
+  jobType: "Tipo di commessa",
+  specialization: "Specializzazione",
+  description: "Descrizione",
+  clientName: "Cliente / ragione sociale",
+  clientTaxId: "P. IVA / codice fiscale",
+  clientContact: "Referente cliente",
+  clientPhone: "Tel. cliente",
+  clientEmail: "E-mail cliente",
+  clientReference: "Riferimento cliente / preventivo",
+  clientAddress: "Sede / indirizzo cliente",
+  worksite: "Luogo di intervento",
+  accessNotes: "Note accesso / cantiere",
+  cig: "CIG",
+  cup: "CUP",
+  dueDate: "Scadenza operativa",
+  priority: "Priorità",
+};

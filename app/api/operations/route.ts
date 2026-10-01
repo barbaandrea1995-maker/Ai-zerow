@@ -108,11 +108,30 @@ export async function POST(request: Request) {
   const dueDate = boundedText(input.dueDate ?? input.meta, 40, "Da pianificare");
   const priority = validPriority(input.priority);
   const statusCode = normalizeJobStatus(input.statusCode ?? input.status ?? "DRAFT");
+  const openingType = boundedText(input.openingType, 80, "NUOVA_COMMESSA");
+  const jobType = boundedText(input.jobType ?? input.category, 120, category);
+  const specialization = boundedText(input.specialization, 120, "Da definire");
+  const sourceMode = input.sourceMode === "COMPANY_AI" ? "COMPANY_AI" : "MANUAL";
+  const aiPreviewId = boundedText(input.aiPreviewId, 120);
+  const clientName = boundedText(input.clientName ?? input.client, 160, client);
+  const clientTaxId = boundedText(input.clientTaxId, 80);
+  const clientContact = boundedText(input.clientContact, 120);
+  const clientPhone = boundedText(input.clientPhone, 80);
+  const clientEmail = boundedText(input.clientEmail, 160);
+  const clientReference = boundedText(input.clientReference, 160);
+  const clientAddress = boundedText(input.clientAddress, 240);
+  const worksite = boundedText(input.worksite ?? input.location ?? input.detail, 240, location);
+  const accessNotes = boundedText(input.accessNotes, 2_000);
+  const cig = boundedText(input.cig, 80);
+  const cup = boundedText(input.cup, 80);
   const tone = validTone(input.tone);
   const requestedIdempotencyKey = boundedText(input.idempotencyKey, 160);
 
   if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
-  if (description.length > 2_000 || client.length > 160 || location.length > 240 || category.length > 80 || dueDate.length > 40) {
+  if (statusCode === "COMPLETED" || statusCode === "CLOSED") {
+    return Response.json({ error: "new_job_must_start_before_completion" }, { status: 400 });
+  }
+  if (description.length > 2_000 || client.length > 160 || location.length > 240 || category.length > 80 || dueDate.length > 40 || openingType.length > 80 || jobType.length > 120 || specialization.length > 120 || accessNotes.length > 2_000) {
     return Response.json({ error: "field_length_exceeded" }, { status: 400 });
   }
 
@@ -150,16 +169,32 @@ export async function POST(request: Request) {
       title,
       description,
       client,
+      clientName,
+      clientTaxId,
+      clientContact,
+      clientPhone,
+      clientEmail,
+      clientReference,
+      clientAddress,
       location,
+      worksite,
+      accessNotes,
+      cig,
+      cup,
       category,
+      openingType,
+      jobType,
+      specialization,
       priority,
       dueDate,
       statusCode,
+      sourceMode,
+      aiPreviewId: aiPreviewId || null,
       version: 1,
       activities: [],
       evidence: [],
       assignment: null,
-      source: "sites-w03-operations",
+      source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
       createdAt: now,
       naming,
     };
@@ -170,8 +205,9 @@ export async function POST(request: Request) {
       canonicalCode: naming.canonicalCode,
       title,
       statusCode,
+      sourceMode,
       version: 1,
-      source: "sites-w03-operations",
+      source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
     });
 
     await db.batch([
@@ -182,7 +218,7 @@ export async function POST(request: Request) {
         canonicalCode: naming.canonicalCode,
         recordType: "job",
         title: naming.canonicalCode,
-        detail: location,
+        detail: worksite,
         meta: dueDate,
         status: jobStatusLabel(statusCode),
         tone,
