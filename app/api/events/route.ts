@@ -60,6 +60,9 @@ export async function POST(request: Request) {
   if (eventType.length < 2 || aggregateType.length < 2 || aggregateId.length < 1 || idempotencyKey.length < 4 || aggregateVersion < 1) {
     return Response.json({ error: "event_type_aggregate_and_positive_version_required" }, { status: 400 });
   }
+  if (typeof payload.idempotencyKey === "string" && payload.idempotencyKey.trim().length > 160) {
+    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
+  }
   if (serializedPayload.length > 12_000) return Response.json({ error: "payload_too_large" }, { status: 400 });
 
   const now = new Date().toISOString();
@@ -73,13 +76,16 @@ export async function POST(request: Request) {
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existing[0]) {
+      if (existing[0].eventType !== eventType || existing[0].aggregateType !== aggregateType || existing[0].aggregateId !== aggregateId || existing[0].aggregateVersion !== aggregateVersion) {
+        return Response.json({ error: "s06_idempotency_key_conflict" }, { status: 409 });
+      }
       const snapshot = await getS06Snapshot(context!.tenantId);
       return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(existing[0]), idempotent: true }, {
         headers: { "cache-control": "no-store" },
       });
     }
 
-    const [event] = await db.insert(s06Events).values({
+    const eventValues = {
       eventId,
       tenantId: context!.tenantId,
       eventType,
@@ -98,31 +104,42 @@ export async function POST(request: Request) {
       idempotencyKey,
       status: "COMMITTED_SITES_READBACK",
       createdAt: now,
-    }).returning();
+    };
 
-    await db.insert(s06Outbox).values({
-      id: crypto.randomUUID(),
-      tenantId: context!.tenantId,
-      eventId,
-      topic: `zerow.${eventType}`,
-      status: "PENDING_EXTERNAL_CONSUMER",
-      attempts: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
+    // Event, outbox and reconciliation are one durable commit. A successful
+    // event without its delivery/reconciliation records would create a false
+    // S06 readback and leave the aggregate in an unrecoverable half-state.
+    await db.batch([
+      db.insert(s06Events).values(eventValues),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        eventId,
+        topic: `zerow.${eventType}`,
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        aggregateType,
+        aggregateId,
+        expectedVersion: aggregateVersion,
+        observedVersion: aggregateVersion,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Evento presente nel D1 Sites; consumer canonico esterno ancora differito.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
 
-    await db.insert(s06Reconciliations).values({
-      id: crypto.randomUUID(),
-      tenantId: context!.tenantId,
-      aggregateType,
-      aggregateId,
-      expectedVersion: aggregateVersion,
-      observedVersion: aggregateVersion,
-      status: "SITES_READBACK_VERIFIED",
-      detail: "Evento presente nel D1 Sites; consumer canonico esterno ancora differito.",
-      createdAt: now,
-      updatedAt: now,
-    });
+    const [event] = await db.select().from(s06Events).where(and(
+      eq(s06Events.tenantId, context!.tenantId),
+      eq(s06Events.eventId, eventId),
+    )).limit(1);
+    if (!event) throw new Error("s06_event_readback_missing");
 
     const snapshot = await getS06Snapshot(context!.tenantId);
     return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(event), idempotent: false }, {

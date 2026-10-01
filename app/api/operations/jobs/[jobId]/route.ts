@@ -280,6 +280,9 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
 
   const action = boundedText(input.action, 48, "update_job").toLowerCase();
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
+  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
+    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
+  }
   if (idempotencyKey.length < 4) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
 
   try {
@@ -292,6 +295,10 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existing[0]) {
+      const aggregateId = jobRow.canonicalCode ?? jobRow.id;
+      if (existing[0].aggregateType !== "commessa" || existing[0].aggregateId !== aggregateId) {
+        return Response.json({ error: "operations_idempotency_key_conflict" }, { status: 409 });
+      }
       return Response.json({
         ...workspaceResponse(context, jobRow, rows, requestedJobId),
         idempotent: true,

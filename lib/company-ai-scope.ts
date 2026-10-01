@@ -43,6 +43,7 @@ export type CompanyAiScopeSuggestion = {
   score: number;
   source: "company-ai" | "manual";
   knowledgeHints: CompanyAiKnowledgeHint[];
+  matchedSignals?: string[];
 };
 
 /**
@@ -149,7 +150,7 @@ export const COMPANY_AI_SCOPE_TAXONOMY: ScopeSection[] = [
         { id: "E-CLIMA-CONTROLLO", title: "Regolazione e controllo", keywords: ["regolazione", "controllo", "termostati"] },
       ] },
       { id: "E-IDRICO", title: "Idrico-sanitario e gas", subgroups: [
-        { id: "E-IDRICO-ADDUZIONE", title: "Adduzione e distribuzione", keywords: ["adduzione", "tubazioni", "distribuzione"] },
+        { id: "E-IDRICO-ADDUZIONE", title: "Adduzione e distribuzione", keywords: ["adduzione", "tubazioni", "distribuzione", "perdita", "idrica", "idrico", "acqua", "pressione", "infiltrazione", "riparazione", "ricerca perdita"] },
         { id: "E-IDRICO-SCARICHI", title: "Scarichi e apparecchi", keywords: ["scarichi", "apparecchi sanitari", "sanitari"] },
         { id: "E-IDRICO-SICUREZZA", title: "Sicurezza e collaudi", keywords: ["gas", "sicurezza", "collaudo"] },
       ] },
@@ -259,8 +260,51 @@ function normalize(value: string) {
     .trim();
 }
 
+const SCOPE_STOP_WORDS = new Set([
+  "a", "ad", "al", "alla", "allo", "agli", "ai", "da", "dal", "dalla", "dello", "degli", "dei",
+  "di", "del", "della", "delle", "e", "ed", "in", "nel", "nella", "nei", "con", "per", "su", "tra",
+  "fra", "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "che", "come", "circa", "anche",
+]);
+
+const SCOPE_TOKEN_ALIASES = new Map([
+  ["idrica", "idrico"], ["idriche", "idrico"], ["idrici", "idrico"], ["idric", "idrico"],
+  ["tubazioni", "tubazione"], ["tubazione", "tubazione"], ["tubi", "tubo"],
+  ["perdite", "perdita"], ["ripristini", "ripristino"], ["riparazioni", "riparazione"],
+  ["sostituzioni", "sostituzione"], ["scarichi", "scarico"], ["infiltrazioni", "infiltrazione"],
+  ["pressioni", "pressione"], ["adduzioni", "adduzione"], ["distribuzioni", "distribuzione"],
+  ["fognature", "fognatura"], ["pavimentazioni", "pavimentazione"], ["manutenzioni", "manutenzione"],
+  ["demolizioni", "demolizione"], ["rimozioni", "rimozione"], ["tinteggiature", "tinteggiatura"],
+  ["elettrica", "elettrico"], ["elettriche", "elettrico"], ["elettrici", "elettrico"],
+  ["quadri", "quadro"], ["cavi", "cavo"], ["stradali", "stradale"], ["trasporti", "trasporto"],
+  ["trasporto", "trasporto"], ["reinterri", "reinterro"],
+]);
+
+function canonicalToken(token: string) {
+  return SCOPE_TOKEN_ALIASES.get(token) ?? token;
+}
+
 function tokenSet(value: string) {
-  return new Set(normalize(value).split(/\s+/).filter((token) => token.length > 2));
+  return new Set(
+    normalize(value)
+      .split(/\s+/)
+      .map(canonicalToken)
+      .filter((token) => token.length > 2 && !SCOPE_STOP_WORDS.has(token)),
+  );
+}
+
+function tokenSequence(value: string) {
+  return normalize(value)
+    .split(/\s+/)
+    .map(canonicalToken)
+    .filter((token) => token.length > 2 && !SCOPE_STOP_WORDS.has(token));
+}
+
+function containsPhrase(sourceTokens: string[], phrase: string[]) {
+  if (phrase.length > sourceTokens.length) return false;
+  for (let index = 0; index <= sourceTokens.length - phrase.length; index += 1) {
+    if (phrase.every((token, offset) => sourceTokens[index + offset] === canonicalToken(token))) return true;
+  }
+  return false;
 }
 
 export function getCompanyAiScopeTaxonomy() {
@@ -285,17 +329,82 @@ export function resolveCompanyAiScopeSelection(input: { sectionId?: string; grou
   };
 }
 
-export function inferCompanyAiScopeSelection(source: string): { selection: CompanyAiScopeSelection; score: number } | null {
+const SCOPE_SIGNAL_RULES = [
+  {
+    subgroupId: "B-PREPARAZIONE-TRASPORTI",
+    signals: [
+      { phrase: ["trasporto", "materiali"], label: "trasporto materiali", weight: 12 },
+    ],
+  },
+  {
+    subgroupId: "D-DISTRIBUZIONE-QUADRI",
+    signals: [
+      { phrase: ["quadro", "elettrico"], label: "quadro elettrico", weight: 14 },
+    ],
+  },
+  {
+    subgroupId: "E-IDRICO-ADDUZIONE",
+    signals: [
+      { phrase: ["perdita", "idrico"], label: "perdita idrica", weight: 24 },
+      { phrase: ["ricerca", "perdita"], label: "ricerca perdita", weight: 20 },
+      { phrase: ["tubo", "ammalorato"], label: "tubazione ammalorata", weight: 18 },
+      { phrase: ["prova", "pressione"], label: "prova di pressione", weight: 14 },
+      { phrase: ["acqua", "pressione"], label: "acqua in pressione", weight: 14 },
+      { phrase: ["linea", "adduzione"], label: "linea di adduzione", weight: 16 },
+    ],
+  },
+];
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function inferCompanyAiScopeSelection(source: string): { selection: CompanyAiScopeSelection; score: number; matchedSignals: string[] } | null {
   const sourceTokens = tokenSet(source);
+  const sourceSequence = tokenSequence(source);
   if (!sourceTokens.size) return null;
+
   const candidates = COMPANY_AI_SCOPE_TAXONOMY.flatMap((section) => section.groups.flatMap((group) => group.subgroups.map((subgroup) => {
-    const searchable = tokenSet([section.title, group.title, subgroup.title, ...subgroup.keywords].join(" "));
-    const overlap = [...sourceTokens].filter((token) => searchable.has(token));
-    const score = overlap.length + (sourceTokens.has(normalize(subgroup.title)) ? 2 : 0);
-    return { selection: resolveCompanyAiScopeSelection({ sectionId: section.id, groupId: group.id, subgroupId: subgroup.id })!, score };
+      const keywordTokens = tokenSet(subgroup.keywords.join(" "));
+      const subgroupTokens = tokenSet(subgroup.title);
+      const groupTokens = tokenSet(group.title);
+      const sectionTokens = tokenSet(section.title);
+      const keywordOverlap = [...sourceTokens].filter((token) => keywordTokens.has(token));
+      const subgroupOverlap = [...sourceTokens].filter((token) => subgroupTokens.has(token));
+      const groupOverlap = [...sourceTokens].filter((token) => groupTokens.has(token));
+      const sectionOverlap = [...sourceTokens].filter((token) => sectionTokens.has(token));
+      let rawScore = keywordOverlap.length * 5 + subgroupOverlap.length * 3 + groupOverlap.length * 2 + sectionOverlap.length;
+      const matchedSignals = keywordOverlap.map((token) => `termine: ${token}`);
+
+      for (const rule of SCOPE_SIGNAL_RULES) {
+        if (rule.subgroupId !== subgroup.id) continue;
+        for (const signal of rule.signals) {
+          if (containsPhrase(sourceSequence, signal.phrase)) {
+            rawScore += signal.weight;
+            matchedSignals.push(signal.label);
+          }
+        }
+      }
+
+      return {
+        selection: resolveCompanyAiScopeSelection({ sectionId: section.id, groupId: group.id, subgroupId: subgroup.id })!,
+        rawScore,
+        matchedSignals: [...new Set(matchedSignals)],
+      };
   })));
-  const best = candidates.sort((left, right) => right.score - left.score || left.selection.subgroupId.localeCompare(right.selection.subgroupId))[0];
-  return best && best.score > 0 ? best : null;
+
+  const ranked = candidates.sort((left, right) => right.rawScore - left.rawScore || left.selection.subgroupId.localeCompare(right.selection.subgroupId));
+  const best = ranked[0];
+  const second = ranked[1];
+  if (!best || best.rawScore < 5) return null;
+
+  const margin = Math.max(0, best.rawScore - (second?.rawScore ?? 0));
+  const score = clamp(
+    0.48 + Math.min(best.rawScore / 70, 0.28) + Math.min(margin / 45, 0.18) + (best.matchedSignals.some((signal) => !signal.startsWith("termine:")) ? 0.05 : 0),
+    0.48,
+    0.98,
+  );
+  return { selection: best.selection, score: Math.round(score * 100) / 100, matchedSignals: best.matchedSignals.slice(0, 8) };
 }
 
 export function scopeSelectionToFields(selection: CompanyAiScopeSelection | null) {

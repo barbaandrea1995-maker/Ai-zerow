@@ -1,12 +1,13 @@
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s07AiLedger } from "@/db/schema";
+import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   getCompanyAiKnowledgePackSummary,
   searchCompanyAiKnowledge,
+  searchCompanyAiKnowledgeForScope,
 } from "@/lib/company-ai-knowledge";
 import {
   getS07Context,
-  getS07Ledger,
   s07AccessDenied,
 } from "@/lib/s07-adapter";
 import {
@@ -32,6 +33,16 @@ function text(value: unknown, fallback = "") {
 
 function bounded(value: unknown, max: number, fallback = "") {
   return text(value, fallback).slice(0, max);
+}
+
+function parseObject(value: string | null) {
+  if (!value) return {} as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {} as Record<string, unknown>;
+  }
 }
 
 function escapeRegex(value: string) {
@@ -163,9 +174,10 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const scopeFields = scopeSelectionToFields(inferredScope?.selection ?? null);
   const scopeSuggestion: CompanyAiScopeSuggestion = {
     selection: inferredScope?.selection ?? null,
-    score: inferredScope ? Math.min(0.98, 0.5 + inferredScope.score * 0.08) : 0,
+    score: inferredScope?.score ?? 0,
     source: "company-ai",
-    knowledgeHints: inferredScope?.selection ? searchCompanyAiKnowledge(inferredScope.selection.knowledgeQuery, { part: inferredScope.selection.knowledgePart, limit: 6 }) : [],
+    knowledgeHints: inferredScope?.selection ? searchCompanyAiKnowledgeForScope(inferredScope.selection, 6) : [],
+    matchedSignals: inferredScope?.matchedSignals ?? [],
   };
 
   addSuggestion(suggestions, "title", title, rawTitle ? 0.96 : 0.52, rawTitle ? "Preventivo · oggetto" : "Prima riga del documento");
@@ -228,44 +240,136 @@ export async function POST(request: Request) {
 
   const sourceText = bounded(input.sourceText, MAX_INTAKE_SOURCE_CHARS);
   const sourceName = bounded(input.sourceName, 160);
+  const requestedIdempotencyKey = bounded(input.idempotencyKey, 160);
   if (sourceText.length < 2) return Response.json({ error: "source_text_required" }, { status: 400 });
+  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
+    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
+  }
 
   const { draft, suggestions, scopeSuggestion } = extractDraft(sourceText);
   const knowledgePack = getCompanyAiKnowledgePackSummary();
-  const knowledgeHints = searchCompanyAiKnowledge(sourceText, { limit: 6 });
+  const knowledgeHints = scopeSuggestion.selection
+    ? searchCompanyAiKnowledgeForScope(scopeSuggestion.selection, 6)
+    : searchCompanyAiKnowledge(sourceText, { limit: 6 });
   const previewId = crypto.randomUUID();
+  const idempotencyKey = requestedIdempotencyKey || `s07:intake:${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const mode: IntakeMode = "COMPANY_AI";
   try {
     const db = getDb();
-    await db.insert(s07AiLedger).values({
-      id: previewId,
-      tenantId: context!.tenantId,
-      entryType: "commessa_intake_preview",
-      actionType: "operations.commessa_intake",
-      command: sourceName ? `Crea una commessa dal documento ${sourceName}` : "Crea una commessa dal preventivo fornito",
-      status: "PREVIEW_ONLY",
-      approvalRequired: 0,
-      relatedActionId: null,
-      payloadJson: JSON.stringify({
+    const existingEvent = await db.select().from(s06Events).where(and(
+      eq(s06Events.tenantId, context!.tenantId),
+      eq(s06Events.idempotencyKey, idempotencyKey),
+    )).limit(1);
+    if (existingEvent[0]) {
+      if (existingEvent[0].aggregateType !== "s07.intake.preview") {
+        return Response.json({ error: "company_ai_intake_idempotency_key_conflict" }, { status: 409 });
+      }
+      const [existingPreview] = await db.select().from(s07AiLedger).where(and(
+        eq(s07AiLedger.tenantId, context!.tenantId),
+        eq(s07AiLedger.id, existingEvent[0].aggregateId),
+      )).limit(1);
+      if (!existingPreview) return Response.json({ error: "company_ai_preview_readback_unavailable" }, { status: 503 });
+      const stored = parseObject(existingPreview.payloadJson);
+      return Response.json({
+        previewId: existingPreview.id,
+        mode: "COMPANY_AI",
+        directWrite: false,
+        runtime: "governed-intake-preview",
+        sourceName: text(stored.sourceName) || undefined,
+        draft: isRecord(stored.draft) ? stored.draft : {},
+        suggestions: Array.isArray(stored.suggestions) ? stored.suggestions : [],
+        scopeSuggestion: isRecord(stored.scopeSuggestion) ? stored.scopeSuggestion : undefined,
+        knowledgePack,
+        knowledgeHints: Array.isArray(stored.knowledgeHints) ? stored.knowledgeHints : [],
+        readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: existingPreview.createdAt },
+        idempotent: true,
+      }, { headers: { "cache-control": "no-store" } });
+    }
+
+    const eventId = crypto.randomUUID();
+    const previewPayload = {
         source: "company-ai",
         mode,
         directWrite: false,
         runtime: "governed-intake-preview",
         sourceName,
+        idempotencyKey,
         draft,
         suggestions,
         scopeSuggestion,
         knowledgePackId: knowledgePack.id,
         knowledgePackVersion: knowledgePack.version,
         knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
+        knowledgeHints,
+      };
+    const serializedPreview = JSON.stringify(previewPayload);
+    if (serializedPreview.length > 12_000) return Response.json({ error: "preview_payload_too_large" }, { status: 413 });
+
+    await db.batch([
+      db.insert(s07AiLedger).values({
+        id: previewId,
+        tenantId: context!.tenantId,
+        entryType: "commessa_intake_preview",
+        actionType: "operations.commessa_intake",
+        command: sourceName ? `Crea una commessa dal documento ${sourceName}` : "Crea una commessa dal preventivo fornito",
+        status: "PREVIEW_ONLY",
+        approvalRequired: 0,
+        relatedActionId: null,
+        payloadJson: serializedPreview,
+        requestedBy: context!.actorId,
+        approvedBy: null,
+        readbackJson: JSON.stringify({ status: "SITES_LEDGER_VERIFIED", checkedAt: now }),
+        createdAt: now,
       }),
-      requestedBy: context!.actorId,
-      approvedBy: null,
-      readbackJson: JSON.stringify({ status: "SITES_LEDGER_VERIFIED", checkedAt: now }),
-      createdAt: now,
-    });
-    await getS07Ledger(context!.tenantId);
+      db.insert(s06Events).values({
+        eventId,
+        tenantId: context!.tenantId,
+        eventType: "company_ai.intake.previewed",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: context!.actorId,
+        source: "sites-command",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "s07.intake.preview",
+        aggregateId: previewId,
+        aggregateVersion: 1,
+        payloadJson: JSON.stringify({ sourceName, mode, scopeSubgroupId: scopeSuggestion.selection?.subgroupId ?? null, source: "company-ai" }),
+        correlationId: crypto.randomUUID(),
+        causationId: null,
+        idempotencyKey,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        eventId,
+        topic: "zerow.company_ai.intake.previewed",
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        aggregateType: "s07.intake.preview",
+        aggregateId: previewId,
+        expectedVersion: 1,
+        observedVersion: 1,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Preview Company AI e relativo event boundary persistiti nello stesso commit D1; nessuna commessa è stata scritta.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+    const [readback] = await db.select().from(s07AiLedger).where(and(
+      eq(s07AiLedger.tenantId, context!.tenantId),
+      eq(s07AiLedger.id, previewId),
+    )).limit(1);
+    if (!readback) return Response.json({ error: "company_ai_preview_readback_unavailable" }, { status: 503 });
     return Response.json({
       previewId,
       mode,
@@ -278,8 +382,13 @@ export async function POST(request: Request) {
       knowledgePack,
       knowledgeHints,
       readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: now },
+      idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE") || message.includes("unique")) {
+      return Response.json({ error: "company_ai_preview_idempotency_conflict" }, { status: 409 });
+    }
     return Response.json({ error: "company_ai_preview_unavailable" }, { status: 503 });
   }
 }

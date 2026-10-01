@@ -338,7 +338,7 @@ export default function CommandSurface({ actor }: { actor: AccountActor }) {
       const response = await fetch("/api/command/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: next, actionType: "query" }),
+        body: JSON.stringify({ prompt: next, actionType: "query", idempotencyKey: `command-query-${crypto.randomUUID()}` }),
       });
       const data = (await response.json()) as { result?: { message?: string }; error?: string };
       if (!response.ok) throw new Error(data.error || "command_adapter_unavailable");

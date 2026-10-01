@@ -165,6 +165,9 @@ export async function POST(request: Request) {
   if (packVersion !== pack.version) return Response.json({ error: "knowledge_pack_version_mismatch", expected: pack.version }, { status: 409 });
   if (!scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup", message: "Lo scope deve contenere sezione, raggruppamento e sottogruppo." }, { status: 400 });
   if (!SCOPE_STATUSES.has(status)) return Response.json({ error: "unknown_scope_status" }, { status: 400 });
+  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
+    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
+  }
 
   try {
     const db = getDb();
@@ -175,6 +178,9 @@ export async function POST(request: Request) {
       .where(and(eq(s06Events.tenantId, context!.tenantId), eq(s06Events.idempotencyKey, idempotencyKey)))
       .limit(1);
     if (existingEvent[0]) {
+      if (existingEvent[0].aggregateType !== "company_ai_scope") {
+        return Response.json({ error: "company_ai_scope_idempotency_key_conflict" }, { status: 409 });
+      }
       const existingScope = await db.select().from(companyAiJobScopes).where(and(eq(companyAiJobScopes.tenantId, context!.tenantId), eq(companyAiJobScopes.id, existingEvent[0].aggregateId))).limit(1);
       if (existingScope[0]) return responseForScope(context!, existingScope[0]);
     }
@@ -277,7 +283,11 @@ export async function POST(request: Request) {
     const [created] = await db.select().from(companyAiJobScopes).where(and(eq(companyAiJobScopes.tenantId, context!.tenantId), eq(companyAiJobScopes.id, scopeId))).limit(1);
     if (!created) return Response.json({ error: "company_ai_scope_readback_unavailable" }, { status: 503 });
     return responseForScope(context!, created, 201);
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE") || message.includes("unique")) {
+      return Response.json({ error: "company_ai_scope_version_conflict" }, { status: 409 });
+    }
     return Response.json({ error: "company_ai_scope_write_unavailable" }, { status: 503 });
   }
 }

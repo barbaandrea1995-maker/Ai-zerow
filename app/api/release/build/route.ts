@@ -1,8 +1,11 @@
+import { RELEASE_BUILD_ID, RELEASE_BUILD_LABEL } from "@/lib/release";
+
 export const dynamic = "force-static";
 
 export async function GET() {
   return Response.json({
-    buildId: "ai-zerow-sites-s08-v19",
+    buildId: RELEASE_BUILD_ID,
+    buildLabel: RELEASE_BUILD_LABEL,
     tranche: "S08",
     source: "Sites",
     manifest: "/manifest.webmanifest",

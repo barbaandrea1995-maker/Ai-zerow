@@ -145,6 +145,9 @@ export async function POST(request: Request) {
   if (description.length > 2_000 || client.length > 160 || location.length > 240 || category.length > 80 || dueDate.length > 40 || openingType.length > 80 || jobType.length > 120 || specialization.length > 120 || accessNotes.length > 2_000) {
     return Response.json({ error: "field_length_exceeded" }, { status: 400 });
   }
+  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
+    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
+  }
 
   const now = new Date().toISOString();
   const idempotencyKey = requestedIdempotencyKey || `operations:create:${crypto.randomUUID()}`;
@@ -158,10 +161,21 @@ export async function POST(request: Request) {
       .where(and(eq(s06Events.tenantId, context.tenantId), eq(s06Events.idempotencyKey, idempotencyKey)))
       .limit(1);
     if (existing[0]) {
+      if (existing[0].aggregateType !== "commessa") {
+        return Response.json({ error: "operations_idempotency_key_conflict" }, { status: 409 });
+      }
+      const [existingRecord] = await db.select().from(s04Records)
+        .where(and(
+          eq(s04Records.tenantId, context.tenantId),
+          eq(s04Records.module, "operations"),
+          eq(s04Records.canonicalCode, existing[0].aggregateId),
+        ))
+        .limit(1);
+      if (!existingRecord) return Response.json({ error: "operations_idempotency_readback_unavailable" }, { status: 503 });
       const rows = await db.select().from(s04Records)
         .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
         .orderBy(desc(s04Records.updatedAt));
-      return Response.json({ ...operationEnvelope(context, rows.map(recordForResponse)), idempotent: true, eventId: existing[0].eventId }, {
+      return Response.json({ ...operationEnvelope(context, rows.map(recordForResponse)), created: recordForResponse(existingRecord), idempotent: true, eventId: existing[0].eventId }, {
         headers: { "cache-control": "no-store" },
       });
     }
@@ -381,15 +395,20 @@ export async function POST(request: Request) {
       .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
       .orderBy(desc(s04Records.updatedAt));
     const created = rows.find((row) => row.id === id);
+    if (!created) return Response.json({ error: "operations_readback_unavailable" }, { status: 503 });
     return Response.json({
       ...operationEnvelope(context, rows.map(recordForResponse)),
-      created: created ? recordForResponse(created) : null,
+      created: recordForResponse(created),
       event: { eventId, aggregateId: naming.canonicalCode, aggregateVersion: 1, readback: "verified" },
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof CanonicalCodeConflictError) {
       return Response.json({ error: error.code }, { status: 409 });
+    }
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE") || message.includes("unique")) {
+      return Response.json({ error: "operations_idempotency_or_version_conflict" }, { status: 409 });
     }
     return Response.json({ error: adapterError(error), module: "operations" }, { status: 503 });
   }

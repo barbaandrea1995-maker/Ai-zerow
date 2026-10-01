@@ -61,6 +61,7 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
           recordType: isWarehouse ? "inventory-item" : "asset-register",
           entityType: isWarehouse ? "material" : assetType,
           barcode: barcode.trim() || undefined,
+          idempotencyKey: `s04-${module}-${crypto.randomUUID()}`,
         }),
       });
       const payload = (await response.json()) as CreateResponse;

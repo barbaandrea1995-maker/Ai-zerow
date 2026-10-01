@@ -87,7 +87,7 @@ export default function S05ModulePage({ module }: { module: ModuleKey }) {
     if (form.title.trim().length < 2) { setToast("Inserisci un titolo di almeno 2 caratteri."); return; }
     setSaving(true);
     try {
-      const response = await fetch(`/api/s05/${module}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form) });
+      const response = await fetch(`/api/s05/${module}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...form, idempotencyKey: `s05-${module}-${crypto.randomUUID()}` }) });
       const data = (await response.json()) as ApiResponse;
       if (!response.ok) throw new Error(data.error || "s05_write_failed");
       setComposerOpen(false);

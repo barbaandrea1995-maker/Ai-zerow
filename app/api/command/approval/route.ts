@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s07AiLedger } from "@/db/schema";
+import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   getS07Context,
   getS07Ledger,
@@ -18,7 +18,11 @@ export async function POST(request: Request) {
 
   let payload: { actionId?: unknown; decision?: unknown; note?: unknown };
   try {
-    payload = (await request.json()) as typeof payload;
+    const parsed = await request.json() as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return Response.json({ error: "invalid_json" }, { status: 400 });
+    }
+    payload = parsed as typeof payload;
   } catch {
     return Response.json({ error: "invalid_json" }, { status: 400 });
   }
@@ -37,10 +41,32 @@ export async function POST(request: Request) {
     )).limit(1);
     if (!original) return Response.json({ error: "command_action_not_found" }, { status: 404 });
     if (original.entryType !== "command_preview") return Response.json({ error: "command_action_not_approvable" }, { status: 409 });
+    if (original.status !== "PENDING_APPROVAL" || !original.approvalRequired) {
+      return Response.json({ error: "command_action_already_resolved" }, { status: 409 });
+    }
+
+    const existingDecision = await db.select().from(s07AiLedger).where(and(
+      eq(s07AiLedger.tenantId, context!.tenantId),
+      eq(s07AiLedger.relatedActionId, original.id),
+      eq(s07AiLedger.entryType, "approval_decision"),
+    )).limit(1);
+    if (existingDecision[0]) {
+      const rows = await getS07Ledger(context!.tenantId);
+      return Response.json({ ...s07Envelope(context!, rows), decision: {
+        id: existingDecision[0].id,
+        actionId: original.id,
+        status: existingDecision[0].status,
+        directWrite: false,
+      }, idempotent: true }, { headers: { "cache-control": "no-store" } });
+    }
 
     const now = new Date().toISOString();
-    const [entry] = await db.insert(s07AiLedger).values({
-      id: crypto.randomUUID(),
+    const decisionId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    const idempotencyKey = `s07:approval:${original.id}`.slice(0, 160);
+    await db.batch([
+      db.insert(s07AiLedger).values({
+      id: decisionId,
       tenantId: context!.tenantId,
       entryType: "approval_decision",
       actionType: "approval.decision",
@@ -58,15 +84,67 @@ export async function POST(request: Request) {
         checkedAt: now,
       }),
       createdAt: now,
-    }).returning();
+      }),
+      db.insert(s06Events).values({
+        eventId,
+        tenantId: context!.tenantId,
+        eventType: "command.approval.decided",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: context!.actorId,
+        source: "sites-command",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "s07.command",
+        aggregateId: original.id,
+        aggregateVersion: 1,
+        payloadJson: JSON.stringify({ actionId: original.id, decision, source: "sites-s07-adapter" }),
+        correlationId: crypto.randomUUID(),
+        causationId: null,
+        idempotencyKey,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        eventId,
+        topic: "zerow.command.approval.decided",
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context!.tenantId,
+        aggregateType: "s07.command",
+        aggregateId: original.id,
+        expectedVersion: 1,
+        observedVersion: 1,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Decisione di approvazione registrata nel ledger e nell'event boundary; esecuzione esterna differita.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+    const [entry] = await db.select().from(s07AiLedger).where(and(
+      eq(s07AiLedger.tenantId, context!.tenantId),
+      eq(s07AiLedger.id, decisionId),
+    )).limit(1);
+    if (!entry) return Response.json({ error: "approval_readback_unavailable" }, { status: 503 });
     const rows = await getS07Ledger(context!.tenantId);
     return Response.json({ ...s07Envelope(context!, rows), decision: {
       id: entry.id,
       actionId: original.id,
       status: entry.status,
       directWrite: false,
-    } }, { status: 201, headers: { "cache-control": "no-store" } });
+    } , idempotent: false }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("UNIQUE") || message.includes("unique")) {
+      return Response.json({ error: "approval_idempotency_conflict" }, { status: 409 });
+    }
     return Response.json({ error: s07Error(error) }, { status: 503 });
   }
 }
