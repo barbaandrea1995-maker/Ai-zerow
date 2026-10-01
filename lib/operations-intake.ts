@@ -40,6 +40,12 @@ export type IntakePreview = {
   mode: IntakeMode;
   directWrite: false;
   runtime: string;
+  aiRuntime?: {
+    provider: "openai";
+    status: "used" | "not_configured" | "unavailable";
+    model: string;
+    requestId?: string | null;
+  };
   draft: Partial<IntakeDraft>;
   suggestions: IntakeSuggestion[];
   sourceName?: string;

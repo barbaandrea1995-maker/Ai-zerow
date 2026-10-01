@@ -10,6 +10,7 @@ import {
   getS07Context,
   s07AccessDenied,
 } from "@/lib/s07-adapter";
+import { analyzeCompanyAiWithOpenAi, resolveOpenAiScope } from "@/lib/company-ai-openai";
 import {
   DEFAULT_INTAKE_DRAFT,
   INTAKE_FIELD_LABELS,
@@ -144,6 +145,105 @@ function addSuggestion(
   const trimmed = value.trim();
   if (!trimmed) return;
   suggestions.push({ key, label: INTAKE_FIELD_LABELS[key], value: trimmed, confidence, source });
+}
+
+function upsertSuggestion(
+  suggestions: IntakeSuggestion[],
+  key: keyof IntakeDraft,
+  value: string,
+  confidence: number,
+  source: string,
+) {
+  const trimmed = value.trim();
+  if (!trimmed) return;
+  const next = { key, label: INTAKE_FIELD_LABELS[key], value: trimmed, confidence, source };
+  const index = suggestions.findIndex((suggestion) => suggestion.key === key);
+  if (index === -1) suggestions.push(next);
+  else suggestions[index] = next;
+}
+
+function setDraftField(draft: Partial<IntakeDraft>, key: keyof IntakeDraft, value: string) {
+  Object.assign(draft, { [key]: value });
+}
+
+function mergeOpenAiExtraction({
+  baseDraft,
+  baseSuggestions,
+  baseScopeSuggestion,
+  baseKnowledgeHints,
+  result,
+}: {
+  baseDraft: Partial<IntakeDraft>;
+  baseSuggestions: IntakeSuggestion[];
+  baseScopeSuggestion: CompanyAiScopeSuggestion;
+  baseKnowledgeHints: ReturnType<typeof searchCompanyAiKnowledge>;
+  result: NonNullable<Awaited<ReturnType<typeof analyzeCompanyAiWithOpenAi>>>["result"];
+}) {
+  const extraction = result!.extraction;
+  const confidence = Math.min(0.98, Math.max(0.56, extraction.confidence || 0.7));
+  const source = `OpenAI · ${result!.model}`;
+  const draft: Partial<IntakeDraft> = { ...baseDraft };
+  const suggestions = [...baseSuggestions];
+  const fields: Array<[keyof IntakeDraft, string]> = [
+    ["title", extraction.title],
+    ["description", extraction.description],
+    ["clientName", extraction.clientName],
+    ["clientTaxId", extraction.clientTaxId],
+    ["clientContact", extraction.clientContact],
+    ["clientPhone", extraction.clientPhone],
+    ["clientEmail", extraction.clientEmail],
+    ["clientReference", extraction.clientReference],
+    ["clientAddress", extraction.clientAddress],
+    ["worksite", extraction.worksite],
+    ["accessNotes", extraction.accessNotes],
+    ["cig", extraction.cig],
+    ["cup", extraction.cup],
+    ["dueDate", extraction.dueDate],
+  ];
+  for (const [key, value] of fields) {
+    if (!value) continue;
+    setDraftField(draft, key, value);
+    upsertSuggestion(suggestions, key, value, confidence, source);
+  }
+  if (extraction.openingType) {
+    setDraftField(draft, "openingType", extraction.openingType);
+    upsertSuggestion(suggestions, "openingType", extraction.openingType, confidence, source);
+  }
+  if (extraction.priority) {
+    setDraftField(draft, "priority", extraction.priority);
+    upsertSuggestion(suggestions, "priority", extraction.priority, confidence, source);
+  }
+
+  const aiSelection = resolveOpenAiScope(extraction);
+  const deterministicSelection = baseScopeSuggestion.selection;
+  const selectedScope = deterministicSelection && baseScopeSuggestion.score >= 0.82
+    ? deterministicSelection
+    : aiSelection ?? deterministicSelection;
+  let scopeSuggestion = baseScopeSuggestion;
+  let knowledgeHints = baseKnowledgeHints;
+  if (selectedScope) {
+    const scopeFields = scopeSelectionToFields(selectedScope);
+    Object.assign(draft, scopeFields);
+    const scopeScore = deterministicSelection === selectedScope
+      ? Math.max(baseScopeSuggestion.score, confidence)
+      : confidence;
+    const matchedSignals = [...new Set([
+      ...(baseScopeSuggestion.matchedSignals ?? []),
+      ...extraction.evidence.map((signal) => `OpenAI: ${signal}`),
+    ])].slice(0, 8);
+    knowledgeHints = searchCompanyAiKnowledgeForScope(selectedScope, 6);
+    scopeSuggestion = {
+      selection: selectedScope,
+      score: scopeScore,
+      source: "company-ai",
+      knowledgeHints,
+      matchedSignals,
+    };
+    upsertSuggestion(suggestions, "scopeSectionId", selectedScope.sectionTitle, scopeScore, source);
+    upsertSuggestion(suggestions, "scopeGroupId", selectedScope.groupTitle, scopeScore, source);
+    upsertSuggestion(suggestions, "scopeSubgroupId", selectedScope.subgroupTitle, scopeScore, source);
+  }
+  return { draft, suggestions, scopeSuggestion, knowledgeHints };
 }
 
 function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; suggestions: IntakeSuggestion[]; scopeSuggestion: CompanyAiScopeSuggestion } {
@@ -287,21 +387,48 @@ export async function POST(request: Request) {
       }, { headers: { "cache-control": "no-store" } });
     }
 
+    const aiOutcome = await analyzeCompanyAiWithOpenAi({
+      sourceText,
+      sourceName,
+      knowledgePack,
+      knowledgeHints,
+    });
+    const merged = aiOutcome.result
+      ? mergeOpenAiExtraction({
+        baseDraft: draft,
+        baseSuggestions: suggestions,
+        baseScopeSuggestion: scopeSuggestion,
+        baseKnowledgeHints: knowledgeHints,
+        result: aiOutcome.result,
+      })
+      : { draft, suggestions, scopeSuggestion, knowledgeHints };
+    const resolvedDraft = merged.draft;
+    const resolvedSuggestions = merged.suggestions;
+    const resolvedScopeSuggestion = merged.scopeSuggestion;
+    const resolvedKnowledgeHints = merged.knowledgeHints;
+    const runtime = aiOutcome.result ? "openai-responses-governed-preview" : "governed-intake-preview-fallback";
+    const aiRuntime = {
+      provider: "openai",
+      status: aiOutcome.status,
+      model: aiOutcome.model,
+      requestId: aiOutcome.result?.requestId ?? null,
+    };
     const eventId = crypto.randomUUID();
     const previewPayload = {
         source: "company-ai",
         mode,
         directWrite: false,
-        runtime: "governed-intake-preview",
+        runtime,
+        aiRuntime,
         sourceName,
         idempotencyKey,
-        draft,
-        suggestions,
-        scopeSuggestion,
+        draft: resolvedDraft,
+        suggestions: resolvedSuggestions,
+        scopeSuggestion: resolvedScopeSuggestion,
         knowledgePackId: knowledgePack.id,
         knowledgePackVersion: knowledgePack.version,
-        knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
-        knowledgeHints,
+        knowledgeHintIds: resolvedKnowledgeHints.map((hint) => hint.id),
+        knowledgeHints: resolvedKnowledgeHints,
       };
     const serializedPreview = JSON.stringify(previewPayload);
     if (serializedPreview.length > 12_000) return Response.json({ error: "preview_payload_too_large" }, { status: 413 });
@@ -335,7 +462,7 @@ export async function POST(request: Request) {
         aggregateType: "s07.intake.preview",
         aggregateId: previewId,
         aggregateVersion: 1,
-        payloadJson: JSON.stringify({ sourceName, mode, scopeSubgroupId: scopeSuggestion.selection?.subgroupId ?? null, source: "company-ai" }),
+        payloadJson: JSON.stringify({ sourceName, mode, scopeSubgroupId: resolvedScopeSuggestion.selection?.subgroupId ?? null, runtime, aiStatus: aiOutcome.status, source: "company-ai" }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,
@@ -374,13 +501,14 @@ export async function POST(request: Request) {
       previewId,
       mode,
       directWrite: false,
-      runtime: "governed-intake-preview",
+      runtime,
+      aiRuntime,
       sourceName: sourceName || undefined,
-      draft,
-      suggestions,
-      scopeSuggestion,
+      draft: resolvedDraft,
+      suggestions: resolvedSuggestions,
+      scopeSuggestion: resolvedScopeSuggestion,
       knowledgePack,
-      knowledgeHints,
+      knowledgeHints: resolvedKnowledgeHints,
       readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: now },
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });

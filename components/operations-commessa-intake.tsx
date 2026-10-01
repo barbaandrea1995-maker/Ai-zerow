@@ -354,7 +354,7 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
             <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Company AI propone i campi leggendo solo il contenuto che mostri. Tu controlli, correggi e confermi prima di creare la commessa.</p>
           </div>
         </div>
-        {preview && <span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-3 py-1.5 text-[10px] font-semibold text-lime-200">{preview.suggestions.length} campi proposti</span>}
+        {preview && <div className="flex flex-wrap items-center justify-end gap-2"><span className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold ${preview.aiRuntime?.status === "used" ? "border-lime-300/30 bg-lime-300/[0.1] text-lime-200" : "border-amber-300/25 bg-amber-300/[0.08] text-amber-100"}`}>{preview.aiRuntime?.status === "used" ? "OPENAI LIVE" : "OPENAI FALLBACK"}</span><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-3 py-1.5 text-[10px] font-semibold text-lime-200">{preview.suggestions.length} campi proposti</span></div>}
       </div>
 
       <div className="relative mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_235px]">
