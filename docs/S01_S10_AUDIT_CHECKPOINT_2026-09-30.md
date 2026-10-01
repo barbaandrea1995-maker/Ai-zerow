@@ -71,3 +71,17 @@ Readback successivo al checkpoint iniziale, `2026-09-30`: il tenant EMS in D1
 provisioning production dell'owner-mediated bridge descritto nei checkpoint
 Auth; non promuove Neon a control plane e non certifica ancora A/B production,
 revoca membership, capability insufficiente o cross-tenant `403`.
+
+## Addendum — v58 source/deployment alignment
+
+On `2026-10-01` the aligned source was republished as private Site version
+`58` from commit `2afcee33ff6d023f4db04e786312659fb5d8c9c2` with successful
+deployment `appgdep_6abddb5e2e7c81918579786367cba6bd`.
+
+- TypeScript, lint, build and `git diff --check`: PASS.
+- Runtime demo-identifier sweep in `app/`, `components/` and `lib/`: clean.
+- Post-deploy D1 readback: one real `OPERATIONS-47363CDE`; zero S05/S06/S07,
+  QR and access-profile rows; one EMS tenant; two active owner memberships.
+- Post-deploy worker error query: empty.
+- AUTH-AB remains an isolated identity boundary; no implicit Neon Auth
+  production cutover was performed and D1 remains canonical.
