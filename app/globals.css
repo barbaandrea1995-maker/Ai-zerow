@@ -648,6 +648,249 @@ select:focus-visible {
   }
 }
 
+/* Ultra command deck: a shared interaction and rhythm layer for every
+   authenticated module. It preserves the existing carbon/lime/cyan palette,
+   card vocabulary and data contracts while making the product feel like one
+   deliberate operating system instead of a set of adjacent screens. */
+:root {
+  --deck-sidebar-width: 248px;
+  --deck-topbar-height: 76px;
+  --deck-content-max: 1680px;
+  --deck-focus: rgba(216, 255, 82, 0.42);
+  --deck-hairline: rgba(216, 255, 82, 0.16);
+}
+
+html {
+  scroll-behavior: smooth;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+a,
+select,
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+/* Every full application shell is identified structurally, so the visual
+   system also reaches older module pages without rewriting their behavior. */
+main:has(> div > aside) {
+  isolation: isolate;
+  position: relative;
+  background:
+    radial-gradient(circle at 78% -4%, rgba(190, 255, 60, 0.075), transparent 27%),
+    radial-gradient(circle at 18% 78%, rgba(62, 222, 255, 0.035), transparent 26%),
+    #050607;
+}
+
+main:has(> div > aside)::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  opacity: 0.34;
+  background-image:
+    linear-gradient(rgba(182, 218, 198, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(182, 218, 198, 0.024) 1px, transparent 1px),
+    repeating-linear-gradient(135deg, rgba(190, 255, 60, 0.012) 0 1px, transparent 1px 13px);
+  background-size: 64px 64px, 64px 64px, 13px 13px;
+  mask-image: linear-gradient(to bottom, black 0%, black 54%, transparent 100%);
+}
+
+main:has(> div > aside) > div > aside {
+  width: var(--deck-sidebar-width);
+  border-right-color: rgba(216, 255, 82, 0.13);
+  background:
+    linear-gradient(180deg, rgba(11, 15, 13, 0.97), rgba(4, 6, 7, 0.98)),
+    #050607;
+  box-shadow: 18px 0 44px rgba(0, 0, 0, 0.18), inset -1px 0 0 rgba(255, 255, 255, 0.025);
+}
+
+main:has(> div > aside) > div > aside > div:first-child {
+  min-height: 2.75rem;
+}
+
+main:has(> div > aside) > div > section > header {
+  min-height: var(--deck-topbar-height);
+  height: var(--deck-topbar-height);
+  border-bottom-color: rgba(216, 255, 82, 0.12);
+  background:
+    linear-gradient(180deg, rgba(11, 15, 13, 0.9), rgba(5, 6, 7, 0.78)),
+    rgba(5, 6, 7, 0.84);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.025);
+}
+
+main:has(> div > aside) > div > section > header input[data-slot="input"] {
+  height: 2.75rem;
+  border-color: rgba(210, 231, 222, 0.14);
+  background: rgba(0, 0, 0, 0.32);
+}
+
+main:has(> div > aside) > div > section > div.mx-auto {
+  width: min(100%, var(--deck-content-max));
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+main:has(> div > aside) nav button {
+  min-height: 2.75rem;
+  border-radius: 0.8rem;
+  letter-spacing: 0.005em;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+main:has(> div > aside) nav button:hover {
+  border-color: rgba(216, 255, 82, 0.12);
+  transform: translateX(2px);
+}
+
+main:has(> div > aside) nav button[aria-current="page"] {
+  position: relative;
+  box-shadow: inset 3px 0 0 rgba(216, 255, 82, 0.8), inset 0 0 24px rgba(190, 255, 60, 0.04);
+}
+
+main:has(> div > aside) nav button[aria-current="page"]::after {
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-left: auto;
+  border-radius: 999px;
+  background: #d8ff52;
+  box-shadow: 0 0 12px rgba(216, 255, 82, 0.8);
+  content: "";
+}
+
+main:has(> div > aside) .carbon-card,
+main:has(> div > aside) .carbon-card-neon {
+  isolation: isolate;
+  transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+}
+
+main:has(> div > aside) .carbon-card::before,
+main:has(> div > aside) .carbon-card-neon::before {
+  position: absolute;
+  top: 0;
+  right: 1rem;
+  left: 1rem;
+  height: 1px;
+  pointer-events: none;
+  content: "";
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--deck-hairline), transparent);
+  transition: opacity 220ms ease;
+}
+
+main:has(> div > aside) .carbon-card:hover,
+main:has(> div > aside) .carbon-card-neon:hover {
+  border-color: rgba(216, 255, 82, 0.24) !important;
+  transform: translateY(-2px);
+}
+
+main:has(> div > aside) .carbon-card:hover::before,
+main:has(> div > aside) .carbon-card-neon:hover::before {
+  opacity: 1;
+}
+
+main:has(> div > aside) .carbon-inset {
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+main:has(> div > aside) .carbon-inset:hover {
+  border-color: rgba(216, 255, 82, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055), inset 0 -12px 24px rgba(0, 0, 0, 0.28), 0 0 20px rgba(190, 255, 60, 0.035);
+}
+
+main:has(> div > aside) button[data-slot="button"] {
+  min-height: 2.5rem;
+  border-radius: 0.75rem;
+  letter-spacing: -0.005em;
+}
+
+main:has(> div > aside) input[data-slot="input"],
+main:has(> div > aside) textarea,
+main:has(> div > aside) select {
+  min-height: 2.75rem;
+  border-radius: 0.75rem;
+}
+
+main:has(> div > aside) .text-\[10px\] {
+  font-size: 0.75rem;
+  line-height: 1.1rem;
+}
+
+main:has(> div > aside) .text-\[11px\] {
+  font-size: 0.8125rem;
+  line-height: 1.2rem;
+}
+
+main:has(> div > aside) .text-\[9px\] {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+}
+
+main:has(> div > aside) footer {
+  min-height: 3.5rem;
+  color: rgba(210, 230, 220, 0.48);
+}
+
+@media (max-width: 1023px) {
+  main:has(> div > aside) > div > section > div.mx-auto {
+    padding-top: 1.5rem;
+    padding-bottom: 2rem;
+  }
+}
+
+@media (max-width: 640px) {
+  main:has(> div > aside) > div > section > header {
+    min-height: 68px;
+    height: 68px;
+  }
+
+  main:has(> div > aside) > div > section > div.mx-auto {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  main:has(> div > aside) .text-\[10px\] {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
+
+  main:has(> div > aside) .text-\[11px\] {
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  main:has(> div > aside) nav button,
+  main:has(> div > aside) .carbon-card,
+  main:has(> div > aside) .carbon-card-neon,
+  main:has(> div > aside) .carbon-inset {
+    transition: none;
+  }
+
+  main:has(> div > aside) .carbon-card:hover,
+  main:has(> div > aside) .carbon-card-neon:hover,
+  main:has(> div > aside) nav button:hover {
+    transform: none;
+  }
+}
+
 ::selection {
   background: #d2ff4d;
   color: #080a0c;
