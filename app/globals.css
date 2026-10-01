@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
@@ -75,8 +76,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-sans: "Space Grotesk", "Avenir Next", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 * {
@@ -95,7 +96,9 @@ body {
     linear-gradient(115deg, #040506 0%, #0a0d0e 48%, #030405 100%);
   background-attachment: fixed;
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-optical-sizing: auto;
+  font-feature-settings: "ss01" 1, "cv02" 1;
 }
 
 /* Shared Command shell: keep the sidebar fixed while its navigation scrolls internally. */
@@ -145,11 +148,12 @@ aside > nav::-webkit-scrollbar-thumb {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 24%),
     repeating-linear-gradient(125deg, rgba(209, 229, 220, 0.018) 0 1px, transparent 1px 8px),
-    linear-gradient(145deg, #101414 0%, #090c0d 52%, #040506 100%) !important;
+    linear-gradient(145deg, #121817 0%, #090d0e 52%, #030405 100%) !important;
   box-shadow:
     inset 0 1px 0 rgba(229, 255, 241, 0.06),
     inset 0 -18px 38px rgba(0, 0, 0, 0.4),
-    0 18px 50px rgba(0, 0, 0, 0.36);
+    0 20px 54px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.012);
 }
 
 .carbon-card::after {
@@ -194,7 +198,8 @@ aside > nav::-webkit-scrollbar-thumb {
     inset 0 1px 0 rgba(216, 255, 82, 0.18),
     inset 0 -20px 40px rgba(0, 0, 0, 0.2),
     0 0 42px rgba(216, 255, 82, 0.08),
-    0 18px 50px rgba(0, 0, 0, 0.45);
+    0 20px 54px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(216, 255, 82, 0.055);
 }
 
 .carbon-card-cyan {
@@ -247,6 +252,12 @@ aside > nav::-webkit-scrollbar-thumb {
 button,
 input {
   font: inherit;
+}
+
+button[data-slot="button"] {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 button {
@@ -653,11 +664,12 @@ select:focus-visible {
    card vocabulary and data contracts while making the product feel like one
    deliberate operating system instead of a set of adjacent screens. */
 :root {
-  --deck-sidebar-width: 248px;
-  --deck-topbar-height: 76px;
+  --deck-sidebar-width: 264px;
+  --deck-topbar-height: 80px;
   --deck-content-max: 1680px;
   --deck-focus: rgba(216, 255, 82, 0.42);
   --deck-hairline: rgba(216, 255, 82, 0.16);
+  --deck-carbon-line: rgba(205, 230, 217, 0.026);
 }
 
 html {
@@ -689,7 +701,8 @@ main:has(> div > aside) {
   position: relative;
   background:
     radial-gradient(circle at 78% -4%, rgba(190, 255, 60, 0.075), transparent 27%),
-    radial-gradient(circle at 18% 78%, rgba(62, 222, 255, 0.035), transparent 26%),
+    radial-gradient(circle at 18% 78%, rgba(62, 222, 255, 0.045), transparent 26%),
+    repeating-linear-gradient(132deg, rgba(205, 230, 217, 0.012) 0 1px, transparent 1px 12px),
     #050607;
 }
 
@@ -717,8 +730,54 @@ main:has(> div > aside) > div > aside {
   box-shadow: 18px 0 44px rgba(0, 0, 0, 0.18), inset -1px 0 0 rgba(255, 255, 255, 0.025);
 }
 
+main:has(> div > aside) > div > aside::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.8;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(190, 255, 60, 0.1), transparent 28%),
+    repeating-linear-gradient(135deg, var(--deck-carbon-line) 0 1px, transparent 1px 9px);
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+main:has(> div > aside) > div > aside::after {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 1px;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(to bottom, transparent, rgba(216, 255, 82, 0.42), transparent);
+  opacity: 0.5;
+}
+
 main:has(> div > aside) > div > aside > div:first-child {
   min-height: 2.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.45rem 0.4rem 0.8rem;
+  border-bottom: 1px solid rgba(216, 255, 82, 0.1);
+}
+
+main:has(> div > aside) > div > aside > div:first-child button:first-child > span:first-child {
+  border-color: rgba(216, 255, 82, 0.58);
+  background:
+    linear-gradient(145deg, rgba(216, 255, 82, 0.2), rgba(0, 0, 0, 0.62)),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 6px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 26px rgba(190, 255, 60, 0.15);
+}
+
+main:has(> div > aside) > div > aside > button {
+  border-color: rgba(216, 255, 82, 0.18) !important;
+  background:
+    linear-gradient(145deg, rgba(216, 255, 82, 0.075), rgba(0, 0, 0, 0.24)),
+    repeating-linear-gradient(135deg, rgba(205, 230, 217, 0.018) 0 1px, transparent 1px 8px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+main:has(> div > aside) > div > aside > button:hover {
+  border-color: rgba(216, 255, 82, 0.38) !important;
+  box-shadow: inset 0 1px 0 rgba(216, 255, 82, 0.12), 0 0 26px rgba(190, 255, 60, 0.08);
 }
 
 main:has(> div > aside) > div > section > header {
@@ -729,6 +788,17 @@ main:has(> div > aside) > div > section > header {
     linear-gradient(180deg, rgba(11, 15, 13, 0.9), rgba(5, 6, 7, 0.78)),
     rgba(5, 6, 7, 0.84);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.025);
+}
+
+main:has(> div > aside) > div > section > header::after {
+  position: absolute;
+  right: 1.75rem;
+  bottom: 0;
+  left: 1.75rem;
+  height: 1px;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(216, 255, 82, 0.22), rgba(62, 222, 255, 0.12), transparent);
 }
 
 main:has(> div > aside) > div > section > header input[data-slot="input"] {
@@ -758,6 +828,10 @@ main:has(> div > aside) nav button:hover {
 main:has(> div > aside) nav button[aria-current="page"] {
   position: relative;
   box-shadow: inset 3px 0 0 rgba(216, 255, 82, 0.8), inset 0 0 24px rgba(190, 255, 60, 0.04);
+}
+
+main:has(> div > aside) nav button[aria-current="page"] span {
+  text-shadow: 0 0 18px rgba(190, 255, 60, 0.16);
 }
 
 main:has(> div > aside) nav button[aria-current="page"]::after {
@@ -811,9 +885,26 @@ main:has(> div > aside) .carbon-inset:hover {
 }
 
 main:has(> div > aside) button[data-slot="button"] {
-  min-height: 2.5rem;
-  border-radius: 0.75rem;
+  min-height: 2.75rem;
+  border-radius: 0.875rem;
   letter-spacing: -0.005em;
+}
+
+main:has(> div > aside) h1,
+main:has(> div > aside) h2,
+main:has(> div > aside) h3 {
+  text-shadow: 0 0 24px rgba(190, 255, 60, 0.045);
+}
+
+main:has(> div > aside) h1 {
+  color: #efffc0;
+  letter-spacing: -0.045em;
+  text-shadow: 0 0 30px rgba(190, 255, 60, 0.1);
+}
+
+main:has(> div > aside) .carbon-card-neon h2,
+main:has(> div > aside) .carbon-card-neon h3 {
+  color: #efffc0;
 }
 
 main:has(> div > aside) input[data-slot="input"],
