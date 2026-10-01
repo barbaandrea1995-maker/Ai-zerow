@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { FormEvent, useEffect, useState } from "react";
 
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
@@ -151,73 +152,112 @@ export default function LoginClient({
     }
   }
 
+  const title = activeMode === "signIn"
+    ? "Rientra nel controllo operativo"
+    : activeMode === "signUp"
+      ? "Crea il tuo accesso"
+      : activeMode === "forgotPassword"
+        ? "Recupera l’accesso"
+        : "Imposta una nuova password";
+
   return (
-    <main className="grid min-h-screen place-items-center bg-[#040505] px-5 py-10 text-slate-100">
-      <section className="w-full max-w-md rounded-2xl border border-lime-300/20 bg-black/30 p-6 shadow-[0_0_40px_rgba(190,255,60,0.06)] sm:p-8">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / PWA AUTH</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-50">{activeMode === "signIn" ? "Accedi al command center" : activeMode === "signUp" ? "Crea accesso Neon" : activeMode === "forgotPassword" ? "Recupera accesso" : "Imposta nuova password"}</h1>
-        <p className="mt-2 text-sm leading-6 text-slate-500">Neon Auth gestisce la sessione. Tenant, ruolo e capability vengono verificati dal server tramite Cloudflare D1.</p>
-
-        {initialState === "authenticated" && actor ? (
-          <div className="mt-6 space-y-4">
-            <div className="rounded-xl border border-lime-300/15 bg-lime-300/5 p-4 text-sm">
-              <p className="text-lime-100">Sessione attiva</p>
-              <p className="mt-1 text-slate-400">{actor.name || actor.email}</p>
-              <p className="mt-1 text-xs text-slate-600">{actor.email}</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <a className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-[#060806] hover:bg-lime-200" href="/command">Apri command</a>
-              <button className="rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-300 hover:border-lime-300/40 hover:text-lime-100 disabled:opacity-50" disabled={busy} onClick={() => void signOut()} type="button">Esci</button>
+    <main className="login-surface min-h-screen px-5 py-8 text-slate-100 sm:px-8 lg:px-12">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(390px,0.72fr)] lg:gap-16">
+        <section className="login-rail hidden lg:block" aria-labelledby="login-rail-title">
+          <div className="flex items-center gap-4">
+            <span className="neon-pulse grid size-14 place-items-center overflow-hidden rounded-2xl border border-lime-300/45 bg-black shadow-[0_0_30px_rgba(190,255,60,0.12)]">
+              <Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={56} height={56} className="size-full object-cover" />
+            </span>
+            <div>
+              <p className="text-sm font-bold tracking-[0.22em] text-slate-50">AI-ZEROW</p>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">command / identity plane</p>
             </div>
           </div>
-        ) : initialState === "not_configured" ? (
-          <p className="mt-6 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-100">Neon Auth non è configurato per questo ambiente.</p>
-        ) : initialState === "error" ? (
-          <p className="mt-6 rounded-xl border border-rose-300/20 bg-rose-300/5 p-4 text-sm text-rose-100">Servizio Auth temporaneamente non disponibile.</p>
-        ) : (
-          <form className="mt-6 grid gap-4" onSubmit={(event) => void (activeMode === "signIn" ? signIn(event) : activeMode === "signUp" ? signUp(event) : activeMode === "forgotPassword" ? requestPasswordReset(event) : resetPassword(event))}>
-            {activeMode === "signUp" ? (
-              <label className="grid gap-2 text-sm text-slate-400">
-                Nome
-                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="name" onChange={(event) => setName(event.target.value)} required type="text" value={name} />
-              </label>
-            ) : null}
-            {activeMode !== "resetPassword" ? (
-              <label className="grid gap-2 text-sm text-slate-400">
-                Email
-                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
-              </label>
-            ) : null}
-            {activeMode !== "forgotPassword" ? (
-              <label className="grid gap-2 text-sm text-slate-400">
-                {activeMode === "resetPassword" ? "Nuova password" : "Password"}
-                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete={activeMode === "resetPassword" ? "new-password" : "current-password"} minLength={8} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
-              </label>
-            ) : null}
-            {activeMode === "resetPassword" ? (
-              <label className="grid gap-2 text-sm text-slate-400">
-                Conferma password
-                <input className="rounded-lg border border-white/10 bg-black/25 px-3 py-2.5 text-base text-slate-100 outline-none focus:border-lime-300/50" autoComplete="new-password" minLength={8} onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
-              </label>
-            ) : null}
-            <button className="mt-2 rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200 disabled:cursor-wait disabled:opacity-50" disabled={busy} type="submit">{busy ? "Attendi…" : activeMode === "signIn" ? "Accedi" : activeMode === "signUp" ? "Crea account" : activeMode === "forgotPassword" ? "Invia link" : "Imposta password"}</button>
-          </form>
-        )}
-
-        {initialState !== "authenticated" && initialState !== "not_configured" && activeMode !== "resetPassword" && (
-          <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-xs">
-            {activeMode === "signIn" ? (
-              <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode("forgotPassword"); setMessage(null); }} type="button">Password dimenticata?</button>
-            ) : null}
-            <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode(mode === "signIn" || mode === "forgotPassword" ? "signUp" : "signIn"); setMessage(null); }} type="button">
-              {mode === "signIn" || mode === "forgotPassword" ? "Non hai ancora un accesso Neon? Crealo" : "Hai già un accesso? Accedi"}
-            </button>
+          <p className="mt-16 text-[11px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">PWA AUTH · OWNER CONTEXT</p>
+          <h2 id="login-rail-title" className="mt-4 max-w-xl text-5xl font-semibold leading-[1.02] tracking-[-0.06em] text-slate-50 xl:text-6xl">Una sola soglia per ogni decisione operativa.</h2>
+          <p className="mt-6 max-w-lg text-base leading-7 text-slate-400">Accedi al command center e ritrova lavori, asset e persone nello stesso perimetro governato. L’identità arriva da Neon Auth; tenant, ruolo e capability vengono verificati server-side.</p>
+          <div className="mt-10 grid max-w-lg grid-cols-3 gap-3">
+            {[
+              ["D1", "readback verificato"],
+              ["AUTHORITY", "scope server-side"],
+              ["NO FAKE DATA", "stato dichiarato"],
+            ].map(([label, detail]) => <div className="carbon-inset rounded-xl p-3" key={label}><p className="font-mono text-xs font-semibold text-lime-200">{label}</p><p className="mt-2 text-[11px] leading-4 text-slate-500">{detail}</p></div>)}
           </div>
-        )}
+        </section>
 
-        {message ? <p className="mt-5 rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-xs text-rose-100">{message}</p> : null}
-        <p className="mt-8 text-xs leading-5 text-slate-600">Dopo il login l’accesso ai tenant viene deciso esclusivamente dalla membership D1.</p>
-      </section>
+        <section className="login-card carbon-card w-full rounded-2xl border border-lime-300/20 p-6 shadow-[0_0_52px_rgba(190,255,60,0.08)] sm:p-8" aria-labelledby="login-title">
+          <div className="flex items-center gap-3 lg:hidden">
+            <span className="neon-pulse grid size-11 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={44} height={44} className="size-full object-cover" /></span>
+            <div><p className="text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</p><p className="text-[10px] uppercase tracking-[0.2em] text-lime-300/70">command / auth</p></div>
+          </div>
+          <p className="mt-7 text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70 lg:mt-0">AI-ZEROW / PWA AUTH</p>
+          <h1 id="login-title" className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-50">{title}</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Neon Auth gestisce la sessione. Tenant, ruolo e capability vengono verificati dal server tramite Cloudflare D1.</p>
+
+          {initialState === "authenticated" && actor ? (
+            <div className="mt-7 space-y-4">
+              <div className="rounded-xl border border-lime-300/15 bg-lime-300/5 p-4 text-sm" role="status">
+                <p className="text-lime-100">Sessione attiva</p>
+                <p className="mt-1 text-slate-300">{actor.name || actor.email}</p>
+                <p className="mt-1 text-xs text-slate-500">{actor.email}</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <a className="rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200" href="/command">Apri command</a>
+                <button className="rounded-lg border border-white/15 px-4 py-2.5 text-sm text-slate-300 hover:border-lime-300/40 hover:text-lime-100 disabled:opacity-50" disabled={busy} onClick={() => void signOut()} type="button">Esci</button>
+              </div>
+            </div>
+          ) : initialState === "not_configured" ? (
+            <p className="mt-7 rounded-xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm leading-6 text-amber-100" role="alert">Neon Auth non è configurato per questo ambiente.</p>
+          ) : initialState === "error" ? (
+            <p className="mt-7 rounded-xl border border-rose-300/20 bg-rose-300/5 p-4 text-sm leading-6 text-rose-100" role="alert">Servizio Auth temporaneamente non disponibile.</p>
+          ) : (
+            <form className="mt-7 grid gap-4" onSubmit={(event) => void (activeMode === "signIn" ? signIn(event) : activeMode === "signUp" ? signUp(event) : activeMode === "forgotPassword" ? requestPasswordReset(event) : resetPassword(event))}>
+              {activeMode === "signUp" ? (
+                <label className="grid gap-2 text-sm text-slate-300" htmlFor="auth-name">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Nome</span>
+                  <input id="auth-name" className="rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-base text-slate-100 outline-none transition focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" autoComplete="name" onChange={(event) => setName(event.target.value)} required type="text" value={name} />
+                </label>
+              ) : null}
+              {activeMode !== "resetPassword" ? (
+                <label className="grid gap-2 text-sm text-slate-300" htmlFor="auth-email">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Email</span>
+                  <input id="auth-email" className="rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-base text-slate-100 outline-none transition focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
+                </label>
+              ) : null}
+              {activeMode !== "forgotPassword" ? (
+                <label className="grid gap-2 text-sm text-slate-300" htmlFor="auth-password">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{activeMode === "resetPassword" ? "Nuova password" : "Password"}</span>
+                  <input id="auth-password" className="rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-base text-slate-100 outline-none transition focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" autoComplete={activeMode === "resetPassword" ? "new-password" : "current-password"} minLength={8} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+                </label>
+              ) : null}
+              {activeMode === "resetPassword" ? (
+                <label className="grid gap-2 text-sm text-slate-300" htmlFor="auth-confirm-password">
+                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Conferma password</span>
+                  <input id="auth-confirm-password" className="rounded-lg border border-white/10 bg-black/25 px-3 py-3 text-base text-slate-100 outline-none transition focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" autoComplete="new-password" minLength={8} onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
+                </label>
+              ) : null}
+              <button className="mt-2 rounded-lg bg-lime-300 px-4 py-3 text-sm font-semibold text-[#060806] transition hover:bg-lime-200 disabled:cursor-wait disabled:opacity-50" disabled={busy} type="submit">{busy ? "Attendi…" : activeMode === "signIn" ? "Accedi" : activeMode === "signUp" ? "Crea account" : activeMode === "forgotPassword" ? "Invia link" : "Imposta password"}</button>
+            </form>
+          )}
+
+          {initialState !== "authenticated" && initialState !== "not_configured" && activeMode !== "resetPassword" && (
+            <div className="mt-6 flex flex-wrap gap-x-4 gap-y-3 text-sm">
+              {activeMode === "signIn" ? (
+                <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode("forgotPassword"); setMessage(null); }} type="button">Password dimenticata?</button>
+              ) : null}
+              <button className="text-lime-200 underline decoration-lime-300/30 underline-offset-4" onClick={() => { setMode(mode === "signIn" || mode === "forgotPassword" ? "signUp" : "signIn"); setMessage(null); }} type="button">
+                {mode === "signIn" || mode === "forgotPassword" ? "Non hai ancora un accesso? Crealo" : "Hai già un accesso? Accedi"}
+              </button>
+            </div>
+          )}
+
+          {message ? <p className="mt-5 rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-3 text-sm leading-5 text-rose-100" role="alert" aria-live="polite">{message}</p> : null}
+          <div className="mt-8 border-t border-white/10 pt-4">
+            <p className="text-xs leading-5 text-slate-500">Dopo il login l’accesso ai tenant viene deciso esclusivamente dalla membership D1.</p>
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-slate-700">session boundary · server owned</p>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
