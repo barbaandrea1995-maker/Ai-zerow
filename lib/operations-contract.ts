@@ -35,6 +35,16 @@ export type JobEvidence = {
   createdBy: string;
 };
 
+export type JobWorkItem = {
+  id: string;
+  label: string;
+  detail: string;
+  quantity: string;
+  unit: string;
+  confidence: number;
+  source: string;
+};
+
 export type JobAssignment = {
   responsible: string;
   team: string;
@@ -53,6 +63,7 @@ export type JobPayload = {
   dueDate: string;
   statusCode: JobStatusCode;
   version: number;
+  workItems: JobWorkItem[];
   progress?: number;
   activities: JobActivity[];
   evidence: JobEvidence[];
@@ -141,6 +152,22 @@ function activityFromUnknown(value: unknown, index: number): JobActivity | null 
   };
 }
 
+function workItemFromUnknown(value: unknown, index: number): JobWorkItem | null {
+  if (!isRecord(value)) return null;
+  const label = text(value.label, text(value.detail));
+  if (!label) return null;
+  const confidenceValue = typeof value.confidence === "number" ? value.confidence : Number(value.confidence);
+  return {
+    id: text(value.id, `work-${index + 1}`).slice(0, 80),
+    label: label.slice(0, 180),
+    detail: text(value.detail, label).slice(0, 520),
+    quantity: text(value.quantity).slice(0, 40),
+    unit: text(value.unit).slice(0, 24),
+    confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0.7,
+    source: text(value.source, "commessa-intake").slice(0, 120),
+  };
+}
+
 export function normalizeJobStatus(value: unknown): JobStatusCode {
   const key = text(value, "PLANNED").toUpperCase().replace(/[-\s]+/g, "_");
   return STATUS_ALIASES[key] ?? "PLANNED";
@@ -194,6 +221,9 @@ export function parseJobPayload(payloadJson: string): JobPayload {
   const activities = Array.isArray(parsed.activities)
     ? parsed.activities.map(activityFromUnknown).filter((item): item is JobActivity => Boolean(item))
     : [];
+  const workItems = Array.isArray(parsed.workItems)
+    ? parsed.workItems.map(workItemFromUnknown).filter((item): item is JobWorkItem => Boolean(item)).slice(0, 24)
+    : [];
   const evidence = Array.isArray(parsed.evidence)
     ? parsed.evidence.filter(isRecord).map((item, index) => {
       const kind: JobEvidence["kind"] = item.kind === "photo" || item.kind === "file" || item.kind === "voice" ? item.kind : "note";
@@ -229,6 +259,7 @@ export function parseJobPayload(payloadJson: string): JobPayload {
     dueDate: text(parsed.dueDate, text(parsed.due, "—")),
     statusCode: normalizeJobStatus(parsed.statusCode ?? parsed.status),
     version: Math.max(1, Math.floor(Number(parsed.version) || 1)),
+    workItems,
     activities,
     evidence,
     assignment,

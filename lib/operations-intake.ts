@@ -1,8 +1,10 @@
-import type { JobStatusCode } from "@/lib/operations-contract";
+import type { JobStatusCode, JobWorkItem } from "@/lib/operations-contract";
 import type { CompanyAiKnowledgeHint, CompanyAiKnowledgePackSummary } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, type CompanyAiScopeSuggestion, type CommessaType } from "@/lib/company-ai-scope";
 
 export type IntakeMode = "MANUAL" | "COMPANY_AI";
+
+export type IntakeWorkItem = JobWorkItem;
 
 export type IntakeDraft = {
   title: string;
@@ -12,6 +14,7 @@ export type IntakeDraft = {
   scopeGroupId: string;
   scopeSubgroupId: string;
   description: string;
+  workItems: IntakeWorkItem[];
   clientName: string;
   clientTaxId: string;
   clientContact: string;
@@ -49,6 +52,7 @@ export type IntakePreview = {
   draft: Partial<IntakeDraft>;
   suggestions: IntakeSuggestion[];
   sourceName?: string;
+  workItems?: IntakeWorkItem[];
   knowledgePack?: CompanyAiKnowledgePackSummary;
   knowledgeHints?: CompanyAiKnowledgeHint[];
   scopeSuggestion?: CompanyAiScopeSuggestion;
@@ -78,6 +82,7 @@ export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
   scopeGroupId: "",
   scopeSubgroupId: "",
   description: "",
+  workItems: [],
   clientName: "",
   clientTaxId: "",
   clientContact: "",
@@ -103,6 +108,7 @@ export const INTAKE_FIELD_LABELS: Record<keyof IntakeDraft, string> = {
   scopeGroupId: "Raggruppamento",
   scopeSubgroupId: "Sottogruppo",
   description: "Descrizione",
+  workItems: "Lavorazioni rilevate",
   clientName: "Cliente / ragione sociale",
   clientTaxId: "P. IVA / codice fiscale",
   clientContact: "Referente cliente",

@@ -16,9 +16,10 @@ import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-nam
 import {
   jobStatusLabel,
   normalizeJobStatus,
+  type JobWorkItem,
   type JobPayload,
 } from "@/lib/operations-contract";
-import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
+import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledge, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,37 @@ function validPriority(value: unknown): JobPayload["priority"] {
 
 function boundedText(value: unknown, max: number, fallback = "") {
   return safeText(value, fallback).slice(0, max);
+}
+
+function normalizeWorkItems(value: unknown): JobWorkItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const label = boundedText(item.label ?? item.detail, 180);
+    if (label.length < 2) return [];
+    const confidenceValue = typeof item.confidence === "number" ? item.confidence : Number(item.confidence);
+    return [{
+      id: boundedText(item.id, 80, `work-${index + 1}`),
+      label,
+      detail: boundedText(item.detail, 520, label),
+      quantity: boundedText(item.quantity, 40),
+      unit: boundedText(item.unit, 24),
+      confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0.7,
+      source: boundedText(item.source, 120, "commessa-intake"),
+    } satisfies JobWorkItem];
+  }).slice(0, 24);
+}
+
+function knowledgeContextForScope(scopeSelection: NonNullable<ReturnType<typeof resolveCompanyAiScopeSelection>>, workItems: JobWorkItem[]) {
+  const byId = new Map<string, ReturnType<typeof searchCompanyAiKnowledge>[number]>();
+  for (const entry of searchCompanyAiKnowledgeForScope(scopeSelection, 5)) byId.set(entry.id, entry);
+  for (const item of workItems.slice(0, 12)) {
+    for (const entry of searchCompanyAiKnowledge(item.detail, { part: scopeSelection.knowledgePart, limit: 3 })) {
+      const current = byId.get(entry.id);
+      if (!current || entry.score > current.score) byId.set(entry.id, entry);
+    }
+  }
+  return [...byId.values()].sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)).slice(0, 8);
 }
 
 function operationEnvelope(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, rows: S04Record[]) {
@@ -135,6 +167,7 @@ export async function POST(request: Request) {
   const cup = boundedText(input.cup, 80);
   const tone = validTone(input.tone);
   const requestedIdempotencyKey = boundedText(input.idempotencyKey, 160);
+  const workItems = normalizeWorkItems(input.workItems);
 
   if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
   if (!COMMESSA_TYPES.some((option) => option.value === openingType)) return Response.json({ error: "invalid_commessa_type", allowed: COMMESSA_TYPES.map((option) => option.value) }, { status: 400 });
@@ -194,7 +227,7 @@ export async function POST(request: Request) {
     const scopeEventId = crypto.randomUUID();
     const scopeIdempotencyKey = `company-ai-scope:create:${idempotencyKey}`.slice(0, 160);
     const knowledgePack = getCompanyAiKnowledgePackSummary();
-    const knowledgeContext = searchCompanyAiKnowledgeForScope(scopeSelection, 8);
+    const knowledgeContext = knowledgeContextForScope(scopeSelection, workItems);
     const payload: JobPayload = {
       title,
       description,
@@ -218,6 +251,7 @@ export async function POST(request: Request) {
       priority,
       dueDate,
       statusCode,
+      workItems,
       sourceMode,
       aiPreviewId: aiPreviewId || null,
       scopeLevel: scopeSelection.level,
@@ -245,6 +279,7 @@ export async function POST(request: Request) {
       statusCode,
       sourceMode,
       scope: { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId },
+      workItemCount: workItems.length,
       version: 1,
       source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
     });
@@ -320,7 +355,7 @@ export async function POST(request: Request) {
         scopeSectionId: scopeSelection.sectionId,
         scopeGroupId: scopeSelection.groupId,
         scopeSubgroupId: scopeSelection.subgroupId,
-        scopeText: description,
+        scopeText: [description, ...workItems.map((item) => item.detail)].filter(Boolean).join("\n").slice(0, 12_000),
         knowledgeEntryIdsJson: JSON.stringify(knowledgeContext.map((entry) => entry.id)),
         assumptionsJson: "[]",
         exclusionsJson: "[]",

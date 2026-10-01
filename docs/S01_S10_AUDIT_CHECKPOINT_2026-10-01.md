@@ -35,6 +35,8 @@ Il caso del preventivo EMS viene ora proposto come:
 
 con confidence locale alta e segnali leggibili nella preview. Il test del resolver sul testo della perdita idrica restituisce `E-IDRICO-ADDUZIONE`.
 
+L’intake DOCX ora legge anche le tabelle Word e conserva le voci sotto `LAVORAZIONI COMPRESE` come `workItems` distinti (quantità/unità quando esplicite). Le voci vengono mostrate in preview, persistite nel payload della commessa e usate per ampliare la ricerca del knowledge pack; la descrizione resta una sintesi e non una copia del preventivo.
+
 ## Confini non dichiarati chiusi
 
 - Il command/tool gateway, OCR/storage esterno, canonical domain services, event consumer/DLQ e native mobile restano adapter esterni espliciti.

@@ -17,6 +17,7 @@ import {
   type IntakeDraft,
   type IntakeMode,
   type IntakeSuggestion,
+  type IntakeWorkItem,
 } from "@/lib/operations-intake";
 import { inferCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiScopeSuggestion } from "@/lib/company-ai-scope";
 
@@ -52,8 +53,19 @@ function escapeRegex(value: string) {
 
 function labeledValue(source: string, labels: string[]) {
   for (const label of labels) {
-    const match = source.match(new RegExp(`(?:^|\\n)\\s*${escapeRegex(label)}\\s*[:\\-]\\s*(.+)`, "im"));
+    const match = source.match(new RegExp(`(?:^|\\n)\\s*${escapeRegex(label)}\\s*[:\\-]\\s*(.*)`, "im"));
     if (match?.[1]?.trim()) return match[1].trim();
+    const lines = source.split(/\r?\n/).map((line) => line.trim());
+    const labelExpression = new RegExp(`^${escapeRegex(label)}\\s*[:\\-]\\s*$`, "i");
+    const labelIndex = lines.findIndex((line) => labelExpression.test(line));
+    if (labelIndex >= 0) {
+      for (let nextIndex = labelIndex + 1; nextIndex < lines.length; nextIndex += 1) {
+        const nextLine = lines[nextIndex];
+        if (!nextLine) continue;
+        if (isKnownFieldLine(nextLine) || isWorkSectionEnd(nextLine)) break;
+        return nextLine;
+      }
+    }
   }
   return "";
 }
@@ -96,6 +108,138 @@ function compactText(value: string, max = 900) {
   return value.replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").trim().slice(0, max);
 }
 
+function workItemLabel(value: string) {
+  const compact = compactText(value, 520);
+  const firstClause = compact.split(/\s+[;,]\s+/)[0]?.trim() || compact;
+  return firstClause.slice(0, 180);
+}
+
+function quantityAndUnit(value: string) {
+  const match = value.match(/\b(\d+(?:[.,]\d+)?)\s*(m²|m2|mq|ml|cm|mm|kg|g|l|lt|h|ore|giorni?|gg|cad|pz|corpo)\b/i);
+  return {
+    quantity: match?.[1] ?? "",
+    unit: match?.[2]?.toLowerCase() ?? "",
+  };
+}
+
+function makeWorkItem(value: string, index: number, source: string, confidence: number): IntakeWorkItem | null {
+  const detail = compactText(value, 520).replace(/^[-•·▪◦]+\s*/, "");
+  if (detail.length < 8) return null;
+  const { quantity, unit } = quantityAndUnit(detail);
+  return {
+    id: `work-${index + 1}`,
+    label: workItemLabel(detail),
+    detail,
+    quantity,
+    unit,
+    confidence,
+    source,
+  };
+}
+
+function isWorkSectionStart(line: string) {
+  return /^(?:lavorazioni|prestazioni|opere|attività|attivita)(?:\s+comprese|\s+previste|\s+da eseguire)?\s*:?$/i.test(line);
+}
+
+function isWorkSectionEnd(line: string) {
+  return /^(?:importo|prezzo|totale|imponibile|iva|note|condizioni|pagamento|validità|validita|firma)\b/i.test(line);
+}
+
+function isListMarker(line: string) {
+  return /^[-•·▪◦]\s*/.test(line);
+}
+
+function extractWorkItems(source: string, excluded: string[] = []) {
+  const lines = source
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const excludedSet = new Set(excluded.map((value) => compactText(value, 900).toLocaleLowerCase("it-IT")).filter(Boolean));
+  const rawItems: string[] = [];
+  let current: string[] = [];
+  let inWorkSection = false;
+  let sawListMarker = false;
+
+  const flush = () => {
+    const value = compactText(current.join(" "), 520);
+    if (value.length >= 8) rawItems.push(value);
+    current = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/^\s+|\s+$/g, "");
+    if (isWorkSectionStart(line)) {
+      flush();
+      inWorkSection = true;
+      sawListMarker = false;
+      continue;
+    }
+    if (inWorkSection && isWorkSectionEnd(line)) {
+      flush();
+      inWorkSection = false;
+      continue;
+    }
+
+    const marker = line.match(/^[-•·▪◦]\s*(.*)$/);
+    if (marker) {
+      sawListMarker = true;
+      flush();
+      if (marker[1]?.trim()) {
+        current.push(marker[1].trim());
+        if (/[;.]$/.test(marker[1].trim())) flush();
+      }
+      continue;
+    }
+    if (!inWorkSection || !sawListMarker) continue;
+
+    current.push(line);
+    if (/[;.]$/.test(line)) flush();
+  }
+  flush();
+
+  if (!rawItems.length) {
+    for (const line of lines) {
+      if (!isListMarker(line)) continue;
+      const value = line.replace(/^[-•·▪◦]\s*/, "").trim();
+      if (value) rawItems.push(value);
+    }
+  }
+
+  if (!rawItems.length) {
+    for (const line of lines) {
+      if (!line.includes("\t") && !/\s+\|\s+/.test(line)) continue;
+      const cells = line.split(/\t|\s+\|\s+/).map((cell) => compactText(cell, 260)).filter(Boolean);
+      const candidate = cells
+        .filter((cell) => !/^(?:voce|descrizione|lavorazione|quantità|quantita|unità|unita|prezzo|importo|totale)$/i.test(cell))
+        .filter((cell) => !/^[\d\s.,€%/:+()\-]+$/.test(cell))
+        .sort((left, right) => right.length - left.length)[0];
+      if (candidate) rawItems.push(candidate);
+    }
+  }
+
+  if (!rawItems.length) {
+    rawItems.push(...extractWorkLines(source, excluded));
+  }
+
+  const deduped: IntakeWorkItem[] = [];
+  const seen = new Set<string>();
+  rawItems.forEach((value) => {
+    const normalized = compactText(value, 520).toLocaleLowerCase("it-IT");
+    if (!normalized || excludedSet.has(normalized) || seen.has(normalized)) return;
+    if (isKnownFieldLine(value) || isWorkSectionEnd(value)) return;
+    if (/^(?:preventivo|offerta|cliente|committente|ragione sociale|p\.\s*iva|partita iva|codice fiscale|referente|telefono|tel\.?|e-?mail|mail|indirizzo|cantiere|luogo|sopralluogo|scadenza|consegna|fine lavori|cig|cup|totale|imponibile|iva|condizioni|pagamento|validità|validita|firma|data)\b/i.test(value)) return;
+    if (/^[\d\s.,€%/:+()\-]+$/.test(value)) return;
+    const item = makeWorkItem(value, deduped.length, "Preventivo · voce lavorazione", rawItems.length ? 0.9 : 0.72);
+    if (item) {
+      deduped.push(item);
+      seen.add(normalized);
+    }
+  });
+  return deduped.slice(0, 24);
+}
+
 function extractWorkLines(source: string, excluded: string[]) {
   const excludedSet = new Set(excluded.map((value) => compactText(value, 900).toLocaleLowerCase("it-IT")));
   return source.split(/\r?\n/)
@@ -105,24 +249,26 @@ function extractWorkLines(source: string, excluded: string[]) {
     .filter((line) => !isKnownFieldLine(line))
     .filter((line) => !/^(?:preventivo|offerta|cliente|committente|ragione sociale|p\.?\s*iva|partita iva|codice fiscale|referente|telefono|tel\.?|e-?mail|mail|indirizzo|cantiere|luogo|sopralluogo|scadenza|consegna|fine lavori|cig|cup|totale|imponibile|iva|condizioni|pagamento|validità|validita|firma|data)\b/i.test(line))
     .filter((line) => !/^[\d\s.,€%/:+()\-]+$/.test(line))
-    .slice(0, 4);
+    .slice(0, 24);
 }
 
 function buildStructuredDescription({
   title,
   rawDescription,
+  workItems,
   client,
   worksite,
   source,
 }: {
   title: string;
   rawDescription: string;
+  workItems: IntakeWorkItem[];
   client: string;
   worksite: string;
   source: string;
 }) {
   const workLines = extractWorkLines(source, [title, rawDescription, client, worksite]);
-  const workSummary = compactText(rawDescription || workLines.join("; "));
+  const workSummary = compactText(rawDescription || workItems.slice(0, 5).map((item) => item.label).join("; ") || workLines.slice(0, 5).join("; "), 900);
   const parts: string[] = [];
   if (workSummary) parts.push(`Lavorazioni rilevate: ${workSummary}${/[.!?]$/.test(workSummary) ? "" : "."}`);
   else if (title) parts.push(`Intervento: ${compactText(title, 180)}${/[.!?]$/.test(title) ? "" : "."}`);
@@ -130,8 +276,8 @@ function buildStructuredDescription({
   if (worksite) parts.push(`Luogo di intervento: ${compactText(worksite, 240)}${/[.!?]$/.test(worksite) ? "" : "."}`);
   return {
     value: parts.join(" ").slice(0, 2_000),
-    confidence: rawDescription ? 0.91 : workLines.length ? 0.78 : title ? 0.68 : 0.42,
-    source: rawDescription ? "Preventivo · descrizione" : workLines.length ? "Company AI · sintesi lavorazioni" : "Company AI · sintesi campi rilevati",
+    confidence: rawDescription ? 0.91 : workItems.length ? 0.9 : workLines.length ? 0.78 : title ? 0.68 : 0.42,
+    source: rawDescription ? "Preventivo · descrizione sintetizzata" : workItems.length ? "Company AI · sintesi lavorazioni" : "Company AI · sintesi campi rilevati",
   };
 }
 
@@ -164,6 +310,37 @@ function upsertSuggestion(
 
 function setDraftField(draft: Partial<IntakeDraft>, key: keyof IntakeDraft, value: string) {
   Object.assign(draft, { [key]: value });
+}
+
+function knowledgeHintsForScope(
+  selection: NonNullable<CompanyAiScopeSuggestion["selection"]>,
+  workItems: IntakeWorkItem[] = [],
+) {
+  const byId = new Map<string, ReturnType<typeof searchCompanyAiKnowledge>[number]>();
+  for (const hint of searchCompanyAiKnowledgeForScope(selection, 5)) byId.set(hint.id, hint);
+  for (const item of workItems.slice(0, 12)) {
+    const query = [selection.knowledgeQuery, item.label, item.detail].join(" ");
+    for (const hint of searchCompanyAiKnowledge(query, { part: selection.knowledgePart, limit: 3 })) {
+      const current = byId.get(hint.id);
+      if (!current || hint.score > current.score) byId.set(hint.id, hint);
+    }
+  }
+  return [...byId.values()].sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)).slice(0, 8);
+}
+
+function mergeWorkItems(base: IntakeWorkItem[], proposed: IntakeWorkItem[]) {
+  if (!base.length) return proposed.slice(0, 24);
+  if (!proposed.length) return base.slice(0, 24);
+  const result = base.slice(0, 24);
+  const seen = new Set(result.map((item) => item.detail.toLocaleLowerCase("it-IT")));
+  for (const item of proposed) {
+    if (result.length >= 24) break;
+    const key = item.detail.toLocaleLowerCase("it-IT");
+    if (seen.has(key)) continue;
+    result.push({ ...item, id: `work-${result.length + 1}` });
+    seen.add(key);
+  }
+  return result;
 }
 
 function mergeOpenAiExtraction({
@@ -202,6 +379,7 @@ function mergeOpenAiExtraction({
   ];
   for (const [key, value] of fields) {
     if (!value) continue;
+    if (key === "description" && draft.description && (draft.workItems?.length ?? 0) > 0) continue;
     setDraftField(draft, key, value);
     upsertSuggestion(suggestions, key, value, confidence, source);
   }
@@ -212,6 +390,21 @@ function mergeOpenAiExtraction({
   if (extraction.priority) {
     setDraftField(draft, "priority", extraction.priority);
     upsertSuggestion(suggestions, "priority", extraction.priority, confidence, source);
+  }
+
+  const aiWorkItems = extraction.workItems.map((item, index) => ({
+    id: `work-${index + 1}`,
+    label: item.label,
+    detail: item.detail || item.label,
+    quantity: item.quantity,
+    unit: item.unit,
+    confidence,
+    source,
+  }));
+  const resolvedWorkItems = mergeWorkItems(baseDraft.workItems ?? [], aiWorkItems);
+  if (resolvedWorkItems.length) {
+    draft.workItems = resolvedWorkItems;
+    upsertSuggestion(suggestions, "workItems", `${resolvedWorkItems.length} lavorazioni separate`, confidence, source);
   }
 
   const aiSelection = resolveOpenAiScope(extraction);
@@ -231,7 +424,7 @@ function mergeOpenAiExtraction({
       ...(baseScopeSuggestion.matchedSignals ?? []),
       ...extraction.evidence.map((signal) => `OpenAI: ${signal}`),
     ])].slice(0, 8);
-    knowledgeHints = searchCompanyAiKnowledgeForScope(selectedScope, 6);
+    knowledgeHints = knowledgeHintsForScope(selectedScope, resolvedWorkItems);
     scopeSuggestion = {
       selection: selectedScope,
       score: scopeScore,
@@ -266,7 +459,8 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const rawDueDate = labeledValue(source, ["Scadenza", "Consegna", "Fine lavori"]);
 
   const title = rawTitle || (firstLine && !firstLine.includes(":" ) ? firstLine : "");
-  const structuredDescription = buildStructuredDescription({ title, rawDescription, client: rawClient, worksite: rawWorksite, source });
+  const workItems = extractWorkItems(source, [title, rawDescription, rawClient, rawWorksite]);
+  const structuredDescription = buildStructuredDescription({ title, rawDescription, workItems, client: rawClient, worksite: rawWorksite, source });
   const description = structuredDescription.value;
   const lowerSource = source.toLocaleLowerCase("it-IT");
   const openingType = /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
@@ -276,12 +470,13 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     selection: inferredScope?.selection ?? null,
     score: inferredScope?.score ?? 0,
     source: "company-ai",
-    knowledgeHints: inferredScope?.selection ? searchCompanyAiKnowledgeForScope(inferredScope.selection, 6) : [],
+    knowledgeHints: inferredScope?.selection ? knowledgeHintsForScope(inferredScope.selection, workItems) : [],
     matchedSignals: inferredScope?.matchedSignals ?? [],
   };
 
   addSuggestion(suggestions, "title", title, rawTitle ? 0.96 : 0.52, rawTitle ? "Preventivo · oggetto" : "Prima riga del documento");
   addSuggestion(suggestions, "description", description, structuredDescription.confidence, structuredDescription.source);
+  if (workItems.length) addSuggestion(suggestions, "workItems", `${workItems.length} lavorazioni separate`, 0.9, "Preventivo · voci rilevate");
   addSuggestion(suggestions, "openingType", openingType, /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? 0.94 : 0.74, "Classificazione del documento");
   if (inferredScope?.selection) {
     addSuggestion(suggestions, "scopeSectionId", inferredScope.selection.sectionTitle, scopeSuggestion.score, "Company AI · sezione");
@@ -308,6 +503,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     openingType,
     ...scopeFields,
     description: description.slice(0, 2_000),
+    workItems,
     clientName: rawClient.slice(0, 160),
     clientTaxId: rawTaxId.slice(0, 80),
     clientContact: rawContact.slice(0, 120),
@@ -349,7 +545,7 @@ export async function POST(request: Request) {
   const { draft, suggestions, scopeSuggestion } = extractDraft(sourceText);
   const knowledgePack = getCompanyAiKnowledgePackSummary();
   const knowledgeHints = scopeSuggestion.selection
-    ? searchCompanyAiKnowledgeForScope(scopeSuggestion.selection, 6)
+    ? knowledgeHintsForScope(scopeSuggestion.selection, draft.workItems ?? [])
     : searchCompanyAiKnowledge(sourceText, { limit: 6 });
   const previewId = crypto.randomUUID();
   const idempotencyKey = requestedIdempotencyKey || `s07:intake:${crypto.randomUUID()}`;
@@ -375,9 +571,11 @@ export async function POST(request: Request) {
         previewId: existingPreview.id,
         mode: "COMPANY_AI",
         directWrite: false,
-        runtime: "governed-intake-preview",
+        runtime: text(stored.runtime, "governed-intake-preview"),
+        aiRuntime: isRecord(stored.aiRuntime) ? stored.aiRuntime : undefined,
         sourceName: text(stored.sourceName) || undefined,
         draft: isRecord(stored.draft) ? stored.draft : {},
+        workItems: Array.isArray(stored.workItems) ? stored.workItems : (isRecord(stored.draft) && Array.isArray(stored.draft.workItems) ? stored.draft.workItems : []),
         suggestions: Array.isArray(stored.suggestions) ? stored.suggestions : [],
         scopeSuggestion: isRecord(stored.scopeSuggestion) ? stored.scopeSuggestion : undefined,
         knowledgePack,
@@ -425,13 +623,14 @@ export async function POST(request: Request) {
         draft: resolvedDraft,
         suggestions: resolvedSuggestions,
         scopeSuggestion: resolvedScopeSuggestion,
+        workItems: resolvedDraft.workItems ?? [],
         knowledgePackId: knowledgePack.id,
         knowledgePackVersion: knowledgePack.version,
         knowledgeHintIds: resolvedKnowledgeHints.map((hint) => hint.id),
         knowledgeHints: resolvedKnowledgeHints,
       };
     const serializedPreview = JSON.stringify(previewPayload);
-    if (serializedPreview.length > 12_000) return Response.json({ error: "preview_payload_too_large" }, { status: 413 });
+    if (serializedPreview.length > 40_000) return Response.json({ error: "preview_payload_too_large" }, { status: 413 });
 
     await db.batch([
       db.insert(s07AiLedger).values({
@@ -507,6 +706,7 @@ export async function POST(request: Request) {
       draft: resolvedDraft,
       suggestions: resolvedSuggestions,
       scopeSuggestion: resolvedScopeSuggestion,
+      workItems: resolvedDraft.workItems ?? [],
       knowledgePack,
       knowledgeHints: resolvedKnowledgeHints,
       readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: now },

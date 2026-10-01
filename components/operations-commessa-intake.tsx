@@ -79,12 +79,45 @@ async function extractDocxText(file: File) {
   const document = new DOMParser().parseFromString(xml, "application/xml");
   if (document.querySelector("parsererror")) throw new Error("Il documento Word non è leggibile.");
 
-  const paragraphs = Array.from(document.getElementsByTagNameNS("*", "p")).map((paragraph) => {
-    const parts = Array.from(paragraph.getElementsByTagNameNS("*", "t"), (node) => node.textContent ?? "");
-    return parts.join("").trim();
-  }).filter(Boolean);
+  const readWordText = (root: Element) => {
+    const parts: string[] = [];
+    const walk = (node: Element) => {
+      const name = node.localName;
+      if (name === "t") parts.push(node.textContent ?? "");
+      else if (name === "tab") parts.push("\t");
+      else if (name === "br" || name === "cr") parts.push("\n");
+      else Array.from(node.children).forEach((child) => walk(child));
+    };
+    walk(root);
+    return parts.join("").replace(/\r\n?/g, "\n").trim();
+  };
 
-  return limitSourceText(paragraphs.join("\n"));
+  const body = document.getElementsByTagNameNS("*", "body")[0];
+  const blocks: string[] = [];
+  if (body) {
+    Array.from(body.children).forEach((block) => {
+      if (block.localName === "tbl") {
+        Array.from(block.getElementsByTagNameNS("*", "tr")).forEach((row) => {
+          const cells = Array.from(row.children)
+            .filter((cell) => cell.localName === "tc")
+            .map((cell) => readWordText(cell))
+            .filter(Boolean);
+          if (cells.length) blocks.push(cells.join("\t"));
+        });
+      } else if (block.localName === "p") {
+        const text = readWordText(block);
+        if (text) blocks.push(text);
+      }
+    });
+  }
+
+  if (!blocks.length) {
+    Array.from(document.getElementsByTagNameNS("*", "p")).forEach((paragraph) => {
+      const text = readWordText(paragraph);
+      if (text) blocks.push(text);
+    });
+  }
+  return limitSourceText(blocks.join("\n"));
 }
 
 type FieldProps = {
@@ -388,6 +421,7 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
               </div>
             ))}
           </div>
+          {preview.workItems?.length ? <div className="relative mt-5 overflow-hidden rounded-[22px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(4,12,9,0.72))] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-200/80">Lavorazioni separate</p><p className="mt-1 text-xs text-slate-500">Le voci del preventivo diventano elementi operativi distinti, senza trasformarsi in scope.</p></div><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-2.5 py-1 font-mono text-[10px] text-lime-200">{preview.workItems.length} voci</span></div><div className="mt-3 grid gap-2 md:grid-cols-2">{preview.workItems.map((item, index) => <div className="rounded-2xl border border-white/[0.08] bg-black/25 p-3.5" key={item.id}><div className="flex items-start gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/[0.08] font-mono text-[9px] text-lime-200">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><p className="text-xs font-semibold leading-5 text-lime-100">{item.label}</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{item.detail}</p></div></div><div className="mt-3 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-[0.08em] text-slate-600"><span>{item.quantity ? `${item.quantity} ${item.unit}` : "quantità da verificare"}</span><span className="text-slate-700">·</span><span>{item.source}</span></div></div>)}</div></div> : <div className="relative mt-5 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.035] px-3.5 py-3 text-[11px] leading-5 text-amber-100/70">Nessuna voce separata rilevata: controlla il testo sorgente oppure inserisci manualmente le lavorazioni nella descrizione.</div>}
           {preview.knowledgePack && (
             <div className="relative mt-5 overflow-hidden rounded-[22px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.08),rgba(6,16,13,0.68)_52%,rgba(34,211,238,0.04))] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
               <div className="pointer-events-none absolute -right-12 -top-14 size-40 rounded-full bg-lime-300/[0.08] blur-3xl" />
@@ -560,8 +594,8 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       const data = await response.json() as IntakePreview & { error?: string };
       if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
       setPreview(data);
-      setDraft((current) => ({ ...current, ...data.draft, statusCode: "DRAFT" } as IntakeDraft));
-      setNotice(`Company AI ha proposto ${data.suggestions?.length ?? 0} campi. Verifica e modifica liberamente prima della conferma.`);
+      setDraft((current) => ({ ...current, ...data.draft, workItems: data.draft.workItems ?? data.workItems ?? current.workItems, statusCode: "DRAFT" } as IntakeDraft));
+      setNotice(`Company AI ha proposto ${data.suggestions?.length ?? 0} campi e ${data.workItems?.length ?? data.draft.workItems?.length ?? 0} lavorazioni separate. Verifica e modifica liberamente prima della conferma.`);
     } catch (caught) {
       setNotice("");
       setError(caught instanceof Error && caught.message !== "Failed to fetch" ? caught.message : "Company AI non è raggiungibile in questo momento. Riprova tra poco.");
