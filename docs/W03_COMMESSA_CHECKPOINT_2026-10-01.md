@@ -29,7 +29,9 @@
 ## Riallineamento compilazione e chiusura — fotografie di riferimento
 
 - La nuova commessa parte da una scelta esplicita: `Crea da preventivo con Company AI` oppure `Compila manualmente`.
-- Entrambi i percorsi usano la stessa scheda canonica con classificazione, contesto e dati cliente/cantiere.
+- Entrambi i percorsi usano la stessa scheda canonica con i due soli tipi `Nuova commessa` e `Pronto intervento`.
+- La classificazione segue `tipo → sezione → raggruppamento → sottogruppo`; lo scope si arresta al sottogruppo.
+- Le singole voci tariffarie restano contesto Company AI e non diventano categorie della commessa.
 - Company AI produce una preview governata, propone i campi con fonte e confidenza, registra la preview nel ledger S07 e non scrive la commessa senza conferma umana.
 - La scheda resta modificabile e viene salvata inizialmente come `BOZZA`; il 100% dell’avanzamento non cambia automaticamente lo stato.
 - Il passaggio a `COMPLETATA` è rifiutato server-side finché non risultano completi contesto, luogo, assegnazione, attività, evidenza, rapportino e avanzamento.

@@ -245,7 +245,12 @@ export const companyAiJobScopes = sqliteTable("company_ai_job_scopes", {
   jobCode: text("job_code").notNull(),
   knowledgePackId: text("knowledge_pack_id").notNull(),
   knowledgePackVersion: text("knowledge_pack_version").notNull(),
+  scopeLevel: text("scope_level").notNull().default("SUBGROUP"),
+  scopeSectionId: text("scope_section_id").notNull().default(""),
+  scopeGroupId: text("scope_group_id").notNull().default(""),
+  scopeSubgroupId: text("scope_subgroup_id").notNull().default(""),
   scopeText: text("scope_text").notNull().default(""),
+  /** Derived Company AI context only; never a user-selected scope level. */
   knowledgeEntryIdsJson: text("knowledge_entry_ids_json").notNull().default("[]"),
   assumptionsJson: text("assumptions_json").notNull().default("[]"),
   exclusionsJson: text("exclusions_json").notNull().default("[]"),

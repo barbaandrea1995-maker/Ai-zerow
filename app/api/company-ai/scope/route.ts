@@ -9,9 +9,9 @@ import {
 import {
   COMPANY_AI_KNOWLEDGE_PACK_ID,
   getCompanyAiKnowledgePackSummary,
-  resolveCompanyAiKnowledgeEntries,
-  toCompanyAiKnowledgeHint,
+  searchCompanyAiKnowledgeForScope,
 } from "@/lib/company-ai-knowledge";
+import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +44,21 @@ function parseStringArray(value: string) {
 }
 
 function scopeForResponse(row: typeof companyAiJobScopes.$inferSelect) {
+  const scope = resolveCompanyAiScopeSelection({
+    sectionId: row.scopeSectionId,
+    groupId: row.scopeGroupId,
+    subgroupId: row.scopeSubgroupId,
+  });
   return {
     id: row.id,
     jobId: row.jobId,
     jobCode: row.jobCode,
     knowledgePackId: row.knowledgePackId,
     knowledgePackVersion: row.knowledgePackVersion,
+    scopeLevel: row.scopeLevel,
+    scope,
     scopeText: row.scopeText,
-    knowledgeEntryIds: parseStringArray(row.knowledgeEntryIdsJson),
+    knowledgeContextEntryIds: parseStringArray(row.knowledgeEntryIdsJson),
     assumptions: parseStringArray(row.assumptionsJson),
     exclusions: parseStringArray(row.exclusionsJson),
     status: row.status,
@@ -80,13 +87,18 @@ async function findJob(jobRef: string, tenantId: string) {
 }
 
 async function responseForScope(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, scope: typeof companyAiJobScopes.$inferSelect, status = 200) {
-  const selected = resolveCompanyAiKnowledgeEntries(parseStringArray(scope.knowledgeEntryIdsJson)).map(toCompanyAiKnowledgeHint);
+  const scopeResponse = scopeForResponse(scope);
+  const selected = parseStringArray(scope.knowledgeEntryIdsJson);
+  const knowledgeContext = scopeResponse.scope
+    ? searchCompanyAiKnowledgeForScope(scopeResponse.scope, 8)
+    : [];
   return Response.json({
     context: publicAuthorityContext(context),
     contract: { route: "/api/company-ai/scope", source: "company-ai-scope-link", directWrite: false, readback: "sites-d1-verified" },
     pack: getCompanyAiKnowledgePackSummary(),
-    scope: scopeForResponse(scope),
-    knowledgeEntries: selected,
+    scope: scopeResponse,
+    knowledgeContextEntryIds: selected,
+    knowledgeContext,
     readback: { status: "SCOPE_LINK_VERIFIED", checkedAt: new Date().toISOString() },
   }, { status, headers: { "cache-control": "no-store" } });
 }
@@ -137,8 +149,12 @@ export async function POST(request: Request) {
   const pack = getCompanyAiKnowledgePackSummary();
   const packVersion = bounded(input.knowledgePackVersion, 32, pack.version);
   const scopeText = bounded(input.scopeText, 6_000);
-  const requestedEntryIds = stringArray(input.knowledgeEntryIds, 80, 180);
-  const entries = resolveCompanyAiKnowledgeEntries(requestedEntryIds);
+  const scopeInput = isRecord(input.scope) ? input.scope : input;
+  const scopeSelection = resolveCompanyAiScopeSelection({
+    sectionId: bounded(scopeInput.scopeSectionId ?? scopeInput.sectionId, 80),
+    groupId: bounded(scopeInput.scopeGroupId ?? scopeInput.groupId, 120),
+    subgroupId: bounded(scopeInput.scopeSubgroupId ?? scopeInput.subgroupId, 160),
+  });
   const status = bounded(input.status, 24, "DRAFT").toUpperCase();
   const assumptions = stringArray(input.assumptions, 40, 240);
   const exclusions = stringArray(input.exclusions, 40, 240);
@@ -147,8 +163,7 @@ export async function POST(request: Request) {
   if (!jobRef) return Response.json({ error: "job_id_required" }, { status: 400 });
   if (packId !== pack.id) return Response.json({ error: "unknown_knowledge_pack", knowledgePackId: packId }, { status: 400 });
   if (packVersion !== pack.version) return Response.json({ error: "knowledge_pack_version_mismatch", expected: pack.version }, { status: 409 });
-  if (!scopeText && !requestedEntryIds.length) return Response.json({ error: "scope_or_knowledge_entries_required" }, { status: 400 });
-  if (entries.length !== requestedEntryIds.length) return Response.json({ error: "unknown_knowledge_entry" }, { status: 400 });
+  if (!scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup", message: "Lo scope deve contenere sezione, raggruppamento e sottogruppo." }, { status: 400 });
   if (!SCOPE_STATUSES.has(status)) return Response.json({ error: "unknown_scope_status" }, { status: 400 });
 
   try {
@@ -172,8 +187,9 @@ export async function POST(request: Request) {
     const scopeId = `COMPANY-AI-SCOPE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const eventId = crypto.randomUUID();
     const jobCode = job.canonicalCode ?? job.id;
-    const entryIdsJson = JSON.stringify(entries.map((entry) => entry.id));
-    const eventPayload = JSON.stringify({ action: "link", aggregate: "company_ai_scope", jobId: job.id, jobCode, knowledgePackId: pack.id, knowledgePackVersion: pack.version, knowledgeEntryCount: entries.length, version, status });
+    const knowledgeContext = searchCompanyAiKnowledgeForScope(scopeSelection, 8);
+    const entryIdsJson = JSON.stringify(knowledgeContext.map((entry) => entry.id));
+    const eventPayload = JSON.stringify({ action: "link", aggregate: "company_ai_scope", jobId: job.id, jobCode, knowledgePackId: pack.id, knowledgePackVersion: pack.version, scopeLevel: scopeSelection.level, scopeSectionId: scopeSelection.sectionId, scopeGroupId: scopeSelection.groupId, scopeSubgroupId: scopeSelection.subgroupId, knowledgeContextEntryCount: knowledgeContext.length, version, status });
 
     await db.batch([
       db.insert(companyAiJobScopes).values({
@@ -183,6 +199,10 @@ export async function POST(request: Request) {
         jobCode,
         knowledgePackId: pack.id,
         knowledgePackVersion: pack.version,
+        scopeLevel: scopeSelection.level,
+        scopeSectionId: scopeSelection.sectionId,
+        scopeGroupId: scopeSelection.groupId,
+        scopeSubgroupId: scopeSelection.subgroupId,
         scopeText,
         knowledgeEntryIdsJson: entryIdsJson,
         assumptionsJson: JSON.stringify(assumptions),
@@ -246,7 +266,7 @@ export async function POST(request: Request) {
         status: status === "CONFIRMED" ? "CONFIRMED" : "DRAFT",
         approvalRequired: 0,
         relatedActionId: scopeId,
-        payloadJson: JSON.stringify({ source: "human-authored", jobId: job.id, jobCode, knowledgePackId: pack.id, knowledgePackVersion: pack.version, knowledgeEntryIds: entries.map((entry) => entry.id), version, status }),
+        payloadJson: JSON.stringify({ source: "human-authored", jobId: job.id, jobCode, knowledgePackId: pack.id, knowledgePackVersion: pack.version, scopeLevel: scopeSelection.level, scopeSectionId: scopeSelection.sectionId, scopeGroupId: scopeSelection.groupId, scopeSubgroupId: scopeSelection.subgroupId, knowledgeContextEntryIds: knowledgeContext.map((entry) => entry.id), version, status }),
         requestedBy: context!.actorId,
         approvedBy: status === "CONFIRMED" ? context!.actorId : null,
         readbackJson: JSON.stringify({ status: "SITES_LEDGER_VERIFIED", checkedAt: now }),

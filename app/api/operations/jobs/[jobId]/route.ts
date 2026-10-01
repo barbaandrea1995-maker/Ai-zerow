@@ -18,6 +18,7 @@ import {
   type JobEvidence,
   type JobPayload,
 } from "@/lib/operations-contract";
+import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -415,9 +416,31 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (typeof fields.accessNotes === "string") next.accessNotes = boundedText(fields.accessNotes, 2_000);
       if (typeof fields.cig === "string") next.cig = boundedText(fields.cig, 80);
       if (typeof fields.cup === "string") next.cup = boundedText(fields.cup, 80);
-      if (typeof fields.openingType === "string") next.openingType = boundedText(fields.openingType, 80);
+      if (typeof fields.openingType === "string") {
+        const openingType = boundedText(fields.openingType, 80).toUpperCase();
+        if (!COMMESSA_TYPES.some((option) => option.value === openingType)) return Response.json({ error: "invalid_commessa_type" }, { status: 400 });
+        next.openingType = openingType;
+      }
       if (typeof fields.jobType === "string") next.jobType = boundedText(fields.jobType, 120);
       if (typeof fields.specialization === "string") next.specialization = boundedText(fields.specialization, 120);
+      const scopeFields = isRecord(fields.scope) ? fields.scope : fields;
+      const hasScopeInput = isRecord(fields.scope) || ["scopeSectionId", "scopeGroupId", "scopeSubgroupId"].some((key) => key in fields);
+      if (hasScopeInput) {
+        const scopeSelection = resolveCompanyAiScopeSelection({
+          sectionId: boundedText(scopeFields.scopeSectionId ?? scopeFields.sectionId, 80),
+          groupId: boundedText(scopeFields.scopeGroupId ?? scopeFields.groupId, 120),
+          subgroupId: boundedText(scopeFields.scopeSubgroupId ?? scopeFields.subgroupId, 160),
+        });
+        if (!scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup" }, { status: 400 });
+        next.scopeLevel = scopeSelection.level;
+        next.scopeSectionId = scopeSelection.sectionId;
+        next.scopeGroupId = scopeSelection.groupId;
+        next.scopeSubgroupId = scopeSelection.subgroupId;
+        next.scope = { ...scopeSelection, source: "human-authored" };
+        next.category = scopeSelection.sectionTitle;
+        next.jobType = scopeSelection.groupTitle;
+        next.specialization = scopeSelection.subgroupTitle;
+      }
       if (typeof fields.category === "string") next.category = boundedText(fields.category, 80);
       if (typeof fields.dueDate === "string") next.dueDate = boundedText(fields.dueDate, 40);
       if (fields.priority === "HIGH" || fields.priority === "STANDARD" || fields.priority === "LOW") next.priority = fields.priority;

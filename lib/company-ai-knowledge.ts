@@ -1,5 +1,6 @@
 import rawEntries from "@/knowledge/company-ai/tariffa-2023/entries.json";
 import rawManifest from "@/knowledge/company-ai/tariffa-2023/manifest.json";
+import type { CompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export type KnowledgeBreadcrumb = {
   code: string;
@@ -45,7 +46,8 @@ export type CompanyAiKnowledgePackSummary = {
   parts: Array<{ part: string; title: string; entryCount: number }>;
   scopeContract: {
     linkKey: string;
-    selectedEntryField: string;
+    scopeField: string;
+    contextEntryField: string;
     requiredHumanConfirmation: boolean;
   };
 };
@@ -61,7 +63,9 @@ type PackManifest = {
   parts: Array<{ part: string; title: string; pricedEntries: number }>;
   scopeContract: {
     linkKey: string;
-    selectedEntryField: string;
+    scopeField?: string;
+    contextEntryField?: string;
+    selectedEntryField?: string;
     requiredHumanConfirmation: boolean;
   };
 };
@@ -102,7 +106,8 @@ export function getCompanyAiKnowledgePackSummary(): CompanyAiKnowledgePackSummar
     parts: manifest.parts.map((part) => ({ part: part.part, title: part.title, entryCount: part.pricedEntries })),
     scopeContract: {
       linkKey: manifest.scopeContract.linkKey,
-      selectedEntryField: manifest.scopeContract.selectedEntryField,
+      scopeField: manifest.scopeContract.scopeField ?? "scopeSubgroupId",
+      contextEntryField: manifest.scopeContract.contextEntryField ?? manifest.scopeContract.selectedEntryField ?? "knowledgeContextEntryIds",
       requiredHumanConfirmation: manifest.scopeContract.requiredHumanConfirmation,
     },
   };
@@ -160,6 +165,13 @@ export function searchCompanyAiKnowledge(query: string, options: { part?: string
     .sort((left, right) => right.score - left.score || left.entry.id.localeCompare(right.entry.id))
     .slice(0, limit)
     .map((item) => hint(item.entry, item.score));
+}
+
+export function searchCompanyAiKnowledgeForScope(selection: CompanyAiScopeSelection, limit = 8) {
+  return searchCompanyAiKnowledge(selection.knowledgeQuery, {
+    part: selection.knowledgePart,
+    limit,
+  });
 }
 
 export function resolveCompanyAiKnowledgeEntries(ids: string[]) {

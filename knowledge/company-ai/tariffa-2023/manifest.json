@@ -137,8 +137,10 @@
   },
   "scopeContract": {
     "linkKey": "jobId",
-    "selectedEntryField": "knowledgeEntryIds",
+    "scopeField": "scopeSubgroupId",
+    "contextEntryField": "knowledgeContextEntryIds",
     "requiredHumanConfirmation": true,
+    "scopeLevel": "SUBGROUP",
     "allowedStatuses": [
       "DRAFT",
       "PROPOSED",

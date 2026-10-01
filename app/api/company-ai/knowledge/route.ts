@@ -7,6 +7,7 @@ import {
   getCompanyAiKnowledgePackSummary,
   searchCompanyAiKnowledge,
 } from "@/lib/company-ai-knowledge";
+import { getCompanyAiScopeTaxonomy } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
       directWrite: false,
     },
     pack,
+    scopeTaxonomy: getCompanyAiScopeTaxonomy(),
     query: { text: query, part: part ?? null, limit: Math.min(24, Math.max(1, Math.round(limit))) },
     results,
     readback: { status: "KNOWLEDGE_PACK_VERIFIED", count: results.length, checkedAt: new Date().toISOString() },

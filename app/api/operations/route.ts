@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { companyAiJobScopes, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   assertTenantScope,
   getAuthorityContext,
@@ -18,6 +18,8 @@ import {
   normalizeJobStatus,
   type JobPayload,
 } from "@/lib/operations-contract";
+import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
+import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -104,13 +106,20 @@ export async function POST(request: Request) {
   const description = boundedText(input.description ?? input.detail, 2_000);
   const client = boundedText(input.client, 160);
   const location = boundedText(input.location ?? input.detail, 240, "Ubicazione da definire");
-  const category = boundedText(input.category, 80, "Operations");
+  const requestedCategory = boundedText(input.category, 80, "Operations");
   const dueDate = boundedText(input.dueDate ?? input.meta, 40, "Da pianificare");
   const priority = validPriority(input.priority);
   const statusCode = normalizeJobStatus(input.statusCode ?? input.status ?? "DRAFT");
-  const openingType = boundedText(input.openingType, 80, "NUOVA_COMMESSA");
-  const jobType = boundedText(input.jobType ?? input.category, 120, category);
-  const specialization = boundedText(input.specialization, 120, "Da definire");
+  const openingType = boundedText(input.openingType, 80, "NUOVA_COMMESSA").toUpperCase();
+  const scopeInput = isRecord(input.scope) ? input.scope : input;
+  const scopeSelection = resolveCompanyAiScopeSelection({
+    sectionId: boundedText(scopeInput.scopeSectionId ?? scopeInput.sectionId, 80),
+    groupId: boundedText(scopeInput.scopeGroupId ?? scopeInput.groupId, 120),
+    subgroupId: boundedText(scopeInput.scopeSubgroupId ?? scopeInput.subgroupId, 160),
+  });
+  const category = scopeSelection?.sectionTitle ?? requestedCategory;
+  const jobType = boundedText(input.jobType, 120, scopeSelection?.groupTitle ?? "");
+  const specialization = boundedText(input.specialization, 120, scopeSelection?.subgroupTitle ?? "");
   const sourceMode = input.sourceMode === "COMPANY_AI" ? "COMPANY_AI" : "MANUAL";
   const aiPreviewId = boundedText(input.aiPreviewId, 120);
   const clientName = boundedText(input.clientName ?? input.client, 160, client);
@@ -128,6 +137,8 @@ export async function POST(request: Request) {
   const requestedIdempotencyKey = boundedText(input.idempotencyKey, 160);
 
   if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
+  if (!COMMESSA_TYPES.some((option) => option.value === openingType)) return Response.json({ error: "invalid_commessa_type", allowed: COMMESSA_TYPES.map((option) => option.value) }, { status: 400 });
+  if (!scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup", message: "Seleziona una sezione, un raggruppamento e un sottogruppo." }, { status: 400 });
   if (statusCode === "COMPLETED" || statusCode === "CLOSED") {
     return Response.json({ error: "new_job_must_start_before_completion" }, { status: 400 });
   }
@@ -165,6 +176,11 @@ export async function POST(request: Request) {
 
     const id = `OPERATIONS-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const eventId = crypto.randomUUID();
+    const scopeId = `COMPANY-AI-SCOPE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const scopeEventId = crypto.randomUUID();
+    const scopeIdempotencyKey = `company-ai-scope:create:${idempotencyKey}`.slice(0, 160);
+    const knowledgePack = getCompanyAiKnowledgePackSummary();
+    const knowledgeContext = searchCompanyAiKnowledgeForScope(scopeSelection, 8);
     const payload: JobPayload = {
       title,
       description,
@@ -190,6 +206,14 @@ export async function POST(request: Request) {
       statusCode,
       sourceMode,
       aiPreviewId: aiPreviewId || null,
+      scopeLevel: scopeSelection.level,
+      scopeSectionId: scopeSelection.sectionId,
+      scopeGroupId: scopeSelection.groupId,
+      scopeSubgroupId: scopeSelection.subgroupId,
+      scope: {
+        ...scopeSelection,
+        source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored",
+      },
       version: 1,
       activities: [],
       evidence: [],
@@ -206,6 +230,7 @@ export async function POST(request: Request) {
       title,
       statusCode,
       sourceMode,
+      scope: { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId },
       version: 1,
       source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
     });
@@ -269,6 +294,86 @@ export async function POST(request: Request) {
         detail: "Creazione commessa persistita su D1; consumer canonico esterno ancora differito.",
         createdAt: now,
         updatedAt: now,
+      }),
+      db.insert(companyAiJobScopes).values({
+        id: scopeId,
+        tenantId: context.tenantId,
+        jobId: id,
+        jobCode: naming.canonicalCode,
+        knowledgePackId: knowledgePack.id,
+        knowledgePackVersion: knowledgePack.version,
+        scopeLevel: scopeSelection.level,
+        scopeSectionId: scopeSelection.sectionId,
+        scopeGroupId: scopeSelection.groupId,
+        scopeSubgroupId: scopeSelection.subgroupId,
+        scopeText: description,
+        knowledgeEntryIdsJson: JSON.stringify(knowledgeContext.map((entry) => entry.id)),
+        assumptionsJson: "[]",
+        exclusionsJson: "[]",
+        status: "DRAFT",
+        source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored",
+        version: 1,
+        idempotencyKey: scopeIdempotencyKey,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Events).values({
+        eventId: scopeEventId,
+        tenantId: context.tenantId,
+        eventType: "company_ai.scope.linked",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: context.actorId,
+        source: "sites-command",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "company_ai_scope",
+        aggregateId: scopeId,
+        aggregateVersion: 1,
+        payloadJson: JSON.stringify({ action: "link", aggregate: "company_ai_scope", jobId: id, jobCode: naming.canonicalCode, knowledgePackId: knowledgePack.id, knowledgePackVersion: knowledgePack.version, scopeLevel: scopeSelection.level, scopeSectionId: scopeSelection.sectionId, scopeGroupId: scopeSelection.groupId, scopeSubgroupId: scopeSelection.subgroupId, knowledgeContextEntryCount: knowledgeContext.length, version: 1, status: "DRAFT" }),
+        correlationId,
+        causationId: eventId,
+        idempotencyKey: scopeIdempotencyKey,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        eventId: scopeEventId,
+        topic: "zerow.company-ai.scope.linked",
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        aggregateType: "company_ai_scope",
+        aggregateId: scopeId,
+        expectedVersion: 1,
+        observedVersion: 1,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Scope gerarchico collegato alla commessa su D1; il contesto tariffario resta reference-only.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s07AiLedger).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        entryType: "knowledge_scope_link",
+        actionType: "company_ai.scope.link",
+        command: `Collega il sottogruppo ${scopeSelection.subgroupTitle} alla commessa ${naming.canonicalCode}`,
+        status: "DRAFT",
+        approvalRequired: 0,
+        relatedActionId: scopeId,
+        payloadJson: JSON.stringify({ source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored", jobId: id, jobCode: naming.canonicalCode, knowledgePackId: knowledgePack.id, knowledgePackVersion: knowledgePack.version, scopeLevel: scopeSelection.level, scopeSectionId: scopeSelection.sectionId, scopeGroupId: scopeSelection.groupId, scopeSubgroupId: scopeSelection.subgroupId, knowledgeContextEntryIds: knowledgeContext.map((entry) => entry.id), version: 1, status: "DRAFT" }),
+        requestedBy: context.actorId,
+        approvedBy: null,
+        readbackJson: JSON.stringify({ status: "SITES_LEDGER_VERIFIED", checkedAt: now }),
+        createdAt: now,
       }),
     ]);
 

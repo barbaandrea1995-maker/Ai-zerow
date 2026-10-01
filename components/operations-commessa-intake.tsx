@@ -27,12 +27,11 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   DEFAULT_INTAKE_DRAFT,
   INTAKE_FIELD_LABELS,
-  INTAKE_JOB_TYPES,
   INTAKE_OPENING_TYPES,
-  INTAKE_SPECIALIZATIONS,
   type IntakeDraft,
   type IntakePreview,
 } from "@/lib/operations-intake";
+import { COMPANY_AI_SCOPE_TAXONOMY, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 
 export type IntakeAdapterRecord = {
   id: string;
@@ -117,6 +116,46 @@ const inputClass = "h-11 rounded-lg border-white/10 bg-black/30 text-sm text-sla
 const selectClass = "h-11 w-full rounded-lg border border-white/10 bg-[#111718] px-3 text-sm text-slate-100 outline-none transition focus:border-lime-300/45 focus:ring-1 focus:ring-lime-300/20";
 const textareaClass = "resize-y rounded-lg border-white/10 bg-black/30 text-sm text-slate-100 placeholder:text-slate-600 shadow-none transition focus-visible:border-lime-300/45 focus-visible:ring-1 focus-visible:ring-lime-300/20";
 
+function ScopeSelectFields({
+  draft,
+  onChange,
+  proposed,
+}: {
+  draft: IntakeDraft;
+  onChange: (key: keyof IntakeDraft, value: string) => void;
+  proposed: (key: keyof IntakeDraft) => boolean;
+}) {
+  const section = COMPANY_AI_SCOPE_TAXONOMY.find((item) => item.id === draft.scopeSectionId);
+  const group = section?.groups.find((item) => item.id === draft.scopeGroupId);
+  return <>
+    <Field label={INTAKE_FIELD_LABELS.scopeSectionId} required proposed={proposed("scopeSectionId")}>
+      <select className={selectClass} onChange={(event) => {
+        onChange("scopeSectionId", event.target.value);
+        onChange("scopeGroupId", "");
+        onChange("scopeSubgroupId", "");
+      }} required value={draft.scopeSectionId}>
+        <option value="">Seleziona sezione</option>
+        {COMPANY_AI_SCOPE_TAXONOMY.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+      </select>
+    </Field>
+    <Field label={INTAKE_FIELD_LABELS.scopeGroupId} required proposed={proposed("scopeGroupId")}>
+      <select className={selectClass} disabled={!section} onChange={(event) => {
+        onChange("scopeGroupId", event.target.value);
+        onChange("scopeSubgroupId", "");
+      }} required value={draft.scopeGroupId}>
+        <option value="">Seleziona raggruppamento</option>
+        {section?.groups.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+      </select>
+    </Field>
+    <Field className="md:col-span-3" label={INTAKE_FIELD_LABELS.scopeSubgroupId} required proposed={proposed("scopeSubgroupId")}>
+      <select className={selectClass} disabled={!group} onChange={(event) => onChange("scopeSubgroupId", event.target.value)} required value={draft.scopeSubgroupId}>
+        <option value="">Seleziona sottogruppo</option>
+        {group?.subgroups.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+      </select>
+    </Field>
+  </>;
+}
+
 export function IntakeFields({
   draft,
   onChange,
@@ -160,28 +199,20 @@ export function IntakeFields({
       </FormSection>
 
       <FormSection
-        description="Orientano pianificazione, linguaggio tecnico e controlli operativi successivi."
+        description="La classificazione segue una gerarchia unica e si ferma al sottogruppo."
         eyebrow="02 / classificazione"
         icon={Flag}
         title="Profilo operativo"
       >
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={INTAKE_FIELD_LABELS.openingType} required proposed={proposed("openingType")}>
-            <select className={selectClass} onChange={(event) => onChange("openingType", event.target.value)} value={draft.openingType}>
+            <select className={selectClass} onChange={(event) => onChange("openingType", event.target.value)} required value={draft.openingType}>
               {INTAKE_OPENING_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
-          <Field label={INTAKE_FIELD_LABELS.jobType} required proposed={proposed("jobType")}>
-            <select className={selectClass} onChange={(event) => onChange("jobType", event.target.value)} value={draft.jobType}>
-              {INTAKE_JOB_TYPES.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </Field>
-          <Field label={INTAKE_FIELD_LABELS.specialization} required proposed={proposed("specialization")}>
-            <select className={selectClass} onChange={(event) => onChange("specialization", event.target.value)} value={draft.specialization}>
-              {INTAKE_SPECIALIZATIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </Field>
+          <ScopeSelectFields draft={draft} onChange={onChange} proposed={proposed} />
         </div>
+        <p className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px] leading-4 text-slate-500">Le voci puntuali della tariffa restano nel contesto Company AI e non diventano categorie della commessa.</p>
       </FormSection>
 
       <FormSection
@@ -358,8 +389,9 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
                 <div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><BookOpen className="size-4" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200/75">Knowledge pack attivo</p><p className="mt-1 text-sm font-semibold text-slate-100">{preview.knowledgePack.name}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">v{preview.knowledgePack.version} · {preview.knowledgePack.entryCount.toLocaleString("it-IT")} voci · riferimento tecnico</p></div></div>
                 <span className="rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-100/80">da confermare</span>
               </div>
-              {preview.knowledgeHints?.length ? <div className="mt-4 grid gap-2 md:grid-cols-2">{preview.knowledgeHints.map((hint) => <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3" key={hint.id}><div className="flex items-center justify-between gap-3"><span className="font-mono text-[10px] text-lime-200">{hint.part} · {hint.code}</span><span className="text-[10px] text-slate-500">{hint.unit || "unità da verificare"}</span></div><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-300">{hint.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-slate-600"><span className="truncate">{hint.partTitle}</span><span className="shrink-0 font-mono text-cyan-200/80">{new Intl.NumberFormat("it-IT", { style: "currency", currency: hint.currency }).format(hint.price)}</span></div></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-[11px] text-slate-500">Nessuna lavorazione candidata rilevata dal testo. Lo scope potrà essere selezionato manualmente.</p>}
-              <p className="mt-3 flex items-start gap-2 text-[10px] leading-4 text-slate-600"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-lime-200/70" />Il pack suggerisce riferimenti; non genera automaticamente quantità, prezzo di vendita, ordine o chiusura della commessa.</p>
+              {preview.scopeSuggestion?.selection ? <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.045] p-3"><div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-cyan-200/80">Scope proposto · fino al sottogruppo</p><span className="font-mono text-[10px] text-cyan-200">{Math.round(preview.scopeSuggestion.score * 100)}%</span></div><p className="mt-2 text-xs font-semibold text-slate-100">{preview.scopeSuggestion.selection.sectionTitle}</p><p className="mt-1 text-[11px] text-slate-400">{preview.scopeSuggestion.selection.groupTitle} <span className="text-slate-600">/</span> {preview.scopeSuggestion.selection.subgroupTitle}</p></div> : <p className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-[11px] text-slate-500">Nessun sottogruppo proposto dal testo. Selezionalo manualmente nella scheda.</p>}
+              {preview.knowledgeHints?.length ? <div className="mt-4"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-600">Contesto tecnico · non parte dello scope</p><div className="grid gap-2 md:grid-cols-2">{preview.knowledgeHints.map((hint) => <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3" key={hint.id}><div className="flex items-center justify-between gap-3"><span className="font-mono text-[10px] text-lime-200">{hint.part} · {hint.code}</span><span className="text-[10px] text-slate-500">{hint.unit || "unità da verificare"}</span></div><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-300">{hint.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-slate-600"><span className="truncate">{hint.partTitle}</span><span className="shrink-0 font-mono text-cyan-200/80">{new Intl.NumberFormat("it-IT", { style: "currency", currency: hint.currency }).format(hint.price)}</span></div></div>)}</div></div> : null}
+              <p className="mt-3 flex items-start gap-2 text-[10px] leading-4 text-slate-600"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-lime-200/70" />Il pack aiuta Company AI a comprendere la lavorazione; non genera quantità, prezzo di vendita, ordine o chiusura della commessa.</p>
             </div>
           )}
         </div>
@@ -378,8 +410,13 @@ function CheckRow({ label, detail, complete }: { label: string; detail: string; 
 }
 
 function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: IntakeMode; preview: IntakePreview | null }) {
+  const selectedSection = COMPANY_AI_SCOPE_TAXONOMY.find((item) => item.id === draft.scopeSectionId);
+  const selectedGroup = selectedSection?.groups.find((item) => item.id === draft.scopeGroupId);
+  const selectedSubgroup = selectedGroup?.subgroups.find((item) => item.id === draft.scopeSubgroupId);
   const keyFields = [
     { label: "Nome commessa", value: draft.title.trim(), fallback: "Da inserire" },
+    { label: "Tipo commessa", value: draft.openingType, fallback: "Da scegliere" },
+    { label: "Scope", value: selectedSubgroup ? `${selectedSection?.title} / ${selectedGroup?.title} / ${selectedSubgroup.title}` : "", fallback: "Da definire fino al sottogruppo" },
     { label: "Cliente", value: draft.clientName.trim(), fallback: "Non ancora indicato" },
     { label: "Luogo intervento", value: draft.worksite.trim(), fallback: "Non ancora indicato" },
     { label: "Scadenza", value: draft.dueDate.trim(), fallback: "Da pianificare" },
@@ -393,9 +430,9 @@ function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: Intak
     <aside className="lg:sticky lg:top-0 lg:self-start">
       <div className="rounded-2xl border border-white/[0.09] bg-[#101617]/80 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.12)] sm:p-5">
         <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/65">Live summary</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Commessa in preparazione</h2></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><ClipboardCheck className="size-4" /></span></div>
-        <div className="mt-5 rounded-xl border border-white/[0.08] bg-black/20 p-3"><div className="flex items-center justify-between gap-3"><span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Dati chiave</span><span className="font-mono text-[10px] text-lime-200">{filledCount}/{keyFields.length}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><span className="block h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-[10px] leading-4 text-slate-600">Il solo dato obbligatorio per iniziare è il nome della commessa.</p></div>
+        <div className="mt-5 rounded-xl border border-white/[0.08] bg-black/20 p-3"><div className="flex items-center justify-between gap-3"><span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Dati chiave</span><span className="font-mono text-[10px] text-lime-200">{filledCount}/{keyFields.length}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><span className="block h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-[10px] leading-4 text-slate-600">La classificazione si completa selezionando il sottogruppo.</p></div>
         <div className="mt-5 space-y-3">{keyFields.map((field) => <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-3 last:border-0 last:pb-0" key={field.label}><span className="text-[10px] text-slate-600">{field.label}</span><span className={`max-w-[58%] truncate text-right text-[11px] ${field.value ? "text-slate-300" : "text-slate-600"}`}>{field.value || field.fallback}</span></div>)}</div>
-        <div className="mt-5 rounded-xl border border-white/[0.08] bg-black/20 p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
+        <div className="mt-5 rounded-xl border border-white/[0.08] bg-black/20 p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete={Boolean(selectedSubgroup)} label="Scope fino al sottogruppo" detail={selectedSubgroup ? "Classificazione pronta" : "Seleziona sezione, raggruppamento e sottogruppo"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3 text-[10px] leading-4 text-cyan-100/70"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-cyan-200" /><span>Il codice commessa viene assegnato dal sistema al salvataggio.</span></div>
       </div>
     </aside>
@@ -405,7 +442,7 @@ function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: Intak
 function modeHeading(mode: IntakeMode) {
   if (mode === "company-ai") return { title: "Crea da preventivo", description: "Prepara una scheda controllabile con Company AI e conferma ogni dato prima del salvataggio." };
   if (mode === "manual") return { title: "Compila manualmente", description: "Costruisci la scheda operativa con il controllo completo sui dati inseriti." };
-  return { title: "Come vuoi iniziare?", description: "Scegli il punto di partenza. Entrambi i percorsi producono la stessa anagrafica canonica." };
+  return { title: "Come vuoi iniziare?", description: "Scegli il punto di partenza. Entrambi i percorsi producono la stessa scheda gerarchica." };
 }
 
 export default function OperationsCommessaIntake({ open, onOpenChange, onCreated }: Props) {
@@ -480,10 +517,19 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       setError("Inserisci il nome della commessa.");
       return;
     }
+    const scopeSelection = resolveCompanyAiScopeSelection({
+      sectionId: draft.scopeSectionId,
+      groupId: draft.scopeGroupId,
+      subgroupId: draft.scopeSubgroupId,
+    });
+    if (!scopeSelection) {
+      setError("Completa lo scope selezionando sezione, raggruppamento e sottogruppo.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, category: draft.jobType, sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: preview?.previewId, idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
+      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, category: scopeSelection.sectionTitle, jobType: scopeSelection.groupTitle, specialization: scopeSelection.subgroupTitle, scope: scopeSelection, sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: preview?.previewId, idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
       const data = await response.json() as IntakeCreateResponse & { error?: string };
       if (!response.ok) throw new Error(data.error || "operations_adapter_write_failed");
       onCreated(data);

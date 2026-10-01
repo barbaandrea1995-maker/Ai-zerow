@@ -57,6 +57,13 @@
       "when": 1790876126941,
       "tag": "0008_company_ai_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790878037291,
+      "tag": "0009_scope_subgroup_alignment",
+      "breakpoints": true
     }
   ]
 }

@@ -166,9 +166,12 @@ export function jobCompletionRequirements(payload: JobPayload): JobCompletionReq
   const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
   const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));
   const location = text(payload.location);
+  const scope = isRecord(payload.scope) ? payload.scope : null;
+  const scopeSubgroup = text(payload.scopeSubgroupId, text(scope?.subgroupId));
+  const scopeComplete = scopeSubgroup.length >= 2 || (text(payload.jobType).length >= 2 && text(payload.specialization).length >= 2);
   return [
     { key: "title", label: "Nome commessa", complete: text(payload.title).length >= 2, detail: "Identità della commessa" },
-    { key: "classification", label: "Classificazione", complete: text(payload.openingType).length >= 2 && text(payload.jobType).length >= 2 && text(payload.specialization).length >= 2, detail: "Tipo di apertura, tipo e specializzazione" },
+    { key: "classification", label: "Scope operativo", complete: text(payload.openingType).length >= 2 && scopeComplete, detail: "Tipo commessa, sezione, raggruppamento e sottogruppo" },
     { key: "description", label: "Contesto operativo", complete: text(payload.description).length >= 2, detail: "Obiettivo e perimetro dell’intervento" },
     { key: "worksite", label: "Luogo di intervento", complete: location.length >= 2 && location.toLowerCase() !== "ubicazione da definire", detail: "Cantiere o sede dell’intervento" },
     { key: "assignment", label: "Assegnazione", complete: assignmentComplete, detail: "Responsabile o squadra operativa" },

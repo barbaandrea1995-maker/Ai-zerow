@@ -1,14 +1,16 @@
 import type { JobStatusCode } from "@/lib/operations-contract";
 import type { CompanyAiKnowledgeHint, CompanyAiKnowledgePackSummary } from "@/lib/company-ai-knowledge";
+import { COMMESSA_TYPES, type CompanyAiScopeSuggestion, type CommessaType } from "@/lib/company-ai-scope";
 
 export type IntakeMode = "MANUAL" | "COMPANY_AI";
 
 export type IntakeDraft = {
   title: string;
   statusCode: JobStatusCode;
-  openingType: string;
-  jobType: string;
-  specialization: string;
+  openingType: CommessaType;
+  scopeSectionId: string;
+  scopeGroupId: string;
+  scopeSubgroupId: string;
   description: string;
   clientName: string;
   clientTaxId: string;
@@ -43,6 +45,7 @@ export type IntakePreview = {
   sourceName?: string;
   knowledgePack?: CompanyAiKnowledgePackSummary;
   knowledgeHints?: CompanyAiKnowledgeHint[];
+  scopeSuggestion?: CompanyAiScopeSuggestion;
 };
 
 export type IntakeAdapterRecord = {
@@ -65,8 +68,9 @@ export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
   title: "",
   statusCode: "DRAFT",
   openingType: "NUOVA_COMMESSA",
-  jobType: "Edilizia e ristrutturazioni",
-  specialization: "Ristrutturazione interna",
+  scopeSectionId: "",
+  scopeGroupId: "",
+  scopeSubgroupId: "",
   description: "",
   clientName: "",
   clientTaxId: "",
@@ -83,35 +87,15 @@ export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
   priority: "STANDARD",
 };
 
-export const INTAKE_OPENING_TYPES = [
-  { value: "NUOVA_COMMESSA", label: "Nuova commessa" },
-  { value: "PREVENTIVO_APPROVATO", label: "Preventivo approvato" },
-  { value: "MANUTENZIONE_PROGRAMMATA", label: "Manutenzione programmata" },
-] as const;
-
-export const INTAKE_JOB_TYPES = [
-  "Edilizia e ristrutturazioni",
-  "Impianti e manutenzione",
-  "Logistica e trasporti",
-  "Servizi tecnici",
-  "Altro",
-] as const;
-
-export const INTAKE_SPECIALIZATIONS = [
-  "Ristrutturazione interna",
-  "Sopralluogo e rilievo",
-  "Manutenzione ordinaria",
-  "Manutenzione straordinaria",
-  "Installazione e collaudo",
-  "Da definire",
-] as const;
+export const INTAKE_OPENING_TYPES = COMMESSA_TYPES;
 
 export const INTAKE_FIELD_LABELS: Record<keyof IntakeDraft, string> = {
   title: "Nome commessa",
   statusCode: "Stato",
-  openingType: "Tipo di apertura",
-  jobType: "Tipo di commessa",
-  specialization: "Specializzazione",
+  openingType: "Tipo commessa",
+  scopeSectionId: "Sezione",
+  scopeGroupId: "Raggruppamento",
+  scopeSubgroupId: "Sottogruppo",
   description: "Descrizione",
   clientName: "Cliente / ragione sociale",
   clientTaxId: "P. IVA / codice fiscale",

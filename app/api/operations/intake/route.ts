@@ -16,6 +16,7 @@ import {
   type IntakeMode,
   type IntakeSuggestion,
 } from "@/lib/operations-intake";
+import { inferCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiScopeSuggestion } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -43,25 +44,6 @@ function labeledValue(source: string, labels: string[]) {
   return "";
 }
 
-function normalizedCategory(value: string) {
-  const lower = value.toLowerCase();
-  if (lower.includes("trasport") || lower.includes("logistic")) return "Logistica e trasporti";
-  if (lower.includes("impiant") || lower.includes("manutenz")) return "Impianti e manutenzione";
-  if (lower.includes("serviz")) return "Servizi tecnici";
-  if (lower.includes("edil") || lower.includes("ristruttur") || lower.includes("cantiere")) return "Edilizia e ristrutturazioni";
-  return value;
-}
-
-function normalizedSpecialization(value: string) {
-  const lower = value.toLowerCase();
-  if (lower.includes("sopral") || lower.includes("riliev")) return "Sopralluogo e rilievo";
-  if (lower.includes("straordin")) return "Manutenzione straordinaria";
-  if (lower.includes("manutenz")) return "Manutenzione ordinaria";
-  if (lower.includes("install") || lower.includes("collaud")) return "Installazione e collaudo";
-  if (lower.includes("ristruttur")) return "Ristrutturazione interna";
-  return value;
-}
-
 function addSuggestion(
   suggestions: IntakeSuggestion[],
   key: keyof IntakeDraft,
@@ -74,7 +56,7 @@ function addSuggestion(
   suggestions.push({ key, label: INTAKE_FIELD_LABELS[key], value: trimmed, confidence, source });
 }
 
-function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; suggestions: IntakeSuggestion[] } {
+function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; suggestions: IntakeSuggestion[]; scopeSuggestion: CompanyAiScopeSuggestion } {
   const source = sourceText.trim();
   const suggestions: IntakeSuggestion[] = [];
   const firstLine = source.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
@@ -92,20 +74,28 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const rawCig = labeledValue(source, ["CIG"]);
   const rawCup = labeledValue(source, ["CUP"]);
   const rawDueDate = labeledValue(source, ["Scadenza", "Consegna", "Fine lavori"]);
-  const rawJobType = labeledValue(source, ["Tipo di commessa", "Categoria", "Lavorazione"]);
-  const rawSpecialization = labeledValue(source, ["Specializzazione", "Tipologia"]);
 
   const title = rawTitle || (firstLine && !firstLine.includes(":" ) ? firstLine : "");
   const description = rawDescription || source;
-  const jobType = normalizedCategory(rawJobType || (source.toLowerCase().includes("ristruttur") ? "Edilizia e ristrutturazioni" : ""));
-  const specialization = normalizedSpecialization(rawSpecialization || (source.toLowerCase().includes("ristruttur") ? "Ristrutturazione interna" : ""));
-  const openingType = source.toLowerCase().includes("preventivo") ? "PREVENTIVO_APPROVATO" : "NUOVA_COMMESSA";
+  const lowerSource = source.toLocaleLowerCase("it-IT");
+  const openingType = /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
+  const inferredScope = inferCompanyAiScopeSelection(source);
+  const scopeFields = scopeSelectionToFields(inferredScope?.selection ?? null);
+  const scopeSuggestion: CompanyAiScopeSuggestion = {
+    selection: inferredScope?.selection ?? null,
+    score: inferredScope ? Math.min(0.98, 0.5 + inferredScope.score * 0.08) : 0,
+    source: "company-ai",
+    knowledgeHints: inferredScope?.selection ? searchCompanyAiKnowledge(inferredScope.selection.knowledgeQuery, { part: inferredScope.selection.knowledgePart, limit: 6 }) : [],
+  };
 
   addSuggestion(suggestions, "title", title, rawTitle ? 0.96 : 0.52, rawTitle ? "Preventivo · oggetto" : "Prima riga del documento");
   addSuggestion(suggestions, "description", description, rawDescription ? 0.91 : 0.64, rawDescription ? "Preventivo · descrizione" : "Contenuto del documento");
-  addSuggestion(suggestions, "openingType", openingType, 0.72, "Segnale preventivo nel documento");
-  addSuggestion(suggestions, "jobType", jobType, rawJobType ? 0.9 : 0.58, rawJobType ? "Preventivo · classificazione" : "Classificazione testuale");
-  addSuggestion(suggestions, "specialization", specialization, rawSpecialization ? 0.9 : 0.58, rawSpecialization ? "Preventivo · tipologia" : "Classificazione testuale");
+  addSuggestion(suggestions, "openingType", openingType, /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? 0.94 : 0.74, "Classificazione del documento");
+  if (inferredScope?.selection) {
+    addSuggestion(suggestions, "scopeSectionId", inferredScope.selection.sectionTitle, scopeSuggestion.score, "Company AI · sezione");
+    addSuggestion(suggestions, "scopeGroupId", inferredScope.selection.groupTitle, scopeSuggestion.score, "Company AI · raggruppamento");
+    addSuggestion(suggestions, "scopeSubgroupId", inferredScope.selection.subgroupTitle, scopeSuggestion.score, "Company AI · sottogruppo");
+  }
   addSuggestion(suggestions, "clientName", rawClient, 0.96, "Preventivo · cliente");
   addSuggestion(suggestions, "clientTaxId", rawTaxId, 0.98, "Preventivo · identificativo fiscale");
   addSuggestion(suggestions, "clientContact", rawContact, 0.9, "Preventivo · referente");
@@ -124,8 +114,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     title: title.slice(0, 120),
     statusCode: "DRAFT",
     openingType,
-    jobType: jobType || DEFAULT_INTAKE_DRAFT.jobType,
-    specialization: specialization || DEFAULT_INTAKE_DRAFT.specialization,
+    ...scopeFields,
     description: description.slice(0, 2_000),
     clientName: rawClient.slice(0, 160),
     clientTaxId: rawTaxId.slice(0, 80),
@@ -140,7 +129,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     cup: rawCup.slice(0, 80),
     dueDate: rawDueDate.slice(0, 40),
   };
-  return { draft, suggestions };
+  return { draft, suggestions, scopeSuggestion };
 }
 
 export async function POST(request: Request) {
@@ -161,7 +150,7 @@ export async function POST(request: Request) {
   const sourceName = bounded(input.sourceName, 160);
   if (sourceText.length < 2) return Response.json({ error: "source_text_required" }, { status: 400 });
 
-  const { draft, suggestions } = extractDraft(sourceText);
+  const { draft, suggestions, scopeSuggestion } = extractDraft(sourceText);
   const knowledgePack = getCompanyAiKnowledgePackSummary();
   const knowledgeHints = searchCompanyAiKnowledge(sourceText, { limit: 6 });
   const previewId = crypto.randomUUID();
@@ -186,6 +175,7 @@ export async function POST(request: Request) {
         sourceName,
         draft,
         suggestions,
+        scopeSuggestion,
         knowledgePackId: knowledgePack.id,
         knowledgePackVersion: knowledgePack.version,
         knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
@@ -204,6 +194,7 @@ export async function POST(request: Request) {
       sourceName: sourceName || undefined,
       draft,
       suggestions,
+      scopeSuggestion,
       knowledgePack,
       knowledgeHints,
       readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: now },
