@@ -67,15 +67,18 @@ type OperationsJob = {
 
 type OperationsAdapterRecord = {
   id: string;
+  canonicalCode?: string;
   title: string;
   detail: string;
   meta: string;
   status: string;
   progress: number;
+  payload?: Record<string, unknown>;
 };
 
 type OperationsAdapterResponse = {
   records?: OperationsAdapterRecord[];
+  created?: OperationsAdapterRecord;
 };
 
 const navItems = [
@@ -148,10 +151,14 @@ function jobsFromAdapter(records: OperationsAdapterRecord[]): OperationsJob[] {
   return records.map((record) => {
     const [location, team] = record.detail.split(" · ");
     const status: JobStatus = record.status === "IN CORSO" ? "In corso" : record.status === "PIANIFICATA" ? "Pianificata" : "Completata";
+    const canonicalCode = record.canonicalCode ?? (record.id.startsWith("OP-") ? `#${record.id.slice(3)}` : record.id);
+    const originalTitle = typeof record.payload?.title === "string" && record.payload.title !== record.title
+      ? record.payload.title
+      : record.title;
     return {
-      id: record.id.startsWith("OP-") ? `#${record.id.slice(3)}` : record.id,
+      id: canonicalCode,
       sourceId: record.id,
-      title: record.title,
+      title: originalTitle,
       location: location || record.detail,
       team: team || "—",
       status,
@@ -231,7 +238,7 @@ export default function OperationsPage() {
       const records = Array.isArray(payload.records) ? payload.records : [];
       setAdapterJobs(records.length ? jobsFromAdapter(records) : []);
       setAdapterStatus("online");
-      notify(`Commessa salvata su Sites D1 adapter: ${title}`);
+      notify(`Commessa ${payload.created?.canonicalCode ?? payload.created?.id ?? "assegnata"} salvata su D1`);
     } catch {
       notify(`Adapter Operations non disponibile: bozza non salvata (${title})`);
     }

@@ -21,6 +21,7 @@ export type S04Module = keyof typeof S04_MODULES;
 
 export type S04Record = {
   id: string;
+  canonicalCode?: string;
   module: S04Module;
   recordType: string;
   title: string;
@@ -72,6 +73,7 @@ export function recordForResponse(row: typeof s04Records.$inferSelect): S04Recor
   const tone = row.tone === "cyan" || row.tone === "amber" || row.tone === "red" ? row.tone : "lime";
   return {
     id: row.id,
+    canonicalCode: row.canonicalCode ?? undefined,
     module: row.module as S04Module,
     recordType: row.recordType,
     title: row.title,

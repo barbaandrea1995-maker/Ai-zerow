@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Canonical Cloudflare/D1 tenant directory. The Sites project tenant keeps
@@ -58,6 +58,20 @@ export const accessProfiles = sqliteTable("access_profiles", {
 });
 
 /**
+ * Tenant-scoped counters used by the server-side naming policy. The counter
+ * is advanced with one atomic SQLite upsert, so concurrent creates cannot
+ * receive the same sequence number.
+ */
+export const entityCodeCounters = sqliteTable("entity_code_counters", {
+  tenantId: text("tenant_id").notNull(),
+  namespace: text("namespace").notNull(),
+  lastValue: integer("last_value").notNull().default(0),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantNamespacePk: primaryKey({ columns: [table.tenantId, table.namespace] }),
+}));
+
+/**
  * Sites-side anti-corruption read model for the S04 domain surfaces.
  *
  * This table is deliberately tenant-scoped and stores the normalized fields
@@ -69,6 +83,7 @@ export const s04Records = sqliteTable("s04_records", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
   module: text("module").notNull(),
+  canonicalCode: text("canonical_code"),
   recordType: text("record_type").notNull().default("read-model"),
   title: text("title").notNull(),
   detail: text("detail").notNull(),
@@ -80,7 +95,9 @@ export const s04Records = sqliteTable("s04_records", {
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => ({
+  tenantModuleCodeUnique: uniqueIndex("s04_records_tenant_module_code_uq").on(table.tenantId, table.module, table.canonicalCode),
+}));
 
 /**
  * Sites-native bounded read/write adapter for S05 domains.
