@@ -1,18 +1,28 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records } from "@/db/schema";
+import { s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
   publicAuthorityContext,
 } from "@/lib/authority-context";
 import { recordForResponse } from "@/lib/s04-adapter";
+import {
+  canTransitionJob,
+  clampJobProgress,
+  jobStatusLabel,
+  normalizeJobStatus,
+  parseJobPayload,
+  type JobActivity,
+  type JobEvidence,
+  type JobPayload,
+} from "@/lib/operations-contract";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ jobId: string }> };
-
 type JsonObject = Record<string, unknown>;
+type WorkspaceSectionStatus = "readback" | "empty" | "deferred";
 
 function parsePayload(payloadJson: string): JsonObject {
   try {
@@ -23,6 +33,18 @@ function parsePayload(payloadJson: string): JsonObject {
   } catch {
     return {};
   }
+}
+
+function safeText(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
+function boundedText(value: unknown, max: number, fallback = "") {
+  return safeText(value, fallback).slice(0, max);
+}
+
+function isRecord(value: unknown): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function keyVariants(value: unknown): string[] {
@@ -41,6 +63,7 @@ function referencesJob(row: typeof s04Records.$inferSelect, jobVariants: Set<str
   const payload = parsePayload(row.payloadJson);
   const references = [
     row.id,
+    row.canonicalCode,
     payload.jobId,
     payload.job_id,
     payload.commessaId,
@@ -52,17 +75,148 @@ function referencesJob(row: typeof s04Records.$inferSelect, jobVariants: Set<str
   return references.some((reference) => keyVariants(reference).some((key) => jobVariants.has(key)));
 }
 
-function relatedRecords(
-  rows: (typeof s04Records.$inferSelect)[],
-  jobVariants: Set<string>,
-) {
+function relatedRecords(rows: (typeof s04Records.$inferSelect)[], jobVariants: Set<string>) {
   return rows
     .filter((row) => row.module !== "operations" && referencesJob(row, jobVariants))
     .map(recordForResponse);
 }
 
-function section(status: "readback" | "empty" | "deferred", records: ReturnType<typeof recordForResponse>[]) {
+function section(status: WorkspaceSectionStatus, records: ReturnType<typeof recordForResponse>[]) {
   return { status, count: records.length, records };
+}
+
+function activityRecords(jobId: string, activities: JobActivity[]) {
+  return activities.map((activity) => ({
+    id: `${jobId}:${activity.id}`,
+    module: "operations" as const,
+    recordType: "activity",
+    title: activity.title,
+    detail: activity.detail,
+    meta: activity.dueDate,
+    status: activity.state.toUpperCase(),
+    tone: activity.state === "blocked" ? "amber" as const : activity.state === "done" ? "lime" as const : "cyan" as const,
+    progress: activity.progress,
+    payload: activity as unknown as Record<string, unknown>,
+    createdAt: activity.createdAt,
+    updatedAt: activity.updatedAt,
+  }));
+}
+
+function evidenceRecords(jobId: string, evidence: JobEvidence[]) {
+  return evidence.map((item) => ({
+    id: `${jobId}:${item.id}`,
+    module: "operations" as const,
+    recordType: "evidence",
+    title: item.title,
+    detail: item.detail,
+    meta: item.kind.toUpperCase(),
+    status: "VERIFIED_SITES_READBACK",
+    tone: "lime" as const,
+    progress: 100,
+    payload: item as unknown as Record<string, unknown>,
+    createdAt: item.createdAt,
+    updatedAt: item.createdAt,
+  }));
+}
+
+function assignmentRecord(jobId: string, assignment: NonNullable<JobPayload["assignment"]>) {
+  return {
+    id: `${jobId}:assignment`,
+    module: "operations" as const,
+    recordType: "assignment",
+    title: assignment.responsible || assignment.team,
+    detail: `${assignment.role} · ${assignment.team}`,
+    meta: assignment.assignedAt,
+    status: "ASSIGNED",
+    tone: "cyan" as const,
+    progress: 100,
+    payload: assignment as unknown as Record<string, unknown>,
+    createdAt: assignment.assignedAt,
+    updatedAt: assignment.assignedAt,
+  };
+}
+
+function workspaceResponse(
+  context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
+  jobRow: typeof s04Records.$inferSelect,
+  rows: (typeof s04Records.$inferSelect)[],
+  requestedJobId: string,
+) {
+  const baseJob = recordForResponse(jobRow);
+  const payload = parseJobPayload(jobRow.payloadJson);
+  const progress = clampJobProgress(payload.progress ?? jobRow.progress);
+  const jobKey = jobRow.canonicalCode ?? jobRow.id;
+  const activities = activityRecords(jobKey, payload.activities);
+  const evidence = evidenceRecords(jobKey, payload.evidence);
+  const assignment = payload.assignment ? assignmentRecord(jobKey, payload.assignment) : null;
+  const job = {
+    ...baseJob,
+    title: payload.title || baseJob.title,
+    detail: payload.location || baseJob.detail,
+    meta: payload.dueDate || baseJob.meta,
+    status: jobStatusLabel(payload.statusCode),
+    progress,
+    payload: { ...payload, progress },
+  };
+  const jobVariants = new Set(keyVariants(requestedJobId));
+  const related = relatedRecords(rows, jobVariants);
+  const byModule = (module: string) => related.filter((record) => record.module === module);
+  const planningRecords = [
+    ...(assignment ? [assignment] : []),
+    ...byModule("workforce"),
+    ...byModule("mission"),
+  ];
+
+  return {
+    context: publicAuthorityContext(context),
+    job,
+    workspace: {
+      source: "sites-d1-w03-commessa-read-write",
+      authority: "server-context",
+      requestedJobId,
+      sections: {
+        activities: section(activities.length ? "readback" : "empty", activities),
+        planning: section(planningRecords.length ? "readback" : "empty", planningRecords),
+        resources: section(byModule("assets").length ? "readback" : "empty", byModule("assets")),
+        materials: section(byModule("warehouse").length ? "readback" : "empty", byModule("warehouse")),
+        field: section(evidence.length ? "readback" : "deferred", evidence),
+        rapportino: section(payload.rapportino ? "readback" : "deferred", []),
+        control: section("readback", []),
+        evidence: section(evidence.length ? "readback" : "empty", evidence),
+      },
+      journey: [
+        { key: "job", label: "Job", status: "readback" },
+        { key: "activity", label: "Activity", status: activities.length ? "readback" : "empty" },
+        { key: "planning", label: "Planning", status: planningRecords.length ? "readback" : "empty" },
+        { key: "assignment", label: "Assignment", status: assignment ? "readback" : "empty" },
+        { key: "attendance", label: "Attendance", status: "deferred" },
+        { key: "work-context", label: "Work context", status: "deferred" },
+        { key: "field", label: "Field", status: evidence.length ? "readback" : "deferred" },
+        { key: "rapportino", label: "Rapportino", status: payload.rapportino ? "readback" : "deferred" },
+        { key: "control", label: "Controllo", status: "readback" },
+      ],
+    },
+    readback: {
+      status: "ok",
+      scope: "tenant",
+      tenantId: context.tenantId,
+      version: payload.version,
+      checkedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function findJob(
+  context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
+  requestedJobId: string,
+) {
+  const jobVariants = new Set(keyVariants(requestedJobId));
+  const rows = await getDb()
+    .select()
+    .from(s04Records)
+    .where(eq(s04Records.tenantId, context.tenantId));
+  const jobRow = rows.find((row) => row.module === "operations" && referencesJob(row, jobVariants));
+  return { rows, jobRow };
 }
 
 export async function GET(_request: Request, routeContext: RouteContext) {
@@ -78,71 +232,259 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   } catch {
     return Response.json({ error: "invalid_job_id" }, { status: 400 });
   }
-
-  const jobVariants = new Set(keyVariants(requestedJobId));
-  if (!jobVariants.size || requestedJobId.length > 160) {
+  if (!requestedJobId || requestedJobId.length > 160) {
     return Response.json({ error: "invalid_job_id" }, { status: 400 });
   }
 
   try {
-    const rows = await getDb()
-      .select()
-      .from(s04Records)
-      .where(eq(s04Records.tenantId, context.tenantId));
-    const jobRow = rows.find((row) => row.module === "operations" && referencesJob(row, jobVariants));
+    const { rows, jobRow } = await findJob(context, requestedJobId);
     if (!jobRow) {
-      return Response.json({
-        error: "job_not_found",
-        requestedJobId,
-        readback: { status: "empty", scope: "tenant" },
-      }, { status: 404 });
+      return Response.json({ error: "job_not_found", requestedJobId, readback: { status: "empty", scope: "tenant" } }, { status: 404 });
     }
-
-    const job = recordForResponse(jobRow);
-    const related = relatedRecords(rows, jobVariants);
-    const byModule = (module: string) => related.filter((record) => record.module === module);
-    const payload = parsePayload(jobRow.payloadJson);
-    const activities = Array.isArray(payload.activities) ? payload.activities : [];
-
-    return Response.json({
-      context: publicAuthorityContext(context),
-      job,
-      workspace: {
-        source: "sites-d1-s04-scoped-read",
-        authority: "server-context",
-        requestedJobId,
-        sections: {
-          activities: section(activities.length ? "readback" : "empty", []),
-          planning: section(byModule("workforce").length || byModule("mission").length ? "readback" : "empty", [
-            ...byModule("workforce"),
-            ...byModule("mission"),
-          ]),
-          resources: section(byModule("assets").length ? "readback" : "empty", byModule("assets")),
-          materials: section(byModule("warehouse").length ? "readback" : "empty", byModule("warehouse")),
-          field: section("deferred", []),
-          rapportino: section("deferred", []),
-          control: section("deferred", []),
-        },
-        journey: [
-          { key: "job", label: "Job", status: "readback" },
-          { key: "activity", label: "Activity", status: activities.length ? "readback" : "empty" },
-          { key: "planning", label: "Planning", status: byModule("workforce").length || byModule("mission").length ? "readback" : "empty" },
-          { key: "assignment", label: "Assignment", status: byModule("workforce").length ? "readback" : "empty" },
-          { key: "attendance", label: "Attendance", status: "deferred" },
-          { key: "work-context", label: "Work context", status: "deferred" },
-          { key: "field", label: "Field", status: "deferred" },
-          { key: "rapportino", label: "Rapportino", status: "deferred" },
-          { key: "control", label: "Controllo", status: "deferred" },
-        ],
-      },
-      readback: {
-        status: "ok",
-        scope: "tenant",
-        tenantId: context.tenantId,
-        checkedAt: new Date().toISOString(),
-      },
-    }, { headers: { "cache-control": "no-store" } });
+    return Response.json(workspaceResponse(context, jobRow, rows, requestedJobId), {
+      headers: { "cache-control": "no-store" },
+    });
   } catch {
     return Response.json({ error: "operations_workspace_readback_failed" }, { status: 503 });
+  }
+}
+
+export async function PATCH(request: Request, routeContext: RouteContext) {
+  const context = await getAuthorityContext();
+  if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  if (!hasCapability(context, "operations.write")) {
+    return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
+  }
+
+  let requestedJobId = "";
+  try {
+    requestedJobId = decodeURIComponent((await routeContext.params).jobId).trim();
+  } catch {
+    return Response.json({ error: "invalid_job_id" }, { status: 400 });
+  }
+
+  let input: JsonObject;
+  try {
+    const parsed = await request.json() as unknown;
+    if (!isRecord(parsed)) return Response.json({ error: "invalid_json" }, { status: 400 });
+    input = parsed;
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  const action = boundedText(input.action, 48, "update_job").toLowerCase();
+  const idempotencyKey = boundedText(input.idempotencyKey, 160);
+  if (idempotencyKey.length < 4) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
+
+  try {
+    const { rows, jobRow } = await findJob(context, requestedJobId);
+    if (!jobRow) return Response.json({ error: "job_not_found", requestedJobId }, { status: 404 });
+
+    const db = getDb();
+    const existing = await db.select().from(s06Events).where(and(
+      eq(s06Events.tenantId, context.tenantId),
+      eq(s06Events.idempotencyKey, idempotencyKey),
+    )).limit(1);
+    if (existing[0]) {
+      return Response.json({
+        ...workspaceResponse(context, jobRow, rows, requestedJobId),
+        idempotent: true,
+        mutation: { action, eventId: existing[0].eventId, readback: "verified" },
+      }, { headers: { "cache-control": "no-store" } });
+    }
+
+    const current = parseJobPayload(jobRow.payloadJson);
+    const expectedVersion = typeof input.expectedVersion === "number" ? Math.floor(input.expectedVersion) : null;
+    if (expectedVersion !== null && expectedVersion !== current.version) {
+      return Response.json({ error: "version_conflict", expectedVersion, currentVersion: current.version }, { status: 409 });
+    }
+
+    const next: JobPayload = { ...current, version: current.version + 1 };
+    const now = new Date().toISOString();
+    let eventType = "operations.job.updated";
+    let change: JsonObject = {};
+
+    if (action === "set_status") {
+      const nextStatus = normalizeJobStatus(input.statusCode ?? input.status);
+      if (!canTransitionJob(current.statusCode, nextStatus)) {
+        return Response.json({ error: "invalid_status_transition", from: current.statusCode, to: nextStatus }, { status: 409 });
+      }
+      next.statusCode = nextStatus;
+      eventType = "operations.job.status_changed";
+      change = { from: current.statusCode, to: nextStatus };
+    } else if (action === "set_progress") {
+      const rawProgress = input.progress;
+      if (typeof rawProgress !== "number" || !Number.isFinite(rawProgress) || rawProgress < 0 || rawProgress > 100) {
+        return Response.json({ error: "progress_must_be_between_0_and_100" }, { status: 400 });
+      }
+      next.progress = clampJobProgress(rawProgress);
+      eventType = "operations.job.progress_changed";
+      change = { progress: next.progress };
+    } else if (action === "add_activity") {
+      const title = boundedText(input.title, 160);
+      if (title.length < 2) return Response.json({ error: "activity_title_required" }, { status: 400 });
+      const activity: JobActivity = {
+        id: `activity-${crypto.randomUUID().slice(0, 8)}`,
+        title,
+        detail: boundedText(input.detail, 280, "Attività operativa"),
+        state: input.state === "active" || input.state === "done" || input.state === "blocked" ? input.state : "queued",
+        owner: boundedText(input.owner, 120, "Da assegnare"),
+        dueDate: boundedText(input.dueDate, 40, "—"),
+        progress: clampJobProgress(input.progress),
+        createdAt: now,
+        updatedAt: now,
+      };
+      next.activities = [...current.activities, activity];
+      eventType = "operations.job.activity_added";
+      change = { activityId: activity.id, title: activity.title };
+    } else if (action === "complete_activity") {
+      const activityId = boundedText(input.activityId, 120);
+      const activity = current.activities.find((item) => item.id === activityId);
+      if (!activity) return Response.json({ error: "activity_not_found" }, { status: 404 });
+      next.activities = current.activities.map((item) => item.id === activityId ? { ...item, state: "done", progress: 100, updatedAt: now } : item);
+      eventType = "operations.job.activity_completed";
+      change = { activityId };
+    } else if (action === "assign") {
+      const responsible = boundedText(input.responsible, 120);
+      const team = boundedText(input.team, 120);
+      if (!responsible && !team) return Response.json({ error: "responsible_or_team_required" }, { status: 400 });
+      next.assignment = {
+        responsible: responsible || "Da assegnare",
+        team: team || "Da assegnare",
+        role: boundedText(input.role, 120, "Responsabile operativo"),
+        assignedAt: now,
+        assignedBy: context.actorId,
+      };
+      eventType = "operations.job.assigned";
+      change = { responsible: next.assignment.responsible, team: next.assignment.team };
+    } else if (action === "add_evidence") {
+      const title = boundedText(input.title, 160, "Evidenza operativa");
+      const evidence: JobEvidence = {
+        id: `evidence-${crypto.randomUUID().slice(0, 8)}`,
+        kind: input.kind === "photo" || input.kind === "file" || input.kind === "voice" ? input.kind : "note",
+        title,
+        detail: boundedText(input.detail, 2_000),
+        createdAt: now,
+        createdBy: context.actorId,
+      };
+      next.evidence = [...current.evidence, evidence];
+      eventType = "operations.job.evidence_added";
+      change = { evidenceId: evidence.id, kind: evidence.kind };
+    } else if (action === "save_rapportino") {
+      const text = boundedText(input.text, 4_000);
+      if (text.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
+      next.rapportino = { status: "DRAFT", text, updatedAt: now, updatedBy: context.actorId };
+      eventType = "operations.job.rapportino_saved";
+      change = { status: "DRAFT" };
+    } else if (action === "update_job") {
+      const fields = isRecord(input.fields) ? input.fields : input;
+      if (typeof fields.title === "string") {
+        const title = boundedText(fields.title, 120);
+        if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
+        next.title = title;
+      }
+      if (typeof fields.description === "string") next.description = boundedText(fields.description, 2_000);
+      if (typeof fields.client === "string") next.client = boundedText(fields.client, 160);
+      if (typeof fields.location === "string") next.location = boundedText(fields.location, 240);
+      if (typeof fields.category === "string") next.category = boundedText(fields.category, 80);
+      if (typeof fields.dueDate === "string") next.dueDate = boundedText(fields.dueDate, 40);
+      if (fields.priority === "HIGH" || fields.priority === "STANDARD" || fields.priority === "LOW") next.priority = fields.priority;
+      eventType = "operations.job.details_updated";
+      change = { fields: Object.keys(fields).filter((key) => ["title", "description", "client", "location", "category", "dueDate", "priority"].includes(key)) };
+    } else {
+      return Response.json({ error: "unknown_job_action" }, { status: 400 });
+    }
+
+    next.progress = clampJobProgress(next.progress ?? jobRow.progress);
+    const serializedPayload = JSON.stringify(next);
+    const eventId = crypto.randomUUID();
+    const correlationId = boundedText(input.correlationId, 120) || crypto.randomUUID();
+    const aggregateId = jobRow.canonicalCode ?? jobRow.id;
+    const eventPayload = JSON.stringify({
+      action,
+      change,
+      before: { statusCode: current.statusCode, progress: current.progress ?? jobRow.progress, version: current.version },
+      after: { statusCode: next.statusCode, progress: next.progress, version: next.version },
+      source: "sites-w03-operations",
+    });
+    if (eventPayload.length > 12_000 || serializedPayload.length > 48_000) {
+      return Response.json({ error: "job_payload_too_large" }, { status: 413 });
+    }
+
+    const updatedRows = await db.batch([
+      db.update(s04Records)
+        .set({
+          detail: next.location,
+          meta: next.dueDate,
+          status: jobStatusLabel(next.statusCode),
+          progress: next.progress,
+          payloadJson: serializedPayload,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(s04Records.id, jobRow.id),
+          eq(s04Records.tenantId, context.tenantId),
+          eq(s04Records.updatedAt, jobRow.updatedAt),
+        ))
+        .returning(),
+      db.insert(s06Events).values({
+        eventId,
+        tenantId: context.tenantId,
+        eventType,
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: context.actorId,
+        source: "sites-command",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "commessa",
+        aggregateId,
+        aggregateVersion: next.version,
+        payloadJson: eventPayload,
+        correlationId,
+        causationId: null,
+        idempotencyKey,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        eventId,
+        topic: `zerow.${eventType}`,
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        aggregateType: "commessa",
+        aggregateId,
+        expectedVersion: next.version,
+        observedVersion: next.version,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Mutazione commessa riletta su D1; consumer canonico esterno ancora differito.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+
+    const updated = (updatedRows[0] as (typeof s04Records.$inferSelect)[])[0];
+    if (!updated) return Response.json({ error: "version_conflict", currentVersion: current.version }, { status: 409 });
+
+    const refreshed = await findJob(context, requestedJobId);
+    return Response.json({
+      ...workspaceResponse(context, refreshed.jobRow ?? updated, refreshed.rows, requestedJobId),
+      idempotent: false,
+      mutation: { action, eventId, version: next.version, readback: "verified" },
+    }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "operations_workspace_write_failed";
+    if (message.includes("UNIQUE") || message.includes("unique")) {
+      return Response.json({ error: "idempotency_or_version_conflict" }, { status: 409 });
+    }
+    return Response.json({ error: "operations_workspace_write_failed" }, { status: 503 });
   }
 }

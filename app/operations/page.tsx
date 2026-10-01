@@ -39,9 +39,10 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "next/navigation";
+import { jobStatusLabel, normalizeJobStatus } from "@/lib/operations-contract";
 
-type JobStatus = "In corso" | "Pianificata" | "Completata";
-type JobFilter = "TUTTE" | "IN CORSO" | "PIANIFICATE" | "COMPLETATE";
+type JobStatus = "BOZZA" | "PROPOSTA" | "APPROVATA" | "In corso" | "Pianificata" | "BLOCCATA" | "Completata" | "CHIUSA" | "ANNULLATA";
+type JobFilter = "TUTTE" | "IN CORSO" | "PIANIFICATE" | "COMPLETATE" | "BOZZE" | "BLOCCATE";
 type Tone = "lime" | "cyan" | "amber" | "red";
 
 type JobActivity = {
@@ -55,13 +56,17 @@ type OperationsJob = {
   id: string;
   sourceId?: string;
   title: string;
+  description: string;
+  client: string;
   location: string;
   status: JobStatus;
+  statusCode: string;
   priority: "HIGH" | "STANDARD" | "LOW";
   progress: number;
   team: string;
   due: string;
   category: string;
+  version: number;
   activities: JobActivity[];
 };
 
@@ -101,13 +106,17 @@ const jobs: OperationsJob[] = [];
 const emptyJob: OperationsJob = {
   id: "EMPTY",
   title: "Nessuna commessa",
+  description: "Il readback D1 non contiene commesse.",
+  client: "—",
   location: "Il readback D1 non contiene commesse.",
-  status: "Pianificata",
+  status: "BOZZA",
+  statusCode: "DRAFT",
   priority: "LOW",
   progress: 0,
   team: "—",
   due: "—",
   category: "Nessun dato",
+  version: 0,
   activities: [],
 };
 
@@ -137,7 +146,7 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
 }
 
 function JobStatus({ status }: { status: JobStatus }) {
-  const tone: Tone = status === "In corso" ? "lime" : status === "Pianificata" ? "cyan" : "amber";
+  const tone: Tone = status === "In corso" ? "lime" : status === "BLOCCATA" || status === "ANNULLATA" ? "red" : status === "Completata" || status === "CHIUSA" ? "amber" : "cyan";
   return <StatusBadge tone={tone}>{status.toUpperCase()}</StatusBadge>;
 }
 
@@ -149,24 +158,44 @@ function ActivityState({ state }: { state: JobActivity["state"] }) {
 
 function jobsFromAdapter(records: OperationsAdapterRecord[]): OperationsJob[] {
   return records.map((record) => {
+    const payload = record.payload ?? {};
     const [location, team] = record.detail.split(" · ");
-    const status: JobStatus = record.status === "IN CORSO" ? "In corso" : record.status === "PIANIFICATA" ? "Pianificata" : "Completata";
+    const statusCode = normalizeJobStatus(payload.statusCode ?? record.status);
+    const statusLabel = jobStatusLabel(statusCode);
+    const status: JobStatus = statusLabel === "IN CORSO" ? "In corso" : statusLabel === "PIANIFICATA" ? "Pianificata" : statusLabel === "COMPLETATA" ? "Completata" : statusLabel as JobStatus;
     const canonicalCode = record.canonicalCode ?? (record.id.startsWith("OP-") ? `#${record.id.slice(3)}` : record.id);
-    const originalTitle = typeof record.payload?.title === "string" && record.payload.title !== record.title
-      ? record.payload.title
+    const originalTitle = typeof payload.title === "string" && payload.title !== record.title
+      ? payload.title
       : record.title;
+    const rawActivities = Array.isArray(payload.activities) ? payload.activities : [];
+    const activities = rawActivities.flatMap((activity, index) => {
+      if (!activity || typeof activity !== "object") return [];
+      const item = activity as Record<string, unknown>;
+      const label = typeof item.title === "string" ? item.title : typeof item.label === "string" ? item.label : "Attività operativa";
+      return [{
+        label,
+        detail: typeof item.detail === "string" ? item.detail : "Attività collegata alla commessa",
+        state: item.state === "done" || item.state === "active" || item.state === "blocked" ? item.state : "queued",
+        owner: typeof item.owner === "string" ? item.owner : "Da assegnare",
+        key: `${record.id}-activity-${index}`,
+      } as JobActivity];
+    });
     return {
       id: canonicalCode,
       sourceId: record.id,
       title: originalTitle,
+      description: typeof payload.description === "string" ? payload.description : "",
+      client: typeof payload.client === "string" ? payload.client : "—",
       location: location || record.detail,
       team: team || "—",
       status,
+      statusCode,
       progress: Math.max(0, Math.min(100, Number(record.progress) || 0)),
-      due: record.meta || "—",
-      category: "Adapter readback",
-      priority: "STANDARD",
-      activities: [],
+      due: typeof payload.dueDate === "string" ? payload.dueDate : record.meta || "—",
+      category: typeof payload.category === "string" ? payload.category : "Adapter readback",
+      priority: payload.priority === "HIGH" || payload.priority === "LOW" ? payload.priority : "STANDARD",
+      version: typeof payload.version === "number" ? payload.version : 1,
+      activities,
     };
   });
 }
@@ -180,7 +209,12 @@ export default function OperationsPage() {
   const [newJobOpen, setNewJobOpen] = useState(false);
   const [planningOpen, setPlanningOpen] = useState(false);
   const [jobTitle, setJobTitle] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+  const [jobClient, setJobClient] = useState("");
   const [jobLocation, setJobLocation] = useState("");
+  const [jobDueDate, setJobDueDate] = useState("");
+  const [jobCategory, setJobCategory] = useState("Operations");
+  const [jobPriority, setJobPriority] = useState<"HIGH" | "STANDARD" | "LOW">("STANDARD");
   const [toast, setToast] = useState("");
   const [adapterJobs, setAdapterJobs] = useState<OperationsJob[] | null>(null);
   const [adapterStatus, setAdapterStatus] = useState<"loading" | "online" | "empty" | "error">("loading");
@@ -197,7 +231,9 @@ export default function OperationsPage() {
       .then((payload) => {
         if (!active) return;
         const records = Array.isArray(payload.records) ? payload.records : [];
-        setAdapterJobs(records.length ? jobsFromAdapter(records) : []);
+        const nextJobs = records.length ? jobsFromAdapter(records) : [];
+        setAdapterJobs(nextJobs);
+        setSelectedId((current) => current || nextJobs[0]?.id || "");
         setAdapterStatus(records.length ? "online" : "empty");
       })
       .catch(() => {
@@ -211,12 +247,21 @@ export default function OperationsPage() {
   }, []);
 
   const filteredJobs = useMemo(() => activeJobs.filter((job) => {
-    const matchesFilter = filter === "TUTTE" || (filter === "IN CORSO" && job.status === "In corso") || (filter === "PIANIFICATE" && job.status === "Pianificata") || (filter === "COMPLETATE" && job.status === "Completata");
+    const matchesFilter = filter === "TUTTE"
+      || (filter === "IN CORSO" && job.status === "In corso")
+      || (filter === "PIANIFICATE" && ["Pianificata", "PROPOSTA", "APPROVATA"].includes(job.status))
+      || (filter === "COMPLETATE" && ["Completata", "CHIUSA"].includes(job.status))
+      || (filter === "BOZZE" && job.status === "BOZZA")
+      || (filter === "BLOCCATE" && job.status === "BLOCCATA");
     const haystack = `${job.id} ${job.title} ${job.location} ${job.team} ${job.category}`.toLowerCase();
     return matchesFilter && haystack.includes(query.trim().toLowerCase());
   }), [activeJobs, filter, query]);
 
   const selectedJob = activeJobs.find((job) => job.id === selectedId) ?? emptyJob;
+  const activeCount = activeJobs.filter((job) => job.status === "In corso").length;
+  const plannedCount = activeJobs.filter((job) => ["Pianificata", "PROPOSTA", "APPROVATA"].includes(job.status)).length;
+  const activityCount = activeJobs.reduce((total, job) => total + job.activities.length, 0);
+  const openReports = activeJobs.filter((job) => job.status !== "Completata" && job.status !== "CHIUSA" && job.status !== "ANNULLATA").length;
 
   const notify = (message: string) => {
     setToast(message);
@@ -231,19 +276,38 @@ export default function OperationsPage() {
       const response = await fetch("/api/operations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title, detail: `${jobLocation.trim() || "Ubicazione da definire"} · Planning`, meta: "Da pianificare", status: "PIANIFICATA", tone: "cyan", progress: 0, recordType: "read-model" }),
+        body: JSON.stringify({
+          title,
+          description: jobDescription.trim(),
+          client: jobClient.trim(),
+          location: jobLocation.trim(),
+          dueDate: jobDueDate.trim(),
+          category: jobCategory,
+          priority: jobPriority,
+          statusCode: "DRAFT",
+          tone: "cyan",
+          idempotencyKey: `operations-create-${crypto.randomUUID()}`,
+        }),
       });
       if (!response.ok) throw new Error("operations_adapter_write_failed");
       const payload = (await response.json()) as OperationsAdapterResponse;
       const records = Array.isArray(payload.records) ? payload.records : [];
-      setAdapterJobs(records.length ? jobsFromAdapter(records) : []);
+      const nextJobs = records.length ? jobsFromAdapter(records) : [];
+      setAdapterJobs(nextJobs);
       setAdapterStatus("online");
-      notify(`Commessa ${payload.created?.canonicalCode ?? payload.created?.id ?? "assegnata"} salvata su D1`);
+      const createdJob = payload.created ? jobsFromAdapter([payload.created])[0] : undefined;
+      if (createdJob) setSelectedId(createdJob.id);
+      notify(`Commessa ${createdJob?.id ?? "assegnata"} salvata su D1 · readback verificato`);
     } catch {
       notify(`Adapter Operations non disponibile: bozza non salvata (${title})`);
     }
     setJobTitle("");
+    setJobDescription("");
+    setJobClient("");
     setJobLocation("");
+    setJobDueDate("");
+    setJobCategory("Operations");
+    setJobPriority("STANDARD");
   };
 
   const navigate = (id: string, label: string) => {
@@ -285,7 +349,7 @@ export default function OperationsPage() {
     {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
     <section className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7"><IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton><div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle Operations" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca commesse, team, ubicazioni…" value={query} /></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">OPERATIONS</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex items-center gap-2"><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />D1 readback</span><IconButton label="Notifiche"><Bell className="size-4" /></IconButton><span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">AB</span><div className="hidden text-right lg:block"><p className="text-xs font-medium text-slate-200">Owner</p><p className="text-[10px] text-slate-600">Tenant EMS</p></div><ChevronDown className="hidden size-3.5 text-slate-500 lg:block" /></div></header>
       <div className="mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7"><div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />AI-ZEROW / WORK / OPERATIONS</div><h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">Operations control</h1><p className="mt-1 text-xs text-slate-500">Commesse, pianificazione e attività · readback D1 tenant-scoped</p></div><div className="flex items-center gap-2"><span className="hidden items-center rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-slate-500 sm:inline-flex"><Clock3 className="mr-2 size-3.5 text-lime-300" />Aggiornato ora</span><Button className="h-9 border border-lime-300/30 bg-lime-300 px-3 text-xs font-semibold text-[#060806] shadow-[0_0_18px_rgba(190,255,60,0.16)] hover:bg-lime-200" onClick={() => setNewJobOpen(true)}><Plus className="size-3.5" />Nuova commessa</Button></div></div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Commesse attive" value="0" detail="Nessun dato" icon={BriefcaseBusiness} tone="lime" /><MetricCard label="In pianificazione" value="0" detail="Nessun dato" icon={CalendarClock} tone="cyan" /><MetricCard label="Attività oggi" value="0" detail="Nessun dato" icon={ClipboardCheck} tone="lime" /><MetricCard label="Rapportini aperti" value="0" detail="Nessun dato" icon={FileText} tone="amber" /></div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Commesse attive" value={String(activeCount)} detail={adapterOnline ? "Readback verificato" : "In attesa"} icon={BriefcaseBusiness} tone="lime" /><MetricCard label="In pianificazione" value={String(plannedCount)} detail={adapterOnline ? "DRAFT / PLAN" : "In attesa"} icon={CalendarClock} tone="cyan" /><MetricCard label="Attività collegate" value={String(activityCount)} detail={adapterOnline ? "Per commessa" : "Nessun dato"} icon={ClipboardCheck} tone="lime" /><MetricCard label="Rapportini aperti" value={String(openReports)} detail={adapterOnline ? "Stato operativo" : "Nessun dato"} icon={FileText} tone="amber" /></div>
         <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(380px,0.85fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><SectionTitle eyebrow="OPERATIONS / REGISTER" title="Registro commesse" /><p className="mt-1 text-[11px] text-slate-500">{adapterOnline ? "Readback D1 attivo · API Operations adapter online" : "Readback D1 vuoto · adapter Operations in attesa"}</p></div><div className="flex items-center gap-2">{adapterOnline ? <StatusBadge tone="lime">ADAPTER ONLINE</StatusBadge> : <StatusBadge tone="cyan">ADAPTER REQUIRED</StatusBadge>}<IconButton label="Impostazioni registro" onClick={() => notify("Filtri avanzati disponibili con l'adapter Operations")}><Settings2 className="size-4" /></IconButton></div></div><div className="mt-4"><Tabs value={filter} onValueChange={(value) => setFilter(value as JobFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-black/55 p-1"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTE">Tutte</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="IN CORSO">In corso</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="PIANIFICATE">Pianificate</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="COMPLETATE">Completate</TabsTrigger></TabsList></Tabs></div><div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08] bg-black/20"><div className="hidden grid-cols-[1.15fr_0.85fr_0.7fr_0.45fr] gap-3 border-b border-white/[0.08] px-4 py-3 text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-600 md:grid"><span>Commessa</span><span>Squadra</span><span>Stato</span><span>Avanzamento</span></div><div className="divide-y divide-white/[0.07]">{filteredJobs.map((job) => { const active = selectedJob.id === job.id; return <button key={job.id} className={`grid w-full gap-3 px-4 py-3 text-left transition md:grid-cols-[1.15fr_0.85fr_0.7fr_0.45fr] md:items-center ${active ? "bg-lime-300/[0.07]" : "hover:bg-white/[0.035]"}`} onClick={() => setSelectedId(job.id)} type="button"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl border ${active ? "border-lime-300/35 bg-lime-300/10 text-lime-200" : "border-white/10 bg-black/30 text-slate-500"}`}><BriefcaseBusiness className="size-4" /></span><span className="min-w-0"><span className="flex items-center gap-2"><span className="font-mono text-[11px] text-lime-200">{job.id}</span><span className="truncate text-xs font-medium text-slate-200">{job.title}</span></span><span className="mt-1 block truncate text-[11px] text-slate-500">{job.location} · {job.category}</span></span></div><div className="flex items-center gap-2 pl-12 md:pl-0"><span className="size-1.5 rounded-full bg-lime-300" /><span className="text-xs text-slate-400">{job.team}</span></div><div className="pl-12 md:pl-0"><JobStatus status={job.status} /></div><div className="pl-12 md:pl-0"><div className="flex items-center gap-2"><div className="h-1.5 min-w-[54px] flex-1 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.55)]" style={{ width: `${job.progress}%` }} /></div><span className="font-mono text-[10px] text-slate-400">{job.progress}%</span></div></div></button>; })}{filteredJobs.length === 0 && <div className="px-4 py-10 text-center text-xs text-slate-500">Nessuna commessa corrisponde ai filtri locali.</div>}</div></div></section>
           <section className="carbon-card carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><SectionTitle eyebrow="SELECTED JOB / READ MODEL" title={selectedJob.id} /><p className="mt-1 text-xs text-slate-500">{selectedJob.title} · {selectedJob.location}</p></div><button className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-lime-300 hover:text-lime-100" onClick={() => adapterOnline ? router.push(`/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}`) : notify(`Dettaglio ${selectedJob.id}: disponibile dopo il readback D1`)} type="button">Apri workspace <ArrowUpRight className="size-3.5" /></button></div><div className="mt-5 flex flex-wrap items-center gap-2"><JobStatus status={selectedJob.status} /><StatusBadge tone={selectedJob.priority === "HIGH" ? "red" : selectedJob.priority === "STANDARD" ? "cyan" : "amber"}>{selectedJob.priority}</StatusBadge><span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-500">{selectedJob.due}</span></div><div className="carbon-inset mt-5 rounded-xl p-4"><div className="flex items-end justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[0.14em] text-slate-600">Avanzamento operativo</p><p className="mt-1 font-mono text-3xl font-semibold tracking-[-0.07em] text-slate-50">{selectedJob.progress}%</p></div><div className="text-right"><p className="text-[11px] text-slate-500">Responsabile</p><p className="mt-1 text-xs font-medium text-lime-200">{selectedJob.team}</p></div></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-lime-300 shadow-[0_0_16px_rgba(190,255,60,0.64)]" style={{ width: `${selectedJob.progress}%` }} /></div><div className="mt-2 flex justify-between text-[10px] text-slate-600"><span>Avvio</span><span>Chiusura e readback</span></div></div><div className="mt-5 space-y-3">{selectedJob.activities.map((activity) => <div className="flex items-center gap-3" key={activity.label}><ActivityState state={activity.state} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{activity.label}</p><p className="mt-1 truncate text-[11px] text-slate-500">{activity.detail}</p></div><span className="hidden text-[10px] text-slate-600 sm:block">{activity.owner}</span></div>)}</div><div className="mt-5 grid grid-cols-2 gap-2"><Button variant="outline" className="h-9 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => setPlanningOpen(true)}><CalendarClock className="size-3.5" />Pianifica</Button><Button className="h-9 bg-lime-300 text-xs font-semibold text-[#060806] hover:bg-lime-200" onClick={() => notify("Rapportino mantenuto in preview · readback non eseguito")}><FileText className="size-3.5" />Rapportino</Button></div></section></div>
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)_minmax(300px,0.75fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="ACTIVITY CONTRACT" title="Attività operative" action="Vedi catalogo" onAction={() => notify("Catalogo attività: route pronta, adapter non collegato")} /><div className="mt-4 space-y-3">{selectedJob.activities.length ? selectedJob.activities.map((activity) => <div className="carbon-inset flex items-center gap-3 rounded-xl p-3" key={`contract-${activity.label}`}><ActivityState state={activity.state} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{activity.label}</p><p className="mt-1 truncate text-[11px] text-slate-500">{activity.detail}</p></div><ChevronRight className="size-4 text-slate-600" /></div>) : <div className="py-6 text-center text-xs text-slate-500">Nessuna attività nel readback D1.</div>}</div></section><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="PLANNING / RESOURCES" title="Risorse assegnate" /><StatusBadge tone="cyan">READ MODEL</StatusBadge></div><div className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-xs text-slate-500">Nessuna risorsa collegata al readback D1.</div><div className="mt-5 border-t border-white/[0.08] pt-4"><div className="flex items-center justify-between text-[11px]"><span className="text-slate-500">Opzioni risorsa</span><span className="font-mono text-slate-600">0 / 0 verificabili</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" /></div></section><section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="DAILY REPORT" title="Rapportino giornaliero" /><div className="carbon-inset mt-4 rounded-xl p-4"><div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-xl border border-amber-300/25 bg-amber-300/10 text-amber-200"><FileText className="size-4" /></span><div><p className="text-xs font-semibold text-slate-200">{selectedJob.id === emptyJob.id ? "Nessuna commessa selezionata" : `${selectedJob.id} · bozza locale`}</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Il documento sarà composto quando il readback operativo restituirà una commessa.</p></div></div><div className="mt-4 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/10 bg-black/25 px-2 py-2"><p className="font-mono text-lg text-slate-100">—</p><p className="text-[10px] text-slate-600">presenza</p></div><div className="rounded-lg border border-white/10 bg-black/25 px-2 py-2"><p className="font-mono text-lg text-lime-200">—</p><p className="text-[10px] text-slate-600">avanzamento</p></div></div></div><Button variant="outline" className="mt-4 h-9 w-full border-lime-300/25 bg-lime-300/5 text-xs text-lime-200 hover:bg-lime-300/10" onClick={() => notify("Rapportino disponibile dopo il readback di una commessa")}><ClipboardCheck className="size-3.5" />Prepara rapportino</Button></section></div>

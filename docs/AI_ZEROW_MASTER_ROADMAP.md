@@ -72,7 +72,7 @@ persona/input
 | W00 Baseline e governance | `FROZEN` | Tag v65 creato e pubblicato nel repository. |
 | W01 Shell e visual system | `CLOSED — Sites` | UI/UX coerente, responsive e mantenuta sulla palette esistente. |
 | W02 Identity, tenant, authority | `CLOSED — Sites / PARTIAL external` | Sites owner-only e authority D1 verificati; identity esterna resta separata. |
-| W03 Commessa e Job Workspace | `PARTIAL` | Workspace reale presente; ciclo completo di scrittura e dominio ancora aperto. |
+| W03 Commessa e Job Workspace | `IMPLEMENTED — Sites W03 / PARTIAL external` | Creazione, codice, stato, attività, assegnazione, avanzamento, evidenze, rapportino, eventi e readback sono ora chiusi nel bounded Sites adapter; il dominio esterno completo resta aperto. |
 | W04 Planning | `DEFERRED / PARTIAL` | Mancano motore di pianificazione, conflitti, revisioni e workers completi. |
 | W05 Workforce e FIELD | `PARTIAL` | Superfici e contratti bounded; runtime operativo, attendance e GPS da certificare. |
 | W06 Assets e manutenzione | `CLOSED — Sites / PARTIAL external` | Registro e codifica Sites presenti; manutenzione e disponibilità reale da chiudere. |
@@ -739,7 +739,7 @@ Gli stream non devono inventare dati quando il servizio dipendente è `DEFERRED`
 ### Tranche 1 — Subito dopo il freeze
 
 - W01 contratti e release manifest;
-- W03 ciclo completo della commessa;
+- W03 ciclo completo della commessa nel perimetro Sites bounded;
 - W04 primo planning reale con revisioni;
 - W05 assegnazione workforce e FIELD minimale;
 - definizione del test end-to-end commessa → planning → FIELD.
@@ -805,4 +805,3 @@ crea commessa
 ```
 
 Il suo contratto deve essere progettato già compatibile con W04 planning, W05 FIELD, W06 asset, W07 warehouse, W08 mission, W09 documents e W10 finance. In questo modo la prima tranche non diventa un CRUD isolato e non sarà necessario rifarla quando entreranno magazzino, trasporti e documenti.
-
