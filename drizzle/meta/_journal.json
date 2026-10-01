@@ -50,6 +50,13 @@
       "when": 1790828224514,
       "tag": "0007_server_naming",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790876126941,
+      "tag": "0008_company_ai_scope",
+      "breakpoints": true
     }
   ]
 }

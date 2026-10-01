@@ -1,0 +1,149 @@
+{
+  "id": "tariffa-2023-open-data",
+  "name": "Tariffa 2023 · Open Data",
+  "version": "2023.1",
+  "kind": "company-ai-knowledge-pack",
+  "language": "it-IT",
+  "status": "active-reference",
+  "purpose": "Riferimento strutturato per riconoscere lavorazioni, categorie, unità di misura e prezzi di riferimento da collegare allo scope della commessa.",
+  "authority": "reference-only",
+  "source": {
+    "archive": "Tariffa_2023_formato_open_DATA (1) 2.zip",
+    "files": [
+      {
+        "file": "PARTE A OPERE EDILI 2023.csv",
+        "sha256": "afaacf659fe0dcf84e04f6412b3ad7257c32ed93778b38e3368c7341a3a0f9e1",
+        "bytes": 703943
+      },
+      {
+        "file": "PARTE B OPERE STRADALI E INFRASTRUTTURE A RETE 2023.csv",
+        "sha256": "f022872c385bfeffd7e8d4c3c8f6229434d69351f9e153cdb26119e8d332e226",
+        "bytes": 277664
+      },
+      {
+        "file": "PARTE C VERDE 2023.csv",
+        "sha256": "7e6bb030fd5b684f5061a54966b1529573e888f62011192175ad44ffc6cee64c",
+        "bytes": 227084
+      },
+      {
+        "file": "PARTE D IMPIANTI ELETTRICI 2023.csv",
+        "sha256": "8d7a3a6565a76bb12880e65173231fcbb39fad6075c505f2d2e79cbad1c0d012",
+        "bytes": 450892
+      },
+      {
+        "file": "PARTE E IMPIANTI TECNOLOGICI 2023.csv",
+        "sha256": "6b9e06d575e55c7f499ccf0f50452fdf2ae6ca2911da15a0320b94f54293d015",
+        "bytes": 380391
+      },
+      {
+        "file": "PARTE F OPERE MARITTIME 2023.csv",
+        "sha256": "5412fe8b25a4ab68c0359fe37a1b263a5bffeb17fd78b7773e2f48039270a331",
+        "bytes": 115124
+      },
+      {
+        "file": "PARTE G PICCOLA MANUTENZIONE 2023.csv",
+        "sha256": "0471d2856d6def6e68627f9ac1fe224d95cbae48dc2849c728de977741388acd",
+        "bytes": 69519
+      },
+      {
+        "file": "PARTE H RESTAURO 2023.csv",
+        "sha256": "00f5a1155703cd98e1f3466f4aef64fcc870afc7faabe2607c011477758321a2",
+        "bytes": 260967
+      },
+      {
+        "file": "PARTE S SICUREZZA 2023.csv",
+        "sha256": "2651022f35318b1a3747d839dba6d76c64f81fe854502eb70f1641e59bb0e76a",
+        "bytes": 206664
+      }
+    ],
+    "importedAt": "2026-10-01",
+    "notes": [
+      "I prezzi sono riferimenti della fonte 2023 e non costituiscono un preventivo, un ordine o un'autorizzazione.",
+      "Le proposte Company AI devono essere verificate e confermate da una persona competente."
+    ]
+  },
+  "counts": {
+    "sourceFiles": 9,
+    "entries": 12377,
+    "pricedRows": 12377
+  },
+  "parts": [
+    {
+      "part": "A",
+      "title": "OPERE EDILI",
+      "sourceFile": "PARTE A OPERE EDILI 2023.csv",
+      "pricedEntries": 2790
+    },
+    {
+      "part": "B",
+      "title": "OPERE STRADALI E INFRASTRUTTURE A RETE",
+      "sourceFile": "PARTE B OPERE STRADALI E INFRASTRUTTURE A RETE 2023.csv",
+      "pricedEntries": 1487
+    },
+    {
+      "part": "C",
+      "title": "VERDE",
+      "sourceFile": "PARTE C VERDE 2023.csv",
+      "pricedEntries": 803
+    },
+    {
+      "part": "D",
+      "title": "IMPIANTI ELETTRICI",
+      "sourceFile": "PARTE D IMPIANTI ELETTRICI 2023.csv",
+      "pricedEntries": 2494
+    },
+    {
+      "part": "E",
+      "title": "IMPIANTI TECNOLOGICI",
+      "sourceFile": "PARTE E IMPIANTI TECNOLOGICI 2023.csv",
+      "pricedEntries": 2794
+    },
+    {
+      "part": "F",
+      "title": "OPERE MARITTIME",
+      "sourceFile": "PARTE F OPERE MARITTIME 2023.csv",
+      "pricedEntries": 277
+    },
+    {
+      "part": "G",
+      "title": "PICCOLA MANUTENZIONE",
+      "sourceFile": "PARTE G PICCOLA MANUTENZIONE 2023.csv",
+      "pricedEntries": 323
+    },
+    {
+      "part": "H",
+      "title": "RESTAURO",
+      "sourceFile": "PARTE H RESTAURO 2023.csv",
+      "pricedEntries": 426
+    },
+    {
+      "part": "S",
+      "title": "SICUREZZA",
+      "sourceFile": "PARTE S SICUREZZA 2023.csv",
+      "pricedEntries": 986
+    }
+  ],
+  "retrieval": {
+    "fields": [
+      "code",
+      "description",
+      "breadcrumbs",
+      "part",
+      "unit"
+    ],
+    "defaultLimit": 8,
+    "maxLimit": 24,
+    "score": "token-overlap-with-code-and-description"
+  },
+  "scopeContract": {
+    "linkKey": "jobId",
+    "selectedEntryField": "knowledgeEntryIds",
+    "requiredHumanConfirmation": true,
+    "allowedStatuses": [
+      "DRAFT",
+      "PROPOSED",
+      "CONFIRMED",
+      "SUPERSEDED"
+    ]
+  }
+}

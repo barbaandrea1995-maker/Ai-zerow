@@ -1,4 +1,5 @@
 import type { JobStatusCode } from "@/lib/operations-contract";
+import type { CompanyAiKnowledgeHint, CompanyAiKnowledgePackSummary } from "@/lib/company-ai-knowledge";
 
 export type IntakeMode = "MANUAL" | "COMPANY_AI";
 
@@ -40,6 +41,8 @@ export type IntakePreview = {
   draft: Partial<IntakeDraft>;
   suggestions: IntakeSuggestion[];
   sourceName?: string;
+  knowledgePack?: CompanyAiKnowledgePackSummary;
+  knowledgeHints?: CompanyAiKnowledgeHint[];
 };
 
 export type IntakeAdapterRecord = {

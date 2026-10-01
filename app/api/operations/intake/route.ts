@@ -1,6 +1,10 @@
 import { getDb } from "@/db";
 import { s07AiLedger } from "@/db/schema";
 import {
+  getCompanyAiKnowledgePackSummary,
+  searchCompanyAiKnowledge,
+} from "@/lib/company-ai-knowledge";
+import {
   getS07Context,
   getS07Ledger,
   s07AccessDenied,
@@ -158,6 +162,8 @@ export async function POST(request: Request) {
   if (sourceText.length < 2) return Response.json({ error: "source_text_required" }, { status: 400 });
 
   const { draft, suggestions } = extractDraft(sourceText);
+  const knowledgePack = getCompanyAiKnowledgePackSummary();
+  const knowledgeHints = searchCompanyAiKnowledge(sourceText, { limit: 6 });
   const previewId = crypto.randomUUID();
   const now = new Date().toISOString();
   const mode: IntakeMode = "COMPANY_AI";
@@ -180,6 +186,9 @@ export async function POST(request: Request) {
         sourceName,
         draft,
         suggestions,
+        knowledgePackId: knowledgePack.id,
+        knowledgePackVersion: knowledgePack.version,
+        knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
       }),
       requestedBy: context!.actorId,
       approvedBy: null,
@@ -195,6 +204,8 @@ export async function POST(request: Request) {
       sourceName: sourceName || undefined,
       draft,
       suggestions,
+      knowledgePack,
+      knowledgeHints,
       readback: { status: "SITES_LEDGER_VERIFIED", checkedAt: now },
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch {

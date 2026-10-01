@@ -232,3 +232,32 @@ export const qrCodes = sqliteTable("qr_codes", {
   tenantPayloadUnique: uniqueIndex("qr_codes_tenant_payload_uq").on(table.tenantId, table.payload),
   tenantEntityUpdatedIdx: index("qr_codes_tenant_entity_updated_idx").on(table.tenantId, table.entityType, table.entityId, table.updatedAt),
 }));
+
+/**
+ * Human-authored scope links between a commessa and a Company AI knowledge
+ * pack. The selected knowledge entries are kept as immutable pack references;
+ * a new save creates a new version instead of overwriting the previous scope.
+ */
+export const companyAiJobScopes = sqliteTable("company_ai_job_scopes", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id").notNull(),
+  jobCode: text("job_code").notNull(),
+  knowledgePackId: text("knowledge_pack_id").notNull(),
+  knowledgePackVersion: text("knowledge_pack_version").notNull(),
+  scopeText: text("scope_text").notNull().default(""),
+  knowledgeEntryIdsJson: text("knowledge_entry_ids_json").notNull().default("[]"),
+  assumptionsJson: text("assumptions_json").notNull().default("[]"),
+  exclusionsJson: text("exclusions_json").notNull().default("[]"),
+  status: text("status").notNull().default("DRAFT"),
+  source: text("source").notNull().default("human-authored"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantJobVersionUnique: uniqueIndex("company_ai_job_scopes_tenant_job_version_uq").on(table.tenantId, table.jobId, table.version),
+  tenantIdempotencyUnique: uniqueIndex("company_ai_job_scopes_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantJobUpdatedIdx: index("company_ai_job_scopes_tenant_job_updated_idx").on(table.tenantId, table.jobId, table.updatedAt),
+}));

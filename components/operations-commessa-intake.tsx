@@ -4,6 +4,7 @@ import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "reac
 import {
   Check,
   CircleCheck,
+  BookOpen,
   ClipboardCheck,
   Flag,
   FolderKanban,
@@ -351,6 +352,16 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
               </div>
             ))}
           </div>
+          {preview.knowledgePack && (
+            <div className="mt-5 rounded-2xl border border-lime-300/15 bg-lime-300/[0.035] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><BookOpen className="size-4" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200/75">Knowledge pack attivo</p><p className="mt-1 text-sm font-semibold text-slate-100">{preview.knowledgePack.name}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">v{preview.knowledgePack.version} · {preview.knowledgePack.entryCount.toLocaleString("it-IT")} voci · riferimento tecnico</p></div></div>
+                <span className="rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-100/80">da confermare</span>
+              </div>
+              {preview.knowledgeHints?.length ? <div className="mt-4 grid gap-2 md:grid-cols-2">{preview.knowledgeHints.map((hint) => <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3" key={hint.id}><div className="flex items-center justify-between gap-3"><span className="font-mono text-[10px] text-lime-200">{hint.part} · {hint.code}</span><span className="text-[10px] text-slate-500">{hint.unit || "unità da verificare"}</span></div><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-300">{hint.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-slate-600"><span className="truncate">{hint.partTitle}</span><span className="shrink-0 font-mono text-cyan-200/80">{new Intl.NumberFormat("it-IT", { style: "currency", currency: hint.currency }).format(hint.price)}</span></div></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-[11px] text-slate-500">Nessuna lavorazione candidata rilevata dal testo. Lo scope potrà essere selezionato manualmente.</p>}
+              <p className="mt-3 flex items-start gap-2 text-[10px] leading-4 text-slate-600"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-lime-200/70" />Il pack suggerisce riferimenti; non genera automaticamente quantità, prezzo di vendita, ordine o chiusura della commessa.</p>
+            </div>
+          )}
         </div>
       )}
     </section>
