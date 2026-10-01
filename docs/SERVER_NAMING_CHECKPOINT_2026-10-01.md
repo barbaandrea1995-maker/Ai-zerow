@@ -44,3 +44,15 @@ dimensions. A repeated description receives a suffix such as `-0002`.
 
 Deployment details and post-deploy create/readback evidence are appended after
 the production Site publication.
+
+## Production publication
+
+- Published on the private production Site as version `61`, source commit
+  `943b7c08f0ef97965631fe3c702d55c3b8c3299e`; deployment status: `succeeded`.
+- Production URL: `https://ai-zerow-command.barba-andrea-1995.chatgpt.site`.
+- D1 readback exposes `entity_code_counters` and `s04_records.canonical_code`;
+  the counter table is empty because no test or demo registration was submitted.
+- The live Operations, Assets and Warehouse forms expose the server-owned
+  naming flow. The production commessa form was opened and closed without
+  creating a test row.
+- The post-publication Worker error query returned no events.
