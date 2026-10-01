@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { unzipSync } from "fflate";
 import {
   DEFAULT_INTAKE_DRAFT,
   INTAKE_FIELD_LABELS,
@@ -56,6 +57,35 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onCreated: (payload: IntakeCreateResponse) => void;
 };
+
+const MAX_SOURCE_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_SOURCE_TEXT_CHARS = 60_000;
+
+function isDocxFile(file: File) {
+  return file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(file.name);
+}
+
+function limitSourceText(value: string) {
+  const normalized = value.replace(/\u0000/g, "").replace(/\r\n?/g, "\n").trim();
+  return normalized.slice(0, MAX_SOURCE_TEXT_CHARS);
+}
+
+async function extractDocxText(file: File) {
+  const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+  const documentXml = archive["word/document.xml"];
+  if (!documentXml) throw new Error("Il documento Word non contiene una scheda leggibile.");
+
+  const xml = new TextDecoder().decode(documentXml);
+  const document = new DOMParser().parseFromString(xml, "application/xml");
+  if (document.querySelector("parsererror")) throw new Error("Il documento Word non è leggibile.");
+
+  const paragraphs = Array.from(document.getElementsByTagNameNS("*", "p")).map((paragraph) => {
+    const parts = Array.from(paragraph.getElementsByTagNameNS("*", "t"), (node) => node.textContent ?? "");
+    return parts.join("").trim();
+  }).filter(Boolean);
+
+  return limitSourceText(paragraphs.join("\n"));
+}
 
 type FieldProps = {
   label: string;
@@ -362,9 +392,10 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
           <label className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/80" htmlFor="commessa-source-text">Testo sorgente del preventivo</label>
           <Textarea className={`${textareaClass} min-h-[126px] rounded-[18px] border-cyan-300/20 bg-[linear-gradient(145deg,rgba(5,20,22,0.72),rgba(3,10,11,0.82))] focus-visible:border-cyan-200/70 focus-visible:ring-cyan-300/15 focus-visible:shadow-[0_0_28px_rgba(34,211,238,0.1)]`} id="commessa-source-text" onChange={(event) => onSourceTextChange(event.target.value)} placeholder="Incolla qui cliente, oggetto, indirizzo, lavorazioni, riferimenti e note del preventivo…" value={sourceText} />
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-xl border border-white/[0.11] bg-black/25 px-3 py-2.5 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.06] hover:text-cyan-100"><Upload className="size-3.5 shrink-0 text-cyan-200" /><span className="truncate">{sourceFileName || "Carica originale"}</span><input accept=".txt,.md,.csv,.json,application/pdf,image/*" className="sr-only" onChange={onFile} type="file" /></label>
-            <Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 font-semibold text-[#061012] shadow-[0_0_24px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_30px_rgba(190,255,60,0.28)]" disabled={busy} onClick={onAnalyze} type="button">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Analizza con Company AI</Button>
+            <label className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-xl border border-white/[0.11] bg-black/25 px-3 py-2.5 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.06] hover:text-cyan-100"><Upload className="size-3.5 shrink-0 text-cyan-200" /><span className="truncate">{sourceFileName || "Carica originale · max 20 MB"}</span><input accept=".docx,.txt,.md,.csv,.json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,image/*" className="sr-only" onChange={onFile} type="file" /></label>
+            <Button aria-busy={busy} className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 font-semibold text-[#061012] shadow-[0_0_24px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_30px_rgba(190,255,60,0.28)] disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || sourceText.trim().length < 2} onClick={onAnalyze} type="button">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Analizza con Company AI</Button>
           </div>
+          <p className="mt-3 text-[10px] leading-4 text-slate-600">Formati supportati: DOCX, TXT, MD, CSV e JSON · dimensione massima 20 MB. PDF e immagini restano allegabili, ma richiedono testo incollato per l’analisi.</p>
           {notice && <p className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.04] px-3 py-2.5 text-[11px] leading-5 text-cyan-100/75">{notice}</p>}
         </div>
 
@@ -486,14 +517,48 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    setSourceFileName(file.name);
-    if (file.type.startsWith("text/") || /\.(txt|md|csv|json)$/i.test(file.name)) {
-      setSourceText(await file.text());
-      setNotice("Testo del documento letto. Avvia la preview Company AI per proporre i campi.");
-    } else {
-      setNotice("Allegato acquisito. Per la compilazione automatica immediata incolla anche il testo del preventivo.");
-    }
     setError("");
+    setPreview(null);
+    if (file.size > MAX_SOURCE_FILE_BYTES) {
+      setSourceFileName("");
+      setSourceText("");
+      setNotice("");
+      setError(`Il file supera il limite di 20 MB. Scegli un preventivo più leggero.`);
+      event.target.value = "";
+      return;
+    }
+
+    setSourceFileName(file.name);
+    setBusy(true);
+    setNotice(`Lettura di ${file.name} in corso…`);
+    try {
+      if (isDocxFile(file)) {
+        const extractedText = await extractDocxText(file);
+        if (extractedText.length < 2) throw new Error("Nel documento Word non è stato trovato testo analizzabile.");
+        setSourceText(extractedText);
+        setNotice(extractedText.length === MAX_SOURCE_TEXT_CHARS
+          ? "DOCX letto. Il testo molto esteso è stato limitato alla parte utile per la preview: avvia Analizza con Company AI."
+          : "DOCX letto correttamente. Avvia Analizza con Company AI per proporre i campi.");
+      } else if (file.type.startsWith("text/") || /\.(txt|md|csv|json)$/i.test(file.name)) {
+        const extractedText = limitSourceText(await file.text());
+        if (extractedText.length < 2) throw new Error("Nel file non è stato trovato testo analizzabile.");
+        setSourceText(extractedText);
+        setNotice(extractedText.length === MAX_SOURCE_TEXT_CHARS
+          ? "Documento letto. Il testo molto esteso è stato limitato alla parte utile per la preview: avvia Analizza con Company AI."
+          : "Testo del documento letto. Avvia Analizza con Company AI per proporre i campi.");
+      } else {
+        setSourceText("");
+        setNotice("Allegato acquisito. Per la compilazione automatica immediata incolla anche il testo del preventivo.");
+      }
+    } catch (caught) {
+      setSourceFileName("");
+      setSourceText("");
+      setNotice("");
+      setError(caught instanceof Error ? caught.message : "Il documento non è stato letto.");
+    } finally {
+      setBusy(false);
+      event.target.value = "";
+    }
   };
 
   const analyzeWithCompanyAi = async () => {
@@ -503,16 +568,17 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     }
     setBusy(true);
     setError("");
-    setNotice("");
+    setNotice("Company AI sta leggendo il preventivo e preparando una proposta controllabile…");
     try {
       const response = await fetch("/api/operations/intake", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceText, sourceName: sourceFileName }) });
       const data = await response.json() as IntakePreview & { error?: string };
       if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
       setPreview(data);
       setDraft((current) => ({ ...current, ...data.draft, statusCode: "DRAFT" } as IntakeDraft));
-      setNotice(`Company AI ha proposto ${data.suggestions.length} campi. Verifica e modifica liberamente prima della conferma.`);
+      setNotice(`Company AI ha proposto ${data.suggestions?.length ?? 0} campi. Verifica e modifica liberamente prima della conferma.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Preview Company AI non disponibile.");
+      setNotice("");
+      setError(caught instanceof Error && caught.message !== "Failed to fetch" ? caught.message : "Company AI non è raggiungibile in questo momento. Riprova tra poco.");
     } finally {
       setBusy(false);
     }

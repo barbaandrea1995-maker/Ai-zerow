@@ -20,6 +20,8 @@ import { inferCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiSco
 
 export const dynamic = "force-dynamic";
 
+const MAX_INTAKE_SOURCE_CHARS = 60_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -146,7 +148,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const sourceText = bounded(input.sourceText, 20_000);
+  const sourceText = bounded(input.sourceText, MAX_INTAKE_SOURCE_CHARS);
   const sourceName = bounded(input.sourceName, 160);
   if (sourceText.length < 2) return Response.json({ error: "source_text_required" }, { status: 400 });
 
