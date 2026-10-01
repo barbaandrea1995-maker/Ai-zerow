@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Check,
   CircleCheck,
@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogHeader } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { unzipSync } from "fflate";
@@ -493,7 +493,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setMode("chooser");
     setDraft(DEFAULT_INTAKE_DRAFT);
     setSourceText("");
@@ -502,12 +502,28 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setBusy(false);
     setError("");
     setNotice("");
-  };
+  }, []);
 
-  const handleOpenChange = (nextOpen: boolean) => {
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen) reset();
     onOpenChange(nextOpen);
-  };
+  }, [onOpenChange, reset]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") handleOpenChange(false);
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, handleOpenChange]);
 
   const updateField = (key: keyof IntakeDraft, value: string) => {
     setDraft((current) => ({ ...current, [key]: value } as IntakeDraft));
@@ -617,15 +633,18 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const proposedKeys = new Set((preview?.suggestions ?? []).map((suggestion) => suggestion.key));
   const heading = modeHeading(mode);
 
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="relative max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)] sm:max-w-[1320px]" showCloseButton={false}>
+    <div className="fixed inset-0 z-[100] isolate" data-slot="commessa-intake-overlay">
+      <div aria-hidden="true" className="absolute inset-0 bg-black/80 backdrop-blur-md" onMouseDown={() => handleOpenChange(false)} />
+      <section aria-describedby="new-commessa-description" aria-labelledby="new-commessa-title" aria-modal="true" className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)] sm:max-w-[1320px]" role="dialog">
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]"><div className="absolute -right-36 -top-40 size-[31rem] rounded-full bg-lime-300/[0.055] blur-3xl" /><div className="absolute -bottom-48 left-1/3 size-[28rem] rounded-full bg-cyan-300/[0.035] blur-3xl" /><div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(255,255,255,0.025),transparent_22%,transparent_76%,rgba(190,255,60,0.025))]" /><div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:42px_42px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]" /></div>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[2px] bg-gradient-to-r from-lime-300 via-lime-200 to-cyan-300 shadow-[0_0_22px_rgba(190,255,60,0.55)]" />
         <div className="flex max-h-[calc(100dvh-1rem)] min-h-0 flex-col">
           <DialogHeader className="relative z-10 shrink-0 border-b border-white/[0.08] bg-black/10 px-4 pb-5 pt-6 text-left backdrop-blur-xl sm:px-8 sm:pb-6 sm:pt-7">
             <div className="flex items-start justify-between gap-4">
-              <div className="flex min-w-0 items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-lime-300/30 bg-[linear-gradient(145deg,rgba(190,255,60,0.22),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.12)]"><FolderKanban className="size-5" /></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300">Operations / intake 01</p><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">workspace</span></div><DialogTitle className="mt-2 text-2xl font-semibold tracking-[-0.045em] text-lime-200 sm:text-[31px]">{heading.title}</DialogTitle><DialogDescription className="mt-2 max-w-2xl text-xs leading-5 text-slate-400">{heading.description}</DialogDescription></div></div>
+              <div className="flex min-w-0 items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-lime-300/30 bg-[linear-gradient(145deg,rgba(190,255,60,0.22),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.12)]"><FolderKanban className="size-5" /></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300">Operations / intake 01</p><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">workspace</span></div><h2 className="mt-2 text-2xl font-semibold tracking-[-0.045em] text-lime-200 sm:text-[31px]" id="new-commessa-title">{heading.title}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-slate-400" id="new-commessa-description">{heading.description}</p></div></div>
               <div className="flex shrink-0 items-center gap-2"><span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80 sm:inline-flex">AI-ZEROW · CONTROLLED</span><button aria-label="Chiudi nuova commessa" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button"><X className="size-4" /></button></div>
             </div>
             <StepRail mode={mode} />
@@ -657,7 +676,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
             </form>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </section>
+    </div>
   );
 }
