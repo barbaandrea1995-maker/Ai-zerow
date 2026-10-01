@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
@@ -17,6 +17,11 @@ export const metadata: Metadata = {
     apple: [{ url: "/icons/ai-zerow-180.png", type: "image/png", sizes: "180x180" }],
   },
   manifest: "/manifest.webmanifest",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

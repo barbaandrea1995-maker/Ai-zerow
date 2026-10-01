@@ -144,9 +144,9 @@ function FormSection({ eyebrow, title, description, icon: Icon, badge, children 
   );
 }
 
-const inputClass = "h-12 rounded-xl border-white/[0.12] bg-black/25 text-sm text-slate-100 placeholder:text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition hover:border-lime-300/25 focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-lime-300/15 focus-visible:shadow-[0_0_22px_rgba(190,255,60,0.07)]";
-const selectClass = "h-12 w-full rounded-xl border border-white/[0.12] bg-[linear-gradient(180deg,rgba(18,27,27,0.96),rgba(7,12,13,0.94))] px-3 text-sm text-slate-100 outline-none transition hover:border-lime-300/25 focus:border-lime-300/60 focus:ring-2 focus:ring-lime-300/15 disabled:cursor-not-allowed disabled:opacity-45";
-const textareaClass = "resize-y rounded-xl border-white/[0.12] bg-black/25 text-sm text-slate-100 placeholder:text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition hover:border-lime-300/25 focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-lime-300/15 focus-visible:shadow-[0_0_22px_rgba(190,255,60,0.07)]";
+const inputClass = "h-12 rounded-xl border-white/[0.12] bg-black/25 text-[16px] text-slate-100 placeholder:text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition hover:border-lime-300/25 focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-lime-300/15 focus-visible:shadow-[0_0_22px_rgba(190,255,60,0.07)] sm:text-sm";
+const selectClass = "h-12 w-full rounded-xl border border-white/[0.12] bg-[linear-gradient(180deg,rgba(18,27,27,0.96),rgba(7,12,13,0.94))] px-3 text-[16px] text-slate-100 outline-none transition hover:border-lime-300/25 focus:border-lime-300/60 focus:ring-2 focus:ring-lime-300/15 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm";
+const textareaClass = "resize-y rounded-xl border-white/[0.12] bg-black/25 text-[16px] text-slate-100 placeholder:text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition hover:border-lime-300/25 focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-lime-300/15 focus-visible:shadow-[0_0_22px_rgba(190,255,60,0.07)] sm:text-sm";
 
 function ScopeSelectFields({
   draft,
@@ -212,7 +212,7 @@ export function IntakeFields({
       >
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_190px]">
           <Field label={INTAKE_FIELD_LABELS.title} required proposed={proposed("title")}>
-            <Input autoFocus className={inputClass} onChange={(event) => onChange("title", event.target.value)} placeholder="Es. Riqualificazione sede Milano" value={draft.title} />
+            <Input className={inputClass} onChange={(event) => onChange("title", event.target.value)} placeholder="Es. Riqualificazione sede Milano" value={draft.title} />
           </Field>
           <Field label={INTAKE_FIELD_LABELS.statusCode}>
             <select aria-label="Stato commessa" className={`${selectClass} ${statusReadOnly ? "opacity-70" : ""}`} disabled={statusReadOnly} onChange={(event) => onChange("statusCode", event.target.value)} value={draft.statusCode}>
@@ -326,36 +326,6 @@ export function IntakeFields({
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-amber-200" />
         <span><strong className="font-semibold text-amber-100">Controllo di ciclo di vita.</strong> I dati restano modificabili. Il 100% dell’avanzamento non chiude la commessa: la chiusura resta un passaggio separato con controlli, evidenze e rapportino.</span>
       </div>
-    </div>
-  );
-}
-
-const journeySteps = [
-  { label: "Origine", caption: "Scegli il flusso" },
-  { label: "Scheda", caption: "Completa i dati" },
-  { label: "Conferma", caption: "Crea la bozza" },
-];
-
-function StepRail({ mode }: { mode: IntakeMode }) {
-  const activeStep = mode === "chooser" ? 0 : 1;
-  return (
-    <div className="mt-5 grid gap-2 border-t border-white/[0.08] pt-4 sm:grid-cols-3">
-      {journeySteps.map((step, index) => {
-        const complete = index < activeStep;
-        const active = index === activeStep;
-        return (
-          <div className={`relative flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition ${complete ? "border-lime-300/30 bg-lime-300/[0.07]" : active ? "border-lime-300/45 bg-[linear-gradient(135deg,rgba(190,255,60,0.12),rgba(190,255,60,0.025))] shadow-[0_0_26px_rgba(190,255,60,0.06)]" : "border-white/[0.07] bg-black/15"}`} key={step.label}>
-            <span className={`grid size-7 shrink-0 place-items-center rounded-xl border text-[10px] font-semibold ${complete ? "border-lime-300/40 bg-lime-300 text-[#060806] shadow-[0_0_15px_rgba(190,255,60,0.18)]" : active ? "border-lime-300/55 bg-lime-300/[0.12] text-lime-200" : "border-white/10 bg-black/20 text-slate-600"}`}>
-              {complete ? <Check className="size-3.5" /> : `0${index + 1}`}
-            </span>
-            <span className="min-w-0">
-              <span className={`block text-[10px] font-semibold uppercase tracking-[0.16em] ${active ? "text-lime-100" : complete ? "text-lime-200/80" : "text-slate-600"}`}>{step.label}</span>
-              <span className="mt-0.5 block truncate text-[10px] text-slate-600">{step.caption}</span>
-            </span>
-            {active && <span className="ml-auto hidden size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.95)] sm:block" />}
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -636,22 +606,21 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] isolate" data-slot="commessa-intake-overlay">
+    <div className="fixed inset-0 z-[100] isolate touch-manipulation" data-slot="commessa-intake-overlay">
       <div aria-hidden="true" className="absolute inset-0 bg-black/80 backdrop-blur-md" onMouseDown={() => handleOpenChange(false)} />
-      <section aria-describedby="new-commessa-description" aria-labelledby="new-commessa-title" aria-modal="true" className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)] sm:max-w-[1320px]" role="dialog">
+      <section aria-describedby="new-commessa-description" aria-labelledby="new-commessa-title" aria-modal="true" className="fixed left-1/2 top-1/2 z-[101] flex max-h-[calc(100dvh-1.25rem)] w-[calc(100%-1rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)] sm:max-h-[calc(100dvh-2rem)] sm:max-w-[1320px]" role="dialog">
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]"><div className="absolute -right-36 -top-40 size-[31rem] rounded-full bg-lime-300/[0.055] blur-3xl" /><div className="absolute -bottom-48 left-1/3 size-[28rem] rounded-full bg-cyan-300/[0.035] blur-3xl" /><div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(255,255,255,0.025),transparent_22%,transparent_76%,rgba(190,255,60,0.025))]" /><div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:42px_42px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]" /></div>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[2px] bg-gradient-to-r from-lime-300 via-lime-200 to-cyan-300 shadow-[0_0_22px_rgba(190,255,60,0.55)]" />
-        <div className="flex max-h-[calc(100dvh-1rem)] min-h-0 flex-col">
-          <DialogHeader className="relative z-10 shrink-0 border-b border-white/[0.08] bg-black/10 px-4 pb-5 pt-6 text-left backdrop-blur-xl sm:px-8 sm:pb-6 sm:pt-7">
+        <div className="flex max-h-[calc(100dvh-1.25rem)] min-h-0 flex-col sm:max-h-[calc(100dvh-2rem)]">
+          <DialogHeader className="relative z-10 shrink-0 border-b border-white/[0.08] bg-black/10 px-4 pb-4 pt-5 text-left backdrop-blur-xl sm:px-8 sm:pb-5 sm:pt-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex min-w-0 items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-lime-300/30 bg-[linear-gradient(145deg,rgba(190,255,60,0.22),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.12)]"><FolderKanban className="size-5" /></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300">Operations / intake 01</p><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">workspace</span></div><h2 className="mt-2 text-2xl font-semibold tracking-[-0.045em] text-lime-200 sm:text-[31px]" id="new-commessa-title">{heading.title}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-slate-400" id="new-commessa-description">{heading.description}</p></div></div>
               <div className="flex shrink-0 items-center gap-2"><span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80 sm:inline-flex">AI-ZEROW · CONTROLLED</span><button aria-label="Chiudi nuova commessa" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button"><X className="size-4" /></button></div>
             </div>
-            <StepRail mode={mode} />
           </DialogHeader>
 
           {mode === "chooser" ? (
-            <div className="relative z-10 min-h-0 flex-1 overflow-y-auto p-4 sm:p-8">
+            <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-8">
               <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(290px,0.75fr)]">
                 <div>
                   <div className="mb-5 flex items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/80">Scegli il percorso</p><p className="mt-2 text-sm text-slate-300">La destinazione è la stessa. Scegli come vuoi costruire la scheda.</p></div><span className="hidden rounded-full border border-white/10 bg-black/20 px-3 py-1.5 font-mono text-[10px] text-slate-600 sm:block">01 / 03</span></div>
@@ -667,7 +636,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
             </div>
           ) : (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={createJob}>
-              <div className="relative min-h-0 flex-1 overflow-y-auto">
+              <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {mode === "company-ai" && <CompanyAiPanel busy={busy} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
                 <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields draft={draft} onChange={updateField} proposedKeys={proposedKeys} /></div><SummaryRail draft={draft} mode={mode} preview={preview} /></div>
                 {error && <div className="relative z-10 mx-4 mb-5 flex items-start gap-3 rounded-2xl border border-rose-300/25 bg-[linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.035))] px-4 py-3.5 text-xs leading-5 text-rose-100 shadow-[0_14px_30px_rgba(0,0,0,0.16)] sm:mx-7"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.8)]" />{error}</div>}

@@ -46,6 +46,83 @@ function labeledValue(source: string, labels: string[]) {
   return "";
 }
 
+const INTAKE_LABELS = [
+  "Titolo", "Oggetto", "Commessa", "Lavori", "Descrizione", "Descrizione lavori", "Oggetto lavori",
+  "Lavorazioni", "Prestazioni", "Intervento", "Perimetro", "Note operative", "Cliente", "Committente",
+  "Ragione sociale", "P. IVA", "PIVA", "Partita IVA", "Codice fiscale", "Referente", "Referente cliente",
+  "Contatto", "Telefono", "Tel.", "Tel. cliente", "E-mail", "Email", "Mail", "Preventivo", "Riferimento",
+  "Riferimento cliente", "Indirizzo cliente", "Sede cliente", "Indirizzo", "Cantiere", "Luogo di intervento",
+  "Luogo", "Sopralluogo", "Note accesso", "Accesso", "Vincoli", "CIG", "CUP", "Scadenza", "Consegna",
+  "Fine lavori",
+];
+
+function isKnownFieldLine(line: string) {
+  return INTAKE_LABELS.some((label) => new RegExp(`^\\s*${escapeRegex(label)}(?=\\s*(?:[:\\-–—]|$))`, "i").test(line));
+}
+
+function labeledBlockValue(source: string, labels: string[]) {
+  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const pattern = labels.map(escapeRegex).join("|");
+  const labelExpression = new RegExp(`^\\s*(?:${pattern})(?=\\s*(?:[:\\-–—]|$))\\s*(?:(?:[:\\-–—])\\s*)?(.*)$`, "i");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(labelExpression);
+    if (!match) continue;
+
+    const values = match[1]?.trim() ? [match[1].trim()] : [];
+    for (let nextIndex = index + 1; nextIndex < lines.length && values.length < 4; nextIndex += 1) {
+      const nextLine = lines[nextIndex];
+      if (isKnownFieldLine(nextLine) || /^(?:totale|imponibile|iva|condizioni|pagamento|validità|validita|note legali)\b/i.test(nextLine)) break;
+      values.push(nextLine);
+    }
+    if (values.length) return values.join(" ");
+  }
+  return "";
+}
+
+function compactText(value: string, max = 900) {
+  return value.replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").trim().slice(0, max);
+}
+
+function extractWorkLines(source: string, excluded: string[]) {
+  const excludedSet = new Set(excluded.map((value) => compactText(value, 900).toLocaleLowerCase("it-IT")));
+  return source.split(/\r?\n/)
+    .map((line) => compactText(line, 260).replace(/^[•·▪◦*-]\s*/, ""))
+    .filter((line) => line.length >= 14)
+    .filter((line) => !excludedSet.has(line.toLocaleLowerCase("it-IT")))
+    .filter((line) => !isKnownFieldLine(line))
+    .filter((line) => !/^(?:preventivo|offerta|cliente|committente|ragione sociale|p\.?\s*iva|partita iva|codice fiscale|referente|telefono|tel\.?|e-?mail|mail|indirizzo|cantiere|luogo|sopralluogo|scadenza|consegna|fine lavori|cig|cup|totale|imponibile|iva|condizioni|pagamento|validità|validita|firma|data)\b/i.test(line))
+    .filter((line) => !/^[\d\s.,€%/:+()\-]+$/.test(line))
+    .slice(0, 4);
+}
+
+function buildStructuredDescription({
+  title,
+  rawDescription,
+  client,
+  worksite,
+  source,
+}: {
+  title: string;
+  rawDescription: string;
+  client: string;
+  worksite: string;
+  source: string;
+}) {
+  const workLines = extractWorkLines(source, [title, rawDescription, client, worksite]);
+  const workSummary = compactText(rawDescription || workLines.join("; "));
+  const parts: string[] = [];
+  if (workSummary) parts.push(`Lavorazioni rilevate: ${workSummary}${/[.!?]$/.test(workSummary) ? "" : "."}`);
+  else if (title) parts.push(`Intervento: ${compactText(title, 180)}${/[.!?]$/.test(title) ? "" : "."}`);
+  if (client) parts.push(`Committente: ${compactText(client, 180)}${/[.!?]$/.test(client) ? "" : "."}`);
+  if (worksite) parts.push(`Luogo di intervento: ${compactText(worksite, 240)}${/[.!?]$/.test(worksite) ? "" : "."}`);
+  return {
+    value: parts.join(" ").slice(0, 2_000),
+    confidence: rawDescription ? 0.91 : workLines.length ? 0.78 : title ? 0.68 : 0.42,
+    source: rawDescription ? "Preventivo · descrizione" : workLines.length ? "Company AI · sintesi lavorazioni" : "Company AI · sintesi campi rilevati",
+  };
+}
+
 function addSuggestion(
   suggestions: IntakeSuggestion[],
   key: keyof IntakeDraft,
@@ -63,7 +140,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const suggestions: IntakeSuggestion[] = [];
   const firstLine = source.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
   const rawTitle = labeledValue(source, ["Titolo", "Oggetto", "Commessa", "Lavori"]);
-  const rawDescription = labeledValue(source, ["Descrizione", "Oggetto lavori", "Perimetro", "Note operative"]);
+  const rawDescription = labeledBlockValue(source, ["Descrizione", "Descrizione lavori", "Oggetto lavori", "Lavorazioni", "Prestazioni", "Intervento", "Perimetro", "Note operative"]);
   const rawClient = labeledValue(source, ["Cliente", "Committente", "Ragione sociale"]);
   const rawTaxId = labeledValue(source, ["P. IVA", "PIVA", "Partita IVA", "Codice fiscale"]);
   const rawContact = labeledValue(source, ["Referente", "Referente cliente", "Contatto"]);
@@ -78,7 +155,8 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const rawDueDate = labeledValue(source, ["Scadenza", "Consegna", "Fine lavori"]);
 
   const title = rawTitle || (firstLine && !firstLine.includes(":" ) ? firstLine : "");
-  const description = rawDescription || source;
+  const structuredDescription = buildStructuredDescription({ title, rawDescription, client: rawClient, worksite: rawWorksite, source });
+  const description = structuredDescription.value;
   const lowerSource = source.toLocaleLowerCase("it-IT");
   const openingType = /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
   const inferredScope = inferCompanyAiScopeSelection(source);
@@ -91,7 +169,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   };
 
   addSuggestion(suggestions, "title", title, rawTitle ? 0.96 : 0.52, rawTitle ? "Preventivo · oggetto" : "Prima riga del documento");
-  addSuggestion(suggestions, "description", description, rawDescription ? 0.91 : 0.64, rawDescription ? "Preventivo · descrizione" : "Contenuto del documento");
+  addSuggestion(suggestions, "description", description, structuredDescription.confidence, structuredDescription.source);
   addSuggestion(suggestions, "openingType", openingType, /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? 0.94 : 0.74, "Classificazione del documento");
   if (inferredScope?.selection) {
     addSuggestion(suggestions, "scopeSectionId", inferredScope.selection.sectionTitle, scopeSuggestion.score, "Company AI · sezione");
