@@ -6,8 +6,8 @@
   "start_url": "/command",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#050607",
-  "theme_color": "#050607",
+  "background_color": "#030504",
+  "theme_color": "#030504",
   "orientation": "any",
   "categories": ["business", "productivity"],
   "icons": [

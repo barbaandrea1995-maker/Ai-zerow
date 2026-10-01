@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
@@ -43,6 +44,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CommandMobileNav } from "@/components/command-mobile-nav";
 import {
   Dialog,
   DialogClose,
@@ -447,13 +449,13 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+    <main className="authority-page zw-app-shell min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.08),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
       <div className="relative flex min-h-screen">
         <aside className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center justify-between px-2">
             <button className="flex items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
-              <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
+              <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span>
               <span><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
             </button>
             <button className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button" aria-label="Chiudi menu"><X className="size-4" /></button>
@@ -477,7 +479,7 @@ export default function OnboardingPage() {
         {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
 
         <section className="min-w-0 flex-1">
-          <header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
+          <header className="authority-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
             <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca utenti, ruoli, permessi, team" className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca utenti, ruoli, permessi, team…" value={query} /></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">AUTHORITY</span><span className="size-1 rounded-full bg-lime-300" /></div>
@@ -490,11 +492,11 @@ export default function OnboardingPage() {
           </header>
 
           <div className="authority-content mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="authority-hero mb-5 hidden">
+            <div className="authority-hero mb-5">
               <div className="authority-hero-grid" aria-hidden="true" />
               <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                 <div className="flex items-center gap-4">
-                  <span className="authority-mark"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span>
+                  <span className="authority-mark"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={52} height={52} className="size-full object-cover" /></span>
                   <div><p className="authority-kicker">COMMAND / AUTHORITY CONTROL PLANE</p><p className="mt-1 text-sm font-medium tracking-wide text-slate-200 sm:text-base">Access matrix <span className="text-slate-600">·</span> tenant boundary <span className="text-slate-600">·</span> governed profiles</p><p className="mt-2 text-xs text-slate-500">S02 is locked for the Sites-native operating scope.</p></div>
                 </div>
                 <div className="authority-hero-meta grid grid-cols-3 gap-2 sm:min-w-[330px]">
@@ -528,6 +530,7 @@ export default function OnboardingPage() {
         </section>
       </div>
 
+      <CommandMobileNav active="more" />
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}><DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]"><DialogHeader><DialogTitle className="text-slate-100">Crea profilo accesso</DialogTitle><DialogDescription className="text-slate-500">Il profilo viene salvato nel database Sites con tenant, creator e capability ricostruiti dal server.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-2"><label className="text-xs text-slate-400" htmlFor="profile-label">Etichetta profilo</label><Input id="profile-label" className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setProfileLabel(event.target.value)} placeholder="Es. Responsabile operativo" value={profileLabel} /></div><div className="space-y-2"><p className="text-xs text-slate-400">Ruolo base</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{AUTHORITY_ROLES.slice(0, 6).map((role) => <button className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${selectedRole === role ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/10 bg-black/20 text-slate-400 hover:border-lime-300/25"}`} key={role} onClick={() => setSelectedRole(role)} type="button">{role}</button>)}</div></div><div className="flex items-start gap-2 rounded-xl border border-lime-300/15 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />Il client invia solo etichetta e ruolo canonico. Il server applica tenant, creator e capability.</div></div><DialogFooter><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button type="button" disabled={profileSubmitting} className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => void createProfile()}><Send className="size-3.5" />{profileSubmitting ? "Salvataggio…" : "Salva profilo"}</Button></DialogFooter></DialogContent></Dialog>
       {toast && <div className="fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#0b1008]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_30px_rgba(190,255,60,0.14)] backdrop-blur-xl"><CheckCircle2 className="size-4 text-lime-300" />{toast}</div>}
     </main>
