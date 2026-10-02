@@ -5,7 +5,7 @@
   "status": "LOCAL_UNPUBLISHED_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
   "source": {
     "tag": "commercial-v1-rc2-6-local-2026-10-02",
-    "codeCommit": "PENDING_FINAL_EVIDENCE_COMMIT",
+    "codeCommit": "4f6a2b339a8d651d1deb4cbfadd0954c92b59325",
     "parentLocalTag": "commercial-v1-rc2-5-local-2026-10-02",
     "parentPublishedTag": "commercial-v1-rc2-1-local-2026-10-02",
     "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
