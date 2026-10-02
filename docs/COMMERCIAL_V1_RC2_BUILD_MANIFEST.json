@@ -5,7 +5,7 @@
   "status": "PUBLISHED_TECHNICAL_RELEASE_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
   "source": {
     "tag": "commercial-v1-rc2-1-local-2026-10-02",
-    "tagPolicy": "The annotated local tag resolves the exact RC2 checkpoint commit.",
+    "tagPolicy": "The annotated local tag resolves the exact RC2.1 checkpoint commit used by the published technical candidate.",
     "parentCheckpoint": "1de9c6dbf927ffe54772b022796ff8b64f349229",
     "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01"
   },
@@ -39,6 +39,7 @@
     "documentUploadRuntime": "PASS_REAL_DOCX_R2",
     "d1RestoreRehearsal": "PASS_19_TABLES_MATCH",
     "r2RestoreRehearsal": "PASS_SHA256_MATCH",
+    "postReleaseWorkerErrors": "PASS_OBSERVATIONAL_0_ERROR_EVENTS_LAST_30_MINUTES",
     "openAiLive": "NOT_RUN_AUTHENTICATED_PRODUCTION_SESSION_REQUIRED",
     "neonInviteAcceptance": "NOT_RUN_PROVIDER_SESSION_REQUIRED",
     "privacySecuritySignoff": "PENDING_HUMAN"

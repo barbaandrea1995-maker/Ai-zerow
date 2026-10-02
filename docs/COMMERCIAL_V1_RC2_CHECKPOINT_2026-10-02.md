@@ -6,7 +6,8 @@
 **Baseline immutabile:** `baseline-ai-zerow-sites-v65-2026-10-01`
 **Checkpoint precedente:** `commercial-v1-rc1-local-2026-10-02` / `1de9c6dbf927ffe54772b022796ff8b64f349229`
 **Tag RC2:** `commercial-v1-rc2-local-2026-10-02`
-**Pubblicazione Sites:** versione `82` · deployment `appgdep_6abf28b8770881918615f4d8f81ff9c6` · stato `SUCCEEDED`
+**Tag corrente RC2.1:** `commercial-v1-rc2-1-local-2026-10-02`
+**Pubblicazione Sites corrente:** versione `84` · deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84` · stato `SUCCEEDED`
 **URL:** https://ai-zerow-command.barba-andrea-1995.chatgpt.site
 **Hotfix RC2.1:** commit `5fffb4c6f1acaf8aa69d6379a464e488557ba821` · fallback owner Sites riallineato con Neon configurato · pubblicato come versione `84` · deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`
 
@@ -42,6 +43,7 @@
 | Documenti | PASS locale | DOCX 3.002.450 byte, R2 `STORED`, SHA-256 coerente; oversize `413`, firma falsa `415` |
 | Restore D1 | PASS locale | export e restore pulito: 19 tabelle e conteggi business identici |
 | Restore R2 | PASS locale | DOCX ripristinato con SHA-256 identico `aae80c…091b4` |
+| Post-release Worker errors | PASS osservazionale | 0 eventi error-level negli ultimi 30 minuti dopo RC2.1; due richieste `/command` risultano `canceled` dal client/headless e non sono state conteggiate come passaggio funzionale |
 | OpenAI live | NOT RUN | il secret è presente nel runtime Sites ma non è leggibile; il deployment è riuscito, ma la chiamata live con sessione Neon autenticata non è ancora stata eseguita |
 | Malware scan | NOT RUN | stato esposto come `AVAILABLE_UNSCANNED`; nessun provider scanner configurato |
 | Invito Neon end-to-end | NOT RUN | richiede una sessione Neon e una mailbox/provider reali |
@@ -56,4 +58,4 @@ RC2 è il primo candidato tecnico pubblicato del verticale commerciale principal
 3. accettazione invito con sessione Neon reale;
 4. sign-off umano security, privacy e commerciale.
 
-Il repository e il deployment restano congelati su RC2; la promozione richiede un nuovo dossier che trasformi tutti e quattro i gate in `PASS` e un’approvazione umana esplicita. Il deployment tecnico è stato eseguito su richiesta, ma non equivale a una certificazione commerciale.
+Il repository e il deployment restano congelati su RC2.1; la promozione richiede un nuovo dossier che trasformi tutti e quattro i gate in `PASS` e un’approvazione umana esplicita. Il deployment tecnico è stato eseguito su richiesta, ma non equivale a una certificazione commerciale.

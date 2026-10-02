@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.2 — riallineamento Commercial v1 RC2
+**Versione roadmap:** 1.3 — riallineamento Commercial v1 RC2.1
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2 · pubblicato tecnico · non certificato commerciale`, congelato dal tag `commercial-v1-rc2-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.1 · pubblicato tecnico · non certificato commerciale`, congelato dal tag `commercial-v1-rc2-1-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
