@@ -48,6 +48,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
@@ -265,18 +266,18 @@ const authorityKpis = [
   },
 ];
 
-const navItems = [
-  { label: "CONTROL", id: "command", icon: MessageSquareText },
-  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness },
-  { label: "FIELD", id: "field", icon: MapIcon },
-  { label: "WORKFORCE", id: "workforce", icon: Users },
-  { label: "FINANCE", id: "finance", icon: Gauge },
-  { label: "ASSETS", id: "assets", icon: Package },
-  { label: "WAREHOUSE", id: "warehouse", icon: Package },
-  { label: "MISSION", id: "mission", icon: Truck },
-  { label: "DOCUMENTS", id: "documents", icon: FileText },
+const navItems: Array<{ label: string; id: string; icon: LucideIcon; capability?: string }> = [
+  { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
+  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
+  { label: "FIELD", id: "field", icon: MapIcon, capability: "field.read" },
+  { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
+  { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
+  { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
+  { label: "WAREHOUSE", id: "warehouse", icon: Package, capability: "warehouse.read" },
+  { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
+  { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
-  { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge },
+  { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
 ];
 
 const fallbackTenantFields = [
@@ -1254,6 +1255,10 @@ export default function OnboardingPage() {
   const [memberships, setMemberships] = useState<AuthorityMembershipView[]>([]);
   const [invitations, setInvitations] = useState<AuthorityInvitationView[]>([]);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => item.id === "events_authority" || Boolean(item.capability && authorityContext?.capabilities.includes(item.capability))),
+    [authorityContext],
+  );
 
   const filteredRoles = useMemo(
     () =>
@@ -1642,7 +1647,7 @@ export default function OnboardingPage() {
               Workspace
             </p>
             <div className="mt-2 space-y-1">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = item.id === "events_authority";
                 return (
@@ -1729,9 +1734,9 @@ export default function OnboardingPage() {
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
                 Sites native
               </span>
-              <IconButton label="Notifiche">
+              {authorityContext?.capabilities.includes("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
                 <Bell className="size-4" />
-              </IconButton>
+              </IconButton> : null}
               <span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">
                 AB
               </span>

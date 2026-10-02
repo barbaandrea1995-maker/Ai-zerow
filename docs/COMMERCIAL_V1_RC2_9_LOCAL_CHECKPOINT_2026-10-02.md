@@ -10,6 +10,8 @@
 **Checkpoint locale aggiuntivo:** tag `commercial-v1-rc2-9-runtime-smoke-2026-10-02`, commit `f8f5b6a`.
 **Deploy:** nessun nuovo deploy; la pubblicazione tecnica precedente resta v86 e la promozione commerciale resta bloccata.
 
+**Audit successivo:** `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md` (`RC2.9-AUDIT-1`). L’audit conferma i collegamenti locali della Command attiva e rende esplicito che la mappa è schematica: provider mappa e GPS browser non sono collegati.
+
 ## Chiusure locali aggiunte
 
 - Nuovo Release & Certification Center in `/release`, protetto da `governance.read` e collegato ai control plane W12 e W16.

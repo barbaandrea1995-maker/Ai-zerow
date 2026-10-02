@@ -36,7 +36,6 @@ import {
   AssetPanel,
   JobPanel,
   KpiCard,
-  MapBoard,
   NewJobDialog,
   defaultAssistantResponse,
   readbackLabel,
@@ -47,6 +46,7 @@ import {
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 import { CommandHero } from "@/components/command-hero";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
+import { OperationalMapBoard } from "@/components/operational-map-board";
 import {
   CommandPersonalizationBar,
   CommandWidgetCustomizer,
@@ -495,7 +495,7 @@ export default function CommandSurface({
     }
 
     if (item.id === "operational-map") {
-      return <div className="h-full" id="operational-map"><MapBoard mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
+      return <div className="h-full" id="operational-map"><OperationalMapBoard mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
     }
     if (item.id === "company-ai") {
       return <div className="h-full" id="company-ai"><CompanyAiPanel onOpenLedger={() => setLedgerOpen(true)} onQueryChange={setAssistantQuery} onQuickPrompt={(prompt) => { setAssistantQuery(prompt); setAssistantResponse(`Pronto a preparare: “${prompt}”. Conferma e policy restano necessarie prima di qualsiasi scrittura.`); }} onSubmit={submitAssistant} query={assistantQuery} response={assistantPanelResponse} runtimeStatus={aiRuntimeStatus} /></div>;
@@ -583,7 +583,7 @@ export default function CommandSurface({
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">COMMAND</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />Live control</span>
-              <IconButton label="Notifiche"><Bell className="size-4" /></IconButton>
+              {access.allowedNavigation.includes("communications") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
               <AccountMenu actor={actor} />
             </div>
           </header>

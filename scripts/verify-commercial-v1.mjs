@@ -20,8 +20,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 assert.equal(packageJson.scripts["verify:runtime"], "node scripts/verify-runtime-smoke.mjs", "Runtime smoke verification must remain runnable from the package scripts");
+assert.equal(packageJson.scripts["audit:release"], "node scripts/audit-release-surface.mjs", "Release surface audit must remain runnable from the package scripts");
 const runtimeSmoke = await readFile(join(root, "scripts", "verify-runtime-smoke.mjs"), "utf8");
 assert(runtimeSmoke.includes("protected_api_fail_closed") && runtimeSmoke.includes("service_worker_build_binding"), "Runtime smoke must cover auth boundaries and PWA build binding");
+const surfaceAudit = await readFile(join(root, "scripts", "audit-release-surface.mjs"), "utf8");
+assert(surfaceAudit.includes("unresolvedApiEndpoints") && surfaceAudit.includes("browserGpsApi"), "Release surface audit must cover endpoint bindings and GPS/map integration status");
 
 assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
@@ -337,6 +340,8 @@ assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.9 m
 assert.equal(releaseManifest.releaseCenter.tranche, "W17", "RC2.9 manifest must bind the W17 release center");
 assert.equal(releaseManifest.verification.runtimeHttpSmoke.local, "PASS_LOCAL_AUTH_PWA_AND_NO_GO_BOUNDARY", "RC2.9 must record the local runtime smoke evidence");
 assert.equal(releaseManifest.verification.runtimeHttpSmoke.publishedEdge, "PASS_OWNER_ONLY_EDGE", "RC2.9 must record the published owner-only edge evidence");
+assert.equal(releaseManifest.verification.surfaceAudit, "PASS_WITH_EXTERNAL_GATES", "RC2.9 must record the full local surface audit");
+assert.equal(releaseManifest.verification.mapAndGps, "SCHEMATIC_ONLY_PROVIDER_AND_BROWSER_GPS_NOT_CONNECTED", "RC2.9 must not claim a live map or GPS provider");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the current RC build ID");
 
@@ -348,6 +353,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "runtime_http_smoke", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "runtime_http_smoke", "full_surface_audit", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

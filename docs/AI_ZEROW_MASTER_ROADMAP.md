@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.2 — riallineamento Commercial v1 RC2.9 locale W17 Release & Certification
+**Versione roadmap:** 2.3 — riallineamento Commercial v1 RC2.9-AUDIT-1 locale W17 Release & Certification
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.9 · candidato tecnico pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02` e parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. Il runtime HTTP locale e il confine edge owner-only pubblicato sono stati verificati; la promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_9_LOCAL_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02` e parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, pulsanti, PWA e integrazioni è registrato in `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md`. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -88,7 +88,7 @@ persona/input
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
-| W17 Release e GA | `RC2.9 — TECHNICAL PUBLISH / COMMERCIAL NO-GO` | Il nuovo Release & Certification Center aggrega W12, W16, document security, W10, restore e adapter esterni in un registro unico. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
+| W17 Release e GA | `RC2.9-AUDIT-1 — TECHNICAL PASS / COMMERCIAL NO-GO` | Audit completo route/API/capability/pulsanti e PWA aggiunto; Command attiva non ha controlli iconici non collegati e i path UI/API risolvono. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, GPS/provider mappa, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 

@@ -28,6 +28,18 @@
     "companyAiReadiness": "PASS_LOCAL_NO_DIRECT_WRITE_AND_LIVE_NOT_RUN",
     "securityPrivacyReadiness": "PASS_LOCAL_PARTIAL_PROVIDER_AND_HUMAN_GATES",
     "restoreRehearsal": "PASS_LOCAL_D1_AND_R2",
+    "surfaceAudit": "PASS_WITH_EXTERNAL_GATES",
+    "surfaceAuditInventory": {
+      "pageRoutes": 29,
+      "layouts": 19,
+      "guardedLayouts": 18,
+      "apiRoutes": 62,
+      "commandNavigationItems": 16,
+      "referencedApiEndpoints": 28,
+      "unresolvedApiEndpoints": 0,
+      "activeCommandUnboundIconButtons": 0
+    },
+    "mapAndGps": "SCHEMATIC_ONLY_PROVIDER_AND_BROWSER_GPS_NOT_CONNECTED",
     "runtimePublication": "PASS_TECHNICAL_SITES_V86_COMMERCIAL_NO_GO",
     "runtimeHttpSmoke": {
       "local": "PASS_LOCAL_AUTH_PWA_AND_NO_GO_BOUNDARY",

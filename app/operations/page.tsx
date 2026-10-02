@@ -722,9 +722,9 @@ export default function OperationsPage() {
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
                 D1 readback
               </span>
-              <IconButton label="Notifiche">
+              {authority.capabilities.has("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
                 <Bell className="size-4" />
-              </IconButton>
+              </IconButton> : null}
               <span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">
                 AB
               </span>
