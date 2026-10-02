@@ -1,10 +1,11 @@
 # AI-ZEROW COMMAND — Commercial v1 RC2.5 local checkpoint
 
-**Data:** 2 ottobre 2026  
-**Stato:** CANDIDATO LOCALE NON PUBBLICATO — NON CERTIFICATO COMMERCIALE  
-**Parent locale:** `commercial-v1-rc2-4-local-2026-10-02`  
-**Runtime pubblicato invariato:** Sites v84, deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`  
-**Build ID:** `ai-zerow-commercial-v1-rc2-5-local-r2026-10-02`  
+**Data:** 2 ottobre 2026
+**Stato:** CANDIDATO LOCALE NON PUBBLICATO — NON CERTIFICATO COMMERCIALE
+**Parent locale:** `commercial-v1-rc2-4-local-2026-10-02`
+**Runtime pubblicato invariato:** Sites v84, deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`
+**Build ID:** `ai-zerow-commercial-v1-rc2-5-local-r2026-10-02`
+**Commit codice candidato:** `b1fde1a73dc34d3f7fbb71efeb3941f3f3030a6f`
 **Deploy:** non eseguito per rispettare il gate di certificazione commerciale.
 
 ## Chiusure locali aggiunte
