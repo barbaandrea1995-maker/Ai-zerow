@@ -1,37 +1,69 @@
 "use client";
 
 import Link from "next/link";
-import { BriefcaseBusiness, Grid2X2, House, Map, Sparkles } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ClipboardCheck,
+  Grid2X2,
+  House,
+  Map,
+  Package,
+  Sparkles,
+  Truck,
+} from "lucide-react";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
 
-type MobileNavItem = "home" | "map" | "ai" | "operations" | "more";
+type MobileNavItem =
+  | "home"
+  | "map"
+  | "ai"
+  | "operations"
+  | "mission"
+  | "attendance"
+  | "warehouse"
+  | "more";
 
-const items: Array<{ id: MobileNavItem; label: string; href: string; icon: typeof House; primary?: boolean }> = [
-  { id: "home" as const, label: "Home", href: "/", icon: House },
-  { id: "map" as const, label: "Mappa", href: "/#operational-map", icon: Map },
-  { id: "ai" as const, label: "AI", href: "/#company-ai", icon: Sparkles, primary: true },
-  { id: "operations" as const, label: "Commesse", href: "/operations", icon: BriefcaseBusiness },
-  { id: "more" as const, label: "Altro", href: "/onboarding", icon: Grid2X2 },
-];
+const OPERATIONAL_ROLES = new Set([
+  "field_supervisor",
+  "worker",
+  "warehouse_manager",
+  "warehouse_operator",
+  "driver",
+  "maintenance",
+]);
 
 export function CommandMobileNav({
   active,
   allowedNavigation,
+  role,
 }: {
   active: MobileNavItem;
   allowedNavigation?: CommandNavigationId[];
+  role?: string;
 }) {
-  const canOpenCommand =
-    !allowedNavigation || allowedNavigation.includes("command");
-  const canOpenOperations = !allowedNavigation || allowedNavigation.includes("operations");
-  const moreHref = allowedNavigation?.includes("authority") ? "/onboarding" : "/settings";
-  const visibleItems = items
-    .filter((item) => {
-      if (["home", "map", "ai"].includes(item.id)) return canOpenCommand;
-      if (item.id === "operations") return canOpenOperations;
-      return true;
-    })
-    .map((item) => item.id === "more" ? { ...item, href: moreHref } : item);
+  if (!role || !OPERATIONAL_ROLES.has(role)) return null;
+
+  const can = (id: CommandNavigationId) =>
+    !allowedNavigation || allowedNavigation.includes(id);
+  const canOpenCommand = can("command");
+  const moreHref = can("authority") ? "/onboarding" : can("settings") ? "/settings" : "/command";
+  const items: Array<{ id: MobileNavItem; label: string; href: string; icon: typeof House; primary?: boolean }> = [];
+
+  if (canOpenCommand) {
+    items.push(
+      { id: "home", label: "Home", href: "/command", icon: House },
+      { id: "map", label: "Mappa", href: "/command#operational-map", icon: Map },
+      { id: "ai", label: "AI", href: "/command#company-ai", icon: Sparkles, primary: true },
+    );
+  }
+  if (can("operations")) items.push({ id: "operations", label: "Commesse", href: "/operations", icon: BriefcaseBusiness });
+  if (can("mission")) items.push({ id: "mission", label: "Missioni", href: "/mission", icon: Truck });
+  if (can("attendance")) items.push({ id: "attendance", label: "Presenze", href: "/presenze", icon: ClipboardCheck });
+  if (can("warehouse")) items.push({ id: "warehouse", label: "Magazzino", href: "/warehouse", icon: Package });
+  items.push({ id: "more", label: "Altro", href: moreHref, icon: Grid2X2 });
+  const visibleItems = items.length > 5
+    ? [...items.filter((item) => item.id !== "more").slice(0, 4), items[items.length - 1]]
+    : items;
 
   return (
     <nav aria-label="Navigazione mobile" className="zw-mobile-nav">

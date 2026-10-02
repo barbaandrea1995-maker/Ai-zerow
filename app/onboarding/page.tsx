@@ -2379,7 +2379,7 @@ export default function OnboardingPage() {
         </section>
       </div>
 
-      <CommandMobileNav active="more" />
+      <CommandMobileNav active="more" role={authorityContext?.role} />
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
         <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
           <DialogHeader>

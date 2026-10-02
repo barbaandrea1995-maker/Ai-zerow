@@ -54,6 +54,22 @@ export const COMMAND_WIDGET_CATALOG = [
     defaultSize: "standard",
   },
   {
+    id: "weather",
+    label: "Meteo operativo",
+    description: "Condizioni meteo per squadre, mezzi e cantieri.",
+    requiredCapabilities: ["command.read"],
+    allowedSizes: ["standard", "wide"],
+    defaultSize: "standard",
+  },
+  {
+    id: "reminders",
+    label: "Promemoria",
+    description: "Scadenze e promemoria dal registro notifiche.",
+    requiredCapabilities: ["command.read"],
+    allowedSizes: ["standard", "wide"],
+    defaultSize: "standard",
+  },
+  {
     id: "operational-map",
     label: "Mappa operativa",
     description: "Vista territoriale di lavori, team e asset autorizzati.",

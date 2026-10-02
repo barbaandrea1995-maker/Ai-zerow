@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
+  AlarmClock,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
@@ -13,6 +14,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleGauge,
+  CloudSun,
   Clock3,
   FileText,
   Gauge,
@@ -126,6 +128,20 @@ type CommandPreferencesResponse = {
   error?: string;
 };
 
+type ReminderRecord = {
+  id: string;
+  recordType?: string;
+  title?: string;
+  detail?: string;
+  meta?: string;
+  status?: string;
+  updatedAt?: string;
+};
+
+type CommunicationsResponse = {
+  records?: ReminderRecord[];
+};
+
 const commandModules = ["operations", "assets", "workforce"] as const;
 
 const navItems: Array<{
@@ -186,6 +202,96 @@ function PlanningCommandPanel() {
     return () => { active = false; };
   }, []);
   return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">P2 / PLANNING</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Piano operativo</h2><p className="mt-1 text-[11px] text-slate-500">Attività, missioni e risorse reali.</p></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.07] text-lime-200"><CalendarClock className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Perimetri</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.jobs ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Piani</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.plans ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Pubblicati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.published ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Conflitti</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.conflicted ?? "—"}</p></div></div><Button className="mt-auto h-9 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/planning")}><CalendarClock className="size-3.5" />Apri pianificazione</Button></section>;
+}
+
+function WeatherCommandPanel() {
+  const router = useRouter();
+  return (
+    <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">LIVE / WEATHER</p>
+          <h2 className="mt-1 text-sm font-semibold text-slate-100">Meteo operativo</h2>
+          <p className="mt-1 text-[11px] text-slate-500">Condizioni utili per squadre, mezzi e cantieri.</p>
+        </div>
+        <span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><CloudSun className="size-4" /></span>
+      </div>
+      <div className="carbon-inset mt-5 flex flex-1 flex-col justify-between rounded-xl p-4">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          {[["Temperatura", "—"], ["Condizioni", "—"], ["Vento", "—"]].map(([label, value]) => (
+            <div key={label}>
+              <p className="text-[9px] uppercase tracking-[.12em] text-slate-600">{label}</p>
+              <p className="mt-2 font-mono text-base text-slate-300">{value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-5 rounded-lg border border-amber-300/15 bg-amber-300/[.045] p-3 text-[10px] leading-4 text-amber-100/75">
+          Provider meteo non collegato · NOT RUN. Nessuna condizione viene simulata.
+        </p>
+      </div>
+      <button className="mt-4 flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" onClick={() => router.push("/externals")} type="button">
+        Configura provider <ArrowUpRight className="size-3.5" />
+      </button>
+    </section>
+  );
+}
+
+function RemindersCommandPanel({ canRead }: { canRead: boolean }) {
+  const router = useRouter();
+  const [records, setRecords] = useState<ReminderRecord[] | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!canRead) return;
+    let active = true;
+    void fetch("/api/communications", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as CommunicationsResponse;
+        if (!active) return;
+        if (!response.ok) throw new Error("communications_read_failed");
+        const next = (Array.isArray(payload.records) ? payload.records : [])
+          .filter((record) => /remind|promem|scaden|follow.?up/i.test(`${record.recordType ?? ""} ${record.title ?? ""} ${record.status ?? ""}`))
+          .slice(0, 4);
+        setRecords(next);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError(true);
+        setRecords([]);
+      });
+    return () => { active = false; };
+  }, [canRead]);
+
+  return (
+    <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">COMMS / REMINDERS</p>
+          <h2 className="mt-1 text-sm font-semibold text-slate-100">Promemoria</h2>
+          <p className="mt-1 text-[11px] text-slate-500">Collegati al registro notifiche del tenant.</p>
+        </div>
+        <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.07] text-lime-200"><AlarmClock className="size-4" /></span>
+      </div>
+      {!canRead ? (
+        <div className="carbon-inset mt-5 flex flex-1 items-center rounded-xl p-4 text-[11px] leading-5 text-slate-500">Promemoria non visibili: capability comunicazioni non presente nel ruolo corrente.</div>
+      ) : error ? (
+        <div className="carbon-inset mt-5 flex flex-1 items-center rounded-xl border border-rose-300/15 p-4 text-[11px] leading-5 text-rose-100/75">Readback notifiche non disponibile. Riprova dal modulo Comunicazioni.</div>
+      ) : records === null ? (
+        <div className="carbon-inset mt-5 flex flex-1 items-center rounded-xl p-4 text-[11px] text-slate-600">Lettura promemoria in corso…</div>
+      ) : records.length === 0 ? (
+        <div className="carbon-inset mt-5 flex flex-1 items-center rounded-xl p-4 text-[11px] leading-5 text-slate-500">Nessun promemoria nel readback notifiche.</div>
+      ) : (
+        <div className="mt-5 flex-1 space-y-2">
+          {records.map((record) => (
+            <div className="carbon-inset rounded-xl p-3" key={record.id}>
+              <div className="flex items-start gap-2"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(200,255,34,.75)]" /><div className="min-w-0"><p className="truncate text-xs text-slate-200">{record.title ?? "Promemoria"}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{record.detail ?? record.meta ?? "—"}</p></div></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {canRead ? <button className="mt-4 flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" onClick={() => router.push("/communications")} type="button">Apri notifiche <ArrowUpRight className="size-3.5" /></button> : null}
+    </section>
+  );
 }
 
 function AttendanceCommandPanel() {
@@ -551,6 +657,8 @@ export default function CommandSurface({
     if (item.id === "analytics") return <AnalyticsPanel />;
     if (item.id === "planning-overview") return <PlanningCommandPanel />;
     if (item.id === "attendance-overview") return <AttendanceCommandPanel />;
+    if (item.id === "weather") return <WeatherCommandPanel />;
+    if (item.id === "reminders") return <RemindersCommandPanel canRead={access.allowedNavigation.includes("communications")} />;
     if (item.id === "finance-procurement") return <W10CommandPanel summary={w10Summary} />;
     if (item.id === "command-readiness") return <CommandReadinessPanel readiness={commandReadiness} />;
 
@@ -670,7 +778,7 @@ export default function CommandSurface({
         </section>
       </div>
 
-      <CommandMobileNav active="home" allowedNavigation={access.allowedNavigation} />
+      <CommandMobileNav active="home" allowedNavigation={access.allowedNavigation} role={access.role} />
       <CommandWidgetCustomizer catalog={widgetCatalog} dirty={dirtyLayout} layout={widgetLayout} onLayoutChange={setWidgetLayout} onOpenChange={setCustomizerOpen} onReset={resetLayout} onSave={saveLayout} open={customizerOpen} saving={savingLayout} />
       <CommandLedgerDialog onOpenChange={setLedgerOpen} open={ledgerOpen} runtimeStatus={aiRuntimeStatus} />
       <NewJobDialog onCreated={(title) => { setNewJobOpen(false); notify(`Bozza locale creata: ${title}`); }} onOpenChange={setNewJobOpen} open={newJobOpen} />

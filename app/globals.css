@@ -822,6 +822,14 @@ main:has(> div > aside) > div > section > header {
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.025);
 }
 
+/* The shell header is intentionally removed: navigation belongs to the
+   workspace sidebar on desktop and to the role-specific execution bar on
+   mobile. The floating action rail keeps back/refresh available everywhere. */
+main:has(> div > aside) > div > section > header,
+.zw-command-topbar {
+  display: none !important;
+}
+
 main:has(> div > aside) > div > section > header::after {
   position: absolute;
   right: 1.75rem;
@@ -1425,6 +1433,52 @@ select:focus-visible {
   box-shadow: 0 35px 120px rgba(0, 0, 0, .76), 0 0 76px rgba(200, 255, 34, .12);
 }
 
+.zw-module-action-rail {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid rgba(200, 255, 34, .18);
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(18, 28, 20, .94), rgba(4, 7, 5, .97));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .52), 0 0 24px rgba(200, 255, 34, .08), inset 0 1px rgba(255, 255, 255, .06);
+  backdrop-filter: blur(18px);
+}
+
+.zw-module-action-rail__button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 0 11px;
+  color: var(--zw-text-2);
+  font-size: .72rem;
+  font-weight: 600;
+  transition: border-color var(--zw-motion-fast), background var(--zw-motion-fast), color var(--zw-motion-fast), transform var(--zw-motion-fast);
+}
+
+.zw-module-action-rail__button:hover,
+.zw-module-action-rail__button:focus-visible {
+  border-color: rgba(200, 255, 34, .28);
+  background: rgba(200, 255, 34, .08);
+  color: var(--zw-lime-hi);
+  outline: none;
+}
+
+.zw-module-action-rail__button:active {
+  transform: scale(.97);
+}
+
+.zw-module-action-rail__button--workspace {
+  color: var(--zw-lime-hi);
+}
+
 .zw-mobile-nav {
   display: none;
 }
@@ -1485,12 +1539,54 @@ select:focus-visible {
     font-size: 16px !important;
   }
 
-  .zw-app-shell {
+  .zw-app-shell:has(.zw-mobile-nav) {
     padding-bottom: calc(74px + env(safe-area-inset-bottom));
   }
 
-  .zw-app-shell > .fixed.bottom-5 {
+  .zw-app-shell:has(.zw-mobile-nav) > .fixed.bottom-5 {
     bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+
+  .zw-module-action-rail {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    gap: 2px;
+    border-radius: 14px;
+  }
+
+  body:has(.zw-mobile-nav) .zw-module-action-rail {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  .zw-module-action-rail__button {
+    width: 40px;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .zw-module-action-rail__button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  /* Non-operational profiles do not receive the execution bottom bar. Keep
+     their authorized workspace sidebar available as the mobile navigation. */
+  body:not(:has(.zw-mobile-nav)) main:has(> div > aside) > div > aside {
+    position: fixed !important;
+    inset: 0 auto 0 0;
+    z-index: 70;
+    display: flex !important;
+    width: min(84vw, var(--deck-sidebar-width)) !important;
+    transform: translateX(0) !important;
+  }
+
+  body:not(:has(.zw-mobile-nav)) main:has(> div > aside) > div > section {
+    margin-left: 0 !important;
   }
 
   .zw-command-hero {
@@ -1600,6 +1696,10 @@ select:focus-visible {
     color: var(--zw-lime-hi);
   }
 
+  [data-slot="commessa-intake-overlay"] {
+    padding: 0;
+  }
+
   [data-slot="commessa-intake-overlay"] section[role="dialog"] {
     top: 0;
     left: 0;
@@ -1609,6 +1709,10 @@ select:focus-visible {
     border-width: 0;
     border-radius: 0;
     transform: none;
+  }
+
+  [data-slot="commessa-intake-overlay"] section[role="dialog"] > div.flex {
+    -webkit-overflow-scrolling: touch;
   }
 }
 

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { GlobalModuleControls } from "@/components/global-module-controls";
 import { PwaRegister } from "@/components/pwa-register";
 import "./globals.css";
 
@@ -33,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
-      <body className="antialiased"><PwaRegister />{children}</body>
+      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls /></body>
     </html>
   );
 }

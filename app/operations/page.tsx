@@ -1296,6 +1296,7 @@ export default function OperationsPage() {
       <CommandMobileNav
         active="operations"
         allowedNavigation={allowedNavigation}
+        role={authority.role}
       />
       {canWriteOperations && newJobOpen && (
         <OperationsCommessaIntake
