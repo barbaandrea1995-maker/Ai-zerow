@@ -29,6 +29,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 
 ## Current continuation
 
+- Commercial v1 RC2.8 local W16: **LOCAL TECHNICAL CANDIDATE · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-8-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_8_LOCAL_CHECKPOINT_2026-10-02.md`. Aggiunto il control plane Security/Privacy con isolamento tenant, guard payload/segreti, documenti fail-closed, privacy on-duty, audit, restore e separazione dei gate provider/human review. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.7 local governance: **LOCAL TECHNICAL CANDIDATE · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-7-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_7_LOCAL_CHECKPOINT_2026-10-02.md`. Company AI ora ha un control plane W12 tenant/capability-gated con gate locali, ledger readback, binding metadata-only, no-direct-write e OpenAI live esplicitamente `NOT RUN`. Il Command espone la readiness come widget personalizzabile. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.6 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-6-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_6_LOCAL_CHECKPOINT_2026-10-02.md`. Il Command include il widget Finance/Procurement capability-filtered, con readback W10 tenant-scoped e boundary provider visibile. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.5 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-5-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_5_LOCAL_CHECKPOINT_2026-10-02.md`. Finance e Procurement ora hanno workflow persistenti, versioni, approval capability-gated, idempotenza, eventi, outbox e reconciliation; emissione PO, ricezione e contabilizzazione provider-backed restano esplicitamente bloccate. Il runtime Sites resta v84/RC2.1.
@@ -51,6 +52,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 - Commercial v1 RC2.5 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build W10 verificata localmente; nessuna pubblicazione eseguita.
 - Commercial v1 RC2.6 release: **LOCAL CANDIDATE · NOT PUBLISHED** — Command bridge W10 verificato localmente; nessuna pubblicazione eseguita.
 - Commercial v1 RC2.7 release: **LOCAL CANDIDATE · NOT PUBLISHED** — control plane Company AI W12, readiness widget e gate commerciali espliciti; nessuna pubblicazione eseguita.
+- Commercial v1 RC2.8 release: **LOCAL CANDIDATE · NOT PUBLISHED** — control plane W16 Security/Privacy e release gate espliciti; nessuna pubblicazione eseguita.
 
 - S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.

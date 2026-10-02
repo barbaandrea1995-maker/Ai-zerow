@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.9 — riallineamento Commercial v1 RC2.7 locale Company AI Governance
+**Versione roadmap:** 2.0 — riallineamento Commercial v1 RC2.8 locale W16 Security/Privacy
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.7 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-7-local-r2026-10-02` e parent locale `commercial-v1-rc2-6-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_7_LOCAL_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.8 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-8-local-r2026-10-02` e parent locale `commercial-v1-rc2-7-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_8_LOCAL_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -87,8 +87,8 @@ persona/input
 | W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
-| W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
-| W17 Release e GA | `RC2.7 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10, Command readiness e W12 governance control plane passano localmente. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
+| W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
+| W17 Release e GA | `RC2.8 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10, W12 governance e W16 security control plane passano localmente. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
@@ -623,6 +623,8 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 ---
 
 ### W16 — Security, privacy, compliance, observability e DR
+
+**Sites RC2.8:** il control plane `/governance/security` e il readback `/api/governance/security-readiness` rendono visibili i controlli locali chiusi e separano `READY`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`. La superficie non promuove token, provider, DPIA o sign-off umano a certificazione automatica.
 
 **Obiettivo:** rendere la piattaforma operabile e difendibile in produzione.
 
