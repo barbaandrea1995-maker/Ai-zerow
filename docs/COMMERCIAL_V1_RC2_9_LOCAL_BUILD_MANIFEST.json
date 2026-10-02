@@ -1,0 +1,79 @@
+{
+  "schema": "ai_zerow_command.release_manifest/v1",
+  "buildId": "ai-zerow-commercial-v1-rc2-9-local-r2026-10-02",
+  "label": "COMMERCIAL-V1-RC2.9-LOCAL-R2026.10.02",
+  "status": "LOCAL_UNPUBLISHED_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
+  "source": {
+    "tag": "commercial-v1-rc2-9-local-2026-10-02",
+    "codeCommit": "64ec4d017b92ca95b0aa97a0eed97e3752cb1ed4",
+    "parentLocalTag": "commercial-v1-rc2-8-local-2026-10-02",
+    "parentPublishedTag": "commercial-v1-rc2-1-local-2026-10-02",
+    "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
+    "tagPolicy": "Create this local tag only on the final evidence commit; no Sites version is created by this checkpoint."
+  },
+  "scope": {
+    "releaseCenter": ["w12_ai_governance", "w16_security_privacy", "document_fail_closed", "w10_workflows", "restore_rehearsal", "external_adapters", "human_signoff"],
+    "securityPrivacy": ["tenant_isolation", "capability_enforcement", "payload_secret_guards", "document_fail_closed", "on_duty_privacy", "append_only_audit"],
+    "resilience": ["d1_restore_rehearsal", "r2_restore_rehearsal", "provider_registry_readback", "slo_rpo_rto_gate"],
+    "releaseBoundary": ["w17_gate_register", "promotion_no_go", "no_deploy_from_ui"],
+    "existingCore": ["commesse", "scope_subgroup", "planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance", "assets", "rbac", "tenant_isolation", "company_ai_governance"]
+  },
+  "verification": {
+    "typecheck": "PASS",
+    "lint": "PASS_WITH_8_PREEXISTING_IMG_WARNINGS",
+    "productionBuild": "PASS",
+    "commercialContract": "PASS",
+    "releaseCenterContract": "PASS_LOCAL_NO_GO",
+    "stateMachineFixtures": "PASS_OUTBOX_DOCUMENT_SECURITY_AND_W10",
+    "companyAiReadiness": "PASS_LOCAL_NO_DIRECT_WRITE_AND_LIVE_NOT_RUN",
+    "securityPrivacyReadiness": "PASS_LOCAL_PARTIAL_PROVIDER_AND_HUMAN_GATES",
+    "restoreRehearsal": "PASS_LOCAL_D1_AND_R2",
+    "runtimePublication": "NOT_RUN_LOCAL_CANDIDATE",
+    "browserDeviceCertification": "NOT_RUN",
+    "openAiLive": "NOT_RUN_AUTHENTICATED_PRODUCTION_SESSION_REQUIRED",
+    "malwareScan": "NOT_RUN_PROVIDER_TOKEN_AND_CALLBACK_REQUIRED",
+    "neonInviteAcceptance": "NOT_RUN_PROVIDER_SESSION_REQUIRED",
+    "privacySecuritySignoff": "PENDING_HUMAN"
+  },
+  "promotion": {
+    "allowed": false,
+    "decision": "NO_GO",
+    "requiresExplicitHumanApproval": true,
+    "blockingGates": [
+      "OPENAI_LIVE",
+      "MALWARE_SCAN_PROVIDER",
+      "NEON_INVITE_ACCEPTANCE",
+      "BROWSER_DEVICE_CERTIFICATION",
+      "OBSERVABILITY_SLO_RPO_RTO",
+      "DPIA_RETENTION_DPA",
+      "HUMAN_SECURITY_PRIVACY_COMMERCIAL_SIGNOFF",
+      "EXTERNAL_DOMAIN_EXECUTORS"
+    ]
+  },
+  "releaseCenter": {
+    "tranche": "W17",
+    "route": "/release",
+    "api": "/api/release/readiness",
+    "capability": "governance.read",
+    "certification": "LOCAL_TECHNICAL_ONLY",
+    "promotionAllowed": false,
+    "directWrite": false,
+    "lastPublishedRuntime": "Sites v84 unchanged"
+  },
+  "lastPublishedRuntime": {
+    "tag": "commercial-v1-rc2-1-local-2026-10-02",
+    "sitesVersion": 84,
+    "deploymentId": "appgdep_6abf3110bcb48191adf6a5b3fe432d84",
+    "sourceCommit": "5fffb4c6f1acaf8aa69d6379a464e488557ba821",
+    "status": "SUCCEEDED",
+    "audience": "custom_owner_only",
+    "url": "https://ai-zerow-command.barba-andrea-1995.chatgpt.site"
+  },
+  "rollback": {
+    "lastKnownBaselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
+    "previousPublishedTag": "commercial-v1-rc2-1-local-2026-10-02",
+    "previousLocalCandidate": "commercial-v1-rc2-8-local-2026-10-02",
+    "d1RestoreRehearsal": "PASS_LOCAL",
+    "r2RestoreRehearsal": "PASS_LOCAL"
+  }
+}
