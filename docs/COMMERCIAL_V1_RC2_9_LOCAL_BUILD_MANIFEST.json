@@ -4,12 +4,12 @@
   "label": "COMMERCIAL-V1-RC2.9-LOCAL-R2026.10.02",
   "status": "LOCAL_RUNTIME_EVIDENCE_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
   "source": {
-    "tag": "commercial-v1-rc2-9-runtime-smoke-2026-10-02",
-    "codeCommit": "f8f5b6a03521dfc99de1a8d5ae5a5ed145a4e805",
+    "tag": "commercial-v1-rc2-9-full-audit-2026-10-02",
+    "codeCommit": "793f5e0e272eda3eba576d60d045a68f83c332dd",
     "parentLocalTag": "commercial-v1-rc2-8-local-2026-10-02",
     "parentPublishedTag": "commercial-v1-rc2-1-local-2026-10-02",
     "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
-    "tagPolicy": "Runtime-smoke evidence tag; no Sites version is created by this checkpoint."
+    "tagPolicy": "Full release-surface audit tag; no Sites version is created by this checkpoint."
   },
   "scope": {
     "releaseCenter": ["w12_ai_governance", "w16_security_privacy", "document_fail_closed", "w10_workflows", "restore_rehearsal", "external_adapters", "human_signoff"],
@@ -79,8 +79,8 @@
   },
   "candidateRuntime": {
     "publication": "LOCAL_NOT_PUBLISHED",
-    "evidenceTag": "commercial-v1-rc2-9-runtime-smoke-2026-10-02",
-    "evidenceCommit": "f8f5b6a03521dfc99de1a8d5ae5a5ed145a4e805",
+    "evidenceTag": "commercial-v1-rc2-9-full-audit-2026-10-02",
+    "evidenceCommit": "793f5e0e272eda3eba576d60d045a68f83c332dd",
     "lastPublishedRuntimeRemains": "Sites v86"
   },
   "lastPublishedRuntime": {

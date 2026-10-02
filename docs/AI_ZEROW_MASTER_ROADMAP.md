@@ -5,7 +5,7 @@
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02` e parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, pulsanti, PWA e integrazioni è registrato in `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md`. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
+**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`, commit `793f5e0` e tag `commercial-v1-rc2-9-full-audit-2026-10-02`, con parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, pulsanti, PWA e integrazioni è registrato in `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md`. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 

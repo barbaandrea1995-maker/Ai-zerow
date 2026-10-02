@@ -7,10 +7,10 @@
 **Runtime pubblicato:** Sites v86 owner-only, deployment `appgdep_6abf743f4e908191bc2297ec522864e6`
 **Build ID:** `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`
 **Commit codice pubblicato:** `f9a15b1a64f91cc8d7c18d764556466fd3618712`
-**Checkpoint locale aggiuntivo:** tag `commercial-v1-rc2-9-runtime-smoke-2026-10-02`, commit `f8f5b6a`.
+**Checkpoint audit completo:** tag `commercial-v1-rc2-9-full-audit-2026-10-02`, commit `793f5e0`.
 **Deploy:** nessun nuovo deploy; la pubblicazione tecnica precedente resta v86 e la promozione commerciale resta bloccata.
 
-**Audit successivo:** `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md` (`RC2.9-AUDIT-1`). L’audit conferma i collegamenti locali della Command attiva e rende esplicito che la mappa è schematica: provider mappa e GPS browser non sono collegati.
+**Audit completo:** `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md` (`RC2.9-AUDIT-1`). L’audit conferma i collegamenti locali della Command attiva e rende esplicito che la mappa è schematica: provider mappa e GPS browser non sono collegati.
 
 ## Chiusure locali aggiunte
 
