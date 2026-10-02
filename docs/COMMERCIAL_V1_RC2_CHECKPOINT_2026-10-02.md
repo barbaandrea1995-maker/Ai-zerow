@@ -8,7 +8,7 @@
 **Tag RC2:** `commercial-v1-rc2-local-2026-10-02`
 **Pubblicazione Sites:** versione `82` · deployment `appgdep_6abf28b8770881918615f4d8f81ff9c6` · stato `SUCCEEDED`
 **URL:** https://ai-zerow-command.barba-andrea-1995.chatgpt.site
-**Hotfix RC2.1:** commit `fcdc31a0f3880ec1a1b44aba6b66f755f42826d0` · fallback owner Sites riallineato con Neon configurato · pubblicato come versione `83`
+**Hotfix RC2.1:** commit `5fffb4c6f1acaf8aa69d6379a464e488557ba821` · fallback owner Sites riallineato con Neon configurato · pubblicato come versione `84` · deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`
 
 ## Perimetro congelato RC2
 
