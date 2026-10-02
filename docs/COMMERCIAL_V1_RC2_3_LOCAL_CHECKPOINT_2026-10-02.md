@@ -3,6 +3,7 @@
 **Data:** 2 ottobre 2026  
 **Stato:** CANDIDATO LOCALE NON PUBBLICATO — NON CERTIFICATO COMMERCIALE  
 **Parent locale:** `commercial-v1-rc2-2-local-2026-10-02`  
+**Commit codice candidato:** `b95c14f`  
 **Runtime pubblicato invariato:** Sites v84, deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`  
 **Build ID:** `ai-zerow-commercial-v1-rc2-3-local-r2026-10-02`  
 **Deploy:** non eseguito per rispettare il gate di certificazione commerciale.
