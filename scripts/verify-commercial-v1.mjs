@@ -12,6 +12,8 @@ import {
 } from "../lib/command-dashboard.ts";
 import { RELEASE_BUILD_ID } from "../lib/release.ts";
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot } from "../lib/planning-contract.ts";
+import { documentCanDownload, transitionDocumentSecurity } from "../lib/document-security.ts";
+import { transitionOutbox } from "../lib/outbox-contract.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,6 +31,32 @@ const planningConflict = evaluatePlanning([
   { ...planningSlot, id: "slot-b", startsAt: "2026-10-03T10:00:00Z", endsAt: "2026-10-03T13:00:00Z" },
 ], [planningResource]);
 assert(planningConflict.conflicts.some((conflict) => conflict.code === "RESOURCE_OVERLAP"), "Planning must detect overlapping resource usage");
+
+const outboxRetry = transitionOutbox({ status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, action: "retry" });
+assert.equal(outboxRetry.nextStatus, "PENDING_EXTERNAL_CONSUMER", "Outbox retry must remain pending until an external consumer proves delivery");
+assert.equal(outboxRetry.nextAttempts, 1, "Outbox retry must increment attempts");
+assert.equal(transitionOutbox({ status: "PENDING_EXTERNAL_CONSUMER", attempts: 4, action: "retry" }).nextStatus, "DEAD_LETTERED", "Outbox retry budget must terminate in DLQ");
+assert.throws(() => transitionOutbox({ status: "DELIVERED", attempts: 1, action: "retry" }), /outbox_terminal_status/, "Delivered outbox rows must not be replayed by Sites");
+
+const documentPending = transitionDocumentSecurity({
+  scanStatus: "NOT_RUN",
+  documentStatus: "AVAILABLE_UNSCANNED",
+  action: "queue_scan",
+});
+const documentClean = transitionDocumentSecurity({
+  scanStatus: documentPending.scanStatus,
+  documentStatus: documentPending.documentStatus,
+  action: "provider_result",
+  providerResult: "CLEAN",
+});
+assert.equal(documentClean.documentStatus, "AVAILABLE_CLEAN", "Only provider CLEAN may release a document");
+assert(!documentCanDownload("NOT_RUN", "AVAILABLE_UNSCANNED"), "Unscanned documents must remain blocked");
+assert(documentCanDownload("CLEAN_PROVIDER", "AVAILABLE_CLEAN"), "Provider-clean documents must be downloadable");
+assert.throws(() => transitionDocumentSecurity({
+  scanStatus: "NOT_RUN",
+  documentStatus: "AVAILABLE_UNSCANNED",
+  action: "release",
+}), /document_release_requires_provider_clean/, "Manual release must not bypass provider evidence");
 
 assert(ROLE_CAPABILITIES.owner.includes("tenant.manage"), "Owner must retain tenant management");
 assert(ROLE_CAPABILITIES.owner.includes("authority.manage"), "Owner must retain authority management");
@@ -208,6 +236,7 @@ assert(documentRoute.includes('scanStatus: "NOT_RUN"'), "Document upload must no
 const documentSecurity = await readFile(join(root, "app", "api", "documents", "[documentId]", "security", "route.ts"), "utf8");
 assert(documentSecurity.includes("malware_scan_provider_not_configured"), "Document security must remain explicit when no provider is configured");
 assert(documentSecurity.includes("provider_result"), "Document security must expose provider result readback");
+assert(documentSecurity.includes("provider_sha256_mismatch"), "Document provider callbacks must be bound to the stored file hash");
 const documentSecurityContract = await readFile(join(root, "lib", "document-security.ts"), "utf8");
 assert(documentSecurityContract.includes("document_release_requires_provider_clean"), "Documents must not be released without provider clean evidence");
 const outboxContract = await readFile(join(root, "lib", "outbox-contract.ts"), "utf8");
@@ -217,17 +246,24 @@ const outboxRoute = await readFile(join(root, "app", "api", "events", "outbox", 
 assert(outboxRoute.includes("transitionOutbox"), "Outbox route must use the governed state machine");
 const cloudflareEnv = await readFile(join(root, "cloudflare-env.d.ts"), "utf8");
 assert(cloudflareEnv.includes("OPENAI_API_KEY"), "OpenAI runtime secret must be declared as a Site binding");
+const externalAdapters = await readFile(join(root, "lib", "external-adapter.ts"), "utf8");
+assert(externalAdapters.includes('key: "openai-runtime"') && externalAdapters.includes('status: "NOT_RUN"'), "OpenAI external adapter must distinguish local binding from live certification");
 const communicationsLayout = await readFile(join(root, "app", "communications", "layout.tsx"), "utf8");
 assert(communicationsLayout.includes('requirePageCapability("communication.read")'), "Communications must be capability-gated");
+assert(journeyRoute.includes('document_security: hasCapability(context, "documents.write")'), "Document security controls must be capability-gated in the journey readback");
+const eventsControl = await readFile(join(root, "components", "events-control-page.tsx"), "utf8");
+assert(eventsControl.includes("/api/events/outbox"), "Events Authority must expose outbox controls");
+const journeyControl = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
+assert(journeyControl.includes("mutateDocumentSecurity"), "Job journey must expose document security controls");
 
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_3_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.3 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.3 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.3 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.3 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_4_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.4 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.4 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.4 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.4 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the RC2 build ID");
 

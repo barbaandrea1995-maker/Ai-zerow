@@ -94,6 +94,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
   }
   const action = typeof payload.action === "string" ? payload.action.trim().toLowerCase() : "";
   const result = typeof payload.result === "string" ? payload.result.trim().toUpperCase() : "";
+  const providerSha256 = typeof payload.sha256 === "string" ? payload.sha256.trim().toLowerCase() : "";
+  const providerReference = typeof payload.providerReference === "string" ? payload.providerReference.trim().slice(0, 160) : "";
   const idempotencyKey = typeof payload.idempotencyKey === "string" ? payload.idempotencyKey.trim().slice(0, 160) : `document-security:${id}:${crypto.randomUUID()}`;
   if (!DOCUMENT_SECURITY_ACTIONS.includes(action as DocumentSecurityAction)) {
     return Response.json({ error: "invalid_document_security_action", actions: DOCUMENT_SECURITY_ACTIONS }, { status: 400 });
@@ -111,12 +113,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (!configuredProviderToken) return Response.json({ error: "malware_scan_provider_not_configured" }, { status: 503 });
     if (!providerAuthorized) return Response.json({ error: "malware_scan_provider_unauthorized" }, { status: 401 });
     if (result !== "CLEAN" && result !== "INFECTED") return Response.json({ error: "provider_result_required" }, { status: 400 });
+    if (!/^[a-f0-9]{64}$/.test(providerSha256)) return Response.json({ error: "provider_sha256_required" }, { status: 400 });
   }
 
   try {
     const db = getDb();
     const current = await findDocument(context?.tenantId ?? null, id);
     if (!current) return Response.json({ error: "document_not_found" }, { status: 404 });
+    if (action === "provider_result" && providerSha256 !== current.sha256.toLowerCase()) {
+      return Response.json({ error: "provider_sha256_mismatch" }, { status: 409 });
+    }
     const tenantId = current.tenantId;
     const existingEvent = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, tenantId),
@@ -145,6 +151,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       previousDocumentStatus: current.status,
       documentStatus: transition.documentStatus,
       sha256: current.sha256,
+      providerReference: providerReference || null,
       source: action === "provider_result" ? "malware-scan-provider-webhook" : "sites-document-security",
     });
     const mutation = db.update(operationalDocuments).set({

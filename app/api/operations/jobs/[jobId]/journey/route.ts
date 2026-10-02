@@ -145,6 +145,7 @@ function actionAccess(context: AuthorityContext) {
       hasCapability(context, capability),
     ])),
     document_upload: hasCapability(context, "documents.write"),
+    document_security: hasCapability(context, "documents.write"),
   };
 }
 

@@ -21,8 +21,11 @@ export type OutboxTransition = {
 };
 
 export class OutboxTransitionError extends Error {
-  constructor(public readonly code: string) {
+  public readonly code: string;
+
+  constructor(code: string) {
     super(code);
+    this.code = code;
   }
 }
 

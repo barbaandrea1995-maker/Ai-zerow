@@ -10,8 +10,11 @@ export type DocumentSecurityAction = (typeof DOCUMENT_SECURITY_ACTIONS)[number];
 export type DocumentProviderResult = "CLEAN" | "INFECTED";
 
 export class DocumentSecurityTransitionError extends Error {
-  constructor(public readonly code: string) {
+  public readonly code: string;
+
+  constructor(code: string) {
     super(code);
+    this.code = code;
   }
 }
 
