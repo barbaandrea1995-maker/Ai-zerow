@@ -96,6 +96,16 @@ type CommandDashboardResponse = {
   records?: CommandRecord[];
   modules?: string[];
   requestedModules?: string[];
+  w10?: W10Summary | null;
+};
+
+type W10Summary = {
+  status: "ok" | "not_available";
+  workflowCount: number;
+  reviewCount: number;
+  openValueMilli: number;
+  reconciledCount: number;
+  checkedAt: string;
 };
 
 type CommandPreferencesResponse = {
@@ -132,6 +142,13 @@ const navItems: Array<{
   { id: "pwa", label: "PWA / DIAGNOSTICS", path: "/pwa/diagnostics", icon: CircleGauge },
   { id: "settings", label: "SETTINGS", path: "/settings", icon: Settings },
 ];
+
+function W10CommandPanel({ summary }: { summary: W10Summary | null }) {
+  const router = useRouter();
+  const amount = summary ? new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(summary.openValueMilli / 1000) : "—";
+  const unavailable = !summary || summary.status !== "ok";
+  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W10 / CONTROL BRIDGE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Finance & Procurement</h2><p className="mt-1 text-[11px] text-slate-500">Workflow, approval e confine provider nel Command.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${unavailable ? "border-amber-300/20 bg-amber-300/[0.06] text-amber-100" : "border-lime-300/20 bg-lime-300/[0.06] text-lime-100"}`}>{unavailable ? "READBACK PENDING" : "D1 VERIFIED"}</span></div>{unavailable ? <div className="carbon-inset mt-5 flex flex-1 items-center gap-3 rounded-xl p-4"><CircleGauge className="size-5 text-amber-200" /><p className="text-xs leading-5 text-slate-500">Il workflow W10 non è ancora disponibile nel readback corrente. Nessun valore viene simulato.</p></div> : <><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Workflow</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.workflowCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">In review</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary.reviewCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Valore aperto</p><p className="mt-2 font-mono text-sm text-lime-100">{amount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Riconciliati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.reconciledCount}</p></div></div><div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.045] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100"><ShieldCheck className="size-3.5" />Provider boundary</div><p className="mt-2 text-[11px] leading-5 text-slate-500">Approval e stato Sites sono verificabili. Emissione PO, ricezione e contabilizzazione restano esterni.</p></div></>}<div className="mt-5 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/procurement")}><ShoppingCart className="size-3.5" />Apri Procurement</Button><Button className="h-9 flex-1 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/finance")}><Gauge className="size-3.5" />Apri Finance</Button></div></section>;
+}
 
 function IconButton({
   label,
@@ -271,6 +288,7 @@ export default function CommandSurface({
   const [savedLayout, setSavedLayout] = useState(layoutFingerprint(access.defaultLayout));
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [preferencesSynced, setPreferencesSynced] = useState(false);
+  const [w10Summary, setW10Summary] = useState<W10Summary | null>(null);
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [savingLayout, setSavingLayout] = useState(false);
@@ -285,6 +303,7 @@ export default function CommandSurface({
         const requestedModules = payload.requestedModules?.length ?? commandModules.length;
         const readableModules = payload.modules?.length ?? 0;
         setRecords(nextRecords);
+        setW10Summary(payload.w10 ?? null);
         if (readableModules === 0) setReadbackStatus("error");
         else if (nextRecords.length === 0) setReadbackStatus("empty");
         else if (readableModules === requestedModules) setReadbackStatus("online");
@@ -465,6 +484,7 @@ export default function CommandSurface({
       return <AssetPanel assets={assets} onTabChange={setAssetTab} tab={assetTab} />;
     }
     if (item.id === "analytics") return <AnalyticsPanel />;
+    if (item.id === "finance-procurement") return <W10CommandPanel summary={w10Summary} />;
 
     return (
       <section className="carbon-card flex h-full flex-wrap items-center justify-between gap-4 rounded-2xl p-4 sm:p-5">

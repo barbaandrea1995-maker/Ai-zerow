@@ -86,6 +86,14 @@ export const COMMAND_WIDGET_CATALOG = [
     defaultSize: "wide",
   },
   {
+    id: "finance-procurement",
+    label: "Finance & Procurement",
+    description: "Workflow economici, approval e confini provider.",
+    requiredCapabilities: ["finance.read", "procurement.read"],
+    allowedSizes: ["wide", "full"],
+    defaultSize: "wide",
+  },
+  {
     id: "command-readiness",
     label: "Command readiness",
     description: "Stato del control plane e dei relativi adapter.",

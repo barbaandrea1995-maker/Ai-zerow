@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.7 — riallineamento Commercial v1 RC2.5 locale W10
+**Versione roadmap:** 1.8 — riallineamento Commercial v1 RC2.6 locale Command/W10
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.5 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-5-local-r2026-10-02` e parent locale `commercial-v1-rc2-4-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_5_LOCAL_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.6 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-6-local-r2026-10-02` e parent locale `commercial-v1-rc2-5-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_6_LOCAL_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -72,7 +72,7 @@ persona/input
 | Workstream | Stato iniziale | Nota |
 |---|---|---|
 | W00 Baseline e governance | `FROZEN` | Tag v65 creato e pubblicato nel repository. |
-| W01 Shell e visual system | `RC2 — PASS LOCALE` | Command ultra-carbon, core Z senza foglia, 11 widget personalizzabili, PWA parity e smoke desktop/mobile superati; axe rileva 0 violazioni automatiche sulle superfici critiche. |
+| W01 Shell e visual system | `RC2.6 — PASS LOCALE` | Command ultra-carbon, core Z senza foglia, 12 widget personalizzabili incluso il bridge Finance/Procurement, PWA parity e smoke desktop/mobile superati; axe rileva 0 violazioni automatiche sulle superfici critiche. |
 | W02 Identity, tenant, authority | `RC2 — IMPLEMENTED / PROVIDER GATE` | 13 ruoli, capability server-side, menu/CTA/widget filtering, bootstrap fail-closed e isolamento A/B verificati. Invite, role change, suspend/reactivate/revoke/remove e last-owner guard sono implementati; accettazione con sessione Neon reale resta `NOT RUN`. |
 | W03 Commessa e Job Workspace | `RC2 — CLOSED LOCAL CORE` | Creazione manuale/Company AI, preventivo DOCX diviso, scope al sottogruppo, workspace, completion gate, eventi, readback e journey cross-modulo sono verificati localmente. Chiusura GA dipende dai gate provider di W09/W12/W16. |
 | W04 Planning | `RC2.2 — LOCAL ADVANCED PASS / EXTERNAL DEFERRED` | Capacità, conflitti, qualifiche, revisioni, what-if e resource options readback sono implementati con D1, versioni, idempotenza e capability; executor/capacity provider esterni restano differiti. |
@@ -88,7 +88,7 @@ persona/input
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
-| W17 Release e GA | `RC2.5 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10 e hardening locale passano. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
+| W17 Release e GA | `RC2.6 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10 e Command bridge passano. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 

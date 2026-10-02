@@ -21,6 +21,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
 assert.equal(new Set(COMMAND_WIDGET_CATALOG.map((widget) => widget.id)).size, COMMAND_WIDGET_CATALOG.length, "Widget IDs must be unique");
+assert(COMMAND_WIDGET_CATALOG.some((widget) => widget.id === "finance-procurement" && widget.requiredCapabilities.includes("finance.read") && widget.requiredCapabilities.includes("procurement.read")), "W10 Command widget must require both Finance and Procurement read capabilities");
 
 const planningResource = normalizePlanningResource({ id: "team-alpha", kind: "team", label: "Team Alpha", capacity: 1, qualifications: ["idraulica"] });
 const planningSlot = normalizePlanningSlot({ id: "slot-a", startsAt: "2026-10-03T08:00:00Z", endsAt: "2026-10-03T12:00:00Z", resourceIds: ["team-alpha"], requiredQualifications: ["idraulica"] });
@@ -193,6 +194,10 @@ assert(commandRoute.includes("askCompanyAiWithOpenAi"), "Command must call the g
 assert(commandRoute.includes("directWrite: false"), "Command AI must retain the no-direct-write boundary");
 assert(commandRoute.includes("consumeCompanyAiRateLimit"), "Command AI must enforce its server-side quota");
 assert(commandRoute.includes("payload_too_large"), "Command AI must reject oversized payloads");
+const commandDashboardRoute = await readFile(join(root, "app", "api", "command", "dashboard", "route.ts"), "utf8");
+assert(commandDashboardRoute.includes("w10Workflows") && commandDashboardRoute.includes("finance.read") && commandDashboardRoute.includes("procurement.read"), "Command dashboard must expose W10 only when both read capabilities exist");
+const commandSurface = await readFile(join(root, "components", "command-surface.tsx"), "utf8");
+assert(commandSurface.includes("W10CommandPanel") && commandSurface.includes("finance-procurement"), "Command must render the capability-filtered W10 widget");
 
 const intakeRoute = await readFile(join(root, "app", "api", "operations", "intake", "route.ts"), "utf8");
 assert(intakeRoute.includes("consumeCompanyAiRateLimit"), "Commessa intake must enforce its server-side quota");
@@ -288,11 +293,11 @@ for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_5_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.5 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.5 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.5 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.5 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_6_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.6 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.6 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.6 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.6 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the RC2 build ID");
 
