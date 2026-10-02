@@ -5,6 +5,7 @@
 **Parent locale:** `commercial-v1-rc2-3-local-2026-10-02`  
 **Runtime pubblicato invariato:** Sites v84, deployment `appgdep_6abf3110bcb48191adf6a5b3fe432d84`  
 **Build ID:** `ai-zerow-commercial-v1-rc2-4-local-r2026-10-02`  
+**Commit codice candidato:** `3c0a5e3618d19c2c3e81a79b31373f8b8b29b76a`
 **Deploy:** non eseguito per rispettare il gate di certificazione commerciale.
 
 ## Chiusure locali aggiunte
