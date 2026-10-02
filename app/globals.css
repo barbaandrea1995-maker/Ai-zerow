@@ -822,14 +822,6 @@ main:has(> div > aside) > div > section > header {
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.025);
 }
 
-/* The shell header is intentionally removed: navigation belongs to the
-   workspace sidebar on desktop and to the role-specific execution bar on
-   mobile. The floating action rail keeps back/refresh available everywhere. */
-main:has(> div > aside) > div > section > header,
-.zw-command-topbar {
-  display: none !important;
-}
-
 main:has(> div > aside) > div > section > header::after {
   position: absolute;
   right: 1.75rem;
@@ -845,6 +837,29 @@ main:has(> div > aside) > div > section > header input[data-slot="input"] {
   height: 2.75rem;
   border-color: rgba(210, 231, 222, 0.14);
   background: rgba(0, 0, 0, 0.32);
+}
+
+/* Older module shells keep their existing runtime structure, but receive the
+   same ZEROW brand anchor as Command through the shared topbar layer. */
+main:has(> div > aside) > div > section > header:not(.zw-command-topbar)::before {
+  display: inline-flex;
+  width: 112px;
+  min-width: 112px;
+  height: 36px;
+  align-items: center;
+  padding-left: 43px;
+  border-radius: 10px;
+  background-image: url("/ai-zerow-icon.jpeg");
+  background-position: 4px center;
+  background-repeat: no-repeat;
+  background-size: 32px 32px;
+  color: #f5f8f2;
+  content: "ZEROW";
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 main:has(> div > aside) > div > section > div.mx-auto {
@@ -1574,21 +1589,6 @@ select:focus-visible {
     white-space: nowrap;
   }
 
-  /* Non-operational profiles do not receive the execution bottom bar. Keep
-     their authorized workspace sidebar available as the mobile navigation. */
-  body:not(:has(.zw-mobile-nav)) main:has(> div > aside) > div > aside {
-    position: fixed !important;
-    inset: 0 auto 0 0;
-    z-index: 70;
-    display: flex !important;
-    width: min(84vw, var(--deck-sidebar-width)) !important;
-    transform: translateX(0) !important;
-  }
-
-  body:not(:has(.zw-mobile-nav)) main:has(> div > aside) > div > section {
-    margin-left: 0 !important;
-  }
-
   .zw-command-hero {
     min-height: 250px;
     grid-template-columns: 1fr;
@@ -1782,6 +1782,46 @@ select:focus-visible {
     rgba(3, 6, 4, .91);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .26), inset 0 -1px rgba(255, 255, 255, .018);
   backdrop-filter: blur(20px);
+}
+
+.zw-command-topbar__brand {
+  min-width: 132px;
+}
+
+@media (min-width: 1024px) {
+  .zw-command-sidebar.is-collapsed {
+    width: 76px;
+  }
+
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__brand-copy,
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__tenant-copy,
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__nav-caption,
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__nav-label,
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__nav-badge,
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__footer {
+    display: none;
+  }
+
+  .zw-command-sidebar.is-collapsed .zw-command-sidebar__collapse {
+    margin-left: auto;
+  }
+
+  .zw-command-sidebar.is-collapsed .zw-command-tenant {
+    justify-content: center;
+    padding-right: .5rem;
+    padding-left: .5rem;
+  }
+
+  .zw-command-sidebar.is-collapsed nav {
+    margin-top: 1.5rem;
+  }
+
+  .zw-command-sidebar.is-collapsed .zw-command-nav-item {
+    justify-content: center;
+    gap: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
 }
 
 .zw-command-tenant,

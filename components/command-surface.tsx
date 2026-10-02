@@ -23,6 +23,8 @@ import {
   MessageSquareText,
   Network,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   Send,
   Settings,
@@ -430,6 +432,7 @@ export default function CommandSurface({
 }) {
   const router = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [search, setSearch] = useState("");
   const [mapFilter, setMapFilter] = useState<MapFilter>("TUTTI");
   const [selectedMarker, setSelectedMarker] = useState("");
@@ -680,22 +683,25 @@ export default function CommandSurface({
     <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
       <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative flex min-h-screen">
-        <aside className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col px-3 py-4 transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
+        <aside className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center justify-between px-2">
-            <button className="flex items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
+            <button aria-label="Apri Command" className="flex min-w-0 items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
               <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span>
-              <span><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
+              <span className="zw-command-sidebar__brand-copy min-w-0"><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
             </button>
-            <button aria-label="Chiudi menu" className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button"><X className="size-4" /></button>
+            <div className="flex items-center gap-1">
+              <button aria-label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} className="zw-command-sidebar__collapse hidden size-8 place-items-center rounded-lg text-slate-500 hover:bg-lime-300/10 hover:text-lime-200 lg:grid" onClick={() => setSidebarCollapsed((value) => !value)} type="button">{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</button>
+              <button aria-label="Chiudi menu" className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button"><X className="size-4" /></button>
+            </div>
           </div>
 
           <div className="zw-command-tenant mt-7 flex items-center gap-3 rounded-2xl p-3">
             <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><HardHat className="size-4" /></span>
-            <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · tenant scoped</span></span>
+            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · tenant scoped</span></span>
           </div>
 
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
-            <p className="px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">Authorized workspace</p>
+            <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">Authorized workspace</p>
             <div className="mt-2 space-y-1">
               {visibleNavigation.map((item) => {
                 const Icon = item.icon;
@@ -703,21 +709,22 @@ export default function CommandSurface({
                 return (
                   <button
                     aria-current={active ? "page" : undefined}
+                    aria-label={sidebarCollapsed ? item.label : undefined}
                     className={`zw-command-nav-item ${active ? "is-active" : ""}`}
                     key={item.id}
                     onClick={() => { setMobileMenu(false); router.push(item.path); }}
                     type="button"
                   >
                     <Icon className="size-4" />
-                    <span>{item.label}</span>
-                    {item.badge ? <span className="ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] text-lime-200">{item.badge}</span> : null}
+                    <span className="zw-command-sidebar__nav-label">{item.label}</span>
+                    {item.badge ? <span className="zw-command-sidebar__nav-badge ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] text-lime-200">{item.badge}</span> : null}
                   </button>
                 );
               })}
             </div>
           </nav>
 
-          <div className="mt-4 border-t border-white/[0.07] pt-4">
+          <div className="zw-command-sidebar__footer mt-4 border-t border-white/[0.07] pt-4">
             <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[0.14em] text-slate-600"><span>System core</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />{readbackLabel(readbackStatus)}</span></div>
             <div className="zw-command-core-status mt-3 rounded-xl p-3"><p className="font-mono text-[9px] text-slate-500">D1 / {records.length} RECORD</p><p className="mt-2 font-mono text-[9px] text-lime-300/60">POLICY / {access.role.toUpperCase()}</p></div>
           </div>
@@ -728,7 +735,9 @@ export default function CommandSurface({
         <section className="min-w-0 flex-1">
           <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
             <IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton>
-            <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca in COMMAND" className="h-10 max-w-[520px] border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={search} /></div>
+            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">command</span></span></button>
+            <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
+            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca in COMMAND" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={search} /></div></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">COMMAND</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
               <TenantSwitcher />
