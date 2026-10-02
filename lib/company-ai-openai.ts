@@ -17,6 +17,31 @@ function runtimeSecret(name: "OPENAI_API_KEY" | "OPENAI_MODEL") {
   return typeof local === "string" ? local.trim() : "";
 }
 
+export type CompanyAiRuntimeStatus = {
+  provider: "openai";
+  configured: boolean;
+  model: string;
+  mode: "server_side_governed_preview";
+  directWrite: false;
+  liveRequest: "NOT_RUN";
+};
+
+/**
+ * Exposes only non-secret runtime metadata. Configuration is not evidence of
+ * a successful provider request, so liveRequest intentionally remains NOT_RUN
+ * until an authenticated runtime check records external evidence.
+ */
+export function getCompanyAiRuntimeStatus(): CompanyAiRuntimeStatus {
+  return {
+    provider: "openai",
+    configured: Boolean(runtimeSecret("OPENAI_API_KEY")),
+    model: runtimeSecret("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL,
+    mode: "server_side_governed_preview",
+    directWrite: false,
+    liveRequest: "NOT_RUN",
+  };
+}
+
 export type CompanyAiOpenAiExtraction = {
   title: string;
   description: string;

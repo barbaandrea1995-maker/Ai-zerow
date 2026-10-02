@@ -10,6 +10,7 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
+  CircleAlert,
   CircleGauge,
   FileText,
   Gauge,
@@ -99,6 +100,12 @@ type CommandDashboardResponse = {
   w10?: W10Summary | null;
 };
 
+type CommandReadinessResponse = {
+  summary?: { localGateReady?: number; localGateTotal?: number; ledgerCount?: number; ledgerStatus?: "READY" | "BLOCKED"; openAiLive?: "NOT_RUN" };
+  runtime?: { configured?: boolean; model?: string; liveRequest?: "NOT_RUN"; directWrite?: boolean };
+  governanceRead?: boolean;
+};
+
 type W10Summary = {
   status: "ok" | "not_available";
   workflowCount: number;
@@ -148,6 +155,15 @@ function W10CommandPanel({ summary }: { summary: W10Summary | null }) {
   const amount = summary ? new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(summary.openValueMilli / 1000) : "—";
   const unavailable = !summary || summary.status !== "ok";
   return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W10 / CONTROL BRIDGE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Finance & Procurement</h2><p className="mt-1 text-[11px] text-slate-500">Workflow, approval e confine provider nel Command.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${unavailable ? "border-amber-300/20 bg-amber-300/[0.06] text-amber-100" : "border-lime-300/20 bg-lime-300/[0.06] text-lime-100"}`}>{unavailable ? "READBACK PENDING" : "D1 VERIFIED"}</span></div>{unavailable ? <div className="carbon-inset mt-5 flex flex-1 items-center gap-3 rounded-xl p-4"><CircleGauge className="size-5 text-amber-200" /><p className="text-xs leading-5 text-slate-500">Il workflow W10 non è ancora disponibile nel readback corrente. Nessun valore viene simulato.</p></div> : <><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Workflow</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.workflowCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">In review</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary.reviewCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Valore aperto</p><p className="mt-2 font-mono text-sm text-lime-100">{amount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Riconciliati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.reconciledCount}</p></div></div><div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.045] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100"><ShieldCheck className="size-3.5" />Provider boundary</div><p className="mt-2 text-[11px] leading-5 text-slate-500">Approval e stato Sites sono verificabili. Emissione PO, ricezione e contabilizzazione restano esterni.</p></div></>}<div className="mt-5 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/procurement")}><ShoppingCart className="size-3.5" />Apri Procurement</Button><Button className="h-9 flex-1 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/finance")}><Gauge className="size-3.5" />Apri Finance</Button></div></section>;
+}
+
+function CommandReadinessPanel({ readiness }: { readiness: CommandReadinessResponse | null }) {
+  const router = useRouter();
+  const ready = readiness?.summary?.localGateReady ?? 0;
+  const total = readiness?.summary?.localGateTotal ?? 0;
+  const ledgerStatus = readiness?.summary?.ledgerStatus ?? "BLOCKED";
+  const configured = Boolean(readiness?.runtime?.configured);
+  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W12 / READINESS</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Company AI control</h2><p className="mt-1 text-[11px] text-slate-500">Guard locali, ledger e confine provider.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${readiness ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-100" : "border-amber-300/20 bg-amber-300/[0.06] text-amber-100"}`}>{readiness ? "D1 READBACK" : "CHECKING"}</span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Local gates</p><p className="mt-2 font-mono text-xl text-lime-100">{readiness ? `${ready}/${total}` : "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Ledger</p><p className="mt-2 font-mono text-xl text-cyan-100">{readiness ? readiness.summary?.ledgerCount ?? 0 : "—"}</p></div></div><div className="mt-4 space-y-2"><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><CircleAlert className="size-3.5 text-amber-200" />OpenAI live</span><span className="text-amber-200">NOT RUN</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><ShieldCheck className="size-3.5 text-lime-200" />No direct write</span><span className="text-lime-200">BLOCKED</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><Sparkles className="size-3.5 text-lime-200" />Runtime binding</span><span className={configured ? "text-lime-200" : "text-amber-200"}>{configured ? "SERVER-SIDE" : "NOT OBSERVED"}</span></div></div><div className="mt-auto flex flex-wrap gap-2 pt-5"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push(readiness?.governanceRead ? "/governance" : "/externals")}><ShieldCheck className="size-3.5" />{readiness?.governanceRead ? "Apri control plane" : "Apri adapter"}</Button><span className="flex h-9 items-center rounded-lg border border-amber-300/15 px-2.5 text-[9px] text-amber-100/70">{ledgerStatus}</span></div></section>;
 }
 
 function IconButton({
@@ -289,6 +305,7 @@ export default function CommandSurface({
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [preferencesSynced, setPreferencesSynced] = useState(false);
   const [w10Summary, setW10Summary] = useState<W10Summary | null>(null);
+  const [commandReadiness, setCommandReadiness] = useState<CommandReadinessResponse | null>(null);
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [savingLayout, setSavingLayout] = useState(false);
@@ -348,6 +365,15 @@ export default function CommandSurface({
       })
       .catch(() => {
         if (active) setAiRuntimeStatus("unavailable");
+      });
+
+    void fetch("/api/command/readiness", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as CommandReadinessResponse;
+        if (active && response.ok) setCommandReadiness(payload);
+      })
+      .catch(() => {
+        if (active) setCommandReadiness(null);
       });
 
     return () => {
@@ -485,6 +511,7 @@ export default function CommandSurface({
     }
     if (item.id === "analytics") return <AnalyticsPanel />;
     if (item.id === "finance-procurement") return <W10CommandPanel summary={w10Summary} />;
+    if (item.id === "command-readiness") return <CommandReadinessPanel readiness={commandReadiness} />;
 
     return (
       <section className="carbon-card flex h-full flex-wrap items-center justify-between gap-4 rounded-2xl p-4 sm:p-5">

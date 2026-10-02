@@ -198,6 +198,10 @@ const commandDashboardRoute = await readFile(join(root, "app", "api", "command",
 assert(commandDashboardRoute.includes("w10Workflows") && commandDashboardRoute.includes("finance.read") && commandDashboardRoute.includes("procurement.read"), "Command dashboard must expose W10 only when both read capabilities exist");
 const commandSurface = await readFile(join(root, "components", "command-surface.tsx"), "utf8");
 assert(commandSurface.includes("W10CommandPanel") && commandSurface.includes("finance-procurement"), "Command must render the capability-filtered W10 widget");
+const commandReadinessRoute = await readFile(join(root, "app", "api", "command", "readiness", "route.ts"), "utf8");
+assert(commandReadinessRoute.includes('hasCapability(context, "command.read")') && commandReadinessRoute.includes("getS07Ledger"), "Command readiness must be server-side and ledger-backed");
+assert(commandReadinessRoute.includes('commercialStatus: "NO_GO"') && commandReadinessRoute.includes('openAiLive: "NOT_RUN"'), "Command readiness must keep live and commercial status explicit");
+assert(commandSurface.includes("CommandReadinessPanel") && commandSurface.includes("command-readiness"), "Command must surface the W12 readiness widget");
 
 const intakeRoute = await readFile(join(root, "app", "api", "operations", "intake", "route.ts"), "utf8");
 assert(intakeRoute.includes("consumeCompanyAiRateLimit"), "Commessa intake must enforce its server-side quota");
@@ -205,6 +209,13 @@ assert(intakeRoute.includes("consumeCompanyAiRateLimit"), "Commessa intake must 
 const openAiAdapter = await readFile(join(root, "lib", "company-ai-openai.ts"), "utf8");
 assert(openAiAdapter.includes("authorizedRecordIds"), "Model citations must be filtered against authorized records");
 assert(openAiAdapter.includes("process.env[name]") && openAiAdapter.includes("cloudflare:workers"), "The OpenAI key must remain server-side");
+assert(openAiAdapter.includes("getCompanyAiRuntimeStatus") && openAiAdapter.includes('liveRequest: "NOT_RUN"'), "OpenAI runtime metadata must not be confused with live evidence");
+const aiReadinessRoute = await readFile(join(root, "app", "api", "governance", "ai-readiness", "route.ts"), "utf8");
+assert(aiReadinessRoute.includes('hasCapability(context, "governance.read")'), "AI readiness must require governance.read");
+assert(aiReadinessRoute.includes("getExternalSnapshot") && aiReadinessRoute.includes("getS07Ledger"), "AI readiness must combine provider evidence and Company AI ledger readback");
+assert(aiReadinessRoute.includes('directWrite: false') && aiReadinessRoute.includes('commercialStatus: "NO_GO"'), "AI readiness must preserve no-direct-write and commercial gate semantics");
+const aiGovernance = await readFile(join(root, "components", "company-ai-governance.tsx"), "utf8");
+assert(aiGovernance.includes("/api/governance/ai-readiness") && aiGovernance.includes("COMMERCIAL NO-GO"), "Governance must expose the W12 readiness control plane");
 
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");
@@ -293,13 +304,13 @@ for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_6_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.6 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.6 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.6 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.6 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_7_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.7 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.7 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.7 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.7 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
-assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the RC2 build ID");
+assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the current RC build ID");
 
 console.log(JSON.stringify({
   status: "PASS",
@@ -309,6 +320,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

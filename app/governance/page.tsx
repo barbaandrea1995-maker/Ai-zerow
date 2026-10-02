@@ -1,5 +1,5 @@
-import S05ModulePage from "@/components/s05-module-page";
+import CompanyAiGovernance from "@/components/company-ai-governance";
 
 export default function GovernancePage() {
-  return <S05ModulePage module="governance" />;
+  return <CompanyAiGovernance />;
 }
