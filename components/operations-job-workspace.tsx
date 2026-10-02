@@ -33,6 +33,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -619,7 +620,7 @@ export default function OperationsJobWorkspace({
 
   if (state === "loading")
     return (
-      <main className="grid min-h-screen place-items-center bg-[#050607] text-slate-100">
+      <main className="zw-command-ultra grid min-h-screen place-items-center text-slate-100">
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <LoaderCircle className="size-4 animate-spin text-lime-300" />
           Caricamento dossier commessa…
@@ -636,7 +637,7 @@ export default function OperationsJobWorkspace({
             ? "La commessa non è presente nel readback tenant-scoped."
             : "Il dossier non è momentaneamente disponibile.";
     return (
-      <main className="grid min-h-screen place-items-center bg-[#050607] px-5 text-slate-100">
+      <main className="zw-command-ultra grid min-h-screen place-items-center px-5 text-slate-100">
         <section className="carbon-card w-full max-w-lg rounded-2xl p-6 text-center">
           <ShieldCheck className="mx-auto size-8 text-amber-200" />
           <h1 className="mt-4 text-lg font-semibold">
@@ -719,11 +720,12 @@ export default function OperationsJobWorkspace({
     : [];
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.09),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
+    <main className="zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+      <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative mx-auto max-w-[1560px] px-4 py-5 sm:px-7 sm:py-7">
-        <header className="flex flex-wrap items-center justify-between gap-4">
+        <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-5 flex flex-wrap items-center justify-between gap-4 px-4 py-3 sm:-mx-7 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
+            <button aria-label="Apri Command" className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]" onClick={() => router.push("/")} type="button"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></button>
             <Button
               variant="outline"
               className="h-9 shrink-0 border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100"

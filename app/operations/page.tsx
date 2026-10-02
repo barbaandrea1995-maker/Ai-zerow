@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
@@ -21,9 +22,12 @@ import {
   Layers3,
   Menu,
   MessageSquareText,
+  PanelLeftClose,
+  PanelLeftOpen,
   Package,
   Plus,
   QrCode,
+  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
@@ -121,14 +125,22 @@ const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
   { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
   { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
+  { label: "PLANNING", id: "planning", icon: CalendarClock, capability: "planning.read" },
+  { label: "PRESENZE", id: "attendance", icon: Clock3, capability: "workforce.read" },
   { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
+  { label: "PROCUREMENT", id: "procurement", icon: Package, capability: "procurement.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
   { label: "WAREHOUSE", id: "warehouse", icon: Layers3, capability: "warehouse.read" },
   { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
+  { label: "GOVERNANCE", id: "governance", icon: ShieldCheck, capability: "governance.read" },
+  { label: "COMMUNICATIONS", id: "communications", icon: MessageSquareText, capability: "communication.read" },
+  { label: "EXTERNAL ADAPTERS", id: "externals", icon: Layers3, capability: "external_adapters.read" },
+  { label: "AUTHORITY", id: "authority", icon: ShieldCheck, capability: "authority.read" },
   { label: "QR / BARCODE", id: "qr", icon: QrCode, capability: "qr.read" },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "events.read" },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
+  { label: "SETTINGS", id: "settings", icon: Settings2, capability: "settings.read" },
 ];
 
 const jobs: OperationsJob[] = [];
@@ -255,12 +267,14 @@ function MetricCard({
   label,
   value,
   detail,
+  footnote,
   icon: Icon,
   tone,
 }: {
   label: string;
   value: string;
   detail: string;
+  footnote: string;
   icon: typeof BriefcaseBusiness;
   tone: Tone;
 }) {
@@ -279,9 +293,7 @@ function MetricCard({
       <p className="mt-1 font-mono text-[32px] font-semibold leading-none tracking-[-0.08em] text-lime-100">
         {value}
       </p>
-      <p className="mt-4 text-[11px] text-slate-600">
-        Nessun dato nel readback
-      </p>
+      <p className="mt-4 text-[11px] text-slate-600">{footnote}</p>
     </article>
   );
 }
@@ -410,6 +422,7 @@ export default function OperationsPage() {
     ...authority.capabilities,
   ]).map((item) => item.id);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [filter, setFilter] = useState<JobFilter>("TUTTE");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -420,29 +433,35 @@ export default function OperationsPage() {
   const [adapterStatus, setAdapterStatus] = useState<
     "loading" | "online" | "empty" | "error"
   >("loading");
+  const [lastReadbackAt, setLastReadbackAt] = useState("");
   const activeJobs = adapterJobs ?? jobs;
   const adapterOnline = adapterStatus === "online";
 
+  const loadOperations = useCallback(async () => {
+    try {
+      invalidateReadback("s04:operations");
+      const payload = await readback<OperationsAdapterResponse>(
+        "s04:operations",
+        "/api/operations",
+        { force: true },
+      );
+      const records = Array.isArray(payload.records) ? payload.records : [];
+      const nextJobs = records.length ? jobsFromAdapter(records) : [];
+      setAdapterJobs(nextJobs);
+      setSelectedId((current) => current || nextJobs[0]?.id || "");
+      setAdapterStatus(records.length ? "online" : "empty");
+      setLastReadbackAt(new Date().toISOString());
+    } catch {
+      setAdapterJobs([]);
+      setAdapterStatus("error");
+      setLastReadbackAt(new Date().toISOString());
+    }
+  }, [setAdapterJobs, setAdapterStatus, setLastReadbackAt, setSelectedId]);
+
   useEffect(() => {
-    let active = true;
-    readback<OperationsAdapterResponse>("s04:operations", "/api/operations")
-      .then((payload) => {
-        if (!active) return;
-        const records = Array.isArray(payload.records) ? payload.records : [];
-        const nextJobs = records.length ? jobsFromAdapter(records) : [];
-        setAdapterJobs(nextJobs);
-        setSelectedId((current) => current || nextJobs[0]?.id || "");
-        setAdapterStatus(records.length ? "online" : "empty");
-      })
-      .catch(() => {
-        if (!active) return;
-        setAdapterJobs([]);
-        setAdapterStatus("error");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    const request = window.setTimeout(() => { void loadOperations(); }, 0);
+    return () => window.clearTimeout(request);
+  }, [loadOperations]);
 
   const filteredJobs = useMemo(
     () =>
@@ -474,6 +493,13 @@ export default function OperationsPage() {
   const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
   const [planningSaving, setPlanningSaving] = useState(false);
   const [planningNotice, setPlanningNotice] = useState("");
+  const resourceOptions = useMemo(() => {
+    if (planningOptionsJobId !== selectedJob.id || !planningOptions?.options) return [];
+    return [
+      ...(planningOptions.options.workforce ?? []),
+      ...(planningOptions.options.assets ?? []),
+    ];
+  }, [planningOptions, planningOptionsJobId, selectedJob.id]);
 
   useEffect(() => {
     if (!planningOpen || selectedJob.id === "EMPTY") return;
@@ -578,73 +604,68 @@ export default function OperationsPage() {
 
   const navigate = (id: string, label: string) => {
     setMobileMenu(false);
-    if (id === "command") {
-      router.push("/");
+    const destinations: Record<string, string> = {
+      command: "/",
+      operations: "/operations",
+      workforce: "/workforce",
+      planning: "/planning",
+      attendance: "/presenze",
+      finance: "/finance",
+      procurement: "/procurement",
+      assets: "/assets",
+      warehouse: "/warehouse",
+      mission: "/mission",
+      documents: "/documents",
+      governance: "/governance",
+      communications: "/communications",
+      externals: "/externals",
+      authority: "/onboarding",
+      qr: "/qr",
+      events_authority: "/events",
+      events: "/events",
+      pwa: "/pwa/diagnostics",
+      settings: "/settings",
+    };
+    const destination = destinations[id];
+    if (destination) {
+      router.push(destination);
       return;
     }
-    if (id === "operations") return;
-    if (id === "workforce") {
-      router.push("/workforce");
-      return;
-    }
-    if (id === "assets") {
-      router.push("/assets");
-      return;
-    }
-    if (id === "warehouse") {
-      router.push("/warehouse");
-      return;
-    }
-    if (id === "mission") {
-      router.push("/mission");
-      return;
-    }
-    if (id === "finance") {
-      router.push("/finance");
-      return;
-    }
-    if (id === "documents") {
-      router.push("/documents");
-      return;
-    }
-    if (id === "pwa") {
-      router.push("/pwa/diagnostics");
-      return;
-    }
-    if (id === "qr") {
-      router.push("/qr");
-      return;
-    }
-    if (id === "events_authority") {
-      router.push("/events");
-      return;
-    }
-    notify(`${label}: superficie prevista nel prossimo adapter`);
+    notify(`${label}: superficie non disponibile nel perimetro autorizzato`);
   };
 
+  const readbackTimeLabel = lastReadbackAt
+    ? new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(new Date(lastReadbackAt))
+    : adapterStatus === "loading"
+      ? "Lettura in corso"
+      : "Non disponibile";
+  const operationalFlow = [
+    { id: "operations", label: "Commesse", detail: `${activeJobs.length} visibili`, icon: BriefcaseBusiness, state: adapterOnline ? "READBACK" : "EMPTY", path: "/operations", capability: "operations.read" },
+    { id: "planning", label: "Pianificazione", detail: "Attività e risorse", icon: CalendarClock, state: authority.capabilities.has("planning.read") ? "COLLEGATO" : "LIMITATO", path: "/planning", capability: "planning.read" },
+    { id: "workforce", label: "Presenze", detail: "Turni e squadre", icon: Clock3, state: authority.capabilities.has("workforce.read") ? "COLLEGATO" : "LIMITATO", path: "/presenze", capability: "workforce.read" },
+    { id: "mission", label: "Missioni", detail: "Trasporto e consegna", icon: Truck, state: authority.capabilities.has("mission.read") ? "COLLEGATO" : "LIMITATO", path: "/mission", capability: "mission.read" },
+    { id: "warehouse", label: "Magazzino", detail: "Materiali e stock", icon: Package, state: authority.capabilities.has("warehouse.read") ? "COLLEGATO" : "LIMITATO", path: "/warehouse", capability: "warehouse.read" },
+  ].filter((node) => authority.capabilities.has(node.capability));
+
   return (
-    <main className="zw-app-shell min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.07),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
+    <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+      <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative flex min-h-screen">
         <aside
-          className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}
+          className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}
         >
           <div className="flex items-center justify-between px-2">
             <button
-              className="flex items-center gap-3 text-left"
+              aria-label="Apri Command"
+              className="flex min-w-0 items-center gap-3 text-left"
               onClick={() => {
                 setMobileMenu(false);
                 router.push("/");
               }}
               type="button"
             >
-              <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black font-mono text-[18px] font-black italic text-lime-200">
-                <span className="absolute inset-x-2 top-3 h-0.5 rotate-[-16deg] bg-lime-300" />
-                <span className="absolute inset-x-2 top-5 h-0.5 rotate-[-16deg] bg-lime-300/80" />
-                <span className="absolute inset-x-2 top-7 h-0.5 rotate-[-16deg] bg-lime-300/60" />
-                Z
-              </span>
-              <span>
+              <span className="neon-pulse relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span>
+              <span className="zw-command-sidebar__brand-copy min-w-0">
                 <span className="block text-sm font-bold tracking-[0.18em] text-slate-50">
                   AI-ZEROW
                 </span>
@@ -653,17 +674,13 @@ export default function OperationsPage() {
                 </span>
               </span>
             </button>
-            <button
-              className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden"
-              onClick={() => setMobileMenu(false)}
-              type="button"
-              aria-label="Chiudi menu"
-            >
-              <X className="size-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button aria-label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} className="zw-command-sidebar__collapse hidden size-8 place-items-center rounded-lg text-slate-500 hover:bg-lime-300/10 hover:text-lime-200 lg:grid" onClick={() => setSidebarCollapsed((value) => !value)} type="button">{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</button>
+              <button className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button" aria-label="Chiudi menu"><X className="size-4" /></button>
+            </div>
           </div>
           <button
-            className="carbon-card mt-8 flex w-full items-center gap-3 rounded-xl p-3 text-left transition hover:border-lime-300/25"
+            className="zw-command-tenant mt-7 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:border-lime-300/25"
             type="button"
             onClick={() =>
               notify(
@@ -674,7 +691,7 @@ export default function OperationsPage() {
             <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/10 text-lime-200">
               <HardHat className="size-4" />
             </span>
-            <span className="min-w-0 flex-1">
+            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-200">
                 ZEROW workspace
               </span>
@@ -684,8 +701,8 @@ export default function OperationsPage() {
             </span>
             <ChevronRight className="size-3.5 text-slate-600" />
           </button>
-          <nav className="mt-7 flex-1" aria-label="Navigazione principale">
-            <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
+          <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
+            <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">
               Workspace
             </p>
             <div className="mt-2 space-y-1">
@@ -695,7 +712,9 @@ export default function OperationsPage() {
                 return (
                   <button
                     aria-current={active ? "page" : undefined}
-                    className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${active ? "border border-lime-300/20 bg-lime-300/10 text-lime-200 shadow-[inset_0_0_20px_rgba(190,255,60,0.04)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-100"}`}
+                    aria-label={sidebarCollapsed ? item.label : undefined}
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`zw-command-nav-item ${active ? "is-active" : ""}`}
                     key={item.id}
                     onClick={() => navigate(item.id, item.label)}
                     type="button"
@@ -703,9 +722,9 @@ export default function OperationsPage() {
                     <Icon
                       className={`size-4 ${active ? "text-lime-200" : "text-slate-600 group-hover:text-slate-300"}`}
                     />
-                    <span>{item.label}</span>
+                    <span className="zw-command-sidebar__nav-label">{item.label}</span>
                     {item.id === "command" && (
-                      <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-slate-600">
+                      <span className="zw-command-sidebar__nav-badge ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-lime-200">
                         AI
                       </span>
                     )}
@@ -714,7 +733,7 @@ export default function OperationsPage() {
               })}
             </div>
           </nav>
-          <div className="mt-5 border-t border-white/[0.08] pt-4">
+          <div className="zw-command-sidebar__footer mt-5 border-t border-white/[0.08] pt-4">
             <div className="flex items-center justify-between px-2 text-[10px] uppercase tracking-[0.14em] text-slate-600">
               <span>System status</span>
               <span className="flex items-center gap-1.5 text-lime-200">
@@ -744,24 +763,11 @@ export default function OperationsPage() {
           />
         )}
         <section className="min-w-0 flex-1">
-          <header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
-            <IconButton
-              label="Apri menu"
-              onClick={() => setMobileMenu(true)}
-              className="lg:hidden"
-            >
-              <Menu className="size-4" />
-            </IconButton>
-            <div className="relative hidden min-w-0 flex-1 md:block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" />
-              <Input
-                aria-label="Cerca nelle Operations"
-                className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cerca commesse, team, ubicazioni…"
-                value={query}
-              />
-            </div>
+          <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
+            <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
+            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
+            <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
+            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle Operations" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={query} /></div></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
               <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">
                 OPERATIONS
@@ -771,8 +777,9 @@ export default function OperationsPage() {
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                D1 readback
+                {adapterStatus === "loading" ? "READING" : adapterOnline ? "D1 VERIFIED" : adapterStatus === "error" ? "READBACK ERROR" : "D1 EMPTY"}
               </span>
+              <IconButton label="Aggiorna commesse" onClick={() => { setAdapterStatus("loading"); void loadOperations(); }}><RefreshCw className={adapterStatus === "loading" ? "size-4 animate-spin" : "size-4"} /></IconButton>
               {authority.capabilities.has("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
                 <Bell className="size-4" />
               </IconButton> : null}
@@ -807,7 +814,7 @@ export default function OperationsPage() {
               <div className="flex items-center gap-3">
                 <span className="hidden items-center rounded-xl border border-white/[0.1] bg-black/25 px-3.5 py-2.5 font-mono text-[10px] text-slate-500 sm:inline-flex">
                   <Clock3 className="mr-2 size-3.5 text-lime-300" />
-                  Aggiornato ora
+                  Readback {readbackTimeLabel}
                 </span>
                 {canWriteOperations && (
                   <Button
@@ -831,6 +838,7 @@ export default function OperationsPage() {
                 label="Commesse attive"
                 value={String(activeCount)}
                 detail={adapterOnline ? "Readback verificato" : "In attesa"}
+                footnote={adapterOnline ? "Stato IN CORSO nel tenant corrente" : "Nessun dato operativo simulato"}
                 icon={BriefcaseBusiness}
                 tone="lime"
               />
@@ -838,6 +846,7 @@ export default function OperationsPage() {
                 label="In pianificazione"
                 value={String(plannedCount)}
                 detail={adapterOnline ? "DRAFT / PLAN" : "In attesa"}
+                footnote={adapterOnline ? "Proposte, approvate e pianificate" : "Nessun piano nel readback"}
                 icon={CalendarClock}
                 tone="cyan"
               />
@@ -845,6 +854,7 @@ export default function OperationsPage() {
                 label="Attività collegate"
                 value={String(activityCount)}
                 detail={adapterOnline ? "Per commessa" : "Nessun dato"}
+                footnote={adapterOnline ? "Attività già presenti nelle schede" : "Le attività nasceranno dal workspace"}
                 icon={ClipboardCheck}
                 tone="lime"
               />
@@ -852,6 +862,7 @@ export default function OperationsPage() {
                 label="Rapportini aperti"
                 value={String(openReports)}
                 detail={adapterOnline ? "Stato operativo" : "Nessun dato"}
+                footnote={adapterOnline ? "Commesse non ancora chiuse" : "Disponibile dal workspace"}
                 icon={FileText}
                 tone="amber"
               />
@@ -1119,11 +1130,9 @@ export default function OperationsPage() {
                     </Button>
                     <Button
                       className="h-9 bg-lime-300 text-xs font-semibold text-[#060806] hover:bg-lime-200"
-                      onClick={() =>
-                        notify(
-                          "Rapportino mantenuto in preview · readback non eseguito",
-                        )
-                      }
+                      onClick={() => selectedJob.id === "EMPTY"
+                        ? notify("Seleziona una commessa riletta prima di aprire il rapportino")
+                        : router.push(`/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}#rapportino`)}
                     >
                       <FileText className="size-3.5" />
                       Rapportino
@@ -1137,12 +1146,10 @@ export default function OperationsPage() {
                 <SectionTitle
                   eyebrow="ACTIVITY CONTRACT"
                   title="Attività operative"
-                  action="Vedi catalogo"
-                  onAction={() =>
-                    notify(
-                      "Catalogo attività: route pronta, adapter non collegato",
-                    )
-                  }
+                  action="Apri workspace"
+                  onAction={() => selectedJob.id === "EMPTY"
+                    ? notify("Seleziona una commessa riletta prima di aprire le attività")
+                    : router.push(`/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}#attivita`)}
                 />
                 <div className="mt-4 space-y-3">
                   {selectedJob.activities.length ? (
@@ -1174,21 +1181,29 @@ export default function OperationsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <SectionTitle
                     eyebrow="PLANNING / RESOURCES"
-                    title="Risorse assegnate"
+                    title="Risorse verificabili"
                   />
-                  <StatusBadge tone="cyan">READ MODEL</StatusBadge>
+                  <StatusBadge tone={resourceOptions.length ? "lime" : "cyan"}>{resourceOptions.length ? "SERVER CHECKED" : "ON DEMAND"}</StatusBadge>
                 </div>
-                <div className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-xs text-slate-500">
-                  Nessuna risorsa collegata al readback D1.
-                </div>
+                {resourceOptions.length ? (
+                  <div className="mt-4 space-y-2">
+                    {resourceOptions.slice(0, 4).map((resource) => (
+                      <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5" key={resource.id}>
+                        <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><Users className="size-3.5" /></span>
+                        <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{resource.label}</p><p className="mt-0.5 text-[10px] uppercase tracking-[0.1em] text-slate-600">{resource.kind}</p></div>
+                        <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-lime-200">{resource.assignable ? "Disponibile" : "Non assegnabile"}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-xs text-slate-500">Apri Pianifica per rileggere workforce e asset realmente assegnabili.</div>
+                )}
                 <div className="mt-5 border-t border-white/[0.08] pt-4">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">Opzioni risorsa</span>
-                    <span className="font-mono text-slate-600">
-                      0 / 0 verificabili
-                    </span>
+                    <span className="text-slate-500">Controllo disponibilità</span>
+                    <span className="font-mono text-slate-600">{resourceOptions.length || "—"} risorse rilevate</span>
                   </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" />
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300" style={{ width: `${Math.min(100, resourceOptions.length * 16)}%` }} /></div>
                 </div>
               </section>
               <section className="carbon-card rounded-2xl p-4 sm:p-5">
@@ -1240,6 +1255,22 @@ export default function OperationsPage() {
                 )}
               </section>
             </div>
+            <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">OPERATIONAL CHAIN</p>
+                  <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Dalla commessa all’esecuzione</h2>
+                  <p className="mt-1 text-[11px] text-slate-500">Ogni passaggio apre solo il perimetro autorizzato e usa lo stesso jobId come collegamento operativo.</p>
+                </div>
+                <StatusBadge tone="lime">TENANT SCOPED</StatusBadge>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {operationalFlow.map((node) => {
+                  const Icon = node.icon;
+                  return <button className="group flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-left transition hover:-translate-y-px hover:border-lime-300/30 hover:bg-lime-300/[0.045]" key={node.id} onClick={() => router.push(node.path)} type="button"><span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><Icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">{node.label}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{node.detail}</span></span><span className="shrink-0 text-[9px] font-semibold uppercase tracking-[0.08em] text-lime-200/75">{node.state}</span></button>;
+                })}
+              </div>
+            </section>
             <section className="carbon-card mt-4 flex flex-wrap items-center justify-between gap-4 rounded-2xl p-4 sm:p-5">
               <div className="flex items-center gap-3">
                 <span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200">
