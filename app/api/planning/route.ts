@@ -15,13 +15,26 @@ function parseJson(value: string) {
   }
 }
 
-function firstSlotValue(payload: Record<string, unknown>, key: "startsAt" | "endsAt") {
+function firstSlotValue(payload: Record<string, unknown>, key: "startsAt" | "endsAt"): string | null {
   if (typeof payload[key] === "string" && payload[key]) return payload[key];
   const slots = Array.isArray(payload.slots) ? payload.slots : [];
   const first = slots[0];
-  return first && typeof first === "object" && !Array.isArray(first) && typeof (first as Record<string, unknown>)[key] === "string"
-    ? (first as Record<string, unknown>)[key]
-    : null;
+  if (!first || typeof first !== "object" || Array.isArray(first)) return null;
+  const value = (first as Record<string, unknown>)[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function currentDayOverlap(startsAt: string | null, endsAt: string | null) {
+  if (!startsAt || !endsAt) return false;
+  const starts = Date.parse(startsAt);
+  const ends = Date.parse(endsAt);
+  if (!Number.isFinite(starts) || !Number.isFinite(ends) || ends <= starts) return false;
+  const now = new Date();
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  return starts < dayEnd.getTime() && ends > dayStart.getTime();
 }
 
 export async function GET() {
@@ -79,6 +92,17 @@ export async function GET() {
       const evaluation = payload.evaluation && typeof payload.evaluation === "object" && !Array.isArray(payload.evaluation)
         ? payload.evaluation as Record<string, unknown>
         : null;
+      const startsAt = firstSlotValue(payload, "startsAt");
+      const endsAt = firstSlotValue(payload, "endsAt");
+      const resources = Array.isArray(payload.resources)
+        ? payload.resources.filter((resource): resource is Record<string, unknown> => Boolean(resource && typeof resource === "object" && !Array.isArray(resource)))
+        : [];
+      const firstSlot = Array.isArray(payload.slots) && payload.slots[0] && typeof payload.slots[0] === "object" && !Array.isArray(payload.slots[0])
+        ? payload.slots[0] as Record<string, unknown>
+        : null;
+      const requiredQualifications = firstSlot && Array.isArray(firstSlot.requiredQualifications)
+        ? firstSlot.requiredQualifications.filter((value: unknown): value is string => typeof value === "string").slice(0, 12)
+        : [];
       return {
         id: plan.id,
         jobId: plan.jobId,
@@ -87,13 +111,20 @@ export async function GET() {
         status: plan.status,
         version: plan.version,
         activityType: payload.activityType ?? "WORK",
-        startsAt: firstSlotValue(payload, "startsAt"),
-        endsAt: firstSlotValue(payload, "endsAt"),
-        resourceCount: Array.isArray(payload.resources) ? payload.resources.length : 0,
+        startsAt,
+        endsAt,
+        location: typeof payload.location === "string" ? payload.location : null,
+        scopeSubgroupTitle: typeof payload.scopeSubgroupTitle === "string" ? payload.scopeSubgroupTitle : null,
+        priority: typeof payload.priority === "string" ? payload.priority : "STANDARD",
+        requiredQualifications,
+        resourceCount: resources.length,
+        resourceLabels: resources.map((resource) => typeof resource.label === "string" ? resource.label : "Risorsa").slice(0, 16),
+        conflictCount: evaluation && Array.isArray(evaluation.conflicts) ? evaluation.conflicts.length : 0,
         feasible: evaluation?.feasible !== false,
         updatedAt: plan.updatedAt,
       };
     });
+    const todayPlans = planViews.filter((plan) => currentDayOverlap(plan.startsAt, plan.endsAt));
     return Response.json({
       context: publicAuthorityContext(context),
       jobs: jobViews,
@@ -101,8 +132,12 @@ export async function GET() {
       summary: {
         jobs: jobViews.length,
         plans: planViews.length,
+        today: todayPlans.length,
+        drafts: planViews.filter((plan) => plan.status === "DRAFT").length,
         published: planViews.filter((plan) => plan.status === "PUBLISHED").length,
         conflicted: planViews.filter((plan) => !plan.feasible).length,
+        scopeLinked: planViews.filter((plan) => Boolean(plan.scopeSubgroupTitle)).length,
+        assignedResources: planViews.reduce((total, plan) => total + plan.resourceCount, 0),
       },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
