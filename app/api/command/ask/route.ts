@@ -1,6 +1,14 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { hasCapability } from "@/lib/authority-context";
+import {
+  companyAiRateLimit,
+  companyAiRateLimitResponse,
+  consumeCompanyAiRateLimit,
+} from "@/lib/ai-rate-limit";
+import { askCompanyAiWithOpenAi } from "@/lib/company-ai-openai";
+import { searchCompanyAiKnowledge } from "@/lib/company-ai-knowledge";
 import {
   getS07Context,
   getS07Ledger,
@@ -15,10 +23,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function parseObject(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function POST(request: Request) {
   const context = await getS07Context();
   const denied = s07AccessDenied(context, "write");
   if (denied) return denied;
+
+  const declaredLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > 16_384) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
+  }
 
   let payload: Record<string, unknown>;
   try {
@@ -27,6 +49,10 @@ export async function POST(request: Request) {
     payload = parsed;
   } catch {
     return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  if (JSON.stringify(payload).length > 16_384) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
   }
 
   const command = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
@@ -58,6 +84,8 @@ export async function POST(request: Request) {
         eq(s07AiLedger.id, existingEvent[0].aggregateId),
       )).limit(1);
       if (!existingRow) return Response.json({ error: "command_preview_readback_unavailable" }, { status: 503 });
+      const existingPayload = parseObject(existingRow.payloadJson);
+      const existingAnswer = typeof existingPayload.answer === "string" ? existingPayload.answer : "";
       const rows = await getS07Ledger(context!.tenantId);
       return Response.json({
         ...s07Envelope(context!, rows),
@@ -66,24 +94,92 @@ export async function POST(request: Request) {
           status: existingRow.status,
           approvalRequired: Boolean(existingRow.approvalRequired),
           directWrite: false,
-          message: existingRow.approvalRequired
+          message: existingAnswer || (existingRow.approvalRequired
             ? "Preview già registrata. Serve una decisione di approvazione prima di qualsiasi adapter esterno."
-            : "Preview già registrata. Nessuna scrittura è stata eseguita.",
+            : "Preview già registrata. Nessuna scrittura è stata eseguita."),
+          aiRuntime: isRecord(existingPayload.aiRuntime) ? existingPayload.aiRuntime : undefined,
+          suggestedActions: Array.isArray(existingPayload.suggestedActions) ? existingPayload.suggestedActions : [],
+          limitations: Array.isArray(existingPayload.limitations) ? existingPayload.limitations : [],
         },
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
     }
 
+    const rateLimit = await consumeCompanyAiRateLimit({
+      tenantId: context!.tenantId,
+      actorId: context!.actorId,
+      action: "command",
+      limit: companyAiRateLimit("command"),
+    });
+    if (!rateLimit.allowed) return companyAiRateLimitResponse(rateLimit);
+
     const id = crypto.randomUUID();
     const eventId = crypto.randomUUID();
     const requestedPayload = payload.payload && isRecord(payload.payload) ? payload.payload : {};
+    const readableModules = [
+      { module: "operations", capability: "operations.read" },
+      { module: "assets", capability: "asset.read" },
+      { module: "workforce", capability: "workforce.read" },
+    ].filter((item) => hasCapability(context!, item.capability)).map((item) => item.module);
+    const operationalRows = readableModules.length
+      ? await db.select({
+        id: s04Records.id,
+        canonicalCode: s04Records.canonicalCode,
+        module: s04Records.module,
+        title: s04Records.title,
+        detail: s04Records.detail,
+        meta: s04Records.meta,
+        status: s04Records.status,
+        progress: s04Records.progress,
+        updatedAt: s04Records.updatedAt,
+      }).from(s04Records).where(and(
+        eq(s04Records.tenantId, context!.tenantId),
+        inArray(s04Records.module, readableModules),
+      )).orderBy(desc(s04Records.updatedAt)).limit(36)
+      : [];
+    const knowledgeHints = searchCompanyAiKnowledge(command, { limit: 6 });
+    const aiOutcome = await askCompanyAiWithOpenAi({
+      prompt: command,
+      actionType,
+      approvalRequired,
+      operationalContext: operationalRows.map((row) => ({
+        id: row.canonicalCode ?? row.id,
+        module: row.module,
+        title: row.title,
+        detail: row.detail,
+        meta: row.meta,
+        status: row.status,
+        progress: row.progress,
+        updatedAt: row.updatedAt,
+      })),
+      knowledgeContext: knowledgeHints,
+    });
+    const fallbackMessage = approvalRequired
+      ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi scrittura."
+      : operationalRows.length
+        ? `Ho trovato ${operationalRows.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
+        : "Non risultano record operativi autorizzati nel readback. Nessuna conclusione viene inventata.";
+    const answer = aiOutcome.result?.answer || fallbackMessage;
+    const aiRuntime = {
+      provider: "openai",
+      status: aiOutcome.status,
+      model: aiOutcome.model,
+      requestId: aiOutcome.requestId ?? null,
+    };
     const ledgerPayload = {
-        source: "sites-s07-adapter",
-        directWrite: false,
-        runtime: "external-openai-runtime-deferred",
-        idempotencyKey,
-        requestedPayload,
-      };
+      source: "sites-s07-adapter",
+      directWrite: false,
+      runtime: aiOutcome.result ? "openai-responses-governed" : "governed-fallback",
+      aiRuntime,
+      answer,
+      citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
+      suggestedActions: aiOutcome.result?.suggestedActions ?? [],
+      limitations: aiOutcome.result?.limitations ?? [],
+      contextRecordIds: operationalRows.map((row) => row.canonicalCode ?? row.id),
+      knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
+      idempotencyKey,
+      requestedPayload,
+    };
     const serializedPayload = JSON.stringify(ledgerPayload);
     if (serializedPayload.length > 12_000) return Response.json({ error: "payload_too_large" }, { status: 400 });
     await db.batch([
@@ -138,7 +234,7 @@ export async function POST(request: Request) {
         expectedVersion: 1,
         observedVersion: 1,
         status: "SITES_READBACK_VERIFIED",
-        detail: "Preview Company AI registrata nel ledger e nell'event boundary; runtime OpenAI esterno differito.",
+        detail: `Preview Company AI registrata nel ledger e nell'event boundary; runtime OpenAI ${aiOutcome.status}. Nessuna scrittura di dominio eseguita.`,
         createdAt: now,
         updatedAt: now,
       }),
@@ -151,15 +247,17 @@ export async function POST(request: Request) {
     const rows = await getS07Ledger(context!.tenantId);
     return Response.json({
       ...s07Envelope(context!, rows),
-      result: {
+        result: {
         actionId: id,
         status: row.status,
-        approvalRequired,
-        directWrite: false,
-        message: approvalRequired
-          ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi adapter esterno."
-        : "Preview registrata. Il runtime AI esterno non è collegato; nessuna scrittura è stata eseguita.",
-      },
+          approvalRequired,
+          directWrite: false,
+          message: answer,
+          aiRuntime,
+          citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
+          suggestedActions: aiOutcome.result?.suggestedActions ?? [],
+          limitations: aiOutcome.result?.limitations ?? [],
+        },
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {

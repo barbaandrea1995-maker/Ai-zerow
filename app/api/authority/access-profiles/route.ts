@@ -24,13 +24,25 @@ function jsonError(error: unknown) {
   return "authority_readback_failed";
 }
 
-function requireAuthorityOwner(
+function requireAuthorityRead(
   context: AuthorityContext | null,
 ): Response | null {
   if (!context) {
     return Response.json({ error: "unauthenticated" }, { status: 401 });
   }
-  if (!hasCapability(context, "tenant.manage")) {
+  if (!hasCapability(context, "authority.read")) {
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  }
+  return null;
+}
+
+function requireAuthorityWrite(
+  context: AuthorityContext | null,
+): Response | null {
+  if (!context) {
+    return Response.json({ error: "unauthenticated" }, { status: 401 });
+  }
+  if (!hasCapability(context, "authority.manage")) {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
   return null;
@@ -38,7 +50,7 @@ function requireAuthorityOwner(
 
 export async function GET() {
   const context = await getAuthorityContext();
-  const denied = requireAuthorityOwner(context);
+  const denied = requireAuthorityRead(context);
   if (denied) return denied;
 
   try {
@@ -60,7 +72,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
-  const denied = requireAuthorityOwner(context);
+  const denied = requireAuthorityWrite(context);
   if (denied) return denied;
 
   let payload: { label?: unknown; role?: unknown };

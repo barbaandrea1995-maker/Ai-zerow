@@ -11,8 +11,8 @@ import {
 export const S05_MODULES = {
   documents: { read: "documents.read", write: "documents.write" },
   finance: { read: "finance.read", write: "finance.write" },
-  procurement: { read: "finance.read", write: "procurement.write" },
-  governance: { read: "approvals.review", write: "tenant.manage" },
+  procurement: { read: "procurement.read", write: "procurement.write" },
+  governance: { read: "governance.read", write: "approvals.review" },
 } as const;
 
 export type S05Module = keyof typeof S05_MODULES;

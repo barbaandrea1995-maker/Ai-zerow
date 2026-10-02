@@ -19,7 +19,7 @@ Scope: Sites-native authority and onboarding contract.
 - Workspace identity: server-derived from Sites authentication headers
 - Tenant boundary: owner-private Site project (`tenantId` is the Sites project boundary)
 - Role catalog: 13 canonical roles with shared immutable capability arrays
-- Permission gate: `tenant.manage` required for authority profile read/write
+- Permission gates: `authority.read` per il readback e `authority.manage` per la creazione dei profili; `tenant.manage` resta riservata alla proprieta del tenant
 - Persistence: Sites D1 binding `DB`, Drizzle schema and migration for `access_profiles`
 - API: `GET`/`POST /api/authority/access-profiles`, with client identity and tenant fields ignored
 - UI: `/onboarding` reads and creates persistent access profiles through the server endpoint
@@ -28,6 +28,13 @@ Scope: Sites-native authority and onboarding contract.
 The Sites-native authority remains canonical for the main command surfaces. A separate Neon Auth tenant adapter is now implemented behind the `AUTH-AB` gate; its evidence is isolated to a Neon certification branch and does not change the S02 Sites tenant boundary.
 
 ## Current continuation
+
+- Commercial v1 Command RC: **IMPLEMENTED · LOCAL · NOT DEPLOYED** — superficie ultra-carbon ispirata al mockup approvato, foglia rimossa, core Z, 11 widget personali, reorder/show-hide/size, preferenze D1 tenant+actor scoped e migration `0010_command_dashboard_preferences.sql`. QA visuale desktop/PWA e personalizzatore superati con zero violazioni axe automatiche.
+- Commercial v1 RBAC: **IMPLEMENTED · RUNTIME PASS LOCALE** — menu, widget, pagine e API applicano capability server-side; 14 route principali sono deny-by-default, Authority separa lettura da gestione, worker/auditor/owner rispettano la matrice e un'identita non censita non puo riaprire il bootstrap owner.
+- Commercial v1 Company AI Command: **IMPLEMENTED · LIVE NOT RUN** — OpenAI Responses API e collegata server-side con contesto operativo filtrato, knowledge hints, output strutturato, citation allowlist, payload guard, quota D1 e `directWrite: false`. `OPENAI_API_KEY` risulta configurata come secret nel runtime Sites; il valore non e stato letto e la prova live del nuovo candidato resta bloccante fino alla pubblicazione autorizzata.
+- Commercial v1 D1 hardening: **PASS LOCALE ISOLATO** — migrazioni `0010` e `0011` applicate; upsert preferenze e incremento atomico quota Company AI riletti correttamente. Nella stessa finestra 6 intake passano e il 7° restituisce `429`; payload oltre soglia restituiscono `413`; selezione cross-tenant restituisce `403`.
+- Commercial v1 preventivo reale: **PASS LOCALE** — il DOCX EMS sulla perdita idrica viene estratto, suddiviso in 24 lavorazioni, classificato fino a `E-IDRICO-ADDUZIONE` e riletto in modo idempotente senza copiare l'intero preventivo in un solo campo.
+- Commercial v1 release: **NO DEPLOY** — il deploy resta esplicitamente sospeso fino alla certificazione del checkpoint.
 
 - S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.
@@ -69,7 +76,7 @@ S01–S04 are therefore closed for the Sites reconstruction scope. The original 
 - Canonical route aliases are available for the reconstructed document, finance, procurement, governance, forecast, approvals and Command timeline surfaces; they all preserve the same server authority boundary.
 - `s05_records` contains seeded read models/proposals and an explicit adapter-contract record for each S05 domain. Destructive update routes are not exposed.
 - `/events` and `/api/events` persist append-only events, enforce tenant idempotency and aggregate-version uniqueness, create durable outbox rows and write a Sites reconciliation readback. `/api/events/outbox` and `/api/events/reconciliation` expose the same snapshot.
-- `/api/command/ask`, `/api/command/approval` and `/api/command/overview` persist preview, approval-decision and readback entries in `s07_ai_ledger`. No direct domain write or provider secret is used.
+- `/api/command/ask`, `/api/command/approval` and `/api/command/overview` persist preview, approval-decision and readback entries in `s07_ai_ledger`. L'adapter OpenAI legge `OPENAI_API_KEY` soltanto lato server; nessun segreto viene inviato al client e nessuna risposta AI esegue una scrittura diretta di dominio.
 - `/pwa/diagnostics`, `/mobile/diagnostics`, `/offline`, `/manifest.webmanifest` and `/sw.js` implement the Sites presentation contract. IndexedDB queue items are replayed sequentially and removed only after a successful HTTP readback.
 - The Sites deployment remains owner-only and all work stays inside @Sites; no Vercel, GitHub or Neon operating workflow is required.
 
@@ -81,7 +88,7 @@ S01–S04 are therefore closed for the Sites reconstruction scope. The original 
 - The public login route was hardened in the same production increment: it renders without a server-side Neon session read, while protected-route authorization remains server-verified.
 - Full commessa lifecycle writes, state-machine parity, external executors and later roadmap gates remain deferred; see `docs/U5_JOB_WORKSPACE_CHECKPOINT_2026-09-30.md`.
 
-The deferred boundaries are explicit: external document storage/OCR, accounting and PO executors, policy engine, event consumers/retry-DLQ workers, OpenAI runtime/tool gateway, exact production SHA/browser/device certification, native mobile and the original B0–B10/PRE00/W20 matrix.
+The deferred boundaries are explicit: external document storage/OCR, accounting and PO executors, policy engine, event consumers/retry-DLQ workers, OpenAI live runtime certification/tool execution, exact production SHA/browser/device certification, native mobile and the original B0–B10/PRE00/W20 matrix.
 
 ### External adapter control
 

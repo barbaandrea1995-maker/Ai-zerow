@@ -212,6 +212,30 @@ export const s07AiLedger = sqliteTable("s07_ai_ledger", {
 }));
 
 /**
+ * Fixed-window quota for provider-backed AI requests. The composite key is
+ * server-owned, so neither tenant nor actor can be forged by the browser.
+ * Old windows are removed opportunistically by the rate-limit adapter.
+ */
+export const aiRateLimitWindows = sqliteTable("ai_rate_limit_windows", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  actorId: text("actor_id").notNull(),
+  action: text("action").notNull(),
+  windowStart: text("window_start").notNull(),
+  requestCount: integer("request_count").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantActorActionWindowUnique: uniqueIndex("ai_rate_limit_windows_scope_uq").on(
+    table.tenantId,
+    table.actorId,
+    table.action,
+    table.windowStart,
+  ),
+  tenantUpdatedIdx: index("ai_rate_limit_windows_tenant_updated_idx").on(table.tenantId, table.updatedAt),
+}));
+
+/**
  * Sites-native registry for generated operational codes. The payload is a
  * canonical, opaque token that can be decoded locally and resolved against
  * the tenant-scoped record context without a third-party QR service.
@@ -265,4 +289,21 @@ export const companyAiJobScopes = sqliteTable("company_ai_job_scopes", {
   tenantJobVersionUnique: uniqueIndex("company_ai_job_scopes_tenant_job_version_uq").on(table.tenantId, table.jobId, table.version),
   tenantIdempotencyUnique: uniqueIndex("company_ai_job_scopes_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
   tenantJobUpdatedIdx: index("company_ai_job_scopes_tenant_job_updated_idx").on(table.tenantId, table.jobId, table.updatedAt),
+}));
+
+/**
+ * Personal Command layout. Preferences are scoped by both tenant and the
+ * server-derived actor identity; the browser can never select either key.
+ */
+export const commandDashboardPreferences = sqliteTable("command_dashboard_preferences", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  actorId: text("actor_id").notNull(),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  layoutJson: text("layout_json").notNull().default("[]"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantActorUnique: uniqueIndex("command_dashboard_preferences_tenant_actor_uq").on(table.tenantId, table.actorId),
+  tenantUpdatedIdx: index("command_dashboard_preferences_tenant_updated_idx").on(table.tenantId, table.updatedAt),
 }));

@@ -64,7 +64,7 @@ export function s07Envelope(context: AuthorityContext, rows: Array<typeof s07AiL
     contract: {
       tranche: "S07",
       source: "sites-d1-governed-command-adapter",
-      runtime: "external-openai-runtime-deferred",
+      runtime: "openai-responses-optional-governed",
       directWrite: false,
       approval: "append-only-ledger-entry",
       readback: "sites-d1-verified",

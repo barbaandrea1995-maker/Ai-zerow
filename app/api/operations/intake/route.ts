@@ -2,6 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
+  companyAiRateLimit,
+  companyAiRateLimitResponse,
+  consumeCompanyAiRateLimit,
+} from "@/lib/ai-rate-limit";
+import {
   getCompanyAiKnowledgePackSummary,
   searchCompanyAiKnowledge,
   searchCompanyAiKnowledgeForScope,
@@ -525,6 +530,11 @@ export async function POST(request: Request) {
   const denied = s07AccessDenied(context, "write");
   if (denied) return denied;
 
+  const declaredLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > 131_072) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
+  }
+
   let input: Record<string, unknown>;
   try {
     const parsed = await request.json() as unknown;
@@ -532,6 +542,10 @@ export async function POST(request: Request) {
     input = parsed;
   } catch {
     return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  if (JSON.stringify(input).length > 131_072) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
   }
 
   const sourceText = bounded(input.sourceText, MAX_INTAKE_SOURCE_CHARS);
@@ -584,6 +598,14 @@ export async function POST(request: Request) {
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
     }
+
+    const rateLimit = await consumeCompanyAiRateLimit({
+      tenantId: context!.tenantId,
+      actorId: context!.actorId,
+      action: "intake",
+      limit: companyAiRateLimit("intake"),
+    });
+    if (!rateLimit.allowed) return companyAiRateLimitResponse(rateLimit);
 
     const aiOutcome = await analyzeCompanyAiWithOpenAi({
       sourceText,

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, BriefcaseBusiness, Leaf, Plus, Radar, Sparkles } from "lucide-react";
+import { ArrowUpRight, BriefcaseBusiness, Plus, Radar, Sparkles } from "lucide-react";
 
 type CommandHeroProps = {
   onNewJob: () => void;
@@ -25,13 +25,16 @@ export function CommandHero({ onNewJob, recordCount, statusLabel }: CommandHeroP
       <div className="zw-command-hero__visual" aria-hidden="true">
         <div className="zw-command-hero__orbit zw-command-hero__orbit--outer" />
         <div className="zw-command-hero__orbit zw-command-hero__orbit--inner" />
-        <div className="zw-command-hero__orb"><Leaf className="size-8" /><span>ZEROW</span></div>
+        <div className="zw-command-hero__orb">
+          <span className="zw-command-hero__z">Z</span>
+          <span className="zw-command-hero__core-label">NEURAL CORE</span>
+        </div>
         <span className="zw-command-hero__signal zw-command-hero__signal--one" />
         <span className="zw-command-hero__signal zw-command-hero__signal--two" />
         <span className="zw-command-hero__signal zw-command-hero__signal--three" />
       </div>
 
-      <div className="zw-command-hero__telemetry" aria-label="Telemetria dashboard">
+      <div className="zw-command-hero__telemetry" aria-label="Telemetria dashboard" role="status">
         <span><i />{statusLabel}</span>
         <span><strong>{recordCount}</strong> record verificati</span>
         <span>AI-ZEROW / v3</span>

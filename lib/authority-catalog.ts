@@ -1,17 +1,120 @@
+const PLATFORM = ["settings.read"];
+const COMMAND = ["command.read", "command.customize", "analytics.read", "events.read"];
+const EVENTS_WRITE = ["events.write"];
+const AUTHORITY_VIEW = ["authority.read"];
+const AUTHORITY_MANAGE = ["authority.read", "authority.manage", "onboarding.manage"];
+const OPERATIONS_READ = ["operations.read"];
+const OPERATIONS_WRITE = ["operations.read", "operations.write"];
+const WORKFORCE_SELF = ["workforce.read", "workforce.write"];
+const WORKFORCE_MANAGE = ["workforce.read", "workforce.write", "workforce.read.all", "workforce.registry.read", "workforce.manage"];
+const FIELD = ["field.read", "field.write"];
+const WAREHOUSE_READ = ["warehouse.read"];
+const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.write"];
+const MISSION_READ = ["mission.read"];
+const MISSION_WRITE = ["mission.read", "mission.write"];
+const DOCUMENTS_READ = ["documents.read"];
+const DOCUMENTS_WRITE = ["documents.read", "documents.write"];
+const PLANNING_READ = ["planning.read"];
+const PLANNING_WRITE = ["planning.read", "planning.write"];
+const ASSET_READ = ["asset.read"];
+const ASSET_WRITE = ["asset.read", "asset.write"];
+const FINANCE_READ = ["finance.read"];
+const FINANCE_WRITE = ["finance.read", "finance.write"];
+const PROCUREMENT_READ = ["procurement.read"];
+const PROCUREMENT_WRITE = ["procurement.read", "procurement.write"];
+const COMMUNICATION = ["communication.read", "communication.send"];
+const COMMUNICATION_CRITICAL = ["communication.read", "communication.send", "communication.broadcast.critical"];
+const QR_READ = ["qr.read"];
+const QR_WRITE = ["qr.read", "qr.write"];
+const GOVERNANCE = ["governance.read", "approvals.review"];
+const EXTERNALS = ["external_adapters.read"];
+
+function capabilitySet(...groups: readonly string[][]) {
+  return Array.from(new Set(groups.flat()));
+}
+
 export const ROLE_CAPABILITIES = {
-  owner: ["workforce.read", "workforce.write", "workforce.read.all", "tenant.manage", "command.read", "approvals.review", "operations.read", "operations.write", "finance.read", "field.read", "field.write", "warehouse.read", "warehouse.write", "mission.read", "mission.write", "documents.read", "planning.read", "planning.write", "workforce.registry.read", "workforce.manage", "asset.read", "asset.write", "finance.write", "procurement.write", "documents.write", "communication.read", "communication.send", "communication.broadcast.critical", "telephony.manage", "qr.read", "qr.write"],
-  admin: ["workforce.read", "workforce.write", "workforce.read.all", "command.read", "approvals.review", "operations.read", "operations.write", "finance.read", "field.read", "field.write", "warehouse.read", "warehouse.write", "mission.read", "mission.write", "documents.read", "planning.read", "planning.write", "workforce.registry.read", "workforce.manage", "asset.read", "asset.write", "finance.write", "procurement.write", "documents.write", "communication.read", "communication.send", "communication.broadcast.critical", "telephony.manage", "qr.read", "qr.write"],
-  member: ["workforce.read", "workforce.write", "command.read", "operations.read", "field.read", "field.write", "warehouse.read", "mission.read", "planning.read", "documents.read", "qr.read"],
-  manager: ["workforce.read", "workforce.write", "workforce.read.all", "command.read", "approvals.review", "operations.read", "operations.write", "finance.read", "field.read", "field.write", "warehouse.read", "warehouse.write", "mission.read", "mission.write", "documents.read", "planning.read", "planning.write", "workforce.registry.read", "workforce.manage", "asset.read", "asset.write", "finance.write", "procurement.write", "documents.write", "communication.read", "communication.send", "communication.broadcast.critical", "qr.read", "qr.write"],
-  office: ["workforce.read", "workforce.write", "workforce.read.all", "command.read", "approvals.review", "operations.read", "operations.write", "finance.read", "field.read", "warehouse.read", "mission.read", "documents.read", "planning.read", "planning.write", "workforce.registry.read", "workforce.manage", "asset.read", "finance.write", "procurement.write", "documents.write", "communication.read", "communication.send", "qr.read", "qr.write"],
-  technical: ["workforce.read", "workforce.write", "command.read", "operations.read", "operations.write", "finance.read", "field.read", "field.write", "warehouse.read", "mission.read", "documents.read", "planning.read", "planning.write", "workforce.registry.read", "workforce.manage", "asset.read", "asset.write", "documents.write", "communication.read", "communication.send", "qr.read", "qr.write"],
-  field_supervisor: ["workforce.read", "workforce.write", "command.read", "operations.read", "field.read", "field.write", "warehouse.read", "mission.read", "planning.read", "workforce.registry.read", "asset.read", "documents.read", "communication.read", "communication.send", "communication.broadcast.critical", "qr.read"],
-  worker: ["workforce.read", "workforce.write", "operations.read", "field.read", "field.write", "warehouse.read", "mission.read", "documents.read", "communication.read", "communication.send", "qr.read"],
-  warehouse_manager: ["workforce.read", "workforce.write", "command.read", "operations.read", "warehouse.read", "warehouse.write", "mission.read", "mission.write", "asset.read", "documents.read", "communication.read", "communication.send", "communication.broadcast.critical", "qr.read", "qr.write"],
-  warehouse_operator: ["workforce.read", "workforce.write", "operations.read", "warehouse.read", "warehouse.write", "mission.read", "asset.read", "documents.read", "communication.read", "communication.send", "qr.read", "qr.write"],
-  driver: ["workforce.read", "workforce.write", "operations.read", "warehouse.read", "mission.read", "mission.write", "asset.read", "documents.read", "communication.read", "communication.send", "qr.read"],
-  maintenance: ["workforce.read", "workforce.write", "field.read", "asset.read", "asset.write", "documents.read", "communication.read", "communication.send", "qr.read"],
-  auditor: ["workforce.read", "workforce.read.all", "command.read", "operations.read", "finance.read", "field.read", "warehouse.read", "mission.read", "planning.read", "workforce.registry.read", "asset.read", "documents.read", "qr.read"],
+  owner: capabilitySet(
+    PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, WORKFORCE_MANAGE,
+    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, ["tenant.manage", "telephony.manage"],
+  ),
+  admin: capabilitySet(
+    PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, WORKFORCE_MANAGE,
+    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, ["telephony.manage"],
+  ),
+  member: capabilitySet(
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    MISSION_READ, DOCUMENTS_READ, PLANNING_READ, COMMUNICATION, QR_READ,
+  ),
+  manager: capabilitySet(
+    PLATFORM, COMMAND, AUTHORITY_VIEW, OPERATIONS_WRITE, WORKFORCE_MANAGE,
+    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE,
+  ),
+  office: capabilitySet(
+    PLATFORM, COMMAND, AUTHORITY_VIEW, OPERATIONS_WRITE, WORKFORCE_MANAGE,
+    ["field.read"], WAREHOUSE_READ, MISSION_READ, DOCUMENTS_WRITE,
+    PLANNING_WRITE, ASSET_READ, FINANCE_WRITE, PROCUREMENT_WRITE,
+    COMMUNICATION, QR_WRITE, GOVERNANCE,
+  ),
+  technical: capabilitySet(
+    PLATFORM, COMMAND, OPERATIONS_WRITE, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    MISSION_READ, DOCUMENTS_WRITE, PLANNING_WRITE, ASSET_WRITE, FINANCE_READ,
+    PROCUREMENT_READ, COMMUNICATION, QR_WRITE,
+  ),
+  field_supervisor: capabilitySet(
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    MISSION_READ, DOCUMENTS_READ, PLANNING_READ, ["workforce.registry.read"],
+    ASSET_READ, COMMUNICATION_CRITICAL, QR_READ,
+  ),
+  worker: capabilitySet(
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    MISSION_READ, DOCUMENTS_READ, COMMUNICATION, QR_READ,
+  ),
+  warehouse_manager: capabilitySet(
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, WAREHOUSE_WRITE,
+    MISSION_WRITE, ASSET_READ, DOCUMENTS_READ, COMMUNICATION_CRITICAL, QR_WRITE,
+  ),
+  warehouse_operator: capabilitySet(
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, WAREHOUSE_WRITE, MISSION_READ,
+    ASSET_READ, DOCUMENTS_READ, COMMUNICATION, QR_WRITE,
+  ),
+  driver: capabilitySet(
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, WAREHOUSE_READ, MISSION_WRITE,
+    ASSET_READ, DOCUMENTS_READ, COMMUNICATION, QR_READ,
+  ),
+  maintenance: capabilitySet(
+    PLATFORM, WORKFORCE_SELF, FIELD, ASSET_WRITE, DOCUMENTS_READ,
+    COMMUNICATION, QR_READ,
+  ),
+  auditor: capabilitySet(
+    PLATFORM, ["command.read", "analytics.read", "events.read"], AUTHORITY_VIEW,
+    OPERATIONS_READ, ["workforce.read", "workforce.read.all", "workforce.registry.read"],
+    ["field.read"], WAREHOUSE_READ, MISSION_READ, DOCUMENTS_READ,
+    PLANNING_READ, ASSET_READ, FINANCE_READ, PROCUREMENT_READ, QR_READ,
+    GOVERNANCE, EXTERNALS,
+  ),
+} as const;
+
+export const ROLE_METADATA = {
+  owner: { label: "Owner", purpose: "Controllo tenant, sicurezza e configurazione completa." },
+  admin: { label: "Amministratore", purpose: "Amministrazione operativa senza trasferimento della proprieta tenant." },
+  member: { label: "Collaboratore", purpose: "Operativita trasversale di base nel proprio perimetro." },
+  manager: { label: "Manager", purpose: "Coordinamento operativo, economico e approvativo." },
+  office: { label: "Ufficio", purpose: "Commesse, documenti, pianificazione e amministrazione." },
+  technical: { label: "Tecnico", purpose: "Lavorazioni, pianificazione tecnica, asset e documenti." },
+  field_supervisor: { label: "Caposquadra", purpose: "Coordinamento field e visibilita del team assegnato." },
+  worker: { label: "Operatore", purpose: "Esecuzione sul campo nel solo perimetro assegnato." },
+  warehouse_manager: { label: "Responsabile magazzino", purpose: "Scorte, movimenti, missioni e controllo deposito." },
+  warehouse_operator: { label: "Operatore magazzino", purpose: "Registrazione materiali e movimenti autorizzati." },
+  driver: { label: "Autista", purpose: "Missioni, mezzi e documenti di trasporto assegnati." },
+  maintenance: { label: "Manutentore", purpose: "Asset, manutenzione ed evidenze tecniche assegnate." },
+  auditor: { label: "Auditor", purpose: "Lettura trasversale, evidenze e controllo senza scrittura." },
 } as const;
 
 export type AuthorityRole = keyof typeof ROLE_CAPABILITIES;

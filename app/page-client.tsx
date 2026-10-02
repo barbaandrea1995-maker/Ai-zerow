@@ -47,6 +47,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readback } from "@/lib/client-readback";
+import type { CommandNavigationId } from "@/lib/command-dashboard";
 
 type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "GEOFENCE";
 type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
@@ -120,32 +121,32 @@ type KpiData = {
   data: string;
 };
 
-const navItems: Array<{ label: string; icon: LucideIcon; id: string; path?: string; badge?: string }> = [
-  { label: "CONTROL", icon: MessageSquareText, id: "command", badge: "AI" },
-  { label: "OPERATIONS", icon: BriefcaseBusiness, id: "operations" },
-  { label: "WORKFORCE", icon: Users, id: "workforce" },
-  { label: "FINANCE", icon: Gauge, id: "finance" },
-  { label: "PROCUREMENT", icon: ShoppingCart, id: "procurement" },
-  { label: "ASSETS", icon: Package, id: "assets" },
-  { label: "WAREHOUSE", icon: Package, id: "warehouse" },
-  { label: "MISSION", icon: Truck, id: "mission" },
-  { label: "DOCUMENTS", icon: FileText, id: "documents" },
-  { label: "GOVERNANCE", icon: ShieldCheck, id: "governance" },
-  { label: "EXTERNAL ADAPTERS", icon: Network, id: "externals" },
-  { label: "AUTHORITY", icon: ShieldCheck, id: "authority" },
-  { label: "EVENTS", icon: Activity, id: "events" },
-  { label: "PWA / DIAGNOSTICS", icon: CircleGauge, id: "pwa" },
-  { label: "SETTINGS", icon: Settings, id: "settings" },
+const navItems: Array<{ label: string; icon: LucideIcon; id: CommandNavigationId; path: string; badge?: string }> = [
+  { label: "CONTROL", icon: MessageSquareText, id: "command", path: "/", badge: "AI" },
+  { label: "OPERATIONS", icon: BriefcaseBusiness, id: "operations", path: "/operations" },
+  { label: "WORKFORCE", icon: Users, id: "workforce", path: "/workforce" },
+  { label: "FINANCE", icon: Gauge, id: "finance", path: "/finance" },
+  { label: "PROCUREMENT", icon: ShoppingCart, id: "procurement", path: "/procurement" },
+  { label: "ASSETS", icon: Package, id: "assets", path: "/assets" },
+  { label: "WAREHOUSE", icon: Package, id: "warehouse", path: "/warehouse" },
+  { label: "MISSION", icon: Truck, id: "mission", path: "/mission" },
+  { label: "DOCUMENTS", icon: FileText, id: "documents", path: "/documents" },
+  { label: "GOVERNANCE", icon: ShieldCheck, id: "governance", path: "/governance" },
+  { label: "EXTERNAL ADAPTERS", icon: Network, id: "externals", path: "/externals" },
+  { label: "AUTHORITY", icon: ShieldCheck, id: "authority", path: "/onboarding" },
+  { label: "EVENTS", icon: Activity, id: "events", path: "/events" },
+  { label: "PWA / DIAGNOSTICS", icon: CircleGauge, id: "pwa", path: "/pwa/diagnostics" },
+  { label: "SETTINGS", icon: Settings, id: "settings", path: "/settings" },
 ];
 
 const commandModules = ["operations", "assets", "workforce"] as const;
-const defaultAssistantResponse = "Nessun dato operativo nel readback D1. Collega un adapter o crea un record.";
+export const defaultAssistantResponse = "Nessun dato operativo nel readback D1. Collega un adapter o crea un record.";
 
 function readbackTone(value: string): Tone {
   return value === "cyan" || value === "amber" || value === "red" ? value : "lime";
 }
 
-function readbackLabel(status: "loading" | "online" | "partial" | "empty" | "error") {
+export function readbackLabel(status: "loading" | "online" | "partial" | "empty" | "error") {
   if (status === "loading") return "Lettura in corso";
   if (status === "online") return "D1 verificato";
   if (status === "partial") return "D1 parziale";
@@ -166,7 +167,7 @@ function recordStatus(record: CommandRecord): Job["status"] {
   return "Pianificato";
 }
 
-function toJobs(records: CommandRecord[]): Job[] {
+export function toJobs(records: CommandRecord[]): Job[] {
   return records.filter((record) => record.module === "operations").map((record) => {
     const [location, team] = record.detail.split(" · ");
     return {
@@ -181,7 +182,7 @@ function toJobs(records: CommandRecord[]): Job[] {
   });
 }
 
-function toAssets(records: CommandRecord[]): Asset[] {
+export function toAssets(records: CommandRecord[]): Asset[] {
   return records.filter((record) => record.module === "assets").map((record) => ({
     id: record.canonicalCode ?? record.id,
     title: recordName(record),
@@ -192,7 +193,7 @@ function toAssets(records: CommandRecord[]): Asset[] {
   }));
 }
 
-function toActivities(records: CommandRecord[]): ActivityItem[] {
+export function toActivities(records: CommandRecord[]): ActivityItem[] {
   return records.slice(0, 8).map((record) => ({
     title: recordName(record),
     detail: `${record.module} · ${record.status || "readback"}`,
@@ -224,47 +225,47 @@ function StatusBadge({ children, tone = "lime" }: { children: ReactNode; tone?: 
   return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold tracking-[0.04em] ${styles.badge}`}><span className={`size-1.5 rounded-full bg-current ${styles.glow}`} />{children}</span>;
 }
 
-function KpiCard({ label, value, delta, icon: Icon, tone, data }: KpiData) {
+export function KpiCard({ label, value, delta, icon: Icon, tone, data }: KpiData) {
   return <article className={`carbon-card carbon-card-neon min-w-0 rounded-2xl p-4 ${tone === "cyan" ? "carbon-card-cyan" : ""}`}><div className="flex items-start justify-between gap-3"><span className={`grid size-9 place-items-center rounded-xl border border-current/20 bg-current/10 ${toneStyles[tone].icon}`}><Icon className="size-[18px]" /></span><StatusBadge tone={tone}>{delta}</StatusBadge></div><p className="mt-4 text-xs text-slate-500">{label}</p><div className="mt-1 flex items-end justify-between gap-4"><p className="font-mono text-[30px] font-semibold leading-none tracking-[-0.06em] text-slate-50">{value}</p><span className="pb-1 text-[10px] uppercase tracking-[0.12em] text-lime-300/60">readback</span></div><p className="mt-2 text-[10px] text-slate-600">{data}</p></article>;
 }
 
-function MapBoard({ mapFilter, onFilterChange, selectedMarker, onSelectMarker, markers }: { mapFilter: MapFilter; onFilterChange: (value: MapFilter) => void; selectedMarker: string; onSelectMarker: (id: string) => void; markers: MapMarker[] }) {
+export function MapBoard({ mapFilter, onFilterChange, selectedMarker, onSelectMarker, markers }: { mapFilter: MapFilter; onFilterChange: (value: MapFilter) => void; selectedMarker: string; onSelectMarker: (id: string) => void; markers: MapMarker[] }) {
   const visibleMarkers = markers.filter((marker) => mapFilter === "TUTTI" || mapFilter === "GEOFENCE" || marker.kind === mapFilter);
   return <section className="carbon-card rounded-2xl p-3 sm:p-4"><div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-3"><div className="flex items-center gap-3"><span className="grid size-8 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200"><MapIcon className="size-4" /></span><div><SectionTitle eyebrow="OPERATIONS / LIVE" title="Mappa operativa" /><p className="mt-0.5 text-[11px] text-slate-500">Asset, team e lavori in tempo reale</p></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-lime-300/15 bg-lime-300/5 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.9)]" />D1 readback</span><IconButton label="Schermo intero"><PanelRight className="size-4" /></IconButton></div></div><div className="relative min-h-[360px] overflow-hidden rounded-xl border border-white/10 bg-[#050607] sm:min-h-[430px]"><div className="map-grid absolute inset-0 opacity-80" /><div className="absolute inset-0 bg-[radial-gradient(circle_at_52%_48%,rgba(190,255,60,0.12),transparent_25%),radial-gradient(circle_at_16%_80%,rgba(65,224,255,0.07),transparent_22%)]" /><svg className="absolute inset-0 h-full w-full" viewBox="0 0 900 500" preserveAspectRatio="none" aria-label="Mappa operativa schematica"><path d="M0 84C110 132 128 24 226 76S384 152 480 91 643 44 900 103" fill="none" stroke="rgba(104,123,128,0.25)" strokeWidth="2" /><path d="M0 216C95 190 116 288 250 232S410 186 506 262 708 348 900 270" fill="none" stroke="rgba(113,135,138,0.22)" strokeWidth="2" /><path d="M-20 384C112 323 151 428 292 356S472 330 585 398 748 437 930 347" fill="none" stroke="rgba(113,135,138,0.2)" strokeWidth="2" /><path d="M112 -10C158 86 121 152 196 224S255 350 212 530M333 -10C305 104 358 168 321 274S328 401 380 530M588 -10C554 98 622 184 565 280S580 423 631 530M776 -10C713 111 784 196 735 296S771 431 731 530" fill="none" stroke="rgba(99,116,120,0.16)" strokeWidth="1.5" /><path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" stroke="rgba(190,255,60,0.72)" strokeDasharray="5 8" strokeLinecap="round" strokeWidth="2" /><path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" opacity="0.24" stroke="rgba(190,255,60,0.85)" strokeLinecap="round" strokeWidth="10" /><circle cx="390" cy="189" r="4" fill="#d6ff4c" /><circle cx="620" cy="130" r="4" fill="#d6ff4c" /><circle cx="195" cy="294" r="4" fill="#d6ff4c" /></svg><div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">AREA OPERATIVA · D1 readback</span></div><div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur"><IconButton label="Zoom in" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra mappa" className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton></div>{visibleMarkers.map((marker) => { const Icon = marker.icon; const selected = selectedMarker === marker.id; return <button key={marker.id} className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" style={{ left: marker.x, top: marker.y }} onClick={() => onSelectMarker(marker.id)} type="button"><span className={`absolute -inset-2 rounded-full border border-lime-300/35 ${selected ? "animate-pulse bg-lime-300/15" : "opacity-0"}`} /><span className={`relative flex items-center gap-2 rounded-lg border px-2 py-1.5 backdrop-blur-md transition ${selected ? "border-lime-300/55 bg-[#101604]/95 shadow-[0_0_24px_rgba(190,255,60,0.18)]" : "border-white/15 bg-black/75 hover:border-lime-300/40"}`}><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${toneStyles[marker.tone].icon}`}><Icon className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{marker.label}</span><span className={`block text-[10px] ${marker.tone === "amber" ? "text-amber-200" : "text-lime-200"}`}>{marker.detail}</span></span></span></button>; })}{visibleMarkers.length === 0 && <div className="absolute inset-x-0 top-1/2 mx-auto max-w-xs -translate-y-1/2 rounded-xl border border-dashed border-white/15 bg-black/55 px-4 py-3 text-center text-xs leading-5 text-slate-500">Nessun segnale con coordinate nel readback D1.</div>}<div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as MapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-black/80 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Asset</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Lavori</TabsTrigger><TabsTrigger className="hidden h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006] sm:inline-flex" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-500"><Crosshair className="size-3 text-lime-300" />{visibleMarkers.length} segnali</span></div></div></section>;
 }
 
-function ActivityPanel({ query, showAll, onToggle, activities }: { query: string; showAll: boolean; onToggle: () => void; activities: ActivityItem[] }) {
+export function ActivityPanel({ query, showAll, onToggle, activities }: { query: string; showAll: boolean; onToggle: () => void; activities: ActivityItem[] }) {
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = activities.filter((item) => `${item.title} ${item.detail}`.toLowerCase().includes(normalizedQuery));
   const visible = showAll ? filtered : filtered.slice(0, 5);
   return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="EVENT STREAM" title="Attività recenti" action={showAll ? "Riduci" : "Vedi tutte"} onAction={onToggle} /><div className="mt-4 divide-y divide-white/[0.07]">{visible.map((item) => { const Icon = item.icon; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={`${item.title}-${item.time}`}><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{item.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{item.detail}</p></div><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></div>; })}{visible.length === 0 && <div className="rounded-lg border border-dashed border-white/10 px-3 py-5 text-center text-xs text-slate-500">Nessuna attività corrisponde alla ricerca.</div>}</div></section>;
 }
 
-function JobPanel({ tab, onTabChange, onNewJob, jobs }: { tab: JobTab; onTabChange: (value: JobTab) => void; onNewJob: () => void; jobs: Job[] }) {
+export function JobPanel({ tab, onTabChange, onNewJob, jobs }: { tab: JobTab; onTabChange: (value: JobTab) => void; onNewJob: () => void; jobs: Job[] }) {
   const visibleJobs = jobs.filter((job) => tab === "ATTIVI" ? job.status === "In corso" : tab === "PIANIFICATI" ? job.status === "Pianificato" : job.status === "Completato");
   return <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="WORK ORDERS" title="Lavori" action="Vedi tutti" /><Button className="h-8 border border-lime-300/25 bg-lime-300/10 px-2.5 text-[11px] text-lime-200 hover:bg-lime-300/20" onClick={onNewJob}><Plus className="size-3.5" />Nuovo</Button></div><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as JobTab)}><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ATTIVI">Attivi</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="PIANIFICATI">Pianificati</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="COMPLETATI">Completati</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleJobs.map((job) => { const Icon = job.icon; const tone = job.status === "Pianificato" ? "cyan" : "lime"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={job.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${toneStyles[tone].badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{job.id}</span><span className="truncate text-[11px] text-slate-300">{job.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{job.location}</p></div><div className="hidden w-[82px] text-right sm:block"><StatusBadge tone={tone}>{job.status}</StatusBadge><div className="mt-2 ml-auto h-1 w-[72px] overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-lime-300" style={{ width: `${job.progress}%` }} /></div></div></div>; })}{visibleJobs.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun lavoro in questo stato.</div>}</div></section>;
 }
 
-function AssetPanel({ tab, onTabChange, assets }: { tab: AssetTab; onTabChange: (value: AssetTab) => void; assets: Asset[] }) {
+export function AssetPanel({ tab, onTabChange, assets }: { tab: AssetTab; onTabChange: (value: AssetTab) => void; assets: Asset[] }) {
   const visibleAssets = assets.filter((asset) => tab === "TUTTI" || tab === "OPERATIVI" ? (tab === "TUTTI" || asset.status === "Operativo") : asset.status === "In manutenzione");
   return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="FLEET STATUS" title="Asset" action="Vedi tutti" /><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as AssetTab)}><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="OPERATIVI">Operativi</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="MANUTENZIONE">Manutenzione</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleAssets.map((asset) => { const Icon = asset.icon; const operational = asset.status === "Operativo"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={asset.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${operational ? toneStyles.lime.badge : toneStyles.amber.badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{asset.id}</span><span className="truncate text-[11px] text-slate-300">{asset.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{asset.detail}</p></div><div className="hidden text-right sm:block"><div className="flex items-center justify-end gap-1.5 text-[10px] text-slate-300"><span className={`size-1.5 rounded-full ${operational ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-amber-300"}`} />{asset.status}</div><p className="mt-1 text-[10px] text-slate-600">{asset.team}</p></div></div>; })}{visibleAssets.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun asset in questo stato.</div>}</div></section>;
 }
 
-function AnalyticsPanel() {
+export function AnalyticsPanel() {
   const [period, setPeriod] = useState("ULTIMI 30 GIORNI");
   return <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="PERFORMANCE" title="Analytics" /><button className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[10px] text-slate-400 hover:border-lime-300/30 hover:text-lime-200" onClick={() => setPeriod(period === "ULTIMI 30 GIORNI" ? "ULTIMI 7 GIORNI" : "ULTIMI 30 GIORNI")} type="button">{period}<ChevronDown className="size-3" /></button></div><div className="carbon-inset mt-4 grid min-h-[142px] place-items-center rounded-xl border border-dashed border-white/10 text-center"><div><p className="text-xs text-slate-400">Nessun dato analytics</p><p className="mt-1 text-[10px] text-slate-600">Il readback D1 non contiene ancora eventi operativi.</p></div></div><div className="mt-4 grid grid-cols-3 gap-2">{["Produttività", "Tempi inattivi", "Efficienza"].map((label) => <div className="carbon-inset rounded-lg p-2.5" key={label}><p className="font-mono text-lg font-semibold text-slate-600">—</p><p className="mt-1 text-[10px] text-slate-500">{label}</p></div>)}</div><div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-black/10 p-3"><Sparkles className="mt-0.5 size-3.5 shrink-0 text-slate-600" /><div><p className="text-[11px] font-medium text-slate-300">AI Insights</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Disponibili dopo il primo readback operativo.</p></div></div></section>;
 }
 
-function AssistantPanel({ query, onQueryChange, onSubmit, response, onQuickPrompt, onOpenLedger }: { query: string; onQueryChange: (value: string) => void; onSubmit: () => void; response: string; onQuickPrompt: (prompt: string) => void; onOpenLedger: () => void }) {
+export function AssistantPanel({ query, onQueryChange, onSubmit, response, onQuickPrompt, onOpenLedger }: { query: string; onQueryChange: (value: string) => void; onSubmit: () => void; response: string; onQuickPrompt: (prompt: string) => void; onOpenLedger: () => void }) {
   const quickPrompts = ["Crea un nuovo lavoro", "Quali asset sono disponibili?", "Mostra team più vicino", "Analizza le performance di oggi"];
   return <section className="carbon-card carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><span className="neon-pulse grid size-9 place-items-center rounded-xl bg-lime-300 text-[#060806]"><Sparkles className="size-[18px]" /></span><div><p className="text-[15px] font-semibold text-slate-50">AI Assistant</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">command / governed preview</p></div></div><StatusBadge tone="amber">ADAPTER REQUIRED</StatusBadge></div><div className="carbon-inset mt-5 rounded-xl p-3"><div className="flex items-center gap-2 text-[10px] text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(190,255,60,0.9)]" />SYSTEM READY<span className="ml-auto font-mono text-[9px] text-slate-600">READ ONLY</span></div><p className="mt-3 text-sm leading-6 text-slate-300">{response}</p></div><form className="mt-4 flex gap-2" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); onSubmit(); }}><div className="relative min-w-0 flex-1"><MessageSquareText className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Chiedi a AI-ZEROW" className="h-10 border-white/10 bg-black/40 pl-9 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => onQueryChange(event.target.value)} placeholder="Chiedi a AI-ZEROW…" value={query} /></div><Button aria-label="Invia richiesta" className="h-10 w-10 bg-lime-300 p-0 text-[#060806] shadow-[0_0_18px_rgba(190,255,60,0.18)] hover:bg-lime-200" size="icon" type="submit"><Send className="size-4" /></Button></form><div className="mt-4 space-y-2">{quickPrompts.map((prompt) => <button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200" key={prompt} onClick={() => onQuickPrompt(prompt)} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>{prompt}</button>)}</div><div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4"><button className="flex items-center gap-2 text-[10px] text-slate-500 hover:text-lime-200" onClick={onOpenLedger} type="button"><FileText className="size-3.5" />Apri command ledger</button><span className="font-mono text-[9px] text-slate-600">S07 / LOCAL</span></div></section>;
 }
 
-function LedgerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function LedgerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="carbon-card max-h-[90vh] max-w-2xl overflow-y-auto border-lime-300/20 p-0 text-slate-100"><DialogHeader className="border-b border-white/10 px-5 py-5 text-left"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><ShieldCheck className="size-4" /></span><div><DialogTitle className="text-base text-slate-50">Command ledger</DialogTitle><DialogDescription className="mt-1 text-xs text-slate-500">Registro locale della preview. Nessuna scrittura è stata inviata al dominio.</DialogDescription></div></div></DialogHeader><div className="space-y-3 p-5"><div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">Gateway AI</p><p className="mt-1 text-[10px] text-slate-500">OpenAI runtime · tool gateway · approval</p></div><StatusBadge tone="amber">ADAPTER REQUIRED</StatusBadge></div><div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">Tenant context</p><p className="mt-1 text-[10px] text-slate-500">Actor, membership e scope server-owned</p></div><StatusBadge>VERIFIED</StatusBadge></div><div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">Readback governato</p><p className="mt-1 text-[10px] text-slate-500">La preview non simula conferme di dominio</p></div><StatusBadge tone="amber">NOT RUN</StatusBadge></div></div><DialogFooter className="border-t border-white/10 px-5 py-4"><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-300 hover:bg-white/10 hover:text-white" variant="outline">Chiudi</Button></DialogClose></DialogFooter></DialogContent></Dialog>;
 }
 
-function NewJobDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; onCreated: (title: string) => void }) {
+export function NewJobDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; onCreated: (title: string) => void }) {
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!title.trim()) return; onCreated(`${title.trim()}${location.trim() ? ` · ${location.trim()}` : ""}`); setTitle(""); setLocation(""); };

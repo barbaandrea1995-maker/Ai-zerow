@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
-import CommandSurface from "@/app/page-client";
+import CommandSurface from "@/components/command-surface";
+import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { commandSurfaceAccess } from "@/lib/command-dashboard";
 import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 
 /**
@@ -15,5 +17,16 @@ export default async function CommandPage() {
     redirect("/login");
   }
 
-  return <CommandSurface actor={identity.actor} />;
+  const authority = await getAuthorityContext();
+  if (!authority) redirect("/tenants?reason=membership_required");
+  if (!hasCapability(authority, "command.read")) {
+    redirect("/access-denied?required=command.read");
+  }
+
+  return (
+    <CommandSurface
+      access={commandSurfaceAccess(authority.role, authority.capabilities)}
+      actor={{ email: authority.actorEmail, name: authority.actorName }}
+    />
+  );
 }

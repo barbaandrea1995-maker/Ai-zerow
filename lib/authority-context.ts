@@ -76,19 +76,23 @@ export type AccessibleTenantDirectory = {
 };
 
 export async function getAuthenticatedIdentity(): Promise<AuthenticatedIdentity | null> {
-  const sitesUser = await getChatGPTUser();
-  if (sitesUser) return sitesIdentity(sitesUser);
-
   const neonIdentity = await getNeonAuthIdentity();
-  if (neonIdentity.status !== "authenticated") return null;
+  if (neonIdentity.status === "authenticated") {
+    return {
+      identityProvider: "neon",
+      actorId: neonIdentity.actor.id,
+      actorEmail: neonIdentity.actor.email,
+      actorName: neonIdentity.actor.name || neonIdentity.actor.email,
+      sessionId: neonIdentity.sessionId,
+    };
+  }
 
-  return {
-    identityProvider: "neon",
-    actorId: neonIdentity.actor.id,
-    actorEmail: neonIdentity.actor.email,
-    actorName: neonIdentity.actor.name || neonIdentity.actor.email,
-    sessionId: neonIdentity.sessionId,
-  };
+  // The protected application uses Neon Auth, so an authenticated Neon
+  // session must also be the identity used for D1 authority. Sites identity
+  // remains the explicit bootstrap/fallback boundary and is resolved by the
+  // dedicated getSitesAuthorityContext when both identities are required.
+  const sitesUser = await getChatGPTUser();
+  return sitesUser ? sitesIdentity(sitesUser) : null;
 }
 
 function sitesIdentity(user: ChatGPTUser): AuthenticatedIdentity {
@@ -228,6 +232,21 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
 }
 
 /**
+ * Bootstrap is a one-time transition for the private Site. As soon as the
+ * canonical tenant exists, every identity—including a Sites identity—must
+ * have an explicit active membership. This prevents an unlisted Site viewer
+ * from inheriting owner authority after provisioning.
+ */
+async function canBootstrapSitesOwner() {
+  const db = getDb();
+  const [canonicalTenant] = await db.select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.id, SITES_TENANT_ID))
+    .limit(1);
+  return !canonicalTenant;
+}
+
+/**
  * Resolves only the Sites owner boundary. This is intentionally separate from
  * getAuthorityContext so an owner can link a currently authenticated Neon
  * identity without allowing the Neon identity to self-bootstrap in D1.
@@ -239,9 +258,8 @@ export async function getSitesAuthorityContext(): Promise<AuthorityContext | nul
   const identity = sitesIdentity(sitesUser);
   try {
     const rows = await queryMemberships(identity);
-    return rows.length > 0
-      ? contextFromRow(identity, rows[0])
-      : sitesBootstrapContext(identity);
+    if (rows.length > 0) return contextFromRow(identity, rows[0]);
+    return await canBootstrapSitesOwner() ? sitesBootstrapContext(identity) : null;
   } catch {
     return null;
   }
@@ -252,9 +270,10 @@ export async function getAuthorityContext(): Promise<AuthorityContext | null> {
   if (!directory || !directory.storeAvailable) return null;
 
   if (directory.rows.length === 0) {
-    // The private Site owner is allowed to create the first canonical D1 row.
-    // Neon identities must be explicitly provisioned and never self-bootstrap.
-    return directory.identity.identityProvider === "sites"
+    // Only a Sites identity may create the first canonical row. Once that row
+    // exists, all identities are fail-closed until explicitly provisioned.
+    if (directory.identity.identityProvider !== "sites") return null;
+    return await canBootstrapSitesOwner()
       ? sitesBootstrapContext(directory.identity)
       : null;
   }

@@ -9,8 +9,7 @@ import {
 } from "@/lib/authority-context";
 
 function canUseEventSurface(context: AuthorityContext, operation: "read" | "write") {
-  if (operation === "write") return hasCapability(context, "tenant.manage") || hasCapability(context, "command.read");
-  return hasCapability(context, "tenant.manage") || hasCapability(context, "command.read") || hasCapability(context, "approvals.review");
+  return hasCapability(context, operation === "write" ? "events.write" : "events.read");
 }
 
 export function s06AccessDenied(context: AuthorityContext | null, operation: "read" | "write"): Response | null {

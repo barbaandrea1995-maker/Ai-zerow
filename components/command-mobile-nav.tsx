@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { BriefcaseBusiness, Grid2X2, House, Map, Sparkles } from "lucide-react";
+import type { CommandNavigationId } from "@/lib/command-dashboard";
 
 type MobileNavItem = "home" | "map" | "ai" | "operations" | "more";
 
@@ -13,10 +14,22 @@ const items: Array<{ id: MobileNavItem; label: string; href: string; icon: typeo
   { id: "more" as const, label: "Altro", href: "/onboarding", icon: Grid2X2 },
 ];
 
-export function CommandMobileNav({ active }: { active: MobileNavItem }) {
+export function CommandMobileNav({
+  active,
+  allowedNavigation,
+}: {
+  active: MobileNavItem;
+  allowedNavigation?: CommandNavigationId[];
+}) {
+  const canOpenOperations = !allowedNavigation || allowedNavigation.includes("operations");
+  const moreHref = allowedNavigation?.includes("authority") ? "/onboarding" : "/settings";
+  const visibleItems = items
+    .filter((item) => item.id !== "operations" || canOpenOperations)
+    .map((item) => item.id === "more" ? { ...item, href: moreHref } : item);
+
   return (
     <nav aria-label="Navigazione mobile" className="zw-mobile-nav">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const Icon = item.icon;
         const selected = item.id === active;
         return (

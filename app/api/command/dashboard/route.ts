@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s04Records } from "@/db/schema";
+import { hasCapability } from "@/lib/authority-context";
 import {
   getS04Context,
   recordForResponse,
@@ -15,6 +16,9 @@ const DASHBOARD_MODULES = ["operations", "assets", "workforce"] as const satisfi
 export async function GET() {
   const context = await getS04Context();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  if (!hasCapability(context, "command.read")) {
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const readableModules = DASHBOARD_MODULES.filter((module) => !s04AccessDenied(context, module, "read"));
   if (readableModules.length === 0) return Response.json({ error: "forbidden" }, { status: 403 });

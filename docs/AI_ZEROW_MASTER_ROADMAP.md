@@ -1,9 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.0  
-**Data:** 1 ottobre 2026  
+**Versione roadmap:** 1.1 — riallineamento Commercial v1
+**Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
+
+**Checkpoint corrente:** `Commercial v1 RC · locale · non pubblicato` sul parent commit `0e96a94417088327ad387ced3db0f746f39a706a`. La baseline v65 resta immutata. Il deploy è bloccato fino alla chiusura dei gate descritti in `COMMERCIAL_V1_CHECKPOINT_2026-10-01.md`.
 
 ## 1. Direzione prodotto
 
@@ -70,8 +72,8 @@ persona/input
 | Workstream | Stato iniziale | Nota |
 |---|---|---|
 | W00 Baseline e governance | `FROZEN` | Tag v65 creato e pubblicato nel repository. |
-| W01 Shell e visual system | `CLOSED — Sites` | UI/UX coerente, responsive e mantenuta sulla palette esistente. |
-| W02 Identity, tenant, authority | `CLOSED — Sites / PARTIAL external` | Sites owner-only e authority D1 verificati; identity esterna resta separata. |
+| W01 Shell e visual system | `COMMERCIAL RC — LOCAL` | Command ultra-carbon, visual core Z, griglia widget responsive e PWA parity implementati; gate visuale desktop/mobile e interazione personalizzatore superati. Lo smoke visuale autenticato per ogni famiglia di ruolo resta aperto, mentre la matrice API per ruolo passa. |
+| W02 Identity, tenant, authority | `COMMERCIAL RC — LOCAL / PARTIAL lifecycle` | 13 ruoli canonici, capability server-side, route guard, menu/widget filtering e Authority read/manage separati; bootstrap owner one-shot e isolamento A/B verificati. Invite/suspend/remove, invalidazione sessione e review periodica restano da chiudere. |
 | W03 Commessa e Job Workspace | `IMPLEMENTED — Sites W03 / PARTIAL external` | Creazione manuale o assistita da Company AI, codice, stato, attività, assegnazione, avanzamento, evidenze, rapportino, gate di completamento, eventi e readback sono chiusi nel bounded Sites adapter; il dominio esterno completo resta aperto. |
 | W04 Planning | `DEFERRED / PARTIAL` | Mancano motore di pianificazione, conflitti, revisioni e workers completi. |
 | W05 Workforce e FIELD | `PARTIAL` | Superfici e contratti bounded; runtime operativo, attendance e GPS da certificare. |
@@ -81,12 +83,12 @@ persona/input
 | W09 Documents | `CLOSED — Sites / PARTIAL external` | Catalogo e proposte bounded; storage/OCR/extraction provider-backed da chiudere. |
 | W10 Finance e Procurement | `CLOSED — Sites / PARTIAL external` | Ledger/proposte bounded; accounting, PO e payment executor aperti. |
 | W11 Events, Outbox, Twin e Timeline | `PARTIAL` | Eventi/outbox/reconciliation Sites; consumer, Twin e worker persistenti da certificare. |
-| W12 AI, Tool Gateway e Approval | `PARTIAL` | Preview e approval ledger presenti; runtime AI/tool governato production aperto. |
+| W12 AI, Tool Gateway e Approval | `IMPLEMENTED / LIVE GATE NOT RUN` | Intake e Command usano OpenAI Responses lato server con contesto capability-filtered, output strutturato, citation allowlist, quota D1 atomica, ledger e no-direct-write. Quota runtime 6/min → `429`, payload guard e preventivo DOCX reale sono verificati localmente. `OPENAI_API_KEY` e presente come secret nel runtime Sites; la chiamata live sul candidato non e ancora eseguibile senza pubblicarlo. |
 | W13 Communication, Voice, Telephony | `DEFERRED` | Contratti previsti; provider voice/SIP e policy operative da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
-| W16 Security, Privacy, Observability, DR | `PARTIAL` | Foundation presente; gate provider-backed, GDPR e SLO/RPO/RTO aperti. |
-| W17 Release e GA | `NOT READY` | Si apre solo dopo i gate W03–W16 applicabili allo scope scelto. |
+| W16 Security, Privacy, Observability, DR | `PARTIAL` | Tenant isolation A/B, bootstrap fail-closed, payload JSON e quota AI passano in runtime locale; storage/antivirus, GDPR, provider-backed observability e SLO/RPO/RTO restano aperti. |
+| W17 Release e GA | `RC LOCAL / NOT READY TO DEPLOY` | TypeScript, lint, build, contract verification, manifest exact-build, migrazioni D1 isolate, RBAC/tenant abuse matrix e visual QA desktop/mobile passano; OpenAI live, journey cross-modulo, storage security/privacy e restore rehearsal restano gate bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
@@ -790,18 +792,22 @@ Un modulo non è chiuso finché non possiede:
 - runbook di recovery e rollback;
 - evidenza di release collegata a commit e versione.
 
-## 10. Primo lavoro da aprire
+## 10. Percorso critico aggiornato verso Commercial v1
 
-Il primo workstream operativo dopo questo freeze è **W03 — Commessa end-to-end**, con un verticale minimo ma reale:
+W03 ha già un verticale bounded Sites funzionante. Il percorso immediato non è aggiungere un altro mock, ma certificare e completare la catena reale:
 
 ```text
-crea commessa
-→ aggiungi attività
-→ pianifica risorse
-→ assegna responsabile/squadra
-→ registra avanzamento/evidenza
-→ collega materiale e asset
-→ chiudi con consuntivo e readback
+applica migrazione D1 0010
+→ browser test autenticato Command desktop/mobile
+→ prova isolamento ruoli e tenant
+→ OpenAI live test senza esposizione segreti
+→ commessa → planning → FIELD
+→ materiale → magazzino → trasporto/POD
+→ documenti → procurement/finance → approval
+→ security/privacy/restore evidence
+→ exact-build checkpoint
+→ sign-off umano
+→ deploy controllato
 ```
 
-Il suo contratto deve essere progettato già compatibile con W04 planning, W05 FIELD, W06 asset, W07 warehouse, W08 mission, W09 documents e W10 finance. In questo modo la prima tranche non diventa un CRUD isolato e non sarà necessario rifarla quando entreranno magazzino, trasporti e documenti.
+Il prodotto non viene dichiarato commerciabile finché i gate del checkpoint non hanno evidenza riproducibile. Il design, i widget o una build verde non sostituiscono tenant isolation, test provider, privacy, restore e percorso operativo end-to-end.

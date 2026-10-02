@@ -64,6 +64,20 @@
       "when": 1790878037291,
       "tag": "0009_scope_subgroup_alignment",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790893663002,
+      "tag": "0010_command_dashboard_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790897425081,
+      "tag": "0011_ai_rate_limit_windows",
+      "breakpoints": true
     }
   ]
 }
