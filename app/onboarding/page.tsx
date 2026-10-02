@@ -182,6 +182,7 @@ const permissionModules = [
   { module: "Asset", read: "asset.read", write: "asset.write" },
   { module: "Pianificazione", read: "planning.read", write: "planning.write" },
   { module: "Workforce", read: "workforce.read", write: "workforce.manage" },
+  { module: "Presenze", read: "attendance.read", write: "attendance.manage" },
   { module: "Magazzino", read: "warehouse.read", write: "warehouse.write" },
   { module: "Documenti", read: "documents.read", write: "documents.write" },
   { module: "Authority", read: "authority.read", write: "authority.manage" },

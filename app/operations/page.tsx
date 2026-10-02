@@ -54,6 +54,7 @@ import type {
 import { invalidateReadback, readback } from "@/lib/client-readback";
 import { ROLE_METADATA } from "@/lib/authority-catalog";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
+import { PlanningResourceFields } from "@/components/planning-resource-fields";
 
 const OperationsCommessaIntake = dynamic(
   () => import("@/components/operations-commessa-intake"),
@@ -467,6 +468,12 @@ export default function OperationsPage() {
   const [planningOptions, setPlanningOptions] =
     useState<PlanningOptionsResponse | null>(null);
   const [planningOptionsJobId, setPlanningOptionsJobId] = useState("");
+  const [planningTitle, setPlanningTitle] = useState("Attività operativa");
+  const [planningStartsAt, setPlanningStartsAt] = useState("");
+  const [planningEndsAt, setPlanningEndsAt] = useState("");
+  const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
+  const [planningSaving, setPlanningSaving] = useState(false);
+  const [planningNotice, setPlanningNotice] = useState("");
 
   useEffect(() => {
     if (!planningOpen || selectedJob.id === "EMPTY") return;
@@ -498,6 +505,40 @@ export default function OperationsPage() {
       : planningOptions
         ? "online"
         : "error";
+
+  async function savePlanningDraft() {
+    if (selectedJob.id === "EMPTY") return;
+    if (!planningStartsAt || !planningEndsAt || !planningResourceIds.length) {
+      setPlanningNotice("Inserisci una finestra valida e seleziona almeno una risorsa reale.");
+      return;
+    }
+    setPlanningSaving(true);
+    setPlanningNotice("");
+    try {
+      const reference = encodeURIComponent(selectedJob.sourceId ?? selectedJob.id);
+      const response = await fetch(`/api/operations/jobs/${reference}/planning`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "draft",
+          title: planningTitle.trim() || "Attività operativa",
+          startsAt: planningStartsAt,
+          endsAt: planningEndsAt,
+          resourceIds: planningResourceIds,
+          idempotencyKey: `planning-draft-${crypto.randomUUID()}`,
+        }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "planning_write_failed");
+      invalidateReadback(`planning-options:${selectedJob.id}`);
+      setPlanningOpen(false);
+      notify("Piano creato in bozza · risorse validate dal server");
+    } catch (error) {
+      setPlanningNotice(error instanceof Error ? error.message : "Piano non salvato");
+    } finally {
+      setPlanningSaving(false);
+    }
+  }
   const activeCount = activeJobs.filter(
     (job) => job.status === "In corso",
   ).length;
@@ -1063,6 +1104,13 @@ export default function OperationsPage() {
                       onClick={() => {
                         setPlanningOptions(null);
                         setPlanningOptionsJobId("");
+                        setPlanningTitle("Attività operativa");
+                        const starts = new Date(Date.now() + 60 * 60 * 1000);
+                        const ends = new Date(starts.getTime() + 4 * 60 * 60 * 1000);
+                        setPlanningStartsAt(starts.toISOString().slice(0, 16));
+                        setPlanningEndsAt(ends.toISOString().slice(0, 16));
+                        setPlanningResourceIds([]);
+                        setPlanningNotice("");
                         setPlanningOpen(true);
                       }}
                     >
@@ -1258,55 +1306,24 @@ export default function OperationsPage() {
       )}
       {canWriteOperations && (
         <Dialog open={planningOpen} onOpenChange={setPlanningOpen}>
-        <DialogContent className="border-cyan-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-cyan-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[620px]">
           <DialogHeader>
             <DialogTitle className="text-slate-100">
-              Pianificazione risorse
+              Nuova attività giornaliera
             </DialogTitle>
             <DialogDescription className="text-slate-500">
-              Readback risorse per {selectedJob.id}. Le scritture del piano
-              passano dal contratto planning versionato.
+              {selectedJob.id} · la bozza viene sottoposta a controllo di disponibilità, qualifica e conflitti.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="carbon-inset flex items-center gap-3 rounded-xl p-3">
-              <Users className="size-4 text-lime-200" />
-              <div>
-                <p className="text-xs font-medium text-slate-200">
-                  {selectedJob.team}
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  presidio operativo selezionato
-                </p>
-              </div>
-            </div>
-            <div className="carbon-inset flex items-center gap-3 rounded-xl p-3">
-              <Truck className="size-4 text-cyan-200" />
-              <div>
-                <p className="text-xs font-medium text-slate-200">Risorse disponibili</p>
-                <p className="text-[11px] text-slate-500">
-                  {planningOptionsStatus === "loading"
-                    ? "Lettura dal perimetro D1…"
-                    : planningOptionsStatus === "error"
-                      ? "Readback non disponibile"
-                      : `${planningOptions?.options?.workforce?.length ?? 0} persone/team · ${planningOptions?.options?.assets?.length ?? 0} asset assegnabili`}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80">
-              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />
-              {planningOptionsStatus === "online"
-                ? `${planningOptions?.existingPlans?.length ?? 0} piani riletti. Conflitti, capacità, qualifiche e what-if sono gestiti dal nuovo contratto.`
-                : "Il readback resta tenant-scoped e non assegna automaticamente risorse."}
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button className="bg-lime-300 text-[#060806] hover:bg-lime-200">
-                Chiudi
-              </Button>
-            </DialogClose>
-          </DialogFooter>
+          <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void savePlanningDraft(); }}>
+            <label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningTitle(event.target.value)} value={planningTitle} required /></label>
+            <label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label>
+            <label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label>
+            <PlanningResourceFields jobId={selectedJob.sourceId ?? selectedJob.id} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} />
+            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[10px] leading-5 text-lime-100/80 sm:col-span-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />{planningOptionsStatus === "online" ? `${planningOptions?.existingPlans?.length ?? 0} piani già riletti. Il server blocca sovrapposizioni e risorse non assegnabili.` : "Il readback resta tenant-scoped e non assegna automaticamente risorse."}</div>
+            {planningNotice && <p className="rounded-xl border border-amber-300/20 bg-amber-300/[.04] px-3 py-2 text-[10px] text-amber-100 sm:col-span-2">{planningNotice}</p>}
+            <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={planningSaving} type="submit" className="bg-lime-300 text-[#060806] hover:bg-lime-200">{planningSaving ? "Salvataggio…" : "Crea bozza"}</Button></DialogFooter>
+          </form>
         </DialogContent>
         </Dialog>
       )}

@@ -13,8 +13,10 @@ import {
   DEFAULT_OPERATING_PROFILE,
   domainsForProfile,
   isOperatingProfileId,
+  normalizeTransportModes,
   OPERATING_PROFILE_CATALOG,
   profileForDomains,
+  transportModesForProfile,
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
 
@@ -26,6 +28,7 @@ type TenantPayload = {
   slug?: unknown;
   operatingProfile?: unknown;
   operatingDomains?: unknown;
+  transportModes?: unknown;
 };
 
 function errorCode(error: unknown) {
@@ -49,6 +52,7 @@ function tenantRows(identityProvider: IdentityProvider, actorId: string) {
       tenantStatus: tenants.status,
       operatingProfile: tenants.operatingProfile,
       operatingDomainsJson: tenants.operatingDomainsJson,
+      operatingTransportModesJson: tenants.operatingTransportModesJson,
       createdBy: tenants.createdBy,
       createdAt: tenants.createdAt,
       updatedAt: tenants.updatedAt,
@@ -82,6 +86,14 @@ function toTenantView(row: Awaited<ReturnType<typeof tenantRows>>[number]) {
     operatingDomains: (() => {
       try {
         const parsed = JSON.parse(row.operatingDomainsJson) as unknown;
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+      } catch {
+        return [];
+      }
+    })(),
+    transportModes: (() => {
+      try {
+        const parsed = JSON.parse(row.operatingTransportModesJson) as unknown;
         return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
       } catch {
         return [];
@@ -168,6 +180,13 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid_operating_profile", profiles: Object.keys(OPERATING_PROFILE_CATALOG) }, { status: 400 });
   }
   const operatingDomains = domainsForProfile(operatingProfile);
+  const requestedTransportModes = normalizeTransportModes(payload.transportModes);
+  const operatingTransportModes = requestedTransportModes.length
+    ? requestedTransportModes.filter((mode) => transportModesForProfile(operatingProfile).includes(mode))
+    : transportModesForProfile(operatingProfile);
+  if (requestedTransportModes.length !== operatingTransportModes.length) {
+    return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(operatingProfile) }, { status: 400 });
+  }
 
   try {
     const db = getDb();
@@ -185,6 +204,7 @@ export async function POST(request: Request) {
         status: "active",
         operatingProfile,
         operatingDomainsJson: JSON.stringify(operatingDomains),
+        operatingTransportModesJson: JSON.stringify(operatingTransportModes),
         createdBy: context!.actorId,
         createdAt: now,
         updatedAt: now,

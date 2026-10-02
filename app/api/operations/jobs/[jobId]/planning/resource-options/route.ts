@@ -1,24 +1,12 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { getPlanningResourceOptions } from "@/lib/planning-resources";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ jobId: string }> };
-
-function text(value: unknown, fallback = "") {
-  return typeof value === "string" ? value.trim() : fallback;
-}
-
-function parsePayload(value: string) {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-}
 
 async function routeJobId(routeContext: RouteContext) {
   try {
@@ -30,26 +18,11 @@ async function routeJobId(routeContext: RouteContext) {
 }
 
 async function findJob(tenantId: string, reference: string) {
-  const base = and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "operations"));
+  const base = and(eq(s04Records.tenantId, tenantId), inArray(s04Records.module, ["operations", "mission"]));
   const [byId] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.id, reference))).limit(1);
   if (byId) return byId;
   const [byCode] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.canonicalCode, reference))).limit(1);
   return byCode ?? null;
-}
-
-function optionForRecord(row: typeof s04Records.$inferSelect, kind: "person" | "team" | "asset" | "vehicle") {
-  const payload = parsePayload(row.payloadJson);
-  const lifecycleStatus = text(payload.lifecycleStatus, row.status || "AVAILABLE").toUpperCase();
-  return {
-    id: row.id,
-    code: row.canonicalCode,
-    label: row.title,
-    kind,
-    status: lifecycleStatus,
-    assignable: kind === "asset" || kind === "vehicle" ? lifecycleStatus === "AVAILABLE" || lifecycleStatus === "ACTIVE" : true,
-    qualifications: Array.isArray(payload.qualifications) ? payload.qualifications.filter((item): item is string => typeof item === "string").slice(0, 20) : [],
-    updatedAt: row.updatedAt,
-  };
 }
 
 export async function GET(_request: Request, routeContext: RouteContext) {
@@ -61,12 +34,12 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
-    const rows = await getDb().select().from(s04Records).where(eq(s04Records.tenantId, context.tenantId)).orderBy(desc(s04Records.updatedAt)).limit(500);
+    const planningOptions = await getPlanningResourceOptions(context.tenantId);
     const workforce = hasCapability(context, "workforce.read")
-      ? rows.filter((row) => row.module === "workforce").map((row) => optionForRecord(row, row.recordType.toLowerCase().includes("team") ? "team" : "person"))
+      ? planningOptions.filter((item) => item.kind === "person" || item.kind === "team")
       : [];
     const assets = hasCapability(context, "asset.read")
-      ? rows.filter((row) => row.module === "assets").map((row) => optionForRecord(row, row.recordType.toLowerCase().includes("vehicle") ? "vehicle" : "asset"))
+      ? planningOptions.filter((item) => item.kind === "asset" || item.kind === "vehicle")
       : [];
     const plans = hasCapability(context, "planning.read")
       ? await getDb().select().from(jobJourneyRecords).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.jobId, job.id), eq(jobJourneyRecords.domain, "planning"))).orderBy(desc(jobJourneyRecords.updatedAt)).limit(50)
@@ -83,4 +56,3 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     return Response.json({ error: "planning_resource_options_unavailable" }, { status: 503 });
   }
 }
-

@@ -8,10 +8,12 @@ import {
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
   CircleGauge,
+  Clock3,
   FileText,
   Gauge,
   HardHat,
@@ -136,6 +138,8 @@ const navItems: Array<{
   { id: "command", label: "CONTROL", path: "/", icon: MessageSquareText, badge: "AI" },
   { id: "operations", label: "OPERATIONS", path: "/operations", icon: BriefcaseBusiness },
   { id: "workforce", label: "WORKFORCE", path: "/workforce", icon: Users },
+  { id: "planning", label: "PLANNING", path: "/planning", icon: CalendarClock },
+  { id: "attendance", label: "PRESENZE", path: "/presenze", icon: Clock3 },
   { id: "finance", label: "FINANCE", path: "/finance", icon: Gauge },
   { id: "procurement", label: "PROCUREMENT", path: "/procurement", icon: ShoppingCart },
   { id: "assets", label: "ASSETS", path: "/assets", icon: Package },
@@ -165,6 +169,40 @@ function CommandReadinessPanel({ readiness }: { readiness: CommandReadinessRespo
   const ledgerStatus = readiness?.summary?.ledgerStatus ?? "BLOCKED";
   const configured = Boolean(readiness?.runtime?.configured);
   return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W12 / READINESS</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Company AI control</h2><p className="mt-1 text-[11px] text-slate-500">Guard locali, ledger e confine provider.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${readiness ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-100" : "border-amber-300/20 bg-amber-300/[0.06] text-amber-100"}`}>{readiness ? "D1 READBACK" : "CHECKING"}</span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Local gates</p><p className="mt-2 font-mono text-xl text-lime-100">{readiness ? `${ready}/${total}` : "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Ledger</p><p className="mt-2 font-mono text-xl text-cyan-100">{readiness ? readiness.summary?.ledgerCount ?? 0 : "—"}</p></div></div><div className="mt-4 space-y-2"><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><CircleAlert className="size-3.5 text-amber-200" />OpenAI live</span><span className="text-amber-200">NOT RUN</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><ShieldCheck className="size-3.5 text-lime-200" />No direct write</span><span className="text-lime-200">BLOCKED</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><Sparkles className="size-3.5 text-lime-200" />Runtime binding</span><span className={configured ? "text-lime-200" : "text-amber-200"}>{configured ? "SERVER-SIDE" : "NOT OBSERVED"}</span></div></div><div className="mt-auto flex flex-wrap gap-2 pt-5"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push(readiness?.governanceRead ? "/governance" : "/externals")}><ShieldCheck className="size-3.5" />{readiness?.governanceRead ? "Apri control plane" : "Apri adapter"}</Button><span className="flex h-9 items-center rounded-lg border border-amber-300/15 px-2.5 text-[9px] text-amber-100/70">{ledgerStatus}</span></div></section>;
+}
+
+function PlanningCommandPanel() {
+  const router = useRouter();
+  const [summary, setSummary] = useState<{ jobs: number; plans: number; published: number; conflicted: number } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/planning", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { summary?: { jobs?: number; plans?: number; published?: number; conflicted?: number } };
+        if (!active || !response.ok) return;
+        setSummary({ jobs: payload.summary?.jobs ?? 0, plans: payload.summary?.plans ?? 0, published: payload.summary?.published ?? 0, conflicted: payload.summary?.conflicted ?? 0 });
+      })
+      .catch(() => { if (active) setSummary(null); });
+    return () => { active = false; };
+  }, []);
+  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">P2 / PLANNING</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Piano operativo</h2><p className="mt-1 text-[11px] text-slate-500">Attività, missioni e risorse reali.</p></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.07] text-lime-200"><CalendarClock className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Perimetri</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.jobs ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Piani</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.plans ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Pubblicati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.published ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Conflitti</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.conflicted ?? "—"}</p></div></div><Button className="mt-auto h-9 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/planning")}><CalendarClock className="size-3.5" />Apri pianificazione</Button></section>;
+}
+
+function AttendanceCommandPanel() {
+  const router = useRouter();
+  const [summary, setSummary] = useState<{ total: number; checkedIn: number; paused: number; gpsObserved: number } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/workforce/attendance", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { summary?: { total?: number; checkedIn?: number; paused?: number; gpsObserved?: number } };
+        if (!active || !response.ok) return;
+        setSummary({ total: payload.summary?.total ?? 0, checkedIn: payload.summary?.checkedIn ?? 0, paused: payload.summary?.paused ?? 0, gpsObserved: payload.summary?.gpsObserved ?? 0 });
+      })
+      .catch(() => { if (active) setSummary(null); });
+    return () => { active = false; };
+  }, []);
+  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">P3 / WORKFORCE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Presenze operative</h2><p className="mt-1 text-[11px] text-slate-500">Solo servizio, timestamp e geofence osservato.</p></div><span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><Clock3 className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Presenze</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.total ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In servizio</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.checkedIn ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In pausa</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.paused ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">GPS</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.gpsObserved ?? "—"}</p></div></div><Button className="mt-auto h-9 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => router.push("/presenze")} variant="outline"><Clock3 className="size-3.5" />Apri presenze</Button></section>;
 }
 
 function IconButton({
@@ -511,6 +549,8 @@ export default function CommandSurface({
       return <AssetPanel assets={assets} onTabChange={setAssetTab} tab={assetTab} />;
     }
     if (item.id === "analytics") return <AnalyticsPanel />;
+    if (item.id === "planning-overview") return <PlanningCommandPanel />;
+    if (item.id === "attendance-overview") return <AttendanceCommandPanel />;
     if (item.id === "finance-procurement") return <W10CommandPanel summary={w10Summary} />;
     if (item.id === "command-readiness") return <CommandReadinessPanel readiness={commandReadiness} />;
 

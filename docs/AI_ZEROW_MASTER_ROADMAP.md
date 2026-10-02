@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.4 — riallineamento multi-tenant, profili operativi e mission resources su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 2.6 — roadmap Pianificazione, Presenze, Trasporti e UI/UX commerciale su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, con riallineamento multi-tenant e mission resources registrato in `docs/MULTI_TENANT_OPERATING_MODEL_CHECKPOINT_2026-10-02.md`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, profili tenant, risorse missione, pulsanti, PWA e integrazioni resta locale e non pubblicato. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
+**Checkpoint corrente:** `PTU-UX-02 · P0–P3 parziali verificati · moduli centrali attivi`, innestato su `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`. La roadmap dedicata è in `docs/ROADMAP_PLANNING_PRESENCE_TRANSPORT_COMMERCIAL_UX_2026-10-02.md`; il verbale è in `docs/AUDIT_CERTIFICATION_PTUX02_2026-10-02.md`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti fino ai gate P7/P8.
 
 ## 1. Direzione prodotto
 

@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `operating_transport_modes_json` text DEFAULT '[]' NOT NULL;

@@ -13,6 +13,7 @@ export const tenants = sqliteTable("tenants", {
   status: text("status").notNull().default("active"),
   operatingProfile: text("operating_profile").notNull().default("FULL_OPERATIONS"),
   operatingDomainsJson: text("operating_domains_json").notNull().default('["operations","warehouse","transport"]'),
+  operatingTransportModesJson: text("operating_transport_modes_json").notNull().default("[]"),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

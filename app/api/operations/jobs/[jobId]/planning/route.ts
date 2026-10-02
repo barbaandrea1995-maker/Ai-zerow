@@ -10,6 +10,7 @@ import {
   type PlanningResource,
   type PlanningSlot,
 } from "@/lib/planning-contract";
+import { PlanningResourceError, resolvePlanningResources } from "@/lib/planning-resources";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,7 @@ async function routeJobId(routeContext: RouteContext) {
 }
 
 async function findJob(tenantId: string, reference: string) {
-  const base = and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "operations"));
+  const base = and(eq(s04Records.tenantId, tenantId), inArray(s04Records.module, ["operations", "mission"]));
   const [byId] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.id, reference))).limit(1);
   if (byId) return byId;
   const [byCode] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.canonicalCode, reference))).limit(1);
@@ -141,7 +142,14 @@ function planPayload(input: JsonObject, now: string): JsonObject | null {
     if (fallback) slots.push(fallback);
   }
   if (!resources.length || !slots.length) return null;
+  const activityType = bounded(input.activityType, 24, "WORK").toUpperCase();
+  if (activityType !== "WORK" && activityType !== "TRANSPORT") return null;
   return {
+    activityType,
+    scopeSubgroupId: bounded(input.scopeSubgroupId, 160),
+    scopeSubgroupTitle: bounded(input.scopeSubgroupTitle, 240),
+    location: bounded(input.location, 240),
+    priority: bounded(input.priority, 24, "STANDARD").toUpperCase(),
     startsAt: bounded(input.startsAt, 40, slots[0].startsAt),
     endsAt: bounded(input.endsAt, 40, slots[0].endsAt),
     resources,
@@ -304,7 +312,33 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
     const now = new Date().toISOString();
     if (action === "what_if" || action === "draft" || action === "revise") {
-      const payload = planPayload(input, now);
+      let canonicalResources: PlanningResource[];
+      try {
+        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds);
+      } catch (error) {
+        if (error instanceof PlanningResourceError) {
+          return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
+        }
+        throw error;
+      }
+      if (canonicalResources.some((resource) => resource.kind === "person" || resource.kind === "team")
+        && !hasCapability(context, "workforce.registry.read")
+        && !hasCapability(context, "workforce.read.all")) {
+        return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
+      }
+      if (canonicalResources.some((resource) => resource.kind === "asset" || resource.kind === "vehicle")
+        && !hasCapability(context, "asset.read")) {
+        return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
+      }
+      const jobPayload = parseJson(job.payloadJson);
+      const jobScope = isRecord(jobPayload.scope) ? jobPayload.scope : {};
+      const payload = planPayload({
+        ...input,
+        resources: canonicalResources,
+        scopeSubgroupId: input.scopeSubgroupId ?? jobPayload.scopeSubgroupId ?? jobScope.subgroupId,
+        scopeSubgroupTitle: input.scopeSubgroupTitle ?? jobScope.subgroupTitle,
+        location: input.location ?? jobPayload.worksite ?? jobPayload.location,
+      }, now);
       if (!payload) return Response.json({ error: "valid_resources_and_slots_required" }, { status: 400 });
       const candidateEvaluation = evaluatePlanning(payload.slots as PlanningSlot[], payload.resources as PlanningResource[]);
       const existing = await activeTenantPlans(context.tenantId, action === "revise" ? bounded(input.recordId, 120) : undefined);

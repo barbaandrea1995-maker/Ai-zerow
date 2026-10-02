@@ -15,6 +15,9 @@ import {
   filterCapabilitiesForDomains,
   isOperatingProfileId,
   parseOperatingDomains,
+  parseTransportModes,
+  transportModesForProfile,
+  type TransportMode,
   type OperatingDomain,
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
@@ -54,6 +57,7 @@ export type AuthorityContext = {
   capabilities: string[];
   operatingProfile: OperatingProfileId;
   operatingDomains: OperatingDomain[];
+  operatingTransportModes: TransportMode[];
   resourceScope: "tenant";
   fieldScope: "tenant";
   fileScope: "site" | "tenant";
@@ -77,6 +81,7 @@ export type AuthorityMembershipRow = {
   tenantStatus: string;
   operatingProfile: string;
   operatingDomainsJson: string;
+  operatingTransportModesJson: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -137,6 +142,7 @@ async function queryMemberships(
       tenantStatus: tenants.status,
       operatingProfile: tenants.operatingProfile,
       operatingDomainsJson: tenants.operatingDomainsJson,
+      operatingTransportModesJson: tenants.operatingTransportModesJson,
       createdBy: tenants.createdBy,
       createdAt: tenants.createdAt,
       updatedAt: tenants.updatedAt,
@@ -196,6 +202,7 @@ function contextFromRow(
     ? row.operatingProfile
     : DEFAULT_OPERATING_PROFILE;
   const operatingDomains = parseOperatingDomains(row.operatingDomainsJson);
+  const operatingTransportModes = parseTransportModes(row.operatingTransportModesJson, operatingProfile);
 
   const environment =
     process.env.NODE_ENV === "production"
@@ -214,6 +221,7 @@ function contextFromRow(
     capabilities: filterCapabilitiesForDomains(ROLE_CAPABILITIES[row.membershipRole], operatingDomains),
     operatingProfile,
     operatingDomains,
+    operatingTransportModes,
     resourceScope: "tenant",
     fieldScope: "tenant",
     fileScope: identity.identityProvider === "sites" ? "site" : "tenant",
@@ -245,6 +253,7 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
     capabilities: [...ROLE_CAPABILITIES.owner],
     operatingProfile: DEFAULT_OPERATING_PROFILE,
     operatingDomains: [...DEFAULT_OPERATING_DOMAINS],
+    operatingTransportModes: transportModesForProfile(DEFAULT_OPERATING_PROFILE),
     resourceScope: "tenant",
     fieldScope: "tenant",
     fileScope: "site",
@@ -341,6 +350,7 @@ export function publicAuthorityContext(context: AuthorityContext) {
     capabilities: context.capabilities,
     operatingProfile: context.operatingProfile,
     operatingDomains: context.operatingDomains,
+    operatingTransportModes: context.operatingTransportModes,
     resourceScope: context.resourceScope,
     fieldScope: context.fieldScope,
     fileScope: context.fileScope,

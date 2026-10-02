@@ -17,7 +17,9 @@ import { transitionOutbox } from "../lib/outbox-contract.ts";
 import { transitionW10Workflow, w10ExternalStatus, w10Progress } from "../lib/w10-contract.ts";
 import {
   OPERATING_PROFILE_CATALOG,
+  TRANSPORT_MODE_CATALOG,
   filterCapabilitiesForDomains,
+  transportModesForProfile,
 } from "../lib/tenant-operating-model.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,6 +36,8 @@ assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contai
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
 assert.equal(new Set(COMMAND_WIDGET_CATALOG.map((widget) => widget.id)).size, COMMAND_WIDGET_CATALOG.length, "Widget IDs must be unique");
 assert(COMMAND_WIDGET_CATALOG.some((widget) => widget.id === "finance-procurement" && widget.requiredCapabilities.includes("finance.read") && widget.requiredCapabilities.includes("procurement.read")), "W10 Command widget must require both Finance and Procurement read capabilities");
+assert(COMMAND_WIDGET_CATALOG.some((widget) => widget.id === "planning-overview" && widget.requiredCapabilities.includes("planning.read")), "Command must expose a capability-filtered planning widget");
+assert(COMMAND_WIDGET_CATALOG.some((widget) => widget.id === "attendance-overview" && widget.requiredCapabilities.includes("workforce.read")), "Command must expose a capability-filtered attendance widget");
 
 const planningResource = normalizePlanningResource({ id: "team-alpha", kind: "team", label: "Team Alpha", capacity: 1, qualifications: ["idraulica"] });
 const planningSlot = normalizePlanningSlot({ id: "slot-a", startsAt: "2026-10-03T08:00:00Z", endsAt: "2026-10-03T12:00:00Z", resourceIds: ["team-alpha"], requiredQualifications: ["idraulica"] });
@@ -91,17 +95,28 @@ assert(ROLE_CAPABILITIES.warehouse_operator.includes("warehouse.write"), "Wareho
 assert(!ROLE_CAPABILITIES.warehouse_operator.includes("finance.read"), "Warehouse operator must not inherit finance visibility");
 assert(ROLE_CAPABILITIES.worker.includes("warehouse.request"), "Field workers must be able to request materials");
 assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers must not mutate stock balances");
+assert(ROLE_CAPABILITIES.worker.includes("attendance.self"), "Field workers must retain self attendance capability");
+assert(ROLE_CAPABILITIES.manager.includes("attendance.approve"), "Managers must retain attendance approval capability");
 
 for (const profile of ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
   assert(OPERATING_PROFILE_CATALOG[profile]?.domains?.length, `${profile} must declare at least one operating domain`);
+  assert(Array.isArray(OPERATING_PROFILE_CATALOG[profile]?.transportModes), `${profile} must declare transport modes`);
 }
+assert(Object.keys(TRANSPORT_MODE_CATALOG).length === 5, "Transport mode catalog must preserve the five canonical flows");
+assert(transportModesForProfile("OPERATIONS").length === 0, "Operations-only tenants must not receive internal transport modes by default");
+assert(transportModesForProfile("TRANSPORT").includes("ASSET_TRANSFER"), "Transport-only tenants must support asset transfer");
+assert(transportModesForProfile("WAREHOUSE").includes("WAREHOUSE_TO_RECIPIENT"), "Warehouse tenants must support warehouse-to-recipient requests");
+assert(transportModesForProfile("FULL_OPERATIONS").includes("WAREHOUSE_TO_JOB"), "Full tenants must support warehouse-to-job transport");
 const warehouseOnlyCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["warehouse"]);
 assert(warehouseOnlyCapabilities.includes("warehouse.read"), "Warehouse-only tenants must retain warehouse visibility");
 assert(!warehouseOnlyCapabilities.includes("mission.read"), "Warehouse-only tenants must not inherit mission visibility");
 assert(!warehouseOnlyCapabilities.includes("asset.read"), "Warehouse-only tenants must not inherit transport asset visibility");
 const transportCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["transport"]);
 assert(transportCapabilities.includes("mission.read") && transportCapabilities.includes("workforce.read"), "Transport tenants must retain mission and workforce visibility");
+assert(transportCapabilities.includes("planning.read"), "Transport tenants must retain planning visibility");
 assert(!transportCapabilities.includes("warehouse.read"), "Transport-only tenants must not inherit warehouse visibility");
+const operationsCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["operations"]);
+assert(operationsCapabilities.includes("workforce.read") && operationsCapabilities.includes("planning.read"), "Operations tenants must retain workforce and planning visibility");
 
 const workerNavigation = getAllowedCommandNavigation(ROLE_CAPABILITIES.worker).map((item) => item.id);
 assert(!workerNavigation.includes("command"), "Worker navigation must hide Command");
@@ -121,6 +136,8 @@ assert.equal(maliciousLayout.length, managerDefaults.length, "Missing authorized
 const guardFiles = {
   operations: "operations.read",
   workforce: "workforce.read",
+  planning: "planning.read",
+  presenze: "workforce.read",
   assets: "asset.read",
   warehouse: "warehouse.read",
   mission: "mission.read",
@@ -280,6 +297,8 @@ assert(journeyRoute.includes("driverId") && journeyRoute.includes("vehicleId"), 
 assert(journeyRoute.includes("mission_free_text_resources_not_allowed"), "Mission creation must reject free-text resources");
 assert(journeyRoute.includes("assertMissionResourceSelection"), "Mission creation must validate resource lifecycle and time-window availability");
 assert(journeyRoute.includes("mission_resource_conflict"), "Mission creation must expose resource conflict readback");
+assert(journeyRoute.includes("resolvePlanningResources") && journeyRoute.includes("input.resourceIds") && journeyRoute.includes("valid_planning_resources_required"), "Legacy journey planning must use canonical resource IDs");
+assert(!journeyRoute.includes('responsible: boundedText(input.responsible'), "Journey planning must not persist free-text responsibility");
 assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
 assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
@@ -288,9 +307,13 @@ assert(journeyRoute.includes("mission_close"), "Mission journey must expose a go
 const missionControlRoute = await readFile(join(root, "app", "api", "mission", "control", "route.ts"), "utf8");
 assert(missionControlRoute.includes('module: "mission"') && missionControlRoute.includes('source: "mission-standalone"') && missionControlRoute.includes("allocateServerName"), "Transport-only tenants must be able to create a server-named standalone mission");
 assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") && missionControlRoute.includes("assertMissionResourceSelection"), "Standalone mission creation must keep the same real-resource contract");
+assert(missionControlRoute.includes("transport_mode_not_enabled") && missionControlRoute.includes("operatingTransportModes"), "Standalone transport must respect tenant-enabled transport modes");
+const missionControl = await readFile(join(root, "components", "mission-control.tsx"), "utf8");
+assert(missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes('name="transportMode"') && missionControl.includes("operatingTransportModes"), "Standalone mission UI must expose only tenant-enabled transport modes");
 
 const planningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
 assert(planningRoute.includes('hasCapability(context, "planning.write")'), "Advanced planning mutations must require planning.write");
+assert(planningRoute.includes("resolvePlanningResources") && planningRoute.includes("workforce_registry_access_required"), "Planning must resolve canonical resources and protect workforce registry scope");
 assert(planningRoute.includes('action === "what_if"'), "Planning must expose an isolated what-if path");
 assert(planningRoute.includes("planning_conflicts"), "Planning must reject unresolved capacity conflicts");
 assert(planningRoute.includes("planning.plan.revised"), "Planning must preserve revision events");
@@ -300,12 +323,25 @@ assert(planningContract.includes("CAPACITY_EXCEEDED"), "Planning must validate r
 const planningOptionsRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "resource-options", "route.ts"), "utf8");
 assert(planningOptionsRoute.includes('hasCapability(context, "planning.read")'), "Planning resource options must require planning.read");
 assert(planningOptionsRoute.includes("unavailableAssets"), "Planning resource options must expose unavailable assets");
+const planningSurface = await readFile(join(root, "components", "planning-control.tsx"), "utf8");
+assert(planningSurface.includes("/api/planning") && planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: \"draft\"'), "Planning module must provide a central readback and canonical resource draft flow");
+const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
+assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId"), "Central planning readback must be capability-gated and tenant-scoped");
 
 const attendanceRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "attendance", "route.ts"), "utf8");
 assert(attendanceRoute.includes('tracking: "ON_DUTY_ONLY"'), "Attendance must declare on-duty tracking policy");
 assert(attendanceRoute.includes("correction_approve"), "Attendance must support governed corrections");
 assert(attendanceRoute.includes("idempotency_key_required"), "Attendance replay must require idempotency");
 assert(attendanceRoute.includes("4_DECIMAL_PLACES"), "Attendance location must be precision-limited");
+assert(attendanceRoute.includes("recordedAt: now") && attendanceRoute.includes("clientObservedAt"), "Attendance must keep the official timestamp server-owned");
+assert(attendanceRoute.includes("evaluateGeofence") && attendanceRoute.includes("UNCONFIGURED"), "Attendance must evaluate geofence server-side without inventing coordinates");
+assert(attendanceRoute.includes("attendance.self") && attendanceRoute.includes("attendance.approve"), "Attendance actions must expose dedicated capabilities with legacy aliases");
+const attendanceControl = await readFile(join(root, "components", "attendance-control.tsx"), "utf8");
+assert(attendanceControl.includes("navigator.geolocation") && attendanceControl.includes("/attendance"), "Attendance UI must capture optional on-duty GPS and bind to the server route");
+const attendanceOverview = await readFile(join(root, "components", "attendance-overview.tsx"), "utf8");
+assert(attendanceOverview.includes("/api/workforce/attendance") && attendanceOverview.includes("Timestamp server"), "Attendance module must expose a central server-timestamped readback");
+const attendanceOverviewRoute = await readFile(join(root, "app", "api", "workforce", "attendance", "route.ts"), "utf8");
+assert(attendanceOverviewRoute.includes('hasCapability(context, "workforce.read")') && attendanceOverviewRoute.includes("ON_DUTY_ONLY") && attendanceOverviewRoute.includes("tenantId"), "Attendance overview must remain capability-gated, on-duty and tenant-scoped");
 
 const assetLifecycleRoute = await readFile(join(root, "app", "api", "assets", "lifecycle", "route.ts"), "utf8");
 assert(assetLifecycleRoute.includes('hasCapability(context, "asset.write")'), "Asset lifecycle mutations must require asset.write");
@@ -314,7 +350,9 @@ assert(assetLifecycleRoute.includes("availabilityGuard"), "Unavailable assets mu
 const tenantOperatingModel = await readFile(join(root, "lib", "tenant-operating-model.ts"), "utf8");
 assert(tenantOperatingModel.includes("OPERATING_PROFILE_CATALOG") && tenantOperatingModel.includes("filterCapabilitiesForDomains"), "Tenant onboarding must declare profile-to-domain capability filtering");
 const tenantProfileRoute = await readFile(join(root, "app", "api", "tenants", "profile", "route.ts"), "utf8");
-assert(tenantProfileRoute.includes('hasCapability(context, "tenant.manage")') && tenantProfileRoute.includes("operatingProfile"), "Tenant onboarding profile must be capability-gated and persisted");
+assert(tenantProfileRoute.includes('hasCapability(context, "tenant.manage")') && tenantProfileRoute.includes("operatingProfile") && tenantProfileRoute.includes("transportModes"), "Tenant onboarding profile and transport modes must be capability-gated and persisted");
+const tenantSchema = await readFile(join(root, "db", "schema.ts"), "utf8");
+assert(tenantSchema.includes("operatingTransportModesJson"), "Tenant schema must persist transport mode configuration");
 const missionResourceContract = await readFile(join(root, "lib", "mission-resources.ts"), "utf8");
 assert(missionResourceContract.includes("activeAssignments") && missionResourceContract.includes("normalizedMissionWindow"), "Mission resource registry must evaluate tenant-scoped time-window conflicts");
 const missionResourceRoute = await readFile(join(root, "app", "api", "mission", "resources", "route.ts"), "utf8");
@@ -322,6 +360,12 @@ assert(missionResourceRoute.includes("server_validated_ids_only") && missionReso
 const missionResourceFields = await readFile(join(root, "components", "mission-resource-fields.tsx"), "utf8");
 assert(missionResourceFields.includes("/api/mission/resources") && missionResourceFields.includes('name="driverId"') && missionResourceFields.includes('name="vehicleId"'), "Mission UI must select registered driver and vehicle IDs");
 assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
+const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
+assert(planningJourney.includes("PlanningResourceFields") && planningJourney.includes("resourceIds: planningResourceIds"), "Planning UI must select canonical resource IDs");
+assert(!planningJourney.includes('name="responsible"') && planningJourney.includes("Attività della giornata"), "Planning UI must not reintroduce a free-text responsible field");
+assert(planningJourney.includes("transportMode") && planningJourney.includes("TRANSPORT_MODE_CATALOG"), "Journey transport UI must expose tenant-enabled transport modes");
+const operationsPlanningPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
+assert(operationsPlanningPage.includes("savePlanningDraft") && operationsPlanningPage.includes("PlanningResourceFields"), "Operations planning surface must persist a real draft with canonical resources");
 const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
 assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");
 

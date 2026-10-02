@@ -10,13 +10,24 @@ type JsonObject = Record<string, unknown>;
 type AttendanceStatus = "CHECKED_IN" | "PAUSED" | "CHECKED_OUT" | "CORRECTION_REQUESTED" | "APPROVED";
 
 const ACTIONS = {
-  check_in: { capability: "field.write", next: "CHECKED_IN" as AttendanceStatus },
-  pause: { capability: "field.write", next: "PAUSED" as AttendanceStatus },
-  resume: { capability: "field.write", next: "CHECKED_IN" as AttendanceStatus },
-  check_out: { capability: "field.write", next: "CHECKED_OUT" as AttendanceStatus },
-  correction_request: { capability: "field.write", next: "CORRECTION_REQUESTED" as AttendanceStatus },
-  correction_approve: { capability: "workforce.manage", next: "APPROVED" as AttendanceStatus },
+  check_in: { capability: "attendance.self", next: "CHECKED_IN" as AttendanceStatus },
+  pause: { capability: "attendance.self", next: "PAUSED" as AttendanceStatus },
+  resume: { capability: "attendance.self", next: "CHECKED_IN" as AttendanceStatus },
+  check_out: { capability: "attendance.self", next: "CHECKED_OUT" as AttendanceStatus },
+  correction_request: { capability: "attendance.self", next: "CORRECTION_REQUESTED" as AttendanceStatus },
+  correction_approve: { capability: "attendance.approve", next: "APPROVED" as AttendanceStatus },
 } as const;
+
+function hasAttendanceCapability(context: Awaited<ReturnType<typeof getAuthorityContext>>, capability: string) {
+  if (!context) return false;
+  if (hasCapability(context, capability)) return true;
+  // Backward-compatible aliases for existing memberships created before the attendance capability split.
+  return capability === "attendance.self"
+    ? hasCapability(context, "field.write")
+    : capability === "attendance.approve"
+      ? hasCapability(context, "workforce.manage")
+      : false;
+}
 
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -80,6 +91,40 @@ function sanitizeLocation(value: unknown) {
   };
 }
 
+function geofenceForJob(payload: JsonObject) {
+  const candidate = isRecord(payload.geofence) ? payload.geofence : payload;
+  const lat = Number(candidate.latitude ?? candidate.lat);
+  const lon = Number(candidate.longitude ?? candidate.lon ?? candidate.lng);
+  const radiusM = Number(candidate.radiusM ?? candidate.geofenceRadiusM);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radiusM) || lat < -90 || lat > 90 || lon < -180 || lon > 180 || radiusM < 20 || radiusM > 10_000) return null;
+  return { lat, lon, radiusM: Math.round(radiusM) };
+}
+
+function distanceMeters(left: { lat: number; lon: number }, right: { lat: number; lon: number }) {
+  const earthRadius = 6_371_000;
+  const toRadians = (value: number) => value * Math.PI / 180;
+  const deltaLat = toRadians(right.lat - left.lat);
+  const deltaLon = toRadians(right.lon - left.lon);
+  const lat1 = toRadians(left.lat);
+  const lat2 = toRadians(right.lat);
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function evaluateGeofence(location: ReturnType<typeof sanitizeLocation>, payload: JsonObject) {
+  if (!location) return { status: "NO_LOCATION" as const, distanceM: null, radiusM: null };
+  const geofence = geofenceForJob(payload);
+  if (!geofence) return { status: "UNCONFIGURED" as const, distanceM: null, radiusM: null };
+  const distanceM = Math.round(distanceMeters(location, geofence));
+  const accuracyM = location.accuracyM ?? 0;
+  const status = distanceM + accuracyM <= geofence.radiusM
+    ? "INSIDE"
+    : distanceM - accuracyM > geofence.radiusM
+      ? "OUTSIDE"
+      : "UNCERTAIN";
+  return { status, distanceM, radiusM: geofence.radiusM };
+}
+
 function attendanceForResponse(row: typeof jobJourneyRecords.$inferSelect) {
   return {
     id: row.id,
@@ -139,7 +184,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const action = bounded(input.action, 32).toLowerCase() as keyof typeof ACTIONS;
   if (!(action in ACTIONS)) return Response.json({ error: "unsupported_attendance_action", allowed: Object.keys(ACTIONS) }, { status: 400 });
   const actionContract = ACTIONS[action];
-  if (!hasCapability(context, actionContract.capability)) return Response.json({ error: "forbidden", capability: actionContract.capability }, { status: 403 });
+  if (!hasAttendanceCapability(context, actionContract.capability)) return Response.json({ error: "forbidden", capability: actionContract.capability }, { status: 403 });
   const idempotencyKey = bounded(input.idempotencyKey, 160);
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
 
@@ -190,19 +235,26 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (latest && action !== "check_in" && expectedVersion === null) return Response.json({ error: "expected_version_required" }, { status: 400 });
 
     const location = sanitizeLocation(input.location);
+    const locationWithGeofence = location
+      ? { ...location, geofence: evaluateGeofence(location, parseJson(job.payloadJson)) }
+      : null;
+    const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
+    const workerId = hasCapability(context, "workforce.read.all") || hasCapability(context, "workforce.manage")
+      ? bounded(input.workerId, 120, context.actorId)
+      : context.actorId;
     const transition = {
       action,
-      at: bounded(input.at, 40, now),
+      recordedAt: now,
+      clientObservedAt: Number.isFinite(Date.parse(clientObservedAt)) ? clientObservedAt : null,
       by: context.actorId,
       note: bounded(input.note, 1_000),
-      location,
+      location: locationWithGeofence,
     };
-    if (!Number.isFinite(Date.parse(transition.at))) return Response.json({ error: "valid_attendance_timestamp_required" }, { status: 400 });
     const currentPayload = latest ? parseJson(latest.payloadJson) : {};
     const transitions = Array.isArray(currentPayload.transitions) ? currentPayload.transitions.filter(isRecord).slice(-49) : [];
     const payload = {
       ...currentPayload,
-      workerId: bounded(input.workerId, 120, context.actorId),
+      workerId,
       teamId: bounded(input.teamId, 120),
       privacy: { mode: "ON_DUTY_ONLY", locationOptional: true, precision: "4_DECIMAL_PLACES", retentionClass: "OPERATIONAL" },
       transitions: [...transitions, transition],
@@ -216,13 +268,13 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const results = latest
       ? await db.batch([
         db.update(jobJourneyRecords).set({ status: actionContract.next, version: nextVersion, payloadJson: JSON.stringify(payload), updatedBy: context.actorId, updatedAt: now }).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.id, latest.id), eq(jobJourneyRecords.version, latest.version))),
-        db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.at, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: nextVersion, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
+        db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.recordedAt, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: nextVersion, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
         db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: `zerow.field.attendance.${action}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.attendance", aggregateId, expectedVersion: nextVersion, observedVersion: nextVersion, status: "SITES_READBACK_VERIFIED", detail: "Attendance aggiornata con transizione versionata e policy on-duty.", createdAt: now, updatedAt: now }),
       ])
       : await db.batch([
         db.insert(jobJourneyRecords).values({ id: aggregateId, tenantId: context.tenantId, jobId: job.id, domain: "field", recordType: "ATTENDANCE", title: "Presenza operativa", status: actionContract.next, version: 1, payloadJson: JSON.stringify(payload), idempotencyKey, createdBy: context.actorId, updatedBy: context.actorId, createdAt: now, updatedAt: now }),
-        db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.at, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: 1, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
+        db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.recordedAt, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: 1, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
         db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: `zerow.field.attendance.${action}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.attendance", aggregateId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Check-in attendance persistito con policy on-duty.", createdAt: now, updatedAt: now }),
       ]);

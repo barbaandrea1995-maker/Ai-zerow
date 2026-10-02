@@ -5,6 +5,7 @@ import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/li
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { allocateServerName } from "@/lib/server-naming";
+import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
 
 export const dynamic = "force-dynamic";
 
@@ -150,9 +151,16 @@ export async function POST(request: Request) {
   const driverId = boundedText(input.driverId, 120);
   const vehicleId = boundedText(input.vehicleId, 120);
   const cargoAssetId = boundedText(input.cargoAssetId, 120);
+  const requestedTransportMode = boundedText(input.transportMode, 48);
+  const transportMode: TransportMode = isTransportMode(requestedTransportMode)
+    ? requestedTransportMode
+    : cargoAssetId ? "ASSET_TRANSFER" : "WAREHOUSE_TO_RECIPIENT";
   if (!idempotencyKey) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
   if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
   if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });
+  if (!context.operatingTransportModes.includes(transportMode)) {
+    return Response.json({ error: "transport_mode_not_enabled", transportMode, enabledModes: context.operatingTransportModes.length ? context.operatingTransportModes : transportModesForProfile(context.operatingProfile) }, { status: 403 });
+  }
   if (Object.prototype.hasOwnProperty.call(input, "driver") || Object.prototype.hasOwnProperty.call(input, "vehicle")) {
     return Response.json({ error: "mission_free_text_resources_not_allowed" }, { status: 400 });
   }
@@ -217,6 +225,7 @@ export async function POST(request: Request) {
       driverId: resources.driver.id,
       vehicleId: resources.vehicle.id,
       cargoAssetId: resources.cargoAsset?.id ?? null,
+      transportMode,
       resourceSnapshot: {
         driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
         vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },

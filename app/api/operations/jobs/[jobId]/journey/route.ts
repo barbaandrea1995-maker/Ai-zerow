@@ -15,6 +15,9 @@ import { documentCanDownload } from "@/lib/document-security";
 import { inventoryMovementForResponse, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
+import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
+import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
+import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +68,45 @@ function parseJson(value: string) {
   } catch {
     return {};
   }
+}
+
+function planningData(row: typeof jobJourneyRecords.$inferSelect) {
+  const payload = parseJson(row.payloadJson);
+  const resources = Array.isArray(payload.resources)
+    ? payload.resources.map(normalizePlanningResource).filter((item): item is PlanningResource => Boolean(item))
+    : [];
+  const slots = Array.isArray(payload.slots)
+    ? payload.slots.map(normalizePlanningSlot).filter((item): item is PlanningSlot => Boolean(item))
+    : [];
+  return { resources, slots };
+}
+
+async function activePlanningRows(tenantId: string) {
+  return getDb().select().from(jobJourneyRecords).where(and(
+    eq(jobJourneyRecords.tenantId, tenantId),
+    eq(jobJourneyRecords.domain, "planning"),
+    inArray(jobJourneyRecords.status, ["DRAFT", "PUBLISHED"]),
+  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+}
+
+function evaluatePlanningAgainstTenant(candidateSlots: PlanningSlot[], candidateResources: PlanningResource[], existing: (typeof jobJourneyRecords.$inferSelect)[]) {
+  const slots = [...candidateSlots];
+  const resources = [...candidateResources];
+  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
+  for (const row of existing) {
+    const data = planningData(row);
+    for (const resource of data.resources) {
+      const current = resourcesById.get(resource.id);
+      if (!current) {
+        resources.push(resource);
+        resourcesById.set(resource.id, resource);
+      } else if (resource.capacity > current.capacity) {
+        current.capacity = resource.capacity;
+      }
+    }
+    slots.push(...data.slots.map((slot) => ({ ...slot, id: `${row.id}:${slot.id}` })));
+  }
+  return evaluatePlanning(slots, resources);
 }
 
 async function readBoundedJson(request: Request, maxBytes = 65_536) {
@@ -341,12 +383,48 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const endsAt = boundedText(input.endsAt, 40);
       if (!validDateTime(startsAt) || !validDateTime(endsAt)) return Response.json({ error: "valid_planning_dates_required" }, { status: 400 });
       if (Date.parse(endsAt) <= Date.parse(startsAt)) return Response.json({ error: "planning_end_must_follow_start" }, { status: 400 });
+      let canonicalResources: PlanningResource[];
+      try {
+        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds);
+      } catch (error) {
+        if (error instanceof PlanningRegistryError) return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
+        throw error;
+      }
+      if (canonicalResources.some((resource) => resource.kind === "person" || resource.kind === "team")
+        && !hasCapability(context, "workforce.registry.read")
+        && !hasCapability(context, "workforce.read.all")) {
+        return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
+      }
+      if (canonicalResources.some((resource) => resource.kind === "asset" || resource.kind === "vehicle")
+        && !hasCapability(context, "asset.read")) {
+        return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
+      }
+      const slot = normalizePlanningSlot({
+        id: "slot-1",
+        startsAt,
+        endsAt,
+        resourceIds: canonicalResources.map((resource) => resource.id),
+        requiredQualifications: input.requiredQualifications,
+        workload: input.workload,
+      });
+      if (!slot) return Response.json({ error: "valid_planning_resources_required" }, { status: 400 });
+      const candidateEvaluation = evaluatePlanning([slot], canonicalResources);
+      const tenantEvaluation = evaluatePlanningAgainstTenant([slot], canonicalResources, await activePlanningRows(context.tenantId));
+      const evaluation = { ...tenantEvaluation, conflicts: [...candidateEvaluation.conflicts, ...tenantEvaluation.conflicts] };
+      if (!evaluation.feasible && input.allowConflicts !== true) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
       status = "DRAFT";
       payload = {
         startsAt,
         endsAt,
-        team: boundedText(input.team, 160),
-        responsible: boundedText(input.responsible, 160),
+        activityType: boundedText(input.activityType, 24, "WORK").toUpperCase(),
+        scopeSubgroupId: boundedText(input.scopeSubgroupId, 160),
+        scopeSubgroupTitle: boundedText(input.scopeSubgroupTitle, 240),
+        location: boundedText(input.location, 240),
+        priority: boundedText(input.priority, 24, "STANDARD").toUpperCase(),
+        resources: canonicalResources,
+        resourceIds: slot.resourceIds,
+        slots: [slot],
+        evaluation,
         notes: boundedText(input.notes, 2_000),
       };
       eventType = "planning.plan.created";
@@ -399,8 +477,15 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const driverId = boundedText(input.driverId, 120);
       const vehicleId = boundedText(input.vehicleId, 120);
       const cargoAssetId = boundedText(input.cargoAssetId, 120);
+      const requestedTransportMode = boundedText(input.transportMode, 48);
+      const transportMode: TransportMode = isTransportMode(requestedTransportMode)
+        ? requestedTransportMode
+        : cargoAssetId ? "ASSET_TRANSFER" : "WAREHOUSE_TO_JOB";
       if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
       if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });
+      if (!context.operatingTransportModes.includes(transportMode)) {
+        return Response.json({ error: "transport_mode_not_enabled", transportMode, enabledModes: context.operatingTransportModes }, { status: 403 });
+      }
       if (Object.prototype.hasOwnProperty.call(input, "driver") || Object.prototype.hasOwnProperty.call(input, "vehicle")) {
         return Response.json({ error: "mission_free_text_resources_not_allowed" }, { status: 400 });
       }
@@ -429,6 +514,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         driverId: resources.driver.id,
         vehicleId: resources.vehicle.id,
         cargoAssetId: resources.cargoAsset?.id ?? null,
+        transportMode,
         resourceSnapshot: {
           driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
           vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },

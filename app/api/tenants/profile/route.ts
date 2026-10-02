@@ -7,9 +7,12 @@ import {
   DEFAULT_OPERATING_PROFILE,
   domainsForProfile,
   isOperatingProfileId,
+  normalizeTransportModes,
   OPERATING_PROFILE_CATALOG,
   parseOperatingDomains,
+  parseTransportModes,
   profileForDomains,
+  transportModesForProfile,
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
 
@@ -17,7 +20,7 @@ export const dynamic = "force-dynamic";
 
 function profileView(profile: OperatingProfileId) {
   const item = OPERATING_PROFILE_CATALOG[profile];
-  return { id: profile, label: item.label, description: item.description, domains: item.domains };
+  return { id: profile, label: item.label, description: item.description, domains: item.domains, transportModes: item.transportModes };
 }
 
 function errorCode(error: unknown) {
@@ -36,11 +39,15 @@ export async function GET() {
       ? tenant.operatingProfile
       : context.operatingProfile || DEFAULT_OPERATING_PROFILE;
     const domains = tenant ? parseOperatingDomains(tenant.operatingDomainsJson) : (context.operatingDomains || DEFAULT_OPERATING_DOMAINS);
+    const transportModes = tenant
+      ? parseTransportModes(tenant.operatingTransportModesJson, profile)
+      : (context.operatingTransportModes || transportModesForProfile(profile));
     return Response.json({
       context: publicAuthorityContext(context),
       tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status } : null,
       operatingProfile: profile,
       operatingDomains: domains,
+      transportModes,
       profiles: Object.entries(OPERATING_PROFILE_CATALOG).map(([id]) => profileView(id as OperatingProfileId)),
       canManage: hasCapability(context, "tenant.manage"),
     }, { headers: { "cache-control": "private, no-store" } });
@@ -54,7 +61,7 @@ export async function PATCH(request: Request) {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   if (!hasCapability(context, "tenant.manage")) return Response.json({ error: "forbidden", capability: "tenant.manage" }, { status: 403 });
 
-  let input: { operatingProfile?: unknown; operatingDomains?: unknown };
+  let input: { operatingProfile?: unknown; operatingDomains?: unknown; transportModes?: unknown };
   try {
     input = await request.json() as { operatingProfile?: unknown; operatingDomains?: unknown };
   } catch {
@@ -71,6 +78,13 @@ export async function PATCH(request: Request) {
     profile = profileForDomains(requestedDomains);
   }
   const domains = domainsForProfile(profile);
+  const requestedTransportModes = normalizeTransportModes(input.transportModes);
+  const transportModes = requestedTransportModes.length
+    ? requestedTransportModes.filter((mode) => transportModesForProfile(profile).includes(mode))
+    : transportModesForProfile(profile);
+  if (requestedTransportModes.length !== transportModes.length) {
+    return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(profile) }, { status: 400 });
+  }
 
   try {
     const db = getDb();
@@ -79,7 +93,7 @@ export async function PATCH(request: Request) {
     const now = new Date().toISOString();
     const eventId = crypto.randomUUID();
     await db.batch([
-      db.update(tenants).set({ operatingProfile: profile, operatingDomainsJson: JSON.stringify(domains), updatedAt: now }).where(eq(tenants.id, context.tenantId)),
+      db.update(tenants).set({ operatingProfile: profile, operatingDomainsJson: JSON.stringify(domains), operatingTransportModesJson: JSON.stringify(transportModes), updatedAt: now }).where(eq(tenants.id, context.tenantId)),
       db.insert(s06Events).values({
         eventId,
         tenantId: context.tenantId,
@@ -93,7 +107,7 @@ export async function PATCH(request: Request) {
         aggregateType: "tenant.operating_profile",
         aggregateId: context.tenantId,
         aggregateVersion: 1,
-        payloadJson: JSON.stringify({ profile, domains }),
+        payloadJson: JSON.stringify({ profile, domains, transportModes }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey: `tenant-profile-${context.tenantId}-${now}`,
@@ -109,6 +123,7 @@ export async function PATCH(request: Request) {
       tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status },
       operatingProfile: profile,
       operatingDomains: domains,
+      transportModes,
       profile: profileView(profile),
       readback: "verified",
     }, { headers: { "cache-control": "private, no-store" } });

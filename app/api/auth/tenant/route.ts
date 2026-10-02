@@ -6,6 +6,7 @@ import {
   TENANT_SELECTION_COOKIE,
 } from "@/lib/authority-context";
 import { isAuthorityRole } from "@/lib/authority-catalog";
+import { parseTransportModes } from "@/lib/tenant-operating-model";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ function tenantView(row: AuthorityMembershipRow) {
         return [];
       }
     })(),
+    transportModes: parseTransportModes(row.operatingTransportModesJson, row.operatingProfile),
   };
 }
 
