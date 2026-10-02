@@ -3,7 +3,7 @@
 **Data:** 2 ottobre 2026  
 **Perimetro:** W05 / presenza operativa, timbratura e collegamento alla workspace FIELD  
 **Baseline visiva:** COMMAND ultra-carbon / neon lime  
-**Stato:** TECHNICAL PASS — PRIVATE PUBLICATION PENDING
+**Stato:** TECHNICAL PASS — PUBLISHED PRIVATELY · Sites version 95 · owner-only
 
 ## Decisione di dominio
 
@@ -48,3 +48,9 @@ Il modulo non registra autisti, mezzi o persone. Authority e Workforce restano i
 ## Gate ancora espliciti
 
 Privacy/retention/DPIA, GPS continuo, provider map, offline queue/replay certificato, browser/device autenticato e approvazione umana restano gate separati. Questo checkpoint certifica il contratto Sites/D1 e la superficie commerciale implementata, non un runtime telematico esterno.
+
+## Pubblicazione
+
+- Site: https://ai-zerow-command.barba-andrea-1995.chatgpt.site
+- Versione pubblicata: 95
+- Audience: custom owner-only invariata
