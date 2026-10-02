@@ -5,7 +5,7 @@
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.9 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02` e parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_9_LOCAL_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.9 · candidato tecnico pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02` e parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_9_LOCAL_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -88,7 +88,7 @@ persona/input
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
-| W17 Release e GA | `RC2.9 — RELEASE CENTER LOCAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | Il nuovo Release & Certification Center aggrega W12, W16, document security, W10, restore e adapter esterni in un registro unico. TypeScript, lint, build e contract passano localmente; OpenAI live, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
+| W17 Release e GA | `RC2.9 — TECHNICAL PUBLISH / COMMERCIAL NO-GO` | Il nuovo Release & Certification Center aggrega W12, W16, document security, W10, restore e adapter esterni in un registro unico. TypeScript, lint, build e contract passano localmente; OpenAI live, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
@@ -671,7 +671,7 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 
 **Sites RC2.9:** `/release` e `/api/release/readiness` costituiscono il centro unico di promozione W17. Il registro non esegue deploy e non trasforma un candidato locale in una release commerciale: espone `READY`, `PARTIAL`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`, con evidenza e prossimo passo per ogni gate.
 
-Il candidato RC2.9 è tecnicamente verificato nel workspace, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale. Il runtime pubblicato rimane Sites v84 invariato.
+Il candidato RC2.9 è tecnicamente pubblicato su Sites v86, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale.
 
 **Obiettivo:** promuovere solo ciò che è verificato end-to-end.
 

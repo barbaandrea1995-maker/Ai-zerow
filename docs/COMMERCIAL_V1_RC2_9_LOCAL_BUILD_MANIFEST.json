@@ -2,10 +2,10 @@
   "schema": "ai_zerow_command.release_manifest/v1",
   "buildId": "ai-zerow-commercial-v1-rc2-9-local-r2026-10-02",
   "label": "COMMERCIAL-V1-RC2.9-LOCAL-R2026.10.02",
-  "status": "LOCAL_UNPUBLISHED_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
+  "status": "TECHNICAL_PUBLISHED_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
   "source": {
-    "tag": "commercial-v1-rc2-9-local-2026-10-02",
-    "codeCommit": "64ec4d017b92ca95b0aa97a0eed97e3752cb1ed4",
+    "tag": "commercial-v1-rc2-9-published-2026-10-02",
+    "codeCommit": "f9a15b1a64f91cc8d7c18d764556466fd3618712",
     "parentLocalTag": "commercial-v1-rc2-8-local-2026-10-02",
     "parentPublishedTag": "commercial-v1-rc2-1-local-2026-10-02",
     "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
@@ -28,7 +28,7 @@
     "companyAiReadiness": "PASS_LOCAL_NO_DIRECT_WRITE_AND_LIVE_NOT_RUN",
     "securityPrivacyReadiness": "PASS_LOCAL_PARTIAL_PROVIDER_AND_HUMAN_GATES",
     "restoreRehearsal": "PASS_LOCAL_D1_AND_R2",
-    "runtimePublication": "NOT_RUN_LOCAL_CANDIDATE",
+    "runtimePublication": "PASS_TECHNICAL_SITES_V86_COMMERCIAL_NO_GO",
     "browserDeviceCertification": "NOT_RUN",
     "openAiLive": "NOT_RUN_AUTHENTICATED_PRODUCTION_SESSION_REQUIRED",
     "malwareScan": "NOT_RUN_PROVIDER_TOKEN_AND_CALLBACK_REQUIRED",
@@ -58,13 +58,13 @@
     "certification": "LOCAL_TECHNICAL_ONLY",
     "promotionAllowed": false,
     "directWrite": false,
-    "lastPublishedRuntime": "Sites v84 unchanged"
+    "lastPublishedRuntime": "Sites v86 · technical candidate · owner-only"
   },
   "lastPublishedRuntime": {
-    "tag": "commercial-v1-rc2-1-local-2026-10-02",
-    "sitesVersion": 84,
-    "deploymentId": "appgdep_6abf3110bcb48191adf6a5b3fe432d84",
-    "sourceCommit": "5fffb4c6f1acaf8aa69d6379a464e488557ba821",
+    "tag": "commercial-v1-rc2-9-published-2026-10-02",
+    "sitesVersion": 86,
+    "deploymentId": "appgdep_6abf743f4e908191bc2297ec522864e6",
+    "sourceCommit": "f9a15b1a64f91cc8d7c18d764556466fd3618712",
     "status": "SUCCEEDED",
     "audience": "custom_owner_only",
     "url": "https://ai-zerow-command.barba-andrea-1995.chatgpt.site"

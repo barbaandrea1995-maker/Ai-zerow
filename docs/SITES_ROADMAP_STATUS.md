@@ -29,7 +29,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 
 ## Current continuation
 
-- Commercial v1 RC2.9 local W17: **LOCAL TECHNICAL CANDIDATE · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_9_LOCAL_CHECKPOINT_2026-10-02.md`. Il Release & Certification Center (`/release`, `/api/release/readiness`) aggrega W12, W16, document security, W10, restore e adapter esterni con promozione esplicitamente bloccata. Il runtime Sites resta v84/RC2.1.
+- Commercial v1 RC2.9 local W17: **TECHNICAL CANDIDATE · PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_9_LOCAL_CHECKPOINT_2026-10-02.md`. Il Release & Certification Center (`/release`, `/api/release/readiness`) aggrega W12, W16, document security, W10, restore e adapter esterni con promozione esplicitamente bloccata. Il runtime Sites è v86 owner-only.
 - Commercial v1 RC2.8 local W16: **LOCAL TECHNICAL CANDIDATE · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-8-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_8_LOCAL_CHECKPOINT_2026-10-02.md`. Aggiunto il control plane Security/Privacy con isolamento tenant, guard payload/segreti, documenti fail-closed, privacy on-duty, audit, restore e separazione dei gate provider/human review. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.7 local governance: **LOCAL TECHNICAL CANDIDATE · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-7-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_7_LOCAL_CHECKPOINT_2026-10-02.md`. Company AI ora ha un control plane W12 tenant/capability-gated con gate locali, ledger readback, binding metadata-only, no-direct-write e OpenAI live esplicitamente `NOT RUN`. Il Command espone la readiness come widget personalizzabile. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.6 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-6-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_6_LOCAL_CHECKPOINT_2026-10-02.md`. Il Command include il widget Finance/Procurement capability-filtered, con readback W10 tenant-scoped e boundary provider visibile. Il runtime Sites resta v84/RC2.1.
@@ -54,7 +54,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 - Commercial v1 RC2.6 release: **LOCAL CANDIDATE · NOT PUBLISHED** — Command bridge W10 verificato localmente; nessuna pubblicazione eseguita.
 - Commercial v1 RC2.7 release: **LOCAL CANDIDATE · NOT PUBLISHED** — control plane Company AI W12, readiness widget e gate commerciali espliciti; nessuna pubblicazione eseguita.
 - Commercial v1 RC2.8 release: **LOCAL CANDIDATE · NOT PUBLISHED** — control plane W16 Security/Privacy e release gate espliciti; nessuna pubblicazione eseguita.
-- Commercial v1 RC2.9 release: **LOCAL CANDIDATE · NOT PUBLISHED** — Release & Certification Center W17 implementato e collegato ai gate W12/W16/provider/human; nessuna pubblicazione eseguita.
+- Commercial v1 RC2.9 release: **TECHNICAL PUBLISHED CANDIDATE · COMMERCIAL NO-GO** — Release & Certification Center W17 implementato e collegato ai gate W12/W16/provider/human; Sites v86 pubblicato owner-only, senza promozione commerciale.
 
 - S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.
