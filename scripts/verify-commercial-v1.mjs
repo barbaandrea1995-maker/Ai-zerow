@@ -205,7 +205,7 @@ assert(documentRoute.includes('scanStatus: "NOT_RUN"'), "Document upload must no
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_BUILD_MANIFEST.json"), "utf8"));
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_2_LOCAL_BUILD_MANIFEST.json"), "utf8"));
 assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2 manifest must share one build ID");
 assert.equal(releaseManifest.promotion.allowed, false, "RC2 must remain blocked from deployment");
 assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2 must record the D1 restore rehearsal");

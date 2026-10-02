@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.3 — riallineamento Commercial v1 RC2.1
+**Versione roadmap:** 1.4 — riallineamento Commercial v1 RC2.2 locale
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.1 · pubblicato tecnico · non certificato commerciale`, congelato dal tag `commercial-v1-rc2-1-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.2 · candidato locale non pubblicato · non certificato commerciale`, sul codice `73417a7` e parent pubblicato `commercial-v1-rc2-1-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_2_LOCAL_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -75,10 +75,10 @@ persona/input
 | W01 Shell e visual system | `RC2 — PASS LOCALE` | Command ultra-carbon, core Z senza foglia, 11 widget personalizzabili, PWA parity e smoke desktop/mobile superati; axe rileva 0 violazioni automatiche sulle superfici critiche. |
 | W02 Identity, tenant, authority | `RC2 — IMPLEMENTED / PROVIDER GATE` | 13 ruoli, capability server-side, menu/CTA/widget filtering, bootstrap fail-closed e isolamento A/B verificati. Invite, role change, suspend/reactivate/revoke/remove e last-owner guard sono implementati; accettazione con sessione Neon reale resta `NOT RUN`. |
 | W03 Commessa e Job Workspace | `RC2 — CLOSED LOCAL CORE` | Creazione manuale/Company AI, preventivo DOCX diviso, scope al sottogruppo, workspace, completion gate, eventi, readback e journey cross-modulo sono verificati localmente. Chiusura GA dipende dai gate provider di W09/W12/W16. |
-| W04 Planning | `RC2 — BASIC FLOW PASS / ADVANCED DEFERRED` | Piano tipizzato create/publish, date, versione, idempotenza e capability passano; capacity engine, conflitti, revisioni e what-if restano fase successiva. |
-| W05 Workforce e FIELD | `RC2 — BASIC FLOW PASS / PARTIAL` | Apertura/chiusura sessione field e richiesta materiali dalla commessa sono operative; attendance, GPS governato e offline field completo restano da certificare. |
-| W06 Assets e manutenzione | `CLOSED — Sites / PARTIAL external` | Registro e codifica Sites presenti; manutenzione e disponibilità reale da chiudere. |
-| W07 Materiali e Warehouse | `RC2 — CLOSED LOCAL CORE` | Anagrafiche, stock, reserve/release/pick/load/consume/return/adjust, millesimali, versioni, idempotenza, invarianti e ledger passano in runtime locale. Lotti/seriali e replenishment avanzato restano evolutivi. |
+| W04 Planning | `RC2.2 — LOCAL ADVANCED PASS / EXTERNAL DEFERRED` | Capacità, conflitti, qualifiche, revisioni, what-if e resource options readback sono implementati con D1, versioni, idempotenza e capability; executor/capacity provider esterni restano differiti. |
+| W05 Workforce e FIELD | `RC2.2 — LOCAL ATTENDANCE PASS / PARTIAL` | Check-in, pausa, ripresa, check-out, correzione/approvazione e GPS on-duty opzionale sono implementati; workforce registry esterno, tracking continuo e device/offline certification restano aperti. |
+| W06 Assets e manutenzione | `RC2.2 — LOCAL LIFECYCLE PASS / PARTIAL external` | Manutenzione, blocco, rilascio e guard di assegnabilità sono persistiti su D1 con eventi; telemetria, certificazioni e disponibilità canonica esterna restano da collegare. |
+| W07 Materiali e Warehouse | `RC2.2 — LOCAL CORE + REPLENISHMENT PROPOSAL` | Core inventario invariato e proposta replenishment `PROPOSAL_ONLY` aggiunta; lotti/seriali, procurement automatico e replenishment esecutivo restano evolutivi/esterni. |
 | W08 Mission e trasporti | `RC2 — CLOSED LOCAL CORE` | Create, dispatch, delivery/POD, collegamento commessa e guard di caricamento passano; routing/telematica provider-backed restano esterni. |
 | W09 Documents | `RC2 — STORAGE PASS / SECURITY GATE` | Upload R2 reale fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature, SHA-256, deduplica e download tenant-scoped passano. Malware scan, OCR e retention provider-backed restano bloccanti. |
 | W10 Finance e Procurement | `CLOSED — Sites / PARTIAL external` | Ledger/proposte bounded; accounting, PO e payment executor aperti. |
@@ -88,7 +88,7 @@ persona/input
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
-| W17 Release e GA | `RC2 TECHNICAL PASS / PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, RBAC UI+API, tenant isolation, journey, storage, visual QA, axe e restore passano. OpenAI live, malware scan, invito Neon reale e sign-off umano privacy/security/commerciale restano i quattro gate bloccanti. |
+| W17 Release e GA | `RC2.2 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract e hardening locale passano. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 

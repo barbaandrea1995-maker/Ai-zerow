@@ -29,6 +29,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 
 ## Current continuation
 
+- Commercial v1 RC2.2 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — codice `73417a7`, checkpoint `COMMERCIAL_V1_RC2_2_LOCAL_CHECKPOINT_2026-10-02.md`. Planning avanzato, resource-options, attendance/FIELD, asset lifecycle, workspace readback e replenishment proposal-only sono implementati e verificati localmente. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.1 checkpoint: **TECHNICAL PASS · PUBLISHED · COMMERCIAL NO-GO** — tag `commercial-v1-rc2-1-local-2026-10-02`, Sites version 84 e deployment riuscito (`appgdep_6abf3110bcb48191adf6a5b3fe432d84`). Il dossier è in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`. La promozione commerciale resta `NO-GO` fino a OpenAI live, malware scanner, accettazione invito Neon reale e sign-off umano.
 - Commercial v1 Command RC: **IMPLEMENTED · PUBLISHED · OWNER-ONLY** — superficie ultra-carbon ispirata al mockup approvato, foglia rimossa, core Z, 11 widget personali, reorder/show-hide/size, preferenze D1 tenant+actor scoped e migration `0010_command_dashboard_preferences.sql`. QA visuale desktop/PWA e personalizzatore superati con zero violazioni axe automatiche.
 - Commercial v1 RBAC: **IMPLEMENTED · RUNTIME PASS LOCALE** — menu desktop/mobile, widget, pagine, CTA e API applicano capability server-side; 14 route principali sono deny-by-default, Authority separa lettura da gestione, worker/auditor/owner rispettano la matrice e un'identita non censita non puo riaprire il bootstrap owner. Invite/role/suspend/reactivate/revoke/remove sono persistenti; il consumo invito con sessione Neon reale resta `NOT RUN`.
@@ -40,6 +41,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 - Commercial v1 D1 hardening: **PASS LOCALE ISOLATO** — migrazioni `0010` e `0011` applicate; upsert preferenze e incremento atomico quota Company AI riletti correttamente. Nella stessa finestra 6 intake passano e il 7° restituisce `429`; payload oltre soglia restituiscono `413`; selezione cross-tenant restituisce `403`.
 - Commercial v1 preventivo reale: **PASS LOCALE** — il DOCX EMS sulla perdita idrica viene estratto, suddiviso in 24 lavorazioni, classificato fino a `E-IDRICO-ADDUZIONE` e riletto in modo idempotente senza copiare l'intero preventivo in un solo campo.
 - Commercial v1 release: **PUBLISHED TECHNICAL RC2.1** — il deployment tecnico è riuscito; RC2.1 resta un candidato tecnico, non una certificazione commerciale finale. I log post-release non mostrano errori Worker negli ultimi 30 minuti osservati.
+- Commercial v1 RC2.2 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build verificata localmente e mantenuta fuori da Sites finché i gate esterni e umani non sono chiusi.
 
 - S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.
