@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -138,7 +138,30 @@ function assignmentRecord(jobId: string, assignment: NonNullable<JobPayload["ass
   };
 }
 
-function workspaceResponse(
+function journeyWorkspaceRecord(row: typeof jobJourneyRecords.$inferSelect) {
+  const payload = parsePayload(row.payloadJson);
+  const tone = row.status === "BLOCKED" || row.status === "CORRECTION_REQUESTED"
+    ? "amber" as const
+    : row.status === "COMPLETED" || row.status === "APPROVED" || row.status === "CLOSED"
+      ? "lime" as const
+      : "cyan" as const;
+  return {
+    id: row.id,
+    module: "operations" as const,
+    recordType: row.recordType.toLowerCase(),
+    title: row.title,
+    detail: typeof payload.notes === "string" ? payload.notes : `${row.domain} · ${row.status}`,
+    meta: row.updatedAt,
+    status: row.status,
+    tone,
+    progress: row.status === "PUBLISHED" || row.status === "APPROVED" || row.status === "CLOSED" ? 100 : 0,
+    payload,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+async function workspaceResponse(
   context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
   jobRow: typeof s04Records.$inferSelect,
   rows: (typeof s04Records.$inferSelect)[],
@@ -162,12 +185,21 @@ function workspaceResponse(
   };
   const jobVariants = new Set(keyVariants(requestedJobId));
   const related = relatedRecords(rows, jobVariants);
+  const journeyRows = await getDb().select().from(jobJourneyRecords).where(and(
+    eq(jobJourneyRecords.tenantId, context.tenantId),
+    eq(jobJourneyRecords.jobId, jobRow.id),
+  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+  const journeyRecords = journeyRows.map(journeyWorkspaceRecord);
+  const planningJourney = journeyRecords.filter((record) => record.recordType === "plan");
+  const attendanceJourney = journeyRecords.filter((record) => record.recordType === "attendance");
   const byModule = (module: string) => related.filter((record) => record.module === module);
   const planningRecords = [
     ...(assignment ? [assignment] : []),
+    ...planningJourney,
     ...byModule("workforce"),
     ...byModule("mission"),
   ];
+  const fieldRecords = [...evidence, ...attendanceJourney];
 
   return {
     context: publicAuthorityContext(context),
@@ -185,7 +217,7 @@ function workspaceResponse(
         planning: section(planningRecords.length ? "readback" : "empty", planningRecords),
         resources: section(byModule("assets").length ? "readback" : "empty", byModule("assets")),
         materials: section(byModule("warehouse").length ? "readback" : "empty", byModule("warehouse")),
-        field: section(evidence.length ? "readback" : "deferred", evidence),
+        field: section(fieldRecords.length ? "readback" : "deferred", fieldRecords),
         rapportino: section(payload.rapportino ? "readback" : "deferred", []),
         control: section("readback", []),
         evidence: section(evidence.length ? "readback" : "empty", evidence),
@@ -195,9 +227,9 @@ function workspaceResponse(
         { key: "activity", label: "Activity", status: activities.length ? "readback" : "empty" },
         { key: "planning", label: "Planning", status: planningRecords.length ? "readback" : "empty" },
         { key: "assignment", label: "Assignment", status: assignment ? "readback" : "empty" },
-        { key: "attendance", label: "Attendance", status: "deferred" },
+        { key: "attendance", label: "Attendance", status: attendanceJourney.length ? "readback" : "empty" },
         { key: "work-context", label: "Work context", status: "deferred" },
-        { key: "field", label: "Field", status: evidence.length ? "readback" : "deferred" },
+        { key: "field", label: "Field", status: fieldRecords.length ? "readback" : "deferred" },
         { key: "rapportino", label: "Rapportino", status: payload.rapportino ? "readback" : "deferred" },
         { key: "control", label: "Controllo", status: "readback" },
       ],
@@ -247,7 +279,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     if (!jobRow) {
       return Response.json({ error: "job_not_found", requestedJobId, readback: { status: "empty", scope: "tenant" } }, { status: 404 });
     }
-    return Response.json(workspaceResponse(context, jobRow, rows, requestedJobId), {
+    return Response.json(await workspaceResponse(context, jobRow, rows, requestedJobId), {
       headers: { "cache-control": "no-store" },
     });
   } catch {
@@ -300,7 +332,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         return Response.json({ error: "operations_idempotency_key_conflict" }, { status: 409 });
       }
       return Response.json({
-        ...workspaceResponse(context, jobRow, rows, requestedJobId),
+        ...(await workspaceResponse(context, jobRow, rows, requestedJobId)),
         idempotent: true,
         mutation: { action, eventId: existing[0].eventId, readback: "verified" },
       }, { headers: { "cache-control": "no-store" } });
@@ -538,7 +570,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
 
     const refreshed = await findJob(context, requestedJobId);
     return Response.json({
-      ...workspaceResponse(context, refreshed.jobRow ?? updated, refreshed.rows, requestedJobId),
+      ...(await workspaceResponse(context, refreshed.jobRow ?? updated, refreshed.rows, requestedJobId)),
       idempotent: false,
       mutation: { action, eventId, version: next.version, readback: "verified" },
     }, { headers: { "cache-control": "no-store" } });

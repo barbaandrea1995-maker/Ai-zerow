@@ -72,3 +72,21 @@ export function inventoryMovementForResponse(row: typeof inventoryMovements.$inf
     createdAt: row.createdAt,
   };
 }
+
+export function replenishmentProposalForItem(row: typeof inventoryItems.$inferSelect) {
+  const availableMilli = Math.max(0, row.onHandMilli - row.reservedMilli);
+  if (availableMilli >= row.minStockMilli || row.status === "ARCHIVED") return null;
+  const targetMilli = Math.max(row.minStockMilli * 2, row.minStockMilli + 1_000);
+  return {
+    itemId: row.id,
+    sku: row.sku,
+    name: row.name,
+    unit: row.unit,
+    location: row.location,
+    available: milliToQuantity(availableMilli),
+    minimum: milliToQuantity(row.minStockMilli),
+    suggestedQuantity: milliToQuantity(Math.max(0, targetMilli - availableMilli)),
+    status: "PROPOSAL_ONLY" as const,
+    reason: "available_below_minimum",
+  };
+}

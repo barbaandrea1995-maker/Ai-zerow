@@ -14,6 +14,7 @@ import {
   inventoryItemForResponse,
   inventoryMovementForResponse,
   quantityToMilli,
+  replenishmentProposalForItem,
   type InventoryMovementType,
 } from "@/lib/inventory-contract";
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
@@ -82,6 +83,7 @@ async function inventoryReadback(tenantId: string, filters: { itemId?: string; j
   return {
     items: items.map(inventoryItemForResponse),
     movements: movements.map(inventoryMovementForResponse),
+    replenishment: items.map(replenishmentProposalForItem).filter((item): item is NonNullable<typeof item> => Boolean(item)),
     summary: {
       itemCount: items.length,
       lowStockCount: items.filter((item) => itemStatus(item.onHandMilli, item.reservedMilli, item.minStockMilli) !== "ACTIVE").length,

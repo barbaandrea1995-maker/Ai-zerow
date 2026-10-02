@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import {
   Activity,
-  AlertTriangle,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
@@ -108,6 +107,15 @@ type OperationsJob = {
 
 type OperationsAdapterRecord = IntakeAdapterRecord;
 type OperationsAdapterResponse = IntakeCreateResponse;
+type PlanningOptionsResponse = {
+  options?: {
+    workforce?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
+    assets?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
+    unavailableAssets?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
+  };
+  existingPlans?: Array<{ id: string; status: string; version: number; title: string }>;
+  readback?: { status?: string };
+};
 
 const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
@@ -458,6 +466,40 @@ export default function OperationsPage() {
 
   const selectedJob =
     activeJobs.find((job) => job.id === selectedId) ?? emptyJob;
+  const [planningOptions, setPlanningOptions] =
+    useState<PlanningOptionsResponse | null>(null);
+  const [planningOptionsJobId, setPlanningOptionsJobId] = useState("");
+
+  useEffect(() => {
+    if (!planningOpen || selectedJob.id === "EMPTY") return;
+    let active = true;
+    const reference = encodeURIComponent(selectedJob.sourceId ?? selectedJob.id);
+    readback<PlanningOptionsResponse>(
+      `planning-options:${selectedJob.id}`,
+      `/api/operations/jobs/${reference}/planning/resource-options`,
+      { force: true },
+    )
+      .then((payload) => {
+        if (!active) return;
+        setPlanningOptions(payload);
+        setPlanningOptionsJobId(selectedJob.id);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPlanningOptions(null);
+        setPlanningOptionsJobId(selectedJob.id);
+      });
+    return () => {
+      active = false;
+    };
+  }, [planningOpen, selectedJob.id, selectedJob.sourceId]);
+  const planningOptionsStatus = !planningOpen
+    ? "idle"
+    : planningOptionsJobId !== selectedJob.id
+      ? "loading"
+      : planningOptions
+        ? "online"
+        : "error";
   const activeCount = activeJobs.filter(
     (job) => job.status === "In corso",
   ).length;
@@ -1008,7 +1050,11 @@ export default function OperationsPage() {
                     <Button
                       variant="outline"
                       className="h-9 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100"
-                      onClick={() => setPlanningOpen(true)}
+                      onClick={() => {
+                        setPlanningOptions(null);
+                        setPlanningOptionsJobId("");
+                        setPlanningOpen(true);
+                      }}
                     >
                       <CalendarClock className="size-3.5" />
                       Pianifica
@@ -1208,9 +1254,8 @@ export default function OperationsPage() {
               Pianificazione risorse
             </DialogTitle>
             <DialogDescription className="text-slate-500">
-              Vista locale per {selectedJob.id}. La verifica delle opzioni
-              risorsa sarà collegata a
-              /api/operations/jobs/[jobId]/planning/resource-options.
+              Readback risorse per {selectedJob.id}. Le scritture del piano
+              passano dal contratto planning versionato.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1228,18 +1273,21 @@ export default function OperationsPage() {
             <div className="carbon-inset flex items-center gap-3 rounded-xl p-3">
               <Truck className="size-4 text-cyan-200" />
               <div>
-                <p className="text-xs font-medium text-slate-200">
-                  Nessun asset selezionato
-                </p>
+                <p className="text-xs font-medium text-slate-200">Risorse disponibili</p>
                 <p className="text-[11px] text-slate-500">
-                  Le opzioni arrivano dal readback D1 della commessa.
+                  {planningOptionsStatus === "loading"
+                    ? "Lettura dal perimetro D1…"
+                    : planningOptionsStatus === "error"
+                      ? "Readback non disponibile"
+                      : `${planningOptions?.options?.workforce?.length ?? 0} persone/team · ${planningOptions?.options?.assets?.length ?? 0} asset assegnabili`}
                 </p>
               </div>
             </div>
-            <div className="flex items-start gap-2 rounded-xl border border-amber-300/20 bg-amber-300/5 p-3 text-[11px] leading-5 text-amber-100/80">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-200" />
-              Nessuna modifica verrà salvata: il dominio, le autorizzazioni e il
-              readback non sono ancora collegati.
+            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80">
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />
+              {planningOptionsStatus === "online"
+                ? `${planningOptions?.existingPlans?.length ?? 0} piani riletti. Conflitti, capacità, qualifiche e what-if sono gestiti dal nuovo contratto.`
+                : "Il readback resta tenant-scoped e non assegna automaticamente risorse."}
             </div>
           </div>
           <DialogFooter>

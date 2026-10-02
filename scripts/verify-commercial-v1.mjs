@@ -11,12 +11,24 @@ import {
   sanitizeCommandWidgetLayout,
 } from "../lib/command-dashboard.ts";
 import { RELEASE_BUILD_ID } from "../lib/release.ts";
+import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot } from "../lib/planning-contract.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
 assert.equal(new Set(COMMAND_WIDGET_CATALOG.map((widget) => widget.id)).size, COMMAND_WIDGET_CATALOG.length, "Widget IDs must be unique");
+
+const planningResource = normalizePlanningResource({ id: "team-alpha", kind: "team", label: "Team Alpha", capacity: 1, qualifications: ["idraulica"] });
+const planningSlot = normalizePlanningSlot({ id: "slot-a", startsAt: "2026-10-03T08:00:00Z", endsAt: "2026-10-03T12:00:00Z", resourceIds: ["team-alpha"], requiredQualifications: ["idraulica"] });
+assert(planningResource && planningSlot, "Planning fixtures must normalize");
+const planningPass = evaluatePlanning([planningSlot], [planningResource]);
+assert(planningPass.feasible, "A qualified resource must produce a feasible planning slot");
+const planningConflict = evaluatePlanning([
+  planningSlot,
+  { ...planningSlot, id: "slot-b", startsAt: "2026-10-03T10:00:00Z", endsAt: "2026-10-03T13:00:00Z" },
+], [planningResource]);
+assert(planningConflict.conflicts.some((conflict) => conflict.code === "RESOURCE_OVERLAP"), "Planning must detect overlapping resource usage");
 
 assert(ROLE_CAPABILITIES.owner.includes("tenant.manage"), "Owner must retain tenant management");
 assert(ROLE_CAPABILITIES.owner.includes("authority.manage"), "Owner must retain authority management");
@@ -161,6 +173,29 @@ const journeyRoute = await readFile(join(root, "app", "api", "operations", "jobs
 assert(journeyRoute.includes("ACTION_CAPABILITY"), "Journey actions must be capability-gated");
 assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
+
+const planningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
+assert(planningRoute.includes('hasCapability(context, "planning.write")'), "Advanced planning mutations must require planning.write");
+assert(planningRoute.includes('action === "what_if"'), "Planning must expose an isolated what-if path");
+assert(planningRoute.includes("planning_conflicts"), "Planning must reject unresolved capacity conflicts");
+assert(planningRoute.includes("planning.plan.revised"), "Planning must preserve revision events");
+const planningContract = await readFile(join(root, "lib", "planning-contract.ts"), "utf8");
+assert(planningContract.includes("QUALIFICATION_MISSING"), "Planning must validate resource qualifications");
+assert(planningContract.includes("CAPACITY_EXCEEDED"), "Planning must validate resource capacity");
+const planningOptionsRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "resource-options", "route.ts"), "utf8");
+assert(planningOptionsRoute.includes('hasCapability(context, "planning.read")'), "Planning resource options must require planning.read");
+assert(planningOptionsRoute.includes("unavailableAssets"), "Planning resource options must expose unavailable assets");
+
+const attendanceRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "attendance", "route.ts"), "utf8");
+assert(attendanceRoute.includes('tracking: "ON_DUTY_ONLY"'), "Attendance must declare on-duty tracking policy");
+assert(attendanceRoute.includes("correction_approve"), "Attendance must support governed corrections");
+assert(attendanceRoute.includes("idempotency_key_required"), "Attendance replay must require idempotency");
+assert(attendanceRoute.includes("4_DECIMAL_PLACES"), "Attendance location must be precision-limited");
+
+const assetLifecycleRoute = await readFile(join(root, "app", "api", "assets", "lifecycle", "route.ts"), "utf8");
+assert(assetLifecycleRoute.includes('hasCapability(context, "asset.write")'), "Asset lifecycle mutations must require asset.write");
+assert(assetLifecycleRoute.includes("invalid_asset_lifecycle_transition"), "Asset lifecycle must enforce state transitions");
+assert(assetLifecycleRoute.includes("availabilityGuard"), "Unavailable assets must be guarded from assignment");
 
 const documentRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "documents", "route.ts"), "utf8");
 assert(documentRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Document upload must enforce the 20 MB contract");
