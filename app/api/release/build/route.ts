@@ -13,6 +13,7 @@ export async function GET() {
     certification: "LOCAL_TECHNICAL_ONLY",
     commercialStatus: "NO_GO",
     promotionAllowed: false,
+    runtimePublication: "PUBLISHED_TECHNICAL_CANDIDATE",
     browserCertification: "NOT_RUN",
     externalWorker: "DEFERRED",
   }, { headers: { "cache-control": "public, max-age=60" } });

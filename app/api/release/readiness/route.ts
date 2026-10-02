@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
 import { getExternalSnapshot } from "@/lib/external-adapter";
-import { RELEASE_BUILD_ID, RELEASE_BUILD_LABEL, LAST_PUBLISHED_RUNTIME_STATUS, LAST_PUBLISHED_SITES_VERSION } from "@/lib/release";
+import { PREVIOUS_PUBLISHED_SITES_VERSION, RELEASE_BUILD_ID, RELEASE_BUILD_LABEL, RELEASE_PUBLICATION_STATUS } from "@/lib/release";
 import { buildReleaseGateCatalog, releaseOverallStatus } from "@/lib/release-readiness";
 import { buildSecurityControlCatalog } from "@/lib/security-governance";
 import { getS07Ledger } from "@/lib/s07-adapter";
@@ -68,9 +68,9 @@ export async function GET() {
     build: {
       id: RELEASE_BUILD_ID,
       label: RELEASE_BUILD_LABEL,
-      runtimePublication: "NOT_RUN",
-      lastPublishedSitesVersion: LAST_PUBLISHED_SITES_VERSION,
-      lastPublishedRuntimeStatus: LAST_PUBLISHED_RUNTIME_STATUS,
+      runtimePublication: RELEASE_PUBLICATION_STATUS,
+      previousPublishedSitesVersion: PREVIOUS_PUBLISHED_SITES_VERSION,
+      lastPublishedRuntimeStatus: "TECHNICAL_CANDIDATE_NO_GO",
     },
     authority: {
       role: context.role,
