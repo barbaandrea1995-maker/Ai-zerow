@@ -6,7 +6,7 @@ export async function GET() {
   return Response.json({
     buildId: RELEASE_BUILD_ID,
     buildLabel: RELEASE_BUILD_LABEL,
-    tranche: "S08",
+    tranche: "W10",
     source: "Sites",
     manifest: "/manifest.webmanifest",
     serviceWorker: "/sw.js",

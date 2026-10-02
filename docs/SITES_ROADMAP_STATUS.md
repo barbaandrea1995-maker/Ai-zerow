@@ -29,6 +29,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 
 ## Current continuation
 
+- Commercial v1 RC2.5 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-5-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_5_LOCAL_CHECKPOINT_2026-10-02.md`. Finance e Procurement ora hanno workflow persistenti, versioni, approval capability-gated, idempotenza, eventi, outbox e reconciliation; emissione PO, ricezione e contabilizzazione provider-backed restano esplicitamente bloccate. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.4 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — build ID `ai-zerow-commercial-v1-rc2-4-local-r2026-10-02`, checkpoint `COMMERCIAL_V1_RC2_4_LOCAL_CHECKPOINT_2026-10-02.md`. Events Authority e journey documenti espongono i controlli operativi; callback malware vincolato a SHA-256 e fixture outbox/document security sono verificati localmente. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.2 local hardening: **TECHNICAL PASS · NOT PUBLISHED · COMMERCIAL NO-GO** — codice `73417a7`, checkpoint `COMMERCIAL_V1_RC2_2_LOCAL_CHECKPOINT_2026-10-02.md`. Planning avanzato, resource-options, attendance/FIELD, asset lifecycle, workspace readback e replenishment proposal-only sono implementati e verificati localmente. Il runtime Sites resta v84/RC2.1.
 - Commercial v1 RC2.1 checkpoint: **TECHNICAL PASS · PUBLISHED · COMMERCIAL NO-GO** — tag `commercial-v1-rc2-1-local-2026-10-02`, Sites version 84 e deployment riuscito (`appgdep_6abf3110bcb48191adf6a5b3fe432d84`). Il dossier è in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`. La promozione commerciale resta `NO-GO` fino a OpenAI live, malware scanner, accettazione invito Neon reale e sign-off umano.
@@ -45,6 +46,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 - Commercial v1 RC2.2 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build verificata localmente e mantenuta fuori da Sites finché i gate esterni e umani non sono chiusi.
 - Commercial v1 RC2.3 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build verificata localmente; nessuna pubblicazione eseguita.
 - Commercial v1 RC2.4 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build verificata localmente; nessuna pubblicazione eseguita.
+- Commercial v1 RC2.5 release: **LOCAL CANDIDATE · NOT PUBLISHED** — build W10 verificata localmente; nessuna pubblicazione eseguita.
 
 - S01: **CLOSED · Sites native** — baseline, ownership and evidence policy locked.
 - S02: **CLOSED · Sites native** — server authority, tenant boundary, capability gate and D1 profile readback verified.

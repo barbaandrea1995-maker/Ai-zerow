@@ -14,6 +14,7 @@ import { RELEASE_BUILD_ID } from "../lib/release.ts";
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot } from "../lib/planning-contract.ts";
 import { documentCanDownload, transitionDocumentSecurity } from "../lib/document-security.ts";
 import { transitionOutbox } from "../lib/outbox-contract.ts";
+import { transitionW10Workflow, w10ExternalStatus, w10Progress } from "../lib/w10-contract.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -57,6 +58,17 @@ assert.throws(() => transitionDocumentSecurity({
   documentStatus: "AVAILABLE_UNSCANNED",
   action: "release",
 }), /document_release_requires_provider_clean/, "Manual release must not bypass provider evidence");
+
+const procurementReview = transitionW10Workflow({ module: "procurement", status: "REQUESTED", action: "submit_review" });
+assert.equal(procurementReview.nextStatus, "REVIEW", "Procurement must move into review before approval");
+const procurementApproval = transitionW10Workflow({ module: "procurement", status: "REVIEW", action: "approve" });
+assert(procurementApproval.requiresApproval, "Procurement approval must require approvals.review");
+const procurementExternalIssue = transitionW10Workflow({ module: "procurement", status: "PO_DRAFT", action: "external_issue" });
+assert(procurementExternalIssue.externalOnly, "Provider-backed PO issue must remain external-only");
+assert.equal(w10Progress("procurement", "PO_DRAFT"), 50, "Procurement progress must be derived from the governed state machine");
+assert.equal(w10ExternalStatus("PO_DRAFT"), "SITES_READY", "PO draft must remain a Sites-local state");
+assert.equal(w10ExternalStatus("PO_ISSUED"), "EXTERNAL_DEFERRED", "Provider-backed PO issue must remain visibly deferred");
+assert.throws(() => transitionW10Workflow({ module: "finance", status: "PROPOSED", action: "reconcile" }), /w10_invalid_transition/, "Finance must not skip review and approval");
 
 assert(ROLE_CAPABILITIES.owner.includes("tenant.manage"), "Owner must retain tenant management");
 assert(ROLE_CAPABILITIES.owner.includes("authority.manage"), "Owner must retain authority management");
@@ -123,6 +135,11 @@ for (const table of ["job_journey_records", "inventory_items", "inventory_moveme
 }
 assert(journeyMigration.includes("inventory_items_tenant_sku_uq"), "Inventory SKUs must be tenant-unique");
 assert(journeyMigration.includes("operational_documents_tenant_job_hash_uq"), "Documents must deduplicate by tenant, job and hash");
+
+const w10Migration = await readFile(join(root, "drizzle", "0014_w10_workflows.sql"), "utf8");
+assert(w10Migration.includes("CREATE TABLE `w10_workflows`"), "W10 must persist governed workflow records");
+assert(w10Migration.includes("w10_workflows_tenant_idempotency_uq"), "W10 workflow creation must be idempotent per tenant");
+assert(w10Migration.includes("w10_workflows_tenant_module_status_idx"), "W10 workflow status readback must be indexed");
 
 const rateLimitAdapter = await readFile(join(root, "lib", "ai-rate-limit.ts"), "utf8");
 assert(rateLimitAdapter.includes("requestCount} + 1"), "AI quota increments must be atomic");
@@ -255,15 +272,27 @@ const eventsControl = await readFile(join(root, "components", "events-control-pa
 assert(eventsControl.includes("/api/events/outbox"), "Events Authority must expose outbox controls");
 const journeyControl = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
 assert(journeyControl.includes("mutateDocumentSecurity"), "Job journey must expose document security controls");
+const w10Route = await readFile(join(root, "app", "api", "workflows", "[module]", "route.ts"), "utf8");
+assert(w10Route.includes("expectedVersion"), "W10 transitions must enforce optimistic versions");
+assert(w10Route.includes("approvals.review"), "W10 approval transitions must use the authority capability");
+assert(w10Route.includes("external_executor_deferred"), "W10 must not simulate provider-backed execution");
+assert(w10Route.includes("s06Outbox") && w10Route.includes("s06Reconciliations"), "W10 transitions must emit outbox and reconciliation readback");
+const w10Control = await readFile(join(root, "components", "w10-workflow-control.tsx"), "utf8");
+assert(w10Control.includes("/api/${module}/workflow"), "W10 UI must use the governed workflow endpoint");
+assert(w10Control.includes("externalActions"), "W10 UI must visibly hold provider-backed actions");
+for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
+  const source = await readFile(join(root, page), "utf8");
+  assert(source.includes("W10WorkflowControl"), `${page} must use the W10 governed surface`);
+}
 
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_4_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.4 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.4 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.4 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.4 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_5_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.5 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.5 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.5 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.5 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the RC2 build ID");
 
@@ -272,9 +301,9 @@ console.log(JSON.stringify({
   roles: AUTHORITY_ROLES.length,
   widgets: COMMAND_WIDGET_CATALOG.length,
   guardedRoutes: Object.keys(guardFiles).length,
-  migrations: 4,
+  migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
-  commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications"],
-  localHardening: ["openai_site_binding", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation"],
+  commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
+  localHardening: ["openai_site_binding", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

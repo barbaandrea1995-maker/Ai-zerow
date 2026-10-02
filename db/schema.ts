@@ -154,6 +154,38 @@ export const s05Records = sqliteTable("s05_records", {
 }));
 
 /**
+ * Sites-native W10 workflow records. These rows model the approval and
+ * reconciliation state without pretending to be the canonical accounting or
+ * supplier executor. Every transition is also written to the S06 event and
+ * outbox surfaces by the workflow route.
+ */
+export const w10Workflows = sqliteTable("w10_workflows", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  module: text("module").notNull(),
+  recordType: text("record_type").notNull(),
+  title: text("title").notNull(),
+  detail: text("detail").notNull(),
+  status: text("status").notNull(),
+  amountMilli: integer("amount_milli").notNull().default(0),
+  currency: text("currency").notNull().default("EUR"),
+  jobId: text("job_id"),
+  supplier: text("supplier").notNull().default(""),
+  linesJson: text("lines_json").notNull().default("[]"),
+  payloadJson: text("payload_json").notNull().default("{}"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("w10_workflows_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantModuleUpdatedIdx: index("w10_workflows_tenant_module_updated_idx").on(table.tenantId, table.module, table.updatedAt),
+  tenantModuleStatusIdx: index("w10_workflows_tenant_module_status_idx").on(table.tenantId, table.module, table.status, table.updatedAt),
+}));
+
+/**
  * Sites-side event store. The uniqueness indexes preserve the important
  * idempotency and aggregate-version invariants without pretending to be the
  * canonical external event service.

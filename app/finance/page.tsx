@@ -1,5 +1,5 @@
-import S05ModulePage from "@/components/s05-module-page";
+import W10WorkflowControl from "@/components/w10-workflow-control";
 
 export default function FinancePage() {
-  return <S05ModulePage module="finance" />;
+  return <W10WorkflowControl module="finance" />;
 }
