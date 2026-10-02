@@ -47,7 +47,7 @@ function readLocation(): Promise<{ lat: number; lon: number; accuracyM: number }
   });
 }
 
-export function AttendanceControl({ jobId }: { jobId: string }) {
+export function AttendanceControl({ jobId, onChanged }: { jobId: string; onChanged?: () => void | Promise<void> }) {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState<AttendanceAction | "">("");
@@ -98,6 +98,7 @@ export function AttendanceControl({ jobId }: { jobId: string }) {
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "attendance_write_failed");
       await refresh();
+      await onChanged?.();
       setNotice(location ? "Presenza registrata con posizione osservata." : "Presenza registrata. GPS non disponibile: la posizione resta assente.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Presenza non registrata");

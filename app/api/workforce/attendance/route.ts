@@ -85,7 +85,10 @@ export async function GET() {
         paused: records.filter((record) => record.status === "PAUSED").length,
         checkedOut: records.filter((record) => record.status === "CHECKED_OUT" || record.status === "APPROVED").length,
         geofenceInside: records.filter((record) => record.geofenceStatus === "INSIDE").length,
+        geofenceOutside: records.filter((record) => record.geofenceStatus === "OUTSIDE").length,
+        geofenceUncertain: records.filter((record) => record.geofenceStatus === "UNCERTAIN").length,
         gpsObserved: records.filter((record) => record.geofenceStatus !== "NO_LOCATION").length,
+        noLocation: records.filter((record) => record.geofenceStatus === "NO_LOCATION").length,
       },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
