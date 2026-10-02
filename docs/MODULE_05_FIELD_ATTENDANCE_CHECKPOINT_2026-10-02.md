@@ -3,7 +3,7 @@
 **Data:** 2 ottobre 2026  
 **Perimetro:** W05 / presenza operativa, timbratura e collegamento alla workspace FIELD  
 **Baseline visiva:** COMMAND ultra-carbon / neon lime  
-**Stato:** TECHNICAL PASS — PUBLISHED PRIVATELY · Sites version 96 · owner-only
+**Stato:** TECHNICAL PASS — PUBLISHED PRIVATELY · latest private Sites version verified · owner-only
 
 ## Decisione di dominio
 
@@ -52,5 +52,5 @@ Privacy/retention/DPIA, GPS continuo, provider map, offline queue/replay certifi
 ## Pubblicazione
 
 - Site: https://ai-zerow-command.barba-andrea-1995.chatgpt.site
-- Versione pubblicata: 96
+- Versione pubblicata: latest private Sites version verified after this checkpoint
 - Audience: custom owner-only invariata
