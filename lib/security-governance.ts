@@ -141,7 +141,7 @@ export function buildSecurityControlCatalog({
       label: "Sign-off commerciale",
       status: "PENDING_REVIEW",
       detail: "La readiness tecnica locale non equivale a certificazione commerciale o autorizzazione al deploy.",
-      evidence: "RC2.8 local candidate · promotion false",
+      evidence: "RC2.9 local candidate · promotion false",
       nextAction: "Chiudere tutti i gate esterni e ottenere approvazione esplicita",
     },
   ];

@@ -108,6 +108,7 @@ const guardFiles = {
   communications: "communication.read",
   events: "events.read",
   externals: "external_adapters.read",
+  release: "governance.read",
   onboarding: "authority.read",
   qr: "qr.read",
   settings: "settings.read",
@@ -225,6 +226,16 @@ assert(securityReadinessRoute.includes("MALWARE_SCAN_WEBHOOK_TOKEN") && security
 const securityPage = await readFile(join(root, "app", "governance", "security", "page.tsx"), "utf8");
 const securitySurface = await readFile(join(root, "components", "security-privacy-control.tsx"), "utf8");
 assert(securityPage.includes("SecurityPrivacyControl") && securitySurface.includes("/api/governance/security-readiness"), "W16 must have a readable security/privacy surface");
+const releaseReadinessRoute = await readFile(join(root, "app", "api", "release", "readiness", "route.ts"), "utf8");
+assert(releaseReadinessRoute.includes('hasCapability(context, "governance.read")') && releaseReadinessRoute.includes("buildReleaseGateCatalog"), "W17 release readiness must be tenant-scoped and capability-gated");
+assert(releaseReadinessRoute.includes('promotionAllowed: summary.promotionAllowed') && releaseReadinessRoute.includes('tranche: "W17"'), "W17 release readiness must expose the promotion boundary");
+const releaseContract = await readFile(join(root, "lib", "release-readiness.ts"), "utf8");
+assert(releaseContract.includes("openai-live") && releaseContract.includes("commercial-signoff") && releaseContract.includes("restore-rehearsal"), "W17 release contract must aggregate provider, human and restore gates");
+const releasePage = await readFile(join(root, "app", "release", "page.tsx"), "utf8");
+const releaseSurface = await readFile(join(root, "components", "release-certification-center.tsx"), "utf8");
+assert(releasePage.includes("ReleaseCertificationCenter") && releaseSurface.includes("/api/release/readiness") && releaseSurface.includes("COMMERCIAL NO-GO"), "W17 must have a readable release certification surface");
+const releaseBuildRoute = await readFile(join(root, "app", "api", "release", "build", "route.ts"), "utf8");
+assert(releaseBuildRoute.includes('tranche: "W17"') && releaseBuildRoute.includes('promotionAllowed: false') && releaseBuildRoute.includes('commercialStatus: "NO_GO"'), "Release identity must remain local and non-promotable");
 
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");
@@ -313,11 +324,12 @@ for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_8_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.8 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.8 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.8 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.8 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_9_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.9 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.9 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.9 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.9 must record the R2 restore rehearsal");
+assert.equal(releaseManifest.releaseCenter.tranche, "W17", "RC2.9 manifest must bind the W17 release center");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the current RC build ID");
 
@@ -329,6 +341,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));
