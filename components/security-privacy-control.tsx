@@ -95,7 +95,7 @@ export default function SecurityPrivacyControl() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const controls = data.controls ?? [];
+  const controls = useMemo(() => data.controls ?? [], [data.controls]);
   const filteredControls = useMemo(
     () => filter === "ALL" ? controls : controls.filter((control) => control.domain === filter),
     [controls, filter],
