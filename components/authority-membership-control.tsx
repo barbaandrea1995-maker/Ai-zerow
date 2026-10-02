@@ -206,7 +206,7 @@ export default function AuthorityMembershipControl({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Users className="size-4" /></span>
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1.</p></div>
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1. Il ruolo Autista abilita la risorsa missione dopo l’accettazione.</p></div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button className="h-9 border border-white/10 bg-black/25 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/[0.06]" onClick={() => void onRefresh()} type="button" variant="outline"><RefreshCw className="size-3.5" />Rileggi</Button>

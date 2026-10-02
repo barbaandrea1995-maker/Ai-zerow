@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  s04Records,
   s06Events,
   s06Outbox,
   s06Reconciliations,
@@ -16,6 +17,7 @@ import {
   normalizeAuthorityEmail,
 } from "@/lib/authority-lifecycle";
 import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
+import { allocateServerName } from "@/lib/server-naming";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +104,98 @@ export async function POST(request: Request) {
     const idempotencyKey = `authority:invitation:${invitation.id}:accept`;
     const aggregateType = "authority.invitation";
 
+    // Authority is the only registration path for a driver. Acceptance of a
+    // driver invitation provisions the operational resource once, so Mission
+    // can select it through the normal tenant-scoped availability readback.
+    const driverResourceId = `AUTH-DRIVER-${identity.actor.id}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
+    const [existingDriverResource] = membershipRole === "driver"
+      ? await db.select({ id: s04Records.id }).from(s04Records).where(and(
+        eq(s04Records.tenantId, invitation.tenantId),
+        eq(s04Records.id, driverResourceId),
+      )).limit(1)
+      : [];
+    const driverNaming = membershipRole === "driver" && !existingDriverResource
+      ? await allocateServerName({
+        tenantId: invitation.tenantId,
+        module: "workforce",
+        entityType: "driver",
+        description: identity.actor.name || normalizedIdentityEmail,
+      })
+      : null;
+    const driverEventId = driverNaming ? crypto.randomUUID() : null;
+    const driverAggregateType = "s04.workforce";
+    const driverStatements = driverNaming && driverEventId ? [
+      db.insert(s04Records).values({
+        id: driverResourceId,
+        tenantId: invitation.tenantId,
+        module: "workforce",
+        canonicalCode: driverNaming.canonicalCode,
+        recordType: "driver",
+        title: identity.actor.name || normalizedIdentityEmail,
+        detail: "Autista autorizzato da Authority",
+        meta: `AUTISTA · membership ${membershipId}`,
+        status: "AVAILABLE",
+        tone: "lime",
+        progress: 100,
+        payloadJson: JSON.stringify({
+          entityType: "driver",
+          resourceKind: "driver",
+          lifecycleStatus: "AVAILABLE",
+          authorityMembershipId: membershipId,
+          actorId: identity.actor.id,
+          actorEmail: normalizedIdentityEmail,
+          qualifications: [],
+          source: "authority-membership-acceptance",
+          createdAt: now,
+        }),
+        createdBy: identity.actor.id,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Events).values({
+        eventId: driverEventId,
+        tenantId: invitation.tenantId,
+        eventType: "workforce.driver.provisioned",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: identity.actor.id,
+        source: "neon-invitation",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: driverAggregateType,
+        aggregateId: driverResourceId,
+        aggregateVersion: 1,
+        payloadJson: JSON.stringify({ membershipId, canonicalCode: driverNaming.canonicalCode }),
+        correlationId: crypto.randomUUID(),
+        causationId: eventId,
+        idempotencyKey: `${idempotencyKey}:driver`,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: invitation.tenantId,
+        eventId: driverEventId,
+        topic: "zerow.workforce.driver.provisioned",
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: invitation.tenantId,
+        aggregateType: driverAggregateType,
+        aggregateId: driverResourceId,
+        expectedVersion: 1,
+        observedVersion: 1,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Risorsa driver provisionata da Authority e riletta nel registro workforce.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ] : [];
+
     const result = await db.batch([
       db.update(tenantInvitations).set({
         status: "accepted",
@@ -168,6 +262,7 @@ export async function POST(request: Request) {
         detail: "Invito accettato dalla sessione Neon con email corrispondente; membership D1 riletta.",
         createdAt: now, updatedAt: now,
       }),
+      ...driverStatements,
     ]);
 
     if (!(result[0] as (typeof tenantInvitations.$inferSelect)[])[0]) {

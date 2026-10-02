@@ -55,6 +55,17 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const denied = s04AccessDenied(context, moduleKey, "write");
   if (denied) return denied;
 
+  // Workforce identities and driver eligibility are Authority-owned. The
+  // generic S04 writer remains available for the other bounded registries,
+  // but it must never become a second user/driver onboarding path.
+  if (moduleKey === "workforce") {
+    return Response.json({
+      error: "workforce_registry_authority_only",
+      route: "/onboarding",
+      detail: "Invita la persona in Authority con il ruolo Autista o Operatore.",
+    }, { status: 409 });
+  }
+
   let payload: Record<string, unknown>;
   try {
     const parsed = (await request.json()) as unknown;
@@ -97,10 +108,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (moduleKey === "assets" && entityType && !["asset", "vehicle", "equipment"].includes(entityType)) {
     return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   }
-  if (moduleKey === "workforce" && entityType && !["driver", "operator", "supervisor"].includes(entityType)) {
-    return Response.json({ error: "unknown_workforce_entity_type" }, { status: 400 });
-  }
-
   try {
     assertS04Tenant(context!, context!.tenantId);
     const now = new Date().toISOString();
@@ -126,7 +133,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
     }
-    const naming = moduleKey === "operations" || moduleKey === "assets" || moduleKey === "warehouse" || moduleKey === "workforce"
+    const naming = moduleKey === "operations" || moduleKey === "assets" || moduleKey === "warehouse"
       ? await allocateServerName({
         tenantId: context!.tenantId,
         module: moduleKey,

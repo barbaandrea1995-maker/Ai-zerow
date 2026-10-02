@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  s04Records,
   s06Events,
   s06Outbox,
   s06Reconciliations,
@@ -17,6 +18,7 @@ import {
   membershipForResponse,
   normalizeAuthorityEmail,
 } from "@/lib/authority-lifecycle";
+import { allocateServerName } from "@/lib/server-naming";
 
 export const dynamic = "force-dynamic";
 
@@ -376,6 +378,74 @@ export async function PATCH(request: Request) {
 
     const nextVersion = target.version + 1;
     const aggregateType = "authority.membership";
+    const driverResourceId = `AUTH-DRIVER-${target.actorId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
+    const [driverResource] = target.role === "driver" || nextRole === "driver"
+      ? await db.select().from(s04Records).where(and(
+        eq(s04Records.tenantId, context.tenantId),
+        eq(s04Records.id, driverResourceId),
+      )).limit(1)
+      : [];
+    const driverAvailable = nextRole === "driver" && nextStatus === "active";
+    const driverStatus = driverAvailable ? "AVAILABLE" : nextRole === "driver" ? "SUSPENDED" : "INACTIVE";
+    const driverNaming = nextRole === "driver" && !driverResource
+      ? await allocateServerName({
+        tenantId: context.tenantId,
+        module: "workforce",
+        entityType: "driver",
+        description: target.displayName || target.actorEmail,
+      })
+      : null;
+    let driverPayload: JsonObject = {};
+    if (driverResource) {
+      try {
+        const parsed = JSON.parse(driverResource.payloadJson) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) driverPayload = parsed as JsonObject;
+      } catch {
+        driverPayload = {};
+      }
+    }
+    driverPayload = {
+      ...driverPayload,
+      entityType: "driver",
+      resourceKind: "driver",
+      lifecycleStatus: driverStatus,
+      authorityMembershipId: target.id,
+      actorId: target.actorId,
+      actorEmail: target.actorEmail,
+      source: "authority-membership-sync",
+      updatedAt: now,
+    };
+    const driverStatements = driverNaming
+      ? [db.insert(s04Records).values({
+        id: driverResourceId,
+        tenantId: context.tenantId,
+        module: "workforce",
+        canonicalCode: driverNaming.canonicalCode,
+        recordType: "driver",
+        title: target.displayName || target.actorEmail,
+        detail: "Autista autorizzato da Authority",
+        meta: `AUTISTA · membership ${target.id}`,
+        status: driverStatus,
+        tone: "lime",
+        progress: 100,
+        payloadJson: JSON.stringify(driverPayload),
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      })]
+      : driverResource
+        ? [db.update(s04Records).set({
+          title: target.displayName || target.actorEmail,
+          detail: "Autista autorizzato da Authority",
+          meta: `AUTISTA · membership ${target.id}`,
+          status: driverStatus,
+          payloadJson: JSON.stringify(driverPayload),
+          updatedAt: now,
+        }).where(and(
+          eq(s04Records.tenantId, context.tenantId),
+          eq(s04Records.id, driverResource.id),
+        ))]
+        : [];
     const result = await db.batch([
       db.update(tenantMemberships).set({
         role: nextRole,
@@ -403,6 +473,7 @@ export async function PATCH(request: Request) {
         payloadJson: JSON.stringify({
           before: { role: target.role, status: target.status, version: target.version },
           after: { role: nextRole, status: nextStatus, version: nextVersion },
+          resource: driverNaming || driverResource ? { id: driverResourceId, status: driverStatus } : null,
         }),
         correlationId: crypto.randomUUID(),
         causationId: null,
@@ -420,6 +491,7 @@ export async function PATCH(request: Request) {
         expectedVersion: nextVersion, observedVersion: nextVersion, status: "SITES_READBACK_VERIFIED",
         detail: "Membership aggiornata con optimistic version e readback tenant-scoped.", createdAt: now, updatedAt: now,
       }),
+      ...driverStatements,
     ]);
     if (!(result[0] as (typeof tenantMemberships.$inferSelect)[])[0]) {
       return Response.json({ error: "version_conflict" }, { status: 409 });

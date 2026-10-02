@@ -49,6 +49,10 @@ export async function GET() {
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
     ]);
     const jobById = new Map(jobs.map((job) => [job.id, job]));
+    const canSeeAllAttendance = hasCapability(context, "workforce.read.all")
+      || hasCapability(context, "workforce.manage")
+      || hasCapability(context, "attendance.read")
+      || hasCapability(context, "attendance.approve");
     const records = attendance.filter((row) => jobById.has(row.jobId)).map((row) => {
       const payload = parseJson(row.payloadJson);
       const job = jobById.get(row.jobId);
@@ -70,7 +74,7 @@ export async function GET() {
         geofenceStatus: recordLocationStatus(payload),
         updatedAt: row.updatedAt,
       };
-    });
+    }).filter((record) => canSeeAllAttendance || record.workerId === context.actorId);
     return Response.json({
       context: publicAuthorityContext(context),
       contract: { source: "sites-d1-workforce-attendance-readback", tracking: "ON_DUTY_ONLY", timestamp: "SERVER_AUTHORITY" },

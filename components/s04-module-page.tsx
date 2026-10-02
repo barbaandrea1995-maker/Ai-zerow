@@ -9,7 +9,6 @@ import {
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
-  CalendarClock,
   ChevronDown,
   ChevronRight,
   CircleGauge,
@@ -43,7 +42,7 @@ import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 
 const ServerNamingDialog = dynamic(() => import("@/components/server-naming-dialog").then((module) => module.ServerNamingDialog), { ssr: false });
 
-type ModuleKey = "workforce" | "warehouse" | "mission" | "assets";
+type ModuleKey = "warehouse" | "mission" | "assets";
 type Tone = "lime" | "cyan" | "amber" | "red";
 type RegisterMode = "readmodel" | "adapter";
 
@@ -140,28 +139,6 @@ const toneStyles: Record<Tone, { icon: string; badge: string; line: string; dot:
 };
 
 const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
-  workforce: {
-    code: "WORKFORCE",
-    eyebrow: "AI-ZEROW / WORK / WORKFORCE",
-    title: "Workforce control",
-    subtitle: "Presenze, turni e qualifiche · readback D1 tenant-scoped",
-    cta: "Registra autista",
-    registerTitle: "Registro workforce",
-    registerHint: "Autisti registrati, turni e qualifiche · Sites adapter / readback",
-    secondaryTitle: "Presidio operativo",
-    secondaryHint: "Copertura restituita dal readback D1",
-    metrics: [
-      { label: "Operatori attivi", value: "0", detail: "Nessun dato", icon: Users, tone: "lime" },
-      { label: "Turni oggi", value: "0", detail: "Nessun dato", icon: CalendarClock, tone: "cyan" },
-      { label: "Qualifiche valide", value: "0", detail: "Nessun dato", icon: ShieldCheck, tone: "lime" },
-      { label: "Presidi operativi", value: "0", detail: "Nessun dato", icon: HardHat, tone: "amber" },
-    ],
-    rows: [],
-    activities: [],
-    secondaryRows: [],
-    prompts: ["Chi è disponibile ora?", "Mostra turni scoperti", "Qualifiche in scadenza"],
-    assistantHint: "Risposte workforce disponibili quando l’adapter restituisce presenze e qualifiche.",
-  },
   warehouse: {
     code: "WAREHOUSE",
     eyebrow: "AI-ZEROW / SUPPLY / WAREHOUSE",
@@ -378,7 +355,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
   };
 
   const openCreate = () => {
-    if (module === "assets" || module === "warehouse" || module === "workforce") {
+    if (module === "assets" || module === "warehouse") {
       setCreateOpen(true);
       return;
     }
@@ -403,7 +380,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · {config.code} · S04 / D1 READBACK</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />Sites private · owner only · no domain mutation</span></div>
       </div>
     </section>
-  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : module === "workforce" ? "attendance" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{(module === "assets" || module === "warehouse" || module === "workforce") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
+  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{(module === "assets" || module === "warehouse") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
 }
 
 export default S04ModulePage;
