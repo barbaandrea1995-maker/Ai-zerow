@@ -1,11 +1,13 @@
 # AI-ZEROW COMMAND — Commercial v1 RC2 checkpoint
 
 **Data:** 2 ottobre 2026
-**Stato:** RELEASE CANDIDATE TECNICA LOCALE — NON PUBBLICATA
-**Decisione:** `NO-GO` alla promozione finché i gate provider e il sign-off umano non sono chiusi
+**Stato:** RELEASE CANDIDATE TECNICA PUBBLICATA — NON CERTIFICATA COMMERCIALE
+**Decisione:** `NO-GO` alla promozione commerciale finché i gate provider e il sign-off umano non sono chiusi
 **Baseline immutabile:** `baseline-ai-zerow-sites-v65-2026-10-01`
 **Checkpoint precedente:** `commercial-v1-rc1-local-2026-10-02` / `1de9c6dbf927ffe54772b022796ff8b64f349229`
 **Tag RC2:** `commercial-v1-rc2-local-2026-10-02`
+**Pubblicazione Sites:** versione `82` · deployment `appgdep_6abf28b8770881918615f4d8f81ff9c6` · stato `SUCCEEDED`
+**URL:** https://ai-zerow-command.barba-andrea-1995.chatgpt.site
 
 ## Perimetro congelato RC2
 
@@ -39,18 +41,18 @@
 | Documenti | PASS locale | DOCX 3.002.450 byte, R2 `STORED`, SHA-256 coerente; oversize `413`, firma falsa `415` |
 | Restore D1 | PASS locale | export e restore pulito: 19 tabelle e conteggi business identici |
 | Restore R2 | PASS locale | DOCX ripristinato con SHA-256 identico `aae80c…091b4` |
-| OpenAI live | NOT RUN | il secret esiste nel runtime Sites ma non è leggibile localmente; nessun deploy autorizzato |
+| OpenAI live | NOT RUN | il secret è presente nel runtime Sites ma non è leggibile; il deployment è riuscito, ma la chiamata live con sessione Neon autenticata non è ancora stata eseguita |
 | Malware scan | NOT RUN | stato esposto come `AVAILABLE_UNSCANNED`; nessun provider scanner configurato |
 | Invito Neon end-to-end | NOT RUN | richiede una sessione Neon e una mailbox/provider reali |
 | Privacy/security sign-off | PENDING HUMAN | DPIA, retention, termini, DPA e review manuale non possono essere auto-certificati |
 
 ## Verdetto
 
-RC2 è il primo candidato tecnico completo del verticale commerciale principale. Non viene dichiarato “certificato per la vendita” e non viene distribuito perché quattro gate esterni restano aperti:
+RC2 è il primo candidato tecnico pubblicato del verticale commerciale principale. Non viene dichiarato “certificato per la vendita”: quattro gate esterni restano aperti:
 
 1. prova OpenAI live con timeout, fallback e controllo costi;
 2. scanner malware provider-backed e policy di quarantena/retention;
 3. accettazione invito con sessione Neon reale;
 4. sign-off umano security, privacy e commerciale.
 
-Il repository è congelato su RC2; la promozione richiede un nuovo dossier che trasformi tutti e quattro i gate in `PASS` e un’approvazione umana esplicita. Nessun deploy è stato eseguito.
+Il repository e il deployment restano congelati su RC2; la promozione richiede un nuovo dossier che trasformi tutti e quattro i gate in `PASS` e un’approvazione umana esplicita. Il deployment tecnico è stato eseguito su richiesta, ma non equivale a una certificazione commerciale.

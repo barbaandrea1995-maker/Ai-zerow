@@ -2,7 +2,7 @@
   "schema": "ai_zerow_command.release_manifest/v1",
   "buildId": "ai-zerow-commercial-v1-rc2-local-r2026-10-02",
   "label": "COMMERCIAL-V1-RC2-LOCAL-R2026.10.02",
-  "status": "LOCAL_TECHNICAL_RELEASE_CANDIDATE_NOT_DEPLOYED",
+  "status": "PUBLISHED_TECHNICAL_RELEASE_CANDIDATE_NOT_COMMERCIAL_CERTIFIED",
   "source": {
     "tag": "commercial-v1-rc2-local-2026-10-02",
     "tagPolicy": "The annotated local tag resolves the exact RC2 checkpoint commit.",
@@ -39,7 +39,7 @@
     "documentUploadRuntime": "PASS_REAL_DOCX_R2",
     "d1RestoreRehearsal": "PASS_19_TABLES_MATCH",
     "r2RestoreRehearsal": "PASS_SHA256_MATCH",
-    "openAiLive": "NOT_RUN_NO_DEPLOY",
+    "openAiLive": "NOT_RUN_AUTHENTICATED_PRODUCTION_SESSION_REQUIRED",
     "neonInviteAcceptance": "NOT_RUN_PROVIDER_SESSION_REQUIRED",
     "privacySecuritySignoff": "PENDING_HUMAN"
   },
@@ -53,6 +53,14 @@
       "NEON_INVITE_ACCEPTANCE",
       "HUMAN_SECURITY_PRIVACY_COMMERCIAL_SIGNOFF"
     ]
+  },
+  "publication": {
+    "provider": "Sites",
+    "versionNumber": 82,
+    "deploymentId": "appgdep_6abf28b8770881918615f4d8f81ff9c6",
+    "status": "SUCCEEDED",
+    "audience": "custom_owner_only",
+    "url": "https://ai-zerow-command.barba-andrea-1995.chatgpt.site"
   },
   "rollback": {
     "lastKnownBaselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",

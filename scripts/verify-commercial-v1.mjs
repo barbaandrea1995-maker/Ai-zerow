@@ -98,11 +98,12 @@ assert(
 
 const pageAccess = await readFile(join(root, "lib", "page-access.ts"), "utf8");
 assert(
-  pageAccess.includes('identity.status !== "authenticated"') &&
-    pageAccess.includes('identity.status !== "not_configured"'),
+  pageAccess.includes('identity.status === "error"') &&
+    pageAccess.includes('context.identityProvider !== "neon"') &&
+    pageAccess.includes('context.identityProvider !== "sites"'),
   "Page access must fail closed on configured Neon auth failures",
 );
-assert(pageAccess.includes('context?.identityProvider !== "sites"'), "Sites page fallback must require a server-derived Sites identity");
+assert(pageAccess.includes('context.identityProvider !== "sites"'), "Sites page fallback must require a server-derived Sites identity");
 for (const page of ["app/page.tsx", "app/command/page.tsx", "app/settings/page.tsx"]) {
   const source = await readFile(join(root, page), "utf8");
   assert(source.includes("requirePage"), `${page} must use the shared fail-closed page gate`);

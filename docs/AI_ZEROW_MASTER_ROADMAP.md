@@ -5,7 +5,7 @@
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2 · locale · non pubblicato`, congelato dal tag `commercial-v1-rc2-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. Il deploy è bloccato fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2 · pubblicato tecnico · non certificato commerciale`, congelato dal tag `commercial-v1-rc2-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -83,12 +83,12 @@ persona/input
 | W09 Documents | `RC2 — STORAGE PASS / SECURITY GATE` | Upload R2 reale fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature, SHA-256, deduplica e download tenant-scoped passano. Malware scan, OCR e retention provider-backed restano bloccanti. |
 | W10 Finance e Procurement | `CLOSED — Sites / PARTIAL external` | Ledger/proposte bounded; accounting, PO e payment executor aperti. |
 | W11 Events, Outbox, Twin e Timeline | `PARTIAL` | Eventi/outbox/reconciliation Sites; consumer, Twin e worker persistenti da certificare. |
-| W12 AI, Tool Gateway e Approval | `IMPLEMENTED / LIVE GATE NOT RUN` | Intake e Command usano OpenAI Responses lato server con contesto capability-filtered, output strutturato, citation allowlist, quota D1 atomica, ledger e no-direct-write. Quota runtime 6/min → `429`, payload guard e preventivo DOCX reale sono verificati localmente. `OPENAI_API_KEY` e presente come secret nel runtime Sites; la chiamata live sul candidato non e ancora eseguibile senza pubblicarlo. |
+| W12 AI, Tool Gateway e Approval | `IMPLEMENTED / LIVE GATE NOT RUN` | Intake e Command usano OpenAI Responses lato server con contesto capability-filtered, output strutturato, citation allowlist, quota D1 atomica, ledger e no-direct-write. Quota runtime 6/min → `429`, payload guard e preventivo DOCX reale sono verificati localmente. `OPENAI_API_KEY` è presente come secret nel runtime Sites; il candidato è pubblicato, ma la chiamata live richiede una sessione Neon autenticata. |
 | W13 Communication, Voice, Telephony | `DEFERRED` | Contratti previsti; provider voice/SIP e policy operative da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
-| W17 Release e GA | `RC2 TECHNICAL PASS / NO-GO DEPLOY` | TypeScript, lint, build, contract, RBAC UI+API, tenant isolation, journey, storage, visual QA, axe e restore passano. OpenAI live, malware scan, invito Neon reale e sign-off umano privacy/security/commerciale restano i quattro gate bloccanti. |
+| W17 Release e GA | `RC2 TECHNICAL PASS / PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, RBAC UI+API, tenant isolation, journey, storage, visual QA, axe e restore passano. OpenAI live, malware scan, invito Neon reale e sign-off umano privacy/security/commerciale restano i quattro gate bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
