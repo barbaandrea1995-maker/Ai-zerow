@@ -1,13 +1,14 @@
 # AI-ZEROW COMMAND — Commercial v1 RC2.9 local checkpoint
 
 **Data:** 2 ottobre 2026  
-**Stato:** CANDIDATO TECNICO PUBBLICATO — NON CERTIFICATO COMMERCIALE
+**Stato:** EVIDENZA RUNTIME LOCALE SU BASE TECNICA PUBBLICATA — NON CERTIFICATO COMMERCIALE
 **Workstream:** W17 Release & Certification Center
 **Parent locale:** `commercial-v1-rc2-8-local-2026-10-02`
 **Runtime pubblicato:** Sites v86 owner-only, deployment `appgdep_6abf743f4e908191bc2297ec522864e6`
 **Build ID:** `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`
 **Commit codice pubblicato:** `f9a15b1a64f91cc8d7c18d764556466fd3618712`
-**Deploy:** eseguito tecnicamente; la promozione commerciale resta bloccata.
+**Checkpoint locale aggiuntivo:** tag `commercial-v1-rc2-9-runtime-smoke-2026-10-02`, commit `f8f5b6a`.
+**Deploy:** nessun nuovo deploy; la pubblicazione tecnica precedente resta v86 e la promozione commerciale resta bloccata.
 
 ## Chiusure locali aggiunte
 
@@ -17,6 +18,7 @@
 - Decisione unica `GO/NO_GO` con `promotionAllowed: false` finché ogni gate aperto non ha evidenza runtime o approvazione umana.
 - API build aggiornata a W17 e identità RC2.9 condivisa con service worker e manifest.
 - Runtime pubblicato su Sites v86 owner-only; il precedente tentativo v85 è stato superseded dalla pubblicazione corretta del readback RC2.9.
+- Aggiunto `pnpm verify:runtime`: smoke locale su auth redirect, API protette, manifest PWA, service worker e boundary `NO_GO`; lo stesso harness ha verificato sull’URL pubblicato il rifiuto edge owner-only non autenticato.
 
 ## Evidenza eseguita
 
@@ -29,6 +31,8 @@
 | W17 release readiness contract | PASS LOCALE; decisione NO-GO |
 | W12/W16 aggregation | PASS LOCALE; provider e human gates separati |
 | D1/R2 restore rehearsal | PASS_LOCAL |
+| Local runtime HTTP smoke | PASS_LOCAL; auth redirect, protected API fail-closed, PWA manifest/service worker binding and NO_GO release boundary |
+| Published Sites edge smoke | PASS_OWNER_ONLY_EDGE; unauthenticated production requests rejected by the owner-only boundary |
 | Browser/device certification | NOT RUN; harness browser/device non disponibile nel workspace |
 | Pubblicazione Sites | PASS_TECHNICAL_SITES_V86; audience owner-only |
 | Runtime live OpenAI | NOT RUN; richiede sessione autenticata e prova provider |
