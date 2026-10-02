@@ -3,7 +3,7 @@
 **Data:** 2 ottobre 2026  
 **Perimetro:** `PLANNING` / agenda operativa, attività, turni, risorse e pubblicazione  
 **Baseline visiva:** COMMAND ultra-carbon / neon lime  
-**Stato:** TECHNICAL PASS — tranche commerciale pronta per pubblicazione privata
+**Stato:** TECHNICAL PASS — PUBLISHED PRIVATELY · Sites version 93 · owner-only
 
 ## Decisione di dominio
 
@@ -44,6 +44,12 @@ La pubblicazione è consentita solo dopo il nuovo controllo server-side di dispo
 - Audit superficie: **PASS_WITH_EXTERNAL_GATES**; nessun endpoint irrisolto, nessun gap di navigazione, nessun pulsante Command attivo non collegato.
 - Smoke runtime locale: **NON RIPETIBILE IN QUESTA SESSIONE**; il container non consente la connessione alla porta locale (`EPERM`). Non viene dichiarata certificazione runtime browser.
 - `git diff --check`: **PASS**.
+
+## Pubblicazione
+
+- Site: [AI-ZEROW COMMAND](https://ai-zerow-command.barba-andrea-1995.chatgpt.site)
+- Versione pubblicata: **93**
+- Audience: **custom owner-only** invariata
 
 ## Gate ancora espliciti
 
