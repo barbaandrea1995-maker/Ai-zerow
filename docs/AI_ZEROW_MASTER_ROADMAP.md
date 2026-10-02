@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.6 — roadmap Pianificazione, Presenze, Trasporti e UI/UX commerciale su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 2.7 — W06 Asset Control su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `PTU-UX-02 · P0–P3 parziali verificati · moduli centrali attivi`, innestato su `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`. La roadmap dedicata è in `docs/ROADMAP_PLANNING_PRESENCE_TRANSPORT_COMMERCIAL_UX_2026-10-02.md`; il verbale è in `docs/AUDIT_CERTIFICATION_PTUX02_2026-10-02.md`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti fino ai gate P7/P8.
+**Checkpoint corrente:** W06 Asset Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_06_ASSET_CONTROL_CHECKPOINT_2026-10-02.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -77,7 +77,7 @@ persona/input
 | W03 Commessa e Job Workspace | `RC2 — CLOSED LOCAL CORE` | Creazione manuale/Company AI, preventivo DOCX diviso, scope al sottogruppo, workspace, completion gate, eventi, readback e journey cross-modulo sono verificati localmente. Chiusura GA dipende dai gate provider di W09/W12/W16. |
 | W04 Planning | `RC2.2 — LOCAL ADVANCED PASS / EXTERNAL DEFERRED` | Capacità, conflitti, qualifiche, revisioni, what-if e resource options readback sono implementati con D1, versioni, idempotenza e capability; executor/capacity provider esterni restano differiti. |
 | W05 Workforce e FIELD | `RC2.2 — LOCAL ATTENDANCE PASS / PARTIAL` | Check-in, pausa, ripresa, check-out, correzione/approvazione e GPS on-duty opzionale sono implementati; workforce registry esterno, tracking continuo e device/offline certification restano aperti. |
-| W06 Assets e manutenzione | `RC2.2 — LOCAL LIFECYCLE PASS / PARTIAL external` | Manutenzione, blocco, rilascio e guard di assegnabilità sono persistiti su D1 con eventi; telemetria, certificazioni e disponibilità canonica esterna restano da collegare. |
+| W06 Assets e manutenzione | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Registro tenant-scoped per asset, mezzi e attrezzature; registrazione tecnica, lifecycle, manutenzione, blocco/rilascio, guard di assegnabilità, eventi, outbox e reconciliation sono collegati nella superficie Command. Telemetria, certificazioni, provider GPS/mappe e documenti manutentivi esterni restano gate separati. |
 | W07 Materiali e Warehouse | `RC2.2 — LOCAL CORE + REPLENISHMENT PROPOSAL` | Core inventario invariato e proposta replenishment `PROPOSAL_ONLY` aggiunta; lotti/seriali, procurement automatico e replenishment esecutivo restano evolutivi/esterni. |
 | W08 Mission e trasporti | `RC2.3 — CLOSED LOCAL CORE / EXTERNAL DEFERRED` | Create, dispatch, delivery/POD, verifica POD, reconciliation e chiusura, collegamento commessa e guard di caricamento passano; routing/telematica provider-backed restano esterni. |
 | W09 Documents | `RC2.4 — STORAGE PASS / FAIL-CLOSED SECURITY GATE` | Upload R2 fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature e SHA-256 passano; UI di quarantena/revisione e callback provider vincolato all’hash sono contrattualizzati e il download resta bloccato senza evidenza CLEAN. OCR e retention provider-backed restano bloccanti. |

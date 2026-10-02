@@ -1,7 +1,7 @@
-import S04ModulePage from "@/components/s04-module-page";
+import AssetControl from "@/components/asset-control";
 import { requirePageCapability } from "@/lib/page-access";
 
 export default async function AssetsPage() {
   await requirePageCapability("asset.read");
-  return <S04ModulePage module="assets" />;
+  return <AssetControl />;
 }

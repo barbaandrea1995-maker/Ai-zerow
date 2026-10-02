@@ -5,6 +5,7 @@ import { Package, Send, Truck, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 type CreateModule = "assets" | "warehouse";
 type AssetType = "asset" | "vehicle" | "equipment";
@@ -32,6 +33,13 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
   const [description, setDescription] = useState("");
   const [assetType, setAssetType] = useState<AssetType>("asset");
   const [barcode, setBarcode] = useState("");
+  const [brand, setBrand] = useState("");
+  const [model, setModel] = useState("");
+  const [serialNumber, setSerialNumber] = useState("");
+  const [registration, setRegistration] = useState("");
+  const [location, setLocation] = useState("");
+  const [capacity, setCapacity] = useState("");
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -55,12 +63,21 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
           title: cleanDescription,
           detail: cleanDescription,
           meta: isWarehouse ? "Materiale da catalogare" : assetType === "vehicle" ? "Mezzo da catalogare" : assetType === "equipment" ? "Attrezzatura da catalogare" : "Asset da catalogare",
-          status: "OPERATIVO",
+          status: isWarehouse ? "OPERATIVO" : "AVAILABLE",
           tone: "lime",
           progress: 0,
           recordType: isWarehouse ? "inventory-item" : "asset-register",
           entityType: isWarehouse ? "material" : assetType,
           barcode: barcode.trim() || undefined,
+          brand: isWarehouse ? undefined : brand.trim() || undefined,
+          model: isWarehouse ? undefined : model.trim() || undefined,
+          serialNumber: isWarehouse ? undefined : serialNumber.trim() || undefined,
+          registration: isWarehouse ? undefined : registration.trim() || undefined,
+          location: isWarehouse ? undefined : location.trim() || undefined,
+          capacity: isWarehouse ? undefined : (capacity.trim() ? Number(capacity) : undefined),
+          notes: isWarehouse ? undefined : notes.trim() || undefined,
+          lifecycleStatus: isWarehouse ? undefined : "AVAILABLE",
+          availabilityGuard: isWarehouse ? undefined : "ASSIGNABLE",
           idempotencyKey: `s04-${module}-${crypto.randomUUID()}`,
         }),
       });
@@ -74,6 +91,13 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
       setDescription("");
       setBarcode("");
       setAssetType("asset");
+      setBrand("");
+      setModel("");
+      setSerialNumber("");
+      setRegistration("");
+      setLocation("");
+      setCapacity("");
+      setNotes("");
     } catch (caught) {
       setError(caught instanceof Error && caught.message === "canonical_code_conflict"
         ? "Questo barcode è già registrato nel tenant."
@@ -84,7 +108,7 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
   };
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
+    <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[680px]">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <DialogHeader>
         <DialogTitle className="text-slate-100">{isWarehouse ? "Registra materiale" : "Registra asset"}</DialogTitle>
@@ -92,7 +116,9 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
         </DialogHeader>
         {!isWarehouse && <label className="block space-y-2"><span className="text-xs text-slate-400">Tipologia</span><select aria-label="Tipologia asset" className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" value={assetType} onChange={(event) => setAssetType(event.target.value as AssetType)}>{assetTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>}
         <label className="block space-y-2"><span className="text-xs text-slate-400">Descrizione</span><Input autoFocus className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setDescription(event.target.value)} placeholder={isWarehouse ? "Es. Chiusini di ghisa da 50x50" : "Es. Furgone operativo o martello demolitore"} value={description} /></label>
+        {!isWarehouse && <div className="grid gap-4 sm:grid-cols-2"><label className="block space-y-2"><span className="text-xs text-slate-400">Marca <span className="text-slate-600">(opzionale)</span></span><Input className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setBrand(event.target.value)} placeholder="Es. Caterpillar" value={brand} /></label><label className="block space-y-2"><span className="text-xs text-slate-400">Modello <span className="text-slate-600">(opzionale)</span></span><Input className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setModel(event.target.value)} placeholder="Es. 302.7D" value={model} /></label><label className="block space-y-2"><span className="text-xs text-slate-400">Matricola / seriale</span><Input className="border-white/10 bg-black/30 font-mono text-slate-100" onChange={(event) => setSerialNumber(event.target.value)} placeholder="Identificativo tecnico" value={serialNumber} /></label><label className="block space-y-2"><span className="text-xs text-slate-400">Targa / identificativo</span><Input className="border-white/10 bg-black/30 font-mono text-slate-100" onChange={(event) => setRegistration(event.target.value)} placeholder="Targa o codice flotta" value={registration} /></label><label className="block space-y-2"><span className="text-xs text-slate-400">Sede / ubicazione</span><Input className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setLocation(event.target.value)} placeholder="Deposito, cantiere o sede" value={location} /></label><label className="block space-y-2"><span className="text-xs text-slate-400">Capacità nominale</span><Input className="border-white/10 bg-black/30 text-slate-100" min="0" onChange={(event) => setCapacity(event.target.value)} placeholder="Es. 1000" type="number" value={capacity} /></label></div>}
         <label className="block space-y-2"><span className="text-xs text-slate-400">Barcode <span className="text-slate-600">(opzionale)</span></span><Input className="border-white/10 bg-black/30 font-mono text-slate-100" onChange={(event) => setBarcode(event.target.value)} placeholder="Lascia vuoto per il codice automatico" value={barcode} /></label>
+        {!isWarehouse && <label className="block space-y-2"><span className="text-xs text-slate-400">Nota tecnica <span className="text-slate-600">(opzionale)</span></span><Textarea className="min-h-20 border-white/10 bg-black/30 text-slate-100" onChange={(event) => setNotes(event.target.value)} placeholder="Vincoli, certificazioni o note operative" value={notes} /></label>}
         {error && <p className="rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-[11px] text-rose-200">{error}</p>}
         <DialogFooter><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button type="submit" disabled={saving} className="bg-lime-300 text-[#060806] hover:bg-lime-200"><Send className="size-3.5" />{saving ? "Salvataggio…" : "Registra"}</Button></DialogFooter>
       </form>
