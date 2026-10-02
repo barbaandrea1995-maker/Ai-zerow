@@ -91,7 +91,7 @@ async function requestedJobId(routeContext: RouteContext) {
 
 async function findJob(tenantId: string, reference: string) {
   const db = getDb();
-  const base = and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "operations"));
+  const base = and(eq(s04Records.tenantId, tenantId), inArray(s04Records.module, ["operations", "mission"]));
   const [byId] = await db.select().from(s04Records)
     .where(and(base, eq(s04Records.id, reference))).limit(1);
   if (byId) return byId;

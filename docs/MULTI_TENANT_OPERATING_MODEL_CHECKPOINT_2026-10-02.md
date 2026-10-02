@@ -46,6 +46,8 @@ La creazione missione ora segue questa catena:
 
 Il testo libero `driver`/`vehicle` è rifiutato con `mission_free_text_resources_not_allowed`. Un conflitto restituisce `409 mission_resource_conflict`; un autista o mezzo mancante/non operativo non può essere assegnato. Il Bobcat, se rappresentato come asset cargo, è selezionabile come asset da consegnare e richiede comunque autista e mezzo reali.
 
+Per un tenant `TRANSPORT` o `WAREHOUSE_TRANSPORT` senza commesse Operations, la Command crea una missione autonoma: il server assegna il codice `MISS-0001`-style, crea il record trasporto e il relativo journey/event/outbox nello stesso commit D1. Se esistono commesse Operations, la stessa schermata propone il collegamento alla commessa reale.
+
 ## Riallineamento UI e navigazione
 
 - Rimossa la voce FIELD dalle sidebar legacy dove non esisteva una route autonoma.
@@ -61,9 +63,10 @@ Controlli eseguiti dopo l’allineamento:
 - `pnpm exec tsc --noEmit` — PASS
 - `pnpm lint` — PASS, 8 warning legacy `img`, 0 errori
 - `pnpm build` — PASS
-- `ZEROW_RUNTIME_URL=http://[::1]:5173 pnpm verify:runtime` — PASS su preview locale: auth redirect, API protette, release `NO_GO`, manifest PWA e service-worker binding
 - `pnpm verify:commercial` — PASS
 - `git diff --check` — PASS
+
+Lo smoke HTTP locale della tranche precedente era PASS; dopo l’aggiunta della missione autonoma il preview sandbox ha aperto il listener ma ha lasciato le richieste pendenti. Per questo l’evidenza runtime di questo ultimo commit resta `NOT_RUN_ENVIRONMENT_BLOCKED`, mentre build e contratti statici restano PASS.
 
 ## Gate ancora aperti
 
@@ -74,6 +77,6 @@ Questa tranche non chiude i gate esterni:
 - provider mappa e GPS browser non collegati;
 - malware scanner e consumer/executor esterni non certificati;
 - test Neon A/B, browser/device/PWA e sign-off security/privacy/commerciale non eseguiti;
-- smoke autenticato del nuovo flusso e certificazione browser/device non eseguiti; lo smoke locale copre il confine HTTP anonimo, non la sessione tenant autenticata.
+- smoke runtime ripetibile su questo ultimo commit, smoke autenticato del nuovo flusso e certificazione browser/device non eseguiti; il precedente smoke locale non viene riutilizzato come prova del commit corrente.
 
 **Decisione:** mantenere il deploy congelato e `promotionAllowed=false` finché questi gate non producono evidenza ripetibile.

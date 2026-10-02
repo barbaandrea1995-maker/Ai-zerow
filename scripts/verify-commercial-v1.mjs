@@ -285,6 +285,9 @@ assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery 
 assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
 assert(journeyRoute.includes("mission_reconcile"), "Mission journey must reconcile before close");
 assert(journeyRoute.includes("mission_close"), "Mission journey must expose a governed close state");
+const missionControlRoute = await readFile(join(root, "app", "api", "mission", "control", "route.ts"), "utf8");
+assert(missionControlRoute.includes('module: "mission"') && missionControlRoute.includes('source: "mission-standalone"') && missionControlRoute.includes("allocateServerName"), "Transport-only tenants must be able to create a server-named standalone mission");
+assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") && missionControlRoute.includes("assertMissionResourceSelection"), "Standalone mission creation must keep the same real-resource contract");
 
 const planningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
 assert(planningRoute.includes('hasCapability(context, "planning.write")'), "Advanced planning mutations must require planning.write");

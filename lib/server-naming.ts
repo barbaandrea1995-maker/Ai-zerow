@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { entityCodeCounters, s04Records } from "@/db/schema";
 
-export type NamingEntity = "commessa" | "asset" | "vehicle" | "equipment" | "material" | "driver";
+export type NamingEntity = "commessa" | "mission" | "asset" | "vehicle" | "equipment" | "material" | "driver";
 
 export type ServerNamingResult = {
   canonicalCode: string;
@@ -149,13 +149,15 @@ export async function allocateServerName({
   barcode,
 }: {
   tenantId: string;
-  module: "operations" | "assets" | "warehouse" | "workforce";
+  module: "operations" | "mission" | "assets" | "warehouse" | "workforce";
   entityType?: string;
   description: string;
   barcode?: string;
 }): Promise<ServerNamingResult | null> {
   const normalizedType: NamingEntity = module === "operations"
     ? "commessa"
+    : module === "mission"
+      ? "mission"
     : module === "warehouse"
       ? "material"
       : module === "workforce"
@@ -169,6 +171,7 @@ export async function allocateServerName({
 
   const config: Record<Exclude<NamingEntity, "material">, { namespace: string; prefix: string }> = {
     commessa: { namespace: "operations", prefix: "COMM" },
+    mission: { namespace: "missions", prefix: "MISS" },
     asset: { namespace: "assets", prefix: "ASSET" },
     vehicle: { namespace: "vehicles", prefix: "MEZZI" },
     equipment: { namespace: "equipment", prefix: "ATT" },

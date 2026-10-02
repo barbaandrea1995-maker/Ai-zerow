@@ -97,7 +97,7 @@ Questo passaggio è **implementato localmente, non deployato** e attraversa W02,
 - W02 ora persiste il profilo operativo del tenant (`operations`, `warehouse`, `transport`) e filtra le capability server-side per dominio; il selettore cross-tenant verifica sempre la membership D1.
 - W05 aggiunge la registrazione esplicita dell’autista nel registro Workforce; non basta più una stringa inserita nella missione.
 - W06 distingue asset cargo e mezzi tramite tipo esplicito; un asset non operativo non è assegnabile.
-- W08 espone un catalogo tenant-scoped di autisti, mezzi e asset, filtrato per lifecycle e finestra temporale; la missione salva solo ID verificati e snapshot storico.
+- W08 espone un catalogo tenant-scoped di autisti, mezzi e asset, filtrato per lifecycle e finestra temporale; la missione salva solo ID verificati e snapshot storico. I tenant Transport senza Operations possono creare un trasporto autonomo con codice server-side e journey completo; quando esistono commesse, il collegamento resta selezionabile.
 - W17 aggiunge gli assert statici di profilo, navigazione reale, risorse missione e icona ufficiale; le sidebar legacy non mostrano più FIELD senza route e gli eventi usano il gate corretto.
 
 Il dettaglio, le regole di errore e i gate aperti sono nel checkpoint `MULTI_TENANT_OPERATING_MODEL_CHECKPOINT_2026-10-02.md`. Questa tranche non chiude la roadmap commerciale: mantiene `NO_GO` finché non esistono prove runtime/provider e sign-off.
