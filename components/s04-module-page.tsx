@@ -19,7 +19,6 @@ import {
   Gauge,
   HardHat,
   Layers3,
-  Map as MapIcon,
   Menu,
   MessageSquareText,
   Package,
@@ -82,6 +81,7 @@ type AdapterRecord = {
 
 type AdapterResponse = {
   records?: AdapterRecord[];
+  context?: { capabilities?: string[] };
 };
 
 type ActivityRow = {
@@ -143,9 +143,9 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     eyebrow: "AI-ZEROW / WORK / WORKFORCE",
     title: "Workforce control",
     subtitle: "Presenze, turni e qualifiche · readback D1 tenant-scoped",
-    cta: "Nuovo turno",
+    cta: "Registra autista",
     registerTitle: "Registro workforce",
-    registerHint: "People, turni e qualifiche · Sites adapter / readback",
+    registerHint: "Autisti registrati, turni e qualifiche · Sites adapter / readback",
     secondaryTitle: "Presidio operativo",
     secondaryHint: "Copertura restituita dal readback D1",
     metrics: [
@@ -228,19 +228,18 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
   },
 };
 
-const navItems: { label: string; id: string; icon: LucideIcon }[] = [
-  { label: "CONTROL", id: "command", icon: MessageSquareText },
-  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness },
-  { label: "FIELD", id: "field", icon: MapIcon },
-  { label: "WORKFORCE", id: "workforce", icon: Users },
-  { label: "FINANCE", id: "finance", icon: Gauge },
-  { label: "ASSETS", id: "assets", icon: Package },
-  { label: "WAREHOUSE", id: "warehouse", icon: Layers3 },
-  { label: "MISSION", id: "mission", icon: Truck },
-  { label: "DOCUMENTS", id: "documents", icon: FileText },
-  { label: "QR / BARCODE", id: "qr", icon: QrCode },
-  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
-  { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge },
+const navItems: { label: string; id: string; icon: LucideIcon; capability: string }[] = [
+  { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
+  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
+  { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
+  { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
+  { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
+  { label: "WAREHOUSE", id: "warehouse", icon: Layers3, capability: "warehouse.read" },
+  { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
+  { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
+  { label: "QR / BARCODE", id: "qr", icon: QrCode, capability: "qr.read" },
+  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "events.read" },
+  { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
 ];
 
 const routes: Record<string, string> = {
@@ -253,7 +252,6 @@ const routes: Record<string, string> = {
   finance: "/finance",
   documents: "/documents",
   qr: "/qr",
-  governance: "/governance",
   events_authority: "/events",
   pwa: "/pwa/diagnostics",
 };
@@ -319,6 +317,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [adapterRows, setAdapterRows] = useState<RegisterRow[] | null>(null);
+  const [authorityCapabilities, setAuthorityCapabilities] = useState<string[] | null>(null);
   const [adapterStatus, setAdapterStatus] = useState<"loading" | "online" | "empty" | "error">("loading");
   const rows = useMemo(() => adapterRows ?? config.rows, [adapterRows, config.rows]);
   const selected = rows.find((row) => row.id === selectedId) ?? emptyRegisterRow;
@@ -330,6 +329,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
       .then((body) => {
         if (!active) return;
         const records = Array.isArray(body.records) ? body.records : [];
+        setAuthorityCapabilities(Array.isArray(body.context?.capabilities) ? body.context.capabilities : []);
         setAdapterRows(records.length ? rowsFromAdapter(records, config.rows) : []);
         setAdapterStatus(records.length ? "online" : "empty");
       })
@@ -350,6 +350,11 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
     return matchesQuery && matchesFilter;
   }), [rows, filter, query]);
 
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => authorityCapabilities === null ? item.id === module : authorityCapabilities.includes(item.capability)),
+    [authorityCapabilities, module],
+  );
+
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
@@ -365,7 +370,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
   };
 
   const openCreate = () => {
-    if (module === "assets" || module === "warehouse") {
+    if (module === "assets" || module === "warehouse" || module === "workforce") {
       setCreateOpen(true);
       return;
     }
@@ -376,7 +381,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
     <aside className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex items-center justify-between px-2"><button className="flex items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button"><span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><img src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" className="size-full object-cover" /></span><span><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span></button><button className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden" onClick={() => setMobileMenu(false)} type="button" aria-label="Chiudi menu"><X className="size-4" /></button></div>
       <button className="carbon-card mt-8 flex w-full items-center gap-3 rounded-xl p-3 text-left transition hover:border-lime-300/25" type="button" onClick={() => notify("Workspace ZEROW · contesto owner Sites")}><span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/10 text-lime-200"><HardHat className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] text-slate-600">owner · Sites tenant context</span></span><ChevronRight className="size-3.5 text-slate-600" /></button>
-      <nav className="mt-7 flex-1" aria-label="Navigazione principale"><p className="px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">Workspace</p><div className="mt-2 space-y-1">{navItems.map((item) => { const Icon = item.icon; const active = item.id === module; return <button aria-current={active ? "page" : undefined} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${active ? "border border-lime-300/20 bg-lime-300/10 text-lime-200 shadow-[inset_0_0_20px_rgba(190,255,60,0.04)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-100"}`} key={item.id} onClick={() => navigate(item.id, item.label)} type="button"><Icon className={`size-4 ${active ? "text-lime-200" : "text-slate-600 group-hover:text-slate-300"}`} /><span>{item.label}</span>{item.id === "command" && <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-slate-600">AI</span>}</button>; })}</div></nav>
+      <nav className="mt-7 flex-1" aria-label="Navigazione principale"><p className="px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">Workspace autorizzato</p><div className="mt-2 space-y-1">{visibleNavItems.map((item) => { const Icon = item.icon; const active = item.id === module; return <button aria-current={active ? "page" : undefined} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${active ? "border border-lime-300/20 bg-lime-300/10 text-lime-200 shadow-[inset_0_0_20px_rgba(190,255,60,0.04)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-100"}`} key={item.id} onClick={() => navigate(item.id, item.label)} type="button"><Icon className={`size-4 ${active ? "text-lime-200" : "text-slate-600 group-hover:text-slate-300"}`} /><span>{item.label}</span>{item.id === "command" && <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-slate-600">AI</span>}</button>; })}</div></nav>
       <div className="mt-5 border-t border-white/[0.08] pt-4"><div className="flex items-center justify-between px-2 text-[10px] uppercase tracking-[0.14em] text-slate-600"><span>System status</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />online</span></div><div className="carbon-inset mt-3 rounded-xl p-3"><div className="flex items-center gap-2 text-[10px] text-slate-400"><Activity className="size-3.5 text-lime-300" />{config.code.toLowerCase()} core</div><p className="mt-3 font-mono text-[9px] text-slate-600">{adapterOnline ? "S04 · D1 ADAPTER ONLINE" : "S04 · D1 READBACK EMPTY"}</p></div></div>
     </aside>
     {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
@@ -390,7 +395,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · {config.code} · S04 / D1 READBACK</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />Sites private · owner only · no domain mutation</span></div>
       </div>
     </section>
-  </div>{(module === "assets" || module === "warehouse") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
+  </div>{(module === "assets" || module === "warehouse" || module === "workforce") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
 }
 
 export default S04ModulePage;

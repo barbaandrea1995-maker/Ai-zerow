@@ -19,7 +19,6 @@ import {
   Gauge,
   HardHat,
   Layers3,
-  Map as MapIcon,
   Menu,
   MessageSquareText,
   Package,
@@ -120,7 +119,6 @@ type PlanningOptionsResponse = {
 const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
   { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
-  { label: "FIELD", id: "field", icon: MapIcon, capability: "field.read" },
   { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
   { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
@@ -128,7 +126,7 @@ const navItems = [
   { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
   { label: "QR / BARCODE", id: "qr", icon: QrCode, capability: "qr.read" },
-  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "authority.read" },
+  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "events.read" },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
 ];
 
@@ -560,12 +558,24 @@ export default function OperationsPage() {
       router.push("/mission");
       return;
     }
+    if (id === "finance") {
+      router.push("/finance");
+      return;
+    }
+    if (id === "documents") {
+      router.push("/documents");
+      return;
+    }
+    if (id === "pwa") {
+      router.push("/pwa/diagnostics");
+      return;
+    }
     if (id === "qr") {
       router.push("/qr");
       return;
     }
     if (id === "events_authority") {
-      router.push("/onboarding");
+      router.push("/events");
       return;
     }
     notify(`${label}: superficie prevista nel prossimo adapter`);
@@ -732,7 +742,7 @@ export default function OperationsPage() {
                 <p className="text-xs font-medium text-slate-200">
                   {ROLE_METADATA[authority.role].label}
                 </p>
-                <p className="text-[10px] text-slate-600">Tenant EMS</p>
+                <p className="text-[10px] text-slate-600">Tenant corrente</p>
               </div>
               <ChevronDown className="hidden size-3.5 text-slate-500 lg:block" />
             </div>

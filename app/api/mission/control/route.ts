@@ -21,10 +21,16 @@ export async function GET() {
   }
   try {
     const db = getDb();
-    const missions = await db.select().from(jobJourneyRecords).where(and(
+    const [missions, operationJobs] = await Promise.all([
+      db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.domain, "mission"),
-    )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
+      db.select().from(s04Records).where(and(
+        eq(s04Records.tenantId, context.tenantId),
+        eq(s04Records.module, "operations"),
+      )).orderBy(desc(s04Records.updatedAt)).limit(500),
+    ]);
     const jobIds = [...new Set(missions.map((mission) => mission.jobId))];
     const jobs = jobIds.length ? await db.select().from(s04Records).where(and(
       eq(s04Records.tenantId, context.tenantId),
@@ -48,8 +54,21 @@ export async function GET() {
         updatedAt: mission.updatedAt,
       };
     });
+    const jobView = (job: typeof s04Records.$inferSelect) => {
+      const jobPayload = parseJobPayload(job.payloadJson);
+      return {
+        id: job.id,
+        code: job.canonicalCode,
+        title: jobPayload?.title || job.title,
+        client: jobPayload?.clientName || jobPayload?.client || null,
+        location: jobPayload?.worksite || jobPayload?.location || null,
+        status: jobPayload?.statusCode || job.status,
+      };
+    };
+
     return Response.json({
       context: publicAuthorityContext(context),
+      jobs: operationJobs.filter((job) => job.recordType !== "adapter-contract").map(jobView),
       missions: records,
       summary: {
         total: records.length,

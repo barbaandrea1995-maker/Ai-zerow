@@ -13,6 +13,7 @@ import {
 import { getAuthorityContext, hasCapability, publicAuthorityContext, type AuthorityContext } from "@/lib/authority-context";
 import { documentCanDownload } from "@/lib/document-security";
 import { inventoryMovementForResponse, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
+import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
 
 export const dynamic = "force-dynamic";
@@ -286,6 +287,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (!hasCapability(context, capability)) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
+  if (action === "mission_create" && (!hasCapability(context, "workforce.registry.read") || !hasCapability(context, "asset.read"))) {
+    return Response.json({ error: "mission_resource_registry_access_required" }, { status: 403 });
+  }
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
   if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
@@ -296,6 +300,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (action === "mission_create" && job.recordType === "adapter-contract") {
+      return Response.json({ error: "operational_job_required" }, { status: 409 });
+    }
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
       eq(s06Events.idempotencyKey, idempotencyKey),
@@ -388,14 +395,47 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const pickup = boundedText(input.pickup, 240);
       const dropoff = boundedText(input.dropoff, 240);
       const plannedAt = boundedText(input.plannedAt, 40);
+      const plannedEndAtInput = boundedText(input.plannedEndAt, 40);
+      const driverId = boundedText(input.driverId, 120);
+      const vehicleId = boundedText(input.vehicleId, 120);
+      const cargoAssetId = boundedText(input.cargoAssetId, 120);
       if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
+      if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });
+      if (Object.prototype.hasOwnProperty.call(input, "driver") || Object.prototype.hasOwnProperty.call(input, "vehicle")) {
+        return Response.json({ error: "mission_free_text_resources_not_allowed" }, { status: 400 });
+      }
+      let resources: Awaited<ReturnType<typeof assertMissionResourceSelection>>;
+      try {
+        resources = await assertMissionResourceSelection({
+          tenantId: context.tenantId,
+          driverId,
+          vehicleId,
+          cargoAssetId: cargoAssetId || undefined,
+          plannedAt,
+          plannedEndAt: plannedEndAtInput || undefined,
+        });
+      } catch (error) {
+        if (error instanceof MissionResourceError) {
+          return Response.json({ error: error.code, details: error.details ?? null }, { status: error.code === "mission_resource_conflict" ? 409 : 400 });
+        }
+        throw error;
+      }
       status = "PLANNED";
       payload = {
         pickup,
         dropoff,
-        plannedAt,
-        vehicle: boundedText(input.vehicle, 160),
-        driver: boundedText(input.driver, 160),
+        plannedAt: resources.window.startsAt,
+        plannedEndAt: resources.window.endsAt,
+        driverId: resources.driver.id,
+        vehicleId: resources.vehicle.id,
+        cargoAssetId: resources.cargoAsset?.id ?? null,
+        resourceSnapshot: {
+          driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
+          vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },
+          cargoAsset: resources.cargoAsset
+            ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label }
+            : null,
+        },
         notes: boundedText(input.notes, 2_000),
       };
       eventType = "mission.transport.created";

@@ -30,7 +30,6 @@ import {
   KeyRound,
   LocateFixed,
   LockKeyhole,
-  Map as MapIcon,
   Menu,
   MessageSquareText,
   Navigation,
@@ -56,6 +55,7 @@ import AuthorityMembershipControl, {
   type AuthorityInvitationView,
   type AuthorityMembershipView,
 } from "@/components/authority-membership-control";
+import { TenantOperatingProfile } from "@/components/tenant-operating-profile";
 import {
   Dialog,
   DialogClose,
@@ -86,6 +86,8 @@ type AuthorityContextView = {
   environment: string;
   role: string;
   capabilities: string[];
+  operatingProfile: string;
+  operatingDomains: string[];
   resourceScope: string;
   fieldScope: string;
   fileScope: string;
@@ -269,14 +271,13 @@ const authorityKpis = [
 const navItems: Array<{ label: string; id: string; icon: LucideIcon; capability?: string }> = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
   { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
-  { label: "FIELD", id: "field", icon: MapIcon, capability: "field.read" },
   { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
   { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
   { label: "WAREHOUSE", id: "warehouse", icon: Package, capability: "warehouse.read" },
   { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
-  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck },
+  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "authority.read" },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
 ];
 
@@ -1256,7 +1257,7 @@ export default function OnboardingPage() {
   const [invitations, setInvitations] = useState<AuthorityInvitationView[]>([]);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const visibleNavItems = useMemo(
-    () => navItems.filter((item) => item.id === "events_authority" || Boolean(item.capability && authorityContext?.capabilities.includes(item.capability))),
+    () => navItems.filter((item) => Boolean(item.capability && authorityContext?.capabilities.includes(item.capability))),
     [authorityContext],
   );
 
@@ -1521,6 +1522,18 @@ export default function OnboardingPage() {
     }
     if (id === "mission") {
       router.push("/mission");
+      return;
+    }
+    if (id === "finance") {
+      router.push("/finance");
+      return;
+    }
+    if (id === "documents") {
+      router.push("/documents");
+      return;
+    }
+    if (id === "pwa") {
+      router.push("/pwa/diagnostics");
       return;
     }
     if (id === "events_authority") return;
@@ -1894,6 +1907,8 @@ export default function OnboardingPage() {
                 ))}
               </ol>
             </section>
+
+            <TenantOperatingProfile />
 
             <AuthorityMembershipControl
               canManage={canManageAuthority}

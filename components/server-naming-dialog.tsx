@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-type CreateModule = "assets" | "warehouse";
+type CreateModule = "assets" | "warehouse" | "workforce";
 type AssetType = "asset" | "vehicle" | "equipment";
 
 type ServerNamingDialogProps = {
@@ -36,6 +36,7 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
   const [error, setError] = useState("");
 
   const isWarehouse = module === "warehouse";
+  const isWorkforce = module === "workforce";
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -54,12 +55,14 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
         body: JSON.stringify({
           title: cleanDescription,
           detail: cleanDescription,
-          meta: isWarehouse ? "Materiale da catalogare" : assetType === "vehicle" ? "Mezzo da catalogare" : assetType === "equipment" ? "Attrezzatura da catalogare" : "Asset da catalogare",
-          status: "OPERATIVO",
+          meta: isWarehouse ? "Materiale da catalogare" : isWorkforce ? "Autista da abilitare" : assetType === "vehicle" ? "Mezzo da catalogare" : assetType === "equipment" ? "Attrezzatura da catalogare" : "Asset da catalogare",
+          status: isWorkforce ? "AVAILABLE" : "OPERATIVO",
+          lifecycleStatus: isWorkforce ? "AVAILABLE" : undefined,
           tone: "lime",
           progress: 0,
-          recordType: isWarehouse ? "inventory-item" : "asset-register",
-          entityType: isWarehouse ? "material" : assetType,
+          recordType: isWarehouse ? "inventory-item" : isWorkforce ? "driver" : "asset-register",
+          entityType: isWarehouse ? "material" : isWorkforce ? "driver" : assetType,
+          role: isWorkforce ? "driver" : undefined,
           barcode: barcode.trim() || undefined,
           idempotencyKey: `s04-${module}-${crypto.randomUUID()}`,
         }),
@@ -87,11 +90,11 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
     <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
       <form className="space-y-4" onSubmit={handleSubmit}>
         <DialogHeader>
-          <DialogTitle className="text-slate-100">{isWarehouse ? "Registra materiale" : "Registra asset"}</DialogTitle>
-          <DialogDescription className="text-slate-500">Il server assegna il codice canonico e lo conserva nel readback D1. Il barcode, se presente, resta invariato.</DialogDescription>
+        <DialogTitle className="text-slate-100">{isWarehouse ? "Registra materiale" : isWorkforce ? "Registra autista" : "Registra asset"}</DialogTitle>
+          <DialogDescription className="text-slate-500">Il server assegna il codice canonico e lo conserva nel readback D1. Solo le risorse registrate qui possono essere assegnate a una missione.</DialogDescription>
         </DialogHeader>
         {!isWarehouse && <label className="block space-y-2"><span className="text-xs text-slate-400">Tipologia</span><select aria-label="Tipologia asset" className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" value={assetType} onChange={(event) => setAssetType(event.target.value as AssetType)}>{assetTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>}
-        <label className="block space-y-2"><span className="text-xs text-slate-400">Descrizione</span><Input autoFocus className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setDescription(event.target.value)} placeholder={isWarehouse ? "Es. Chiusini di ghisa da 50x50" : "Es. Furgone operativo o martello demolitore"} value={description} /></label>
+        <label className="block space-y-2"><span className="text-xs text-slate-400">{isWorkforce ? "Nome e cognome" : "Descrizione"}</span><Input autoFocus className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setDescription(event.target.value)} placeholder={isWarehouse ? "Es. Chiusini di ghisa da 50x50" : isWorkforce ? "Es. Mario Rossi" : "Es. Furgone operativo o martello demolitore"} value={description} /></label>
         <label className="block space-y-2"><span className="text-xs text-slate-400">Barcode <span className="text-slate-600">(opzionale)</span></span><Input className="border-white/10 bg-black/30 font-mono text-slate-100" onChange={(event) => setBarcode(event.target.value)} placeholder="Lascia vuoto per il codice automatico" value={barcode} /></label>
         {error && <p className="rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-2 text-[11px] text-rose-200">{error}</p>}
         <DialogFooter><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button type="submit" disabled={saving} className="bg-lime-300 text-[#060806] hover:bg-lime-200"><Send className="size-3.5" />{saving ? "Salvataggio…" : "Registra"}</Button></DialogFooter>

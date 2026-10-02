@@ -46,6 +46,7 @@ import {
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 import { CommandHero } from "@/components/command-hero";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { OperationalMapBoard } from "@/components/operational-map-board";
 import {
   CommandPersonalizationBar,
@@ -582,6 +583,7 @@ export default function CommandSurface({
             <div className="relative hidden min-w-0 flex-1 md:block"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca in COMMAND" className="h-10 max-w-[520px] border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={search} /></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">COMMAND</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
+              <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />Live control</span>
               {access.allowedNavigation.includes("communications") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
               <AccountMenu actor={actor} />

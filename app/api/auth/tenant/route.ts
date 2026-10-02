@@ -18,6 +18,15 @@ function tenantView(row: AuthorityMembershipRow) {
     membershipId: row.membershipId,
     role: row.membershipRole,
     membershipStatus: row.membershipStatus,
+    operatingProfile: row.operatingProfile,
+    operatingDomains: (() => {
+      try {
+        const parsed = JSON.parse(row.operatingDomainsJson) as unknown;
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+      } catch {
+        return [];
+      }
+    })(),
   };
 }
 

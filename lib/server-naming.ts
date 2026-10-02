@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { entityCodeCounters, s04Records } from "@/db/schema";
 
-export type NamingEntity = "commessa" | "asset" | "vehicle" | "equipment" | "material";
+export type NamingEntity = "commessa" | "asset" | "vehicle" | "equipment" | "material" | "driver";
 
 export type ServerNamingResult = {
   canonicalCode: string;
@@ -149,7 +149,7 @@ export async function allocateServerName({
   barcode,
 }: {
   tenantId: string;
-  module: "operations" | "assets" | "warehouse";
+  module: "operations" | "assets" | "warehouse" | "workforce";
   entityType?: string;
   description: string;
   barcode?: string;
@@ -158,7 +158,9 @@ export async function allocateServerName({
     ? "commessa"
     : module === "warehouse"
       ? "material"
-      : entityType === "vehicle" || entityType === "equipment" ? entityType : "asset";
+      : module === "workforce"
+        ? "driver"
+        : entityType === "vehicle" || entityType === "equipment" ? entityType : "asset";
 
   if (normalizedType !== "commessa" && barcode) {
     if (await codeIsTaken(tenantId, module, barcode)) throw new CanonicalCodeConflictError();
@@ -170,6 +172,7 @@ export async function allocateServerName({
     asset: { namespace: "assets", prefix: "ASSET" },
     vehicle: { namespace: "vehicles", prefix: "MEZZI" },
     equipment: { namespace: "equipment", prefix: "ATT" },
+    driver: { namespace: "drivers", prefix: "DRV" },
   };
 
   if (normalizedType === "material") {

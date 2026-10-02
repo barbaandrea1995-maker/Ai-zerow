@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.3 — riallineamento Commercial v1 RC2.9-AUDIT-1 locale W17 Release & Certification
+**Versione roadmap:** 2.4 — riallineamento multi-tenant, profili operativi e mission resources su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-9-local-r2026-10-02`, commit `793f5e0` e tag `commercial-v1-rc2-9-full-audit-2026-10-02`, con parent locale `commercial-v1-rc2-8-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, pulsanti, PWA e integrazioni è registrato in `docs/COMMERCIAL_V1_RC2_9_FULL_AUDIT_CHECKPOINT_2026-10-02.md`. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
+**Checkpoint corrente:** `Commercial v1 RC2.9-AUDIT-1 · candidato tecnico locale · non certificato commerciale`, con riallineamento multi-tenant e mission resources registrato in `docs/MULTI_TENANT_OPERATING_MODEL_CHECKPOINT_2026-10-02.md`. La baseline v65 resta immutata; il runtime Sites è v86 owner-only. L’audit completo di route, API, capability, profili tenant, risorse missione, pulsanti, PWA e integrazioni resta locale e non pubblicato. Runtime HTTP locale e confine edge owner-only pubblicato passano; OpenAI live, GPS/provider mappa, browser/device, provider esterni e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -89,6 +89,18 @@ persona/input
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
 | W17 Release e GA | `RC2.9-AUDIT-1 — TECHNICAL PASS / COMMERCIAL NO-GO` | Audit completo route/API/capability/pulsanti e PWA aggiunto; Command attiva non ha controlli iconici non collegati e i path UI/API risolvono. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, GPS/provider mappa, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
+
+### Riallineamento trasversale 2.4 — multi-tenant e mission resources
+
+Questo passaggio è **implementato localmente, non deployato** e attraversa W02, W05, W06, W08 e W17:
+
+- W02 ora persiste il profilo operativo del tenant (`operations`, `warehouse`, `transport`) e filtra le capability server-side per dominio; il selettore cross-tenant verifica sempre la membership D1.
+- W05 aggiunge la registrazione esplicita dell’autista nel registro Workforce; non basta più una stringa inserita nella missione.
+- W06 distingue asset cargo e mezzi tramite tipo esplicito; un asset non operativo non è assegnabile.
+- W08 espone un catalogo tenant-scoped di autisti, mezzi e asset, filtrato per lifecycle e finestra temporale; la missione salva solo ID verificati e snapshot storico.
+- W17 aggiunge gli assert statici di profilo, navigazione reale, risorse missione e icona ufficiale; le sidebar legacy non mostrano più FIELD senza route e gli eventi usano il gate corretto.
+
+Il dettaglio, le regole di errore e i gate aperti sono nel checkpoint `MULTI_TENANT_OPERATING_MODEL_CHECKPOINT_2026-10-02.md`. Questa tranche non chiude la roadmap commerciale: mantiene `NO_GO` finché non esistono prove runtime/provider e sign-off.
 
 ## 5. Roadmap per fasi e moduli
 

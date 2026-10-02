@@ -1808,17 +1808,16 @@ select:focus-visible {
   box-shadow: 0 0 14px rgba(200, 255, 34, .72);
 }
 
-.zw-command-hero__z {
-  position: relative !important;
-  bottom: auto !important;
-  font-family: var(--font-sans) !important;
-  font-size: 3.55rem !important;
-  font-style: italic;
-  font-weight: 800 !important;
-  line-height: 1;
-  letter-spacing: -.14em !important;
-  text-shadow: 0 0 26px rgba(200, 255, 34, .56);
-  transform: translate(-3px, -5px) skewX(-9deg);
+.zw-command-hero__brand-core {
+  position: relative;
+  z-index: 1;
+  width: 76%;
+  height: 76%;
+  object-fit: cover;
+  border-radius: 22%;
+  opacity: .96;
+  filter: saturate(1.12) brightness(1.08) drop-shadow(0 0 22px rgba(200, 255, 34, .48));
+  box-shadow: 0 0 0 1px rgba(229, 255, 88, .28), 0 0 34px rgba(200, 255, 34, .38);
 }
 
 .zw-command-hero__core-label {
@@ -2007,7 +2006,7 @@ select:focus-visible {
     grid-template-columns: 1fr;
   }
   .zw-command-hero__orb { width: 98px; height: 98px; border-radius: 24px; }
-  .zw-command-hero__z { font-size: 2.8rem !important; }
+  .zw-command-hero__brand-core { border-radius: 20%; }
   .zw-command-hero__core-label { bottom: 12px !important; font-size: .4rem !important; }
   .zw-personalization-bar { align-items: flex-start; flex-direction: column; }
   .zw-personalization-bar > div:last-child { width: 100%; }

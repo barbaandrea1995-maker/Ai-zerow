@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowUpRight, BriefcaseBusiness, Plus, Radar, Sparkles } from "lucide-react";
 
 type CommandHeroProps = {
@@ -26,7 +27,7 @@ export function CommandHero({ onNewJob, recordCount, statusLabel }: CommandHeroP
         <div className="zw-command-hero__orbit zw-command-hero__orbit--outer" />
         <div className="zw-command-hero__orbit zw-command-hero__orbit--inner" />
         <div className="zw-command-hero__orb">
-          <span className="zw-command-hero__z">Z</span>
+          <Image src="/ai-zerow-icon.png" alt="" width={220} height={220} className="zw-command-hero__brand-core" priority />
           <span className="zw-command-hero__core-label">NEURAL CORE</span>
         </div>
         <span className="zw-command-hero__signal zw-command-hero__signal--one" />

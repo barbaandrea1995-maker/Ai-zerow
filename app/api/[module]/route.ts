@@ -97,6 +97,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (moduleKey === "assets" && entityType && !["asset", "vehicle", "equipment"].includes(entityType)) {
     return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   }
+  if (moduleKey === "workforce" && entityType && !["driver", "operator", "supervisor"].includes(entityType)) {
+    return Response.json({ error: "unknown_workforce_entity_type" }, { status: 400 });
+  }
 
   try {
     assertS04Tenant(context!, context!.tenantId);
@@ -123,7 +126,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
     }
-    const naming = moduleKey === "operations" || moduleKey === "assets" || moduleKey === "warehouse"
+    const naming = moduleKey === "operations" || moduleKey === "assets" || moduleKey === "warehouse" || moduleKey === "workforce"
       ? await allocateServerName({
         tenantId: context!.tenantId,
         module: moduleKey,

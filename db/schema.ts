@@ -11,12 +11,15 @@ export const tenants = sqliteTable("tenants", {
   slug: text("slug").notNull(),
   name: text("name").notNull(),
   status: text("status").notNull().default("active"),
+  operatingProfile: text("operating_profile").notNull().default("FULL_OPERATIONS"),
+  operatingDomainsJson: text("operating_domains_json").notNull().default('["operations","warehouse","transport"]'),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
   slugUnique: uniqueIndex("tenants_slug_uq").on(table.slug),
   statusIdx: index("tenants_status_idx").on(table.status),
+  operatingProfileIdx: index("tenants_operating_profile_idx").on(table.operatingProfile, table.status),
 }));
 
 /**

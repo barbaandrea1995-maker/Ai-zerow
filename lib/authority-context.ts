@@ -9,6 +9,15 @@ import {
   type AuthorityRole,
 } from "@/lib/authority-catalog";
 import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
+import {
+  DEFAULT_OPERATING_DOMAINS,
+  DEFAULT_OPERATING_PROFILE,
+  filterCapabilitiesForDomains,
+  isOperatingProfileId,
+  parseOperatingDomains,
+  type OperatingDomain,
+  type OperatingProfileId,
+} from "@/lib/tenant-operating-model";
 
 /**
  * The selected tenant is only a preference. Every request still verifies the
@@ -43,6 +52,8 @@ export type AuthorityContext = {
   environment: "sites-local-preview" | "sites-production";
   role: AuthorityRole;
   capabilities: string[];
+  operatingProfile: OperatingProfileId;
+  operatingDomains: OperatingDomain[];
   resourceScope: "tenant";
   fieldScope: "tenant";
   fileScope: "site" | "tenant";
@@ -64,6 +75,8 @@ export type AuthorityMembershipRow = {
   slug: string;
   name: string;
   tenantStatus: string;
+  operatingProfile: string;
+  operatingDomainsJson: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -122,6 +135,8 @@ async function queryMemberships(
       slug: tenants.slug,
       name: tenants.name,
       tenantStatus: tenants.status,
+      operatingProfile: tenants.operatingProfile,
+      operatingDomainsJson: tenants.operatingDomainsJson,
       createdBy: tenants.createdBy,
       createdAt: tenants.createdAt,
       updatedAt: tenants.updatedAt,
@@ -177,6 +192,11 @@ function contextFromRow(
 ): AuthorityContext | null {
   if (!isAuthorityRole(row.membershipRole)) return null;
 
+  const operatingProfile = isOperatingProfileId(row.operatingProfile)
+    ? row.operatingProfile
+    : DEFAULT_OPERATING_PROFILE;
+  const operatingDomains = parseOperatingDomains(row.operatingDomainsJson);
+
   const environment =
     process.env.NODE_ENV === "production"
       ? "sites-production"
@@ -191,7 +211,9 @@ function contextFromRow(
     tenantId: row.tenantId,
     environment,
     role: row.membershipRole,
-    capabilities: [...ROLE_CAPABILITIES[row.membershipRole]],
+    capabilities: filterCapabilitiesForDomains(ROLE_CAPABILITIES[row.membershipRole], operatingDomains),
+    operatingProfile,
+    operatingDomains,
     resourceScope: "tenant",
     fieldScope: "tenant",
     fileScope: identity.identityProvider === "sites" ? "site" : "tenant",
@@ -221,6 +243,8 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
     environment,
     role: "owner",
     capabilities: [...ROLE_CAPABILITIES.owner],
+    operatingProfile: DEFAULT_OPERATING_PROFILE,
+    operatingDomains: [...DEFAULT_OPERATING_DOMAINS],
     resourceScope: "tenant",
     fieldScope: "tenant",
     fileScope: "site",
@@ -315,6 +339,8 @@ export function publicAuthorityContext(context: AuthorityContext) {
     environment: context.environment,
     role: context.role,
     capabilities: context.capabilities,
+    operatingProfile: context.operatingProfile,
+    operatingDomains: context.operatingDomains,
     resourceScope: context.resourceScope,
     fieldScope: context.fieldScope,
     fileScope: context.fileScope,

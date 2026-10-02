@@ -15,6 +15,10 @@ import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot } fr
 import { documentCanDownload, transitionDocumentSecurity } from "../lib/document-security.ts";
 import { transitionOutbox } from "../lib/outbox-contract.ts";
 import { transitionW10Workflow, w10ExternalStatus, w10Progress } from "../lib/w10-contract.ts";
+import {
+  OPERATING_PROFILE_CATALOG,
+  filterCapabilitiesForDomains,
+} from "../lib/tenant-operating-model.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -87,6 +91,17 @@ assert(ROLE_CAPABILITIES.warehouse_operator.includes("warehouse.write"), "Wareho
 assert(!ROLE_CAPABILITIES.warehouse_operator.includes("finance.read"), "Warehouse operator must not inherit finance visibility");
 assert(ROLE_CAPABILITIES.worker.includes("warehouse.request"), "Field workers must be able to request materials");
 assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers must not mutate stock balances");
+
+for (const profile of ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
+  assert(OPERATING_PROFILE_CATALOG[profile]?.domains?.length, `${profile} must declare at least one operating domain`);
+}
+const warehouseOnlyCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["warehouse"]);
+assert(warehouseOnlyCapabilities.includes("warehouse.read"), "Warehouse-only tenants must retain warehouse visibility");
+assert(!warehouseOnlyCapabilities.includes("mission.read"), "Warehouse-only tenants must not inherit mission visibility");
+assert(!warehouseOnlyCapabilities.includes("asset.read"), "Warehouse-only tenants must not inherit transport asset visibility");
+const transportCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["transport"]);
+assert(transportCapabilities.includes("mission.read") && transportCapabilities.includes("workforce.read"), "Transport tenants must retain mission and workforce visibility");
+assert(!transportCapabilities.includes("warehouse.read"), "Transport-only tenants must not inherit warehouse visibility");
 
 const workerNavigation = getAllowedCommandNavigation(ROLE_CAPABILITIES.worker).map((item) => item.id);
 assert(!workerNavigation.includes("command"), "Worker navigation must hide Command");
@@ -261,6 +276,10 @@ assert(inventoryRoute.includes("mission_not_loadable"), "Material loading must r
 
 const journeyRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "journey", "route.ts"), "utf8");
 assert(journeyRoute.includes("ACTION_CAPABILITY"), "Journey actions must be capability-gated");
+assert(journeyRoute.includes("driverId") && journeyRoute.includes("vehicleId"), "Mission creation must use real driver and vehicle IDs");
+assert(journeyRoute.includes("mission_free_text_resources_not_allowed"), "Mission creation must reject free-text resources");
+assert(journeyRoute.includes("assertMissionResourceSelection"), "Mission creation must validate resource lifecycle and time-window availability");
+assert(journeyRoute.includes("mission_resource_conflict"), "Mission creation must expose resource conflict readback");
 assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
 assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
@@ -289,6 +308,19 @@ const assetLifecycleRoute = await readFile(join(root, "app", "api", "assets", "l
 assert(assetLifecycleRoute.includes('hasCapability(context, "asset.write")'), "Asset lifecycle mutations must require asset.write");
 assert(assetLifecycleRoute.includes("invalid_asset_lifecycle_transition"), "Asset lifecycle must enforce state transitions");
 assert(assetLifecycleRoute.includes("availabilityGuard"), "Unavailable assets must be guarded from assignment");
+const tenantOperatingModel = await readFile(join(root, "lib", "tenant-operating-model.ts"), "utf8");
+assert(tenantOperatingModel.includes("OPERATING_PROFILE_CATALOG") && tenantOperatingModel.includes("filterCapabilitiesForDomains"), "Tenant onboarding must declare profile-to-domain capability filtering");
+const tenantProfileRoute = await readFile(join(root, "app", "api", "tenants", "profile", "route.ts"), "utf8");
+assert(tenantProfileRoute.includes('hasCapability(context, "tenant.manage")') && tenantProfileRoute.includes("operatingProfile"), "Tenant onboarding profile must be capability-gated and persisted");
+const missionResourceContract = await readFile(join(root, "lib", "mission-resources.ts"), "utf8");
+assert(missionResourceContract.includes("activeAssignments") && missionResourceContract.includes("normalizedMissionWindow"), "Mission resource registry must evaluate tenant-scoped time-window conflicts");
+const missionResourceRoute = await readFile(join(root, "app", "api", "mission", "resources", "route.ts"), "utf8");
+assert(missionResourceRoute.includes("server_validated_ids_only") && missionResourceRoute.includes("tenant_scoped_lifecycle_and_time_window"), "Mission resource options must expose the server validation contract");
+const missionResourceFields = await readFile(join(root, "components", "mission-resource-fields.tsx"), "utf8");
+assert(missionResourceFields.includes("/api/mission/resources") && missionResourceFields.includes('name="driverId"') && missionResourceFields.includes('name="vehicleId"'), "Mission UI must select registered driver and vehicle IDs");
+assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
+const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
+assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");
 
 const documentRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "documents", "route.ts"), "utf8");
 assert(documentRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Document upload must enforce the 20 MB contract");

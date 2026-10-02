@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4d69571f-cd15-4f75-a20d-a7c31bfc4f18",
-  "prevId": "c6296dc6-9b42-48b1-9439-61efcc40578f",
+  "id": "afa807c8-fae2-41b0-9e32-43187431d16c",
+  "prevId": "4d69571f-cd15-4f75-a20d-a7c31bfc4f18",
   "tables": {
     "access_profiles": {
       "name": "access_profiles",
@@ -2242,6 +2242,22 @@
           "autoincrement": false,
           "default": "'active'"
         },
+        "operating_profile": {
+          "name": "operating_profile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'FULL_OPERATIONS'"
+        },
+        "operating_domains_json": {
+          "name": "operating_domains_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[\"operations\",\"warehouse\",\"transport\"]'"
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -2277,6 +2293,14 @@
         "tenants_status_idx": {
           "name": "tenants_status_idx",
           "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "tenants_operating_profile_idx": {
+          "name": "tenants_operating_profile_idx",
+          "columns": [
+            "operating_profile",
             "status"
           ],
           "isUnique": false
