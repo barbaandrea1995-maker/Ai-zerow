@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import {
   COMPANY_AI_SCOPE_TAXONOMY,
   resolveCompanyAiScopeSelection,
@@ -8,6 +9,13 @@ import {
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const MAX_MODEL_SOURCE_CHARS = 48_000;
+
+function runtimeSecret(name: "OPENAI_API_KEY" | "OPENAI_MODEL") {
+  const bound = (env as unknown as Record<string, unknown>)[name];
+  if (typeof bound === "string" && bound.trim()) return bound.trim();
+  const local = process.env[name];
+  return typeof local === "string" ? local.trim() : "";
+}
 
 export type CompanyAiOpenAiExtraction = {
   title: string;
@@ -269,8 +277,8 @@ export async function analyzeCompanyAiWithOpenAi({
   knowledgePack: unknown;
   knowledgeHints: unknown[];
 }): Promise<CompanyAiOpenAiOutcome> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const model = process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
+  const apiKey = runtimeSecret("OPENAI_API_KEY");
+  const model = runtimeSecret("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL;
   if (!apiKey) return { result: null, status: "not_configured", model };
 
   const controller = new AbortController();
@@ -366,8 +374,8 @@ export async function askCompanyAiWithOpenAi({
   operationalContext: unknown[];
   knowledgeContext: unknown[];
 }): Promise<CompanyAiCommandOutcome> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const model = process.env.OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL;
+  const apiKey = runtimeSecret("OPENAI_API_KEY");
+  const model = runtimeSecret("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL;
   if (!apiKey) return { result: null, status: "not_configured", model };
 
   const systemPrompt = [

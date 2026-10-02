@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, Network, Plus, Search, Send, Settings2, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";
+import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, MessageSquare, Network, Plus, Search, Send, Settings2, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { invalidateReadback, readback } from "@/lib/client-readback";
 
-type ModuleKey = "documents" | "finance" | "procurement" | "governance";
+type ModuleKey = "documents" | "finance" | "procurement" | "governance" | "communications";
 type Tone = "lime" | "cyan" | "amber" | "red";
 type RecordItem = { id: string; recordType: string; title: string; detail: string; meta: string; status: string; tone: Tone; progress: number; createdAt: string; updatedAt: string };
 type ApiResponse = { records?: RecordItem[]; readback?: { count?: number }; contract?: { canonicalAdapter?: string }; error?: string };
@@ -17,6 +17,7 @@ const configs: Record<ModuleKey, { code: string; title: string; subtitle: string
   finance: { code: "FINANCE", title: "Finance control", subtitle: "Movimenti, costi e forecast · S05 Sites adapter", icon: CircleDollarSign, cta: "Nuova voce", prompts: ["Mostra costi aperti", "Prepara forecast mensile", "Verifica scostamenti"], description: "Read/write bounded per voci e proposte; contabilità canonica esterna differita." },
   procurement: { code: "PROCUREMENT", title: "Procurement control", subtitle: "Purchase order e approvazioni · S05 Sites adapter", icon: ShoppingCart, cta: "Nuova richiesta", prompts: ["Crea richiesta acquisto", "Mostra ordini in approvazione", "Confronta fornitori"], description: "Ogni richiesta è una proposta append-only; l’esecuzione d’ordine richiede adapter esterno." },
   governance: { code: "GOVERNANCE", title: "Governance control", subtitle: "Workflow, policy e audit · S05 Sites adapter", icon: ShieldCheck, cta: "Nuovo workflow", prompts: ["Verifica policy attive", "Apri workflow approvazione", "Mostra audit recente"], description: "Workflow e decisioni sono registrati nel tenant Sites; policy canoniche esterne differite." },
+  communications: { code: "COMMUNICATIONS", title: "Communications control", subtitle: "Messaggi operativi, ack e briefing · S05 Sites adapter", icon: MessageSquare, cta: "Nuovo messaggio", prompts: ["Prepara briefing turno", "Invia avviso al team", "Mostra acknowledgment aperti"], description: "Messaggi e proposte sono tenant-scoped e append-only; delivery provider e telephony restano separati." },
 };
 
 const nav: Array<{ label: string; href: string; icon: LucideIcon }> = [
@@ -27,6 +28,7 @@ const nav: Array<{ label: string; href: string; icon: LucideIcon }> = [
   { label: "PROCUREMENT", href: "/procurement", icon: ShoppingCart },
   { label: "DOCUMENTS", href: "/documents", icon: FileText },
   { label: "GOVERNANCE", href: "/governance", icon: ShieldCheck },
+  { label: "COMMUNICATIONS", href: "/communications", icon: MessageSquare },
   { label: "EXTERNALS", href: "/externals", icon: Network },
   { label: "EVENTS / AUTHORITY", href: "/events", icon: BookOpen },
   { label: "PWA / DIAGNOSTICS", href: "/pwa/diagnostics", icon: Activity },

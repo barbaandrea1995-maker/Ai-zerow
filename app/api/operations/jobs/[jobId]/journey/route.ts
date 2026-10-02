@@ -11,6 +11,7 @@ import {
   s06Reconciliations,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext, type AuthorityContext } from "@/lib/authority-context";
+import { documentCanDownload } from "@/lib/document-security";
 import { inventoryMovementForResponse, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
 import { parseJobPayload } from "@/lib/operations-contract";
 
@@ -39,6 +40,9 @@ const ACTION_CAPABILITY = {
   mission_create: "mission.write",
   mission_dispatch: "mission.write",
   mission_deliver: "mission.write",
+  mission_verify_pod: "mission.write",
+  mission_reconcile: "mission.write",
+  mission_close: "mission.write",
 } as const;
 
 function isRecord(value: unknown): value is JsonObject {
@@ -126,6 +130,7 @@ function documentForResponse(row: typeof operationalDocuments.$inferSelect) {
     provenance: row.provenance,
     status: row.status,
     version: row.version,
+    downloadable: documentCanDownload(row.scanStatus, row.status),
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -315,10 +320,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let domain: JourneyDomain;
     let recordType: string;
     let title: string;
-    let status: string;
+    let status = "";
     let payload: JsonObject;
     let existing: typeof jobJourneyRecords.$inferSelect | null = null;
-    let eventType: string;
+    let eventType = "";
 
     if (action === "planning_create") {
       domain = "planning";
@@ -451,7 +456,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = "DISPATCHED";
         payload = { ...payload, dispatchedAt: boundedText(input.dispatchedAt, 40, now), dispatchedBy: context.actorId };
         eventType = "mission.transport.dispatched";
-      } else {
+      } else if (action === "mission_deliver") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DISPATCHED") {
           return Response.json({ error: "invalid_mission_transition" }, { status: 409 });
         }
@@ -471,9 +476,41 @@ export async function POST(request: Request, routeContext: RouteContext) {
           },
         };
         eventType = "mission.transport.delivered";
+      } else if (action === "mission_verify_pod") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DELIVERED") {
+          return Response.json({ error: "invalid_pod_verification_transition" }, { status: 409 });
+        }
+        const proof = isRecord(payload.proofOfDelivery) ? payload.proofOfDelivery : {};
+        if (typeof proof.recipient !== "string" || proof.recipient.trim().length < 2 || typeof proof.deliveredAt !== "string" || !validDateTime(proof.deliveredAt)) {
+          return Response.json({ error: "delivery_proof_readback_required" }, { status: 400 });
+        }
+        status = "POD_VERIFIED";
+        payload = {
+          ...payload,
+          proofOfDelivery: { ...proof, verifiedAt: now, verifiedBy: context.actorId },
+          podEvidenceDocumentId: boundedText(input.documentId, 120) || null,
+        };
+        eventType = "mission.transport.pod_verified";
+      } else if (action === "mission_reconcile") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "POD_VERIFIED") {
+          return Response.json({ error: "invalid_mission_reconciliation_transition" }, { status: 409 });
+        }
+        const reconciliationNote = boundedText(input.note, 2_000);
+        if (reconciliationNote.length < 2) return Response.json({ error: "reconciliation_note_required" }, { status: 400 });
+        status = "RECONCILED";
+        payload = { ...payload, reconciliation: { reconciledAt: now, reconciledBy: context.actorId, note: reconciliationNote } };
+        eventType = "mission.transport.reconciled";
+      } else if (action === "mission_close") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "RECONCILED") {
+          return Response.json({ error: "invalid_mission_close_transition" }, { status: 409 });
+        }
+        status = "CLOSED";
+        payload = { ...payload, closedAt: now, closedBy: context.actorId };
+        eventType = "mission.transport.closed";
       }
     }
 
+    if (!status || !eventType) return Response.json({ error: "unsupported_journey_transition" }, { status: 409 });
     const recordId = existing?.id ?? crypto.randomUUID();
     const nextVersion = existing ? existing.version + 1 : 1;
     const eventId = crypto.randomUUID();

@@ -131,6 +131,7 @@ export const COMMAND_NAVIGATION = [
   { id: "mission", path: "/mission", requiredCapability: "mission.read" },
   { id: "documents", path: "/documents", requiredCapability: "documents.read" },
   { id: "governance", path: "/governance", requiredCapability: "governance.read" },
+  { id: "communications", path: "/communications", requiredCapability: "communication.read" },
   { id: "externals", path: "/externals", requiredCapability: "external_adapters.read" },
   { id: "authority", path: "/onboarding", requiredCapability: "authority.read" },
   { id: "events", path: "/events", requiredCapability: "events.read" },

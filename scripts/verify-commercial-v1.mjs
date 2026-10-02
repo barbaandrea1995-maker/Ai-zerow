@@ -64,6 +64,7 @@ const guardFiles = {
   procurement: "procurement.read",
   documents: "documents.read",
   governance: "governance.read",
+  communications: "communication.read",
   events: "events.read",
   externals: "external_adapters.read",
   onboarding: "authority.read",
@@ -153,7 +154,7 @@ assert(intakeRoute.includes("consumeCompanyAiRateLimit"), "Commessa intake must 
 
 const openAiAdapter = await readFile(join(root, "lib", "company-ai-openai.ts"), "utf8");
 assert(openAiAdapter.includes("authorizedRecordIds"), "Model citations must be filtered against authorized records");
-assert(openAiAdapter.includes("process.env.OPENAI_API_KEY"), "The OpenAI key must remain server-side");
+assert(openAiAdapter.includes("process.env[name]") && openAiAdapter.includes("cloudflare:workers"), "The OpenAI key must remain server-side");
 
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");
@@ -173,6 +174,9 @@ const journeyRoute = await readFile(join(root, "app", "api", "operations", "jobs
 assert(journeyRoute.includes("ACTION_CAPABILITY"), "Journey actions must be capability-gated");
 assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
+assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
+assert(journeyRoute.includes("mission_reconcile"), "Mission journey must reconcile before close");
+assert(journeyRoute.includes("mission_close"), "Mission journey must expose a governed close state");
 
 const planningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
 assert(planningRoute.includes('hasCapability(context, "planning.write")'), "Advanced planning mutations must require planning.write");
@@ -201,15 +205,29 @@ const documentRoute = await readFile(join(root, "app", "api", "operations", "job
 assert(documentRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Document upload must enforce the 20 MB contract");
 assert(documentRoute.includes("matchesOperationalDocumentSignature"), "Document upload must validate file signatures");
 assert(documentRoute.includes('scanStatus: "NOT_RUN"'), "Document upload must not claim an unavailable malware scan");
+const documentSecurity = await readFile(join(root, "app", "api", "documents", "[documentId]", "security", "route.ts"), "utf8");
+assert(documentSecurity.includes("malware_scan_provider_not_configured"), "Document security must remain explicit when no provider is configured");
+assert(documentSecurity.includes("provider_result"), "Document security must expose provider result readback");
+const documentSecurityContract = await readFile(join(root, "lib", "document-security.ts"), "utf8");
+assert(documentSecurityContract.includes("document_release_requires_provider_clean"), "Documents must not be released without provider clean evidence");
+const outboxContract = await readFile(join(root, "lib", "outbox-contract.ts"), "utf8");
+assert(outboxContract.includes("DEAD_LETTERED"), "Outbox must have a dead-letter state");
+assert(outboxContract.includes("OUTBOX_MAX_ATTEMPTS"), "Outbox retry budget must be bounded");
+const outboxRoute = await readFile(join(root, "app", "api", "events", "outbox", "route.ts"), "utf8");
+assert(outboxRoute.includes("transitionOutbox"), "Outbox route must use the governed state machine");
+const cloudflareEnv = await readFile(join(root, "cloudflare-env.d.ts"), "utf8");
+assert(cloudflareEnv.includes("OPENAI_API_KEY"), "OpenAI runtime secret must be declared as a Site binding");
+const communicationsLayout = await readFile(join(root, "app", "communications", "layout.tsx"), "utf8");
+assert(communicationsLayout.includes('requirePageCapability("communication.read")'), "Communications must be capability-gated");
 
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_2_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_3_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.3 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.3 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.3 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.3 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the RC2 build ID");
 
@@ -220,6 +238,7 @@ console.log(JSON.stringify({
   guardedRoutes: Object.keys(guardFiles).length,
   migrations: 4,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
-  commercialJourney: ["planning", "field", "inventory", "mission", "documents"],
+  commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications"],
+  localHardening: ["openai_site_binding", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation"],
   checks: "commercial-v1-static-contract",
 }));

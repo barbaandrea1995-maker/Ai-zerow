@@ -125,6 +125,7 @@ const navItems: Array<{
   { id: "mission", label: "MISSION", path: "/mission", icon: Truck },
   { id: "documents", label: "DOCUMENTS", path: "/documents", icon: FileText },
   { id: "governance", label: "GOVERNANCE", path: "/governance", icon: ShieldCheck },
+  { id: "communications", label: "COMMUNICATIONS", path: "/communications", icon: MessageSquareText },
   { id: "externals", label: "EXTERNAL ADAPTERS", path: "/externals", icon: Network },
   { id: "authority", label: "AUTHORITY", path: "/onboarding", icon: ShieldCheck },
   { id: "events", label: "EVENTS", path: "/events", icon: Activity },

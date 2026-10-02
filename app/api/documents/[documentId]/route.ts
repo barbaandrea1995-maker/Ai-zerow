@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { operationalDocuments } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { documentCanDownload } from "@/lib/document-security";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,12 @@ export async function GET(_request: Request, routeContext: RouteContext) {
       eq(operationalDocuments.id, documentId),
     )).limit(1);
     if (!document) return Response.json({ error: "document_not_found" }, { status: 404 });
+    if (!documentCanDownload(document.scanStatus, document.status)) {
+      return Response.json({ error: "document_security_hold", scanStatus: document.scanStatus, status: document.status }, {
+        status: 423,
+        headers: { "cache-control": "private, no-store", "x-zerow-scan-status": document.scanStatus },
+      });
+    }
     const object = await env.BUCKET.get(document.objectKey);
     if (!object) return Response.json({ error: "document_object_not_found" }, { status: 404 });
     return new Response(object.body, {

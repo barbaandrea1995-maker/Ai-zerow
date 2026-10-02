@@ -9,6 +9,7 @@ import {
   s06Reconciliations,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { documentCanDownload } from "@/lib/document-security";
 import {
   matchesOperationalDocumentSignature,
   MAX_OPERATIONAL_DOCUMENT_BYTES,
@@ -60,6 +61,7 @@ function responseDocument(row: typeof operationalDocuments.$inferSelect) {
     provenance: row.provenance,
     status: row.status,
     version: row.version,
+    downloadable: documentCanDownload(row.scanStatus, row.status),
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

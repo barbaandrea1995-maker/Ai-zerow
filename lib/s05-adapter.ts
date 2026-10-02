@@ -13,6 +13,7 @@ export const S05_MODULES = {
   finance: { read: "finance.read", write: "finance.write" },
   procurement: { read: "procurement.read", write: "procurement.write" },
   governance: { read: "governance.read", write: "approvals.review" },
+  communications: { read: "communication.read", write: "communication.send" },
 } as const;
 
 export type S05Module = keyof typeof S05_MODULES;
