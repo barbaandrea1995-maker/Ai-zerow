@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.7 — W06 Asset Control su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 2.8 — W07 Warehouse Control su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W06 Asset Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_06_ASSET_CONTROL_CHECKPOINT_2026-10-02.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W07 Warehouse Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_07_WAREHOUSE_CHECKPOINT_2026-10-02.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -78,7 +78,7 @@ persona/input
 | W04 Planning | `RC2.2 — LOCAL ADVANCED PASS / EXTERNAL DEFERRED` | Capacità, conflitti, qualifiche, revisioni, what-if e resource options readback sono implementati con D1, versioni, idempotenza e capability; executor/capacity provider esterni restano differiti. |
 | W05 Workforce e FIELD | `RC2.2 — LOCAL ATTENDANCE PASS / PARTIAL` | Check-in, pausa, ripresa, check-out, correzione/approvazione e GPS on-duty opzionale sono implementati; workforce registry esterno, tracking continuo e device/offline certification restano aperti. |
 | W06 Assets e manutenzione | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Registro tenant-scoped per asset, mezzi e attrezzature; registrazione tecnica, lifecycle, manutenzione, blocco/rilascio, guard di assegnabilità, eventi, outbox e reconciliation sono collegati nella superficie Command. Telemetria, certificazioni, provider GPS/mappe e documenti manutentivi esterni restano gate separati. |
-| W07 Materiali e Warehouse | `RC2.2 — LOCAL CORE + REPLENISHMENT PROPOSAL` | Core inventario invariato e proposta replenishment `PROPOSAL_ONLY` aggiunta; lotti/seriali, procurement automatico e replenishment esecutivo restano evolutivi/esterni. |
+| W07 Materiali e Warehouse | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Control deck Command pubblicato privatamente con anagrafica, saldo in millesimi, filtri, inspector, movimenti, collegamenti commessa/missione e proposta replenishment. Prenotazioni, prelievi, carico missione, consumo/reso, idempotenza, versioning, eventi, outbox e reconciliation restano server-side; procurement automatico e provider esterni sono gate separati. |
 | W08 Mission e trasporti | `RC2.3 — CLOSED LOCAL CORE / EXTERNAL DEFERRED` | Create, dispatch, delivery/POD, verifica POD, reconciliation e chiusura, collegamento commessa e guard di caricamento passano; routing/telematica provider-backed restano esterni. |
 | W09 Documents | `RC2.4 — STORAGE PASS / FAIL-CLOSED SECURITY GATE` | Upload R2 fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature e SHA-256 passano; UI di quarantena/revisione e callback provider vincolato all’hash sono contrattualizzati e il download resta bloccato senza evidenza CLEAN. OCR e retention provider-backed restano bloccanti. |
 | W10 Finance e Procurement | `RC2.5 — LOCAL WORKFLOW PASS / EXTERNAL EXECUTOR DEFERRED` | Workflow Finance/Procurement con stati, approval, idempotenza, optimistic version, eventi, outbox e reconciliation in D1; accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
