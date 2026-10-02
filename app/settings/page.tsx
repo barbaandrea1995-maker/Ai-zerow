@@ -1,15 +1,17 @@
-import { redirect } from "next/navigation";
-import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
+import { requirePageCapability } from "@/lib/page-access";
 import SettingsClient from "./settings-client";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const identity = await getNeonAuthIdentity();
+  const authority = await requirePageCapability("settings.read");
 
-  if (identity.status !== "authenticated") {
-    redirect("/login");
-  }
-
-  return <SettingsClient actor={identity.actor} />;
+  return (
+    <SettingsClient
+      actor={{
+        email: authority.actorEmail,
+        name: authority.actorName,
+      }}
+    />
+  );
 }

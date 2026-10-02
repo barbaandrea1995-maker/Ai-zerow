@@ -9,7 +9,8 @@ const WORKFORCE_SELF = ["workforce.read", "workforce.write"];
 const WORKFORCE_MANAGE = ["workforce.read", "workforce.write", "workforce.read.all", "workforce.registry.read", "workforce.manage"];
 const FIELD = ["field.read", "field.write"];
 const WAREHOUSE_READ = ["warehouse.read"];
-const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.write"];
+const WAREHOUSE_REQUEST = ["warehouse.read", "warehouse.request"];
+const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.request", "warehouse.write"];
 const MISSION_READ = ["mission.read"];
 const MISSION_WRITE = ["mission.read", "mission.write"];
 const DOCUMENTS_READ = ["documents.read"];
@@ -47,7 +48,7 @@ export const ROLE_CAPABILITIES = {
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, ["telephony.manage"],
   ),
   member: capabilitySet(
-    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_REQUEST,
     MISSION_READ, DOCUMENTS_READ, PLANNING_READ, COMMUNICATION, QR_READ,
   ),
   manager: capabilitySet(
@@ -63,17 +64,17 @@ export const ROLE_CAPABILITIES = {
     COMMUNICATION, QR_WRITE, GOVERNANCE,
   ),
   technical: capabilitySet(
-    PLATFORM, COMMAND, OPERATIONS_WRITE, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    PLATFORM, COMMAND, OPERATIONS_WRITE, WORKFORCE_SELF, FIELD, WAREHOUSE_REQUEST,
     MISSION_READ, DOCUMENTS_WRITE, PLANNING_WRITE, ASSET_WRITE, FINANCE_READ,
     PROCUREMENT_READ, COMMUNICATION, QR_WRITE,
   ),
   field_supervisor: capabilitySet(
-    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_REQUEST,
     MISSION_READ, DOCUMENTS_READ, PLANNING_READ, ["workforce.registry.read"],
     ASSET_READ, COMMUNICATION_CRITICAL, QR_READ,
   ),
   worker: capabilitySet(
-    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_READ,
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, FIELD, WAREHOUSE_REQUEST,
     MISSION_READ, DOCUMENTS_READ, COMMUNICATION, QR_READ,
   ),
   warehouse_manager: capabilitySet(
@@ -89,7 +90,7 @@ export const ROLE_CAPABILITIES = {
     ASSET_READ, DOCUMENTS_READ, COMMUNICATION, QR_READ,
   ),
   maintenance: capabilitySet(
-    PLATFORM, WORKFORCE_SELF, FIELD, ASSET_WRITE, DOCUMENTS_READ,
+    PLATFORM, WORKFORCE_SELF, FIELD, WAREHOUSE_REQUEST, ASSET_WRITE, DOCUMENTS_READ,
     COMMUNICATION, QR_READ,
   ),
   auditor: capabilitySet(

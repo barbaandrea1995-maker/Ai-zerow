@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import CommandSurface from "@/components/command-surface";
-import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
-import { commandSurfaceAccess, firstAuthorizedPath } from "@/lib/command-dashboard";
-import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
+import { hasCapability } from "@/lib/authority-context";
+import {
+  commandSurfaceAccess,
+  firstAuthorizedPath,
+} from "@/lib/command-dashboard";
+import { requirePageContext } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +14,7 @@ export const dynamic = "force-dynamic";
  * see the login before any operational surface is rendered.
  */
 export default async function HomePage() {
-  const identity = await getNeonAuthIdentity();
-
-  if (identity.status !== "authenticated") {
-    redirect("/login");
-  }
-
-  const authority = await getAuthorityContext();
-  if (!authority) redirect("/tenants?reason=membership_required");
+  const authority = await requirePageContext();
   if (!hasCapability(authority, "command.read")) {
     redirect(firstAuthorizedPath(authority.capabilities));
   }

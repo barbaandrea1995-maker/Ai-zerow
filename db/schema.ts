@@ -32,12 +32,39 @@ export const tenantMemberships = sqliteTable("tenant_memberships", {
   displayName: text("display_name").notNull(),
   role: text("role").notNull().default("owner"),
   status: text("status").notNull().default("active"),
+  version: integer("version").notNull().default(1),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
   tenantActorUnique: uniqueIndex("tenant_memberships_tenant_provider_actor_uq").on(table.tenantId, table.identityProvider, table.actorId),
   actorStatusIdx: index("tenant_memberships_actor_status_idx").on(table.actorId, table.status),
   tenantStatusIdx: index("tenant_memberships_tenant_status_idx").on(table.tenantId, table.status),
+}));
+
+/**
+ * One-time tenant invitations. Only the SHA-256 token digest is persisted;
+ * the raw token is returned once to an authorized administrator and must be
+ * presented by an authenticated Neon identity with the same email address.
+ */
+export const tenantInvitations = sqliteTable("tenant_invitations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  status: text("status").notNull().default("pending"),
+  version: integer("version").notNull().default(1),
+  expiresAt: text("expires_at").notNull(),
+  invitedBy: text("invited_by").notNull(),
+  acceptedBy: text("accepted_by"),
+  acceptedAt: text("accepted_at"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tokenUnique: uniqueIndex("tenant_invitations_token_uq").on(table.tokenHash),
+  tenantIdempotencyUnique: uniqueIndex("tenant_invitations_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantEmailStatusIdx: index("tenant_invitations_tenant_email_status_idx").on(table.tenantId, table.email, table.status, table.updatedAt),
 }));
 
 /**
@@ -306,4 +333,105 @@ export const commandDashboardPreferences = sqliteTable("command_dashboard_prefer
 }, (table) => ({
   tenantActorUnique: uniqueIndex("command_dashboard_preferences_tenant_actor_uq").on(table.tenantId, table.actorId),
   tenantUpdatedIdx: index("command_dashboard_preferences_tenant_updated_idx").on(table.tenantId, table.updatedAt),
+}));
+
+/**
+ * Versioned records that close the commercial job journey without flattening
+ * planning, field, warehouse, mission and document states into the commessa.
+ */
+export const jobJourneyRecords = sqliteTable("job_journey_records", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id").notNull(),
+  domain: text("domain").notNull(),
+  recordType: text("record_type").notNull(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
+  version: integer("version").notNull().default(1),
+  payloadJson: text("payload_json").notNull().default("{}"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("job_journey_records_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantJobDomainIdx: index("job_journey_records_tenant_job_domain_idx").on(table.tenantId, table.jobId, table.domain, table.updatedAt),
+  tenantDomainStatusIdx: index("job_journey_records_tenant_domain_status_idx").on(table.tenantId, table.domain, table.status, table.updatedAt),
+}));
+
+/**
+ * Canonical local inventory balance. Quantities are stored as thousandths of
+ * the declared unit to avoid floating point drift in reservations/movements.
+ */
+export const inventoryItems = sqliteTable("inventory_items", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  sku: text("sku").notNull(),
+  name: text("name").notNull(),
+  unit: text("unit").notNull(),
+  location: text("location").notNull().default("MAGAZZINO"),
+  onHandMilli: integer("on_hand_milli").notNull().default(0),
+  reservedMilli: integer("reserved_milli").notNull().default(0),
+  minStockMilli: integer("min_stock_milli").notNull().default(0),
+  status: text("status").notNull().default("ACTIVE"),
+  version: integer("version").notNull().default(1),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantSkuUnique: uniqueIndex("inventory_items_tenant_sku_uq").on(table.tenantId, table.sku),
+  tenantStatusIdx: index("inventory_items_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+}));
+
+/** Append-only stock ledger with before/after balances and idempotency. */
+export const inventoryMovements = sqliteTable("inventory_movements", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  itemId: text("item_id").notNull(),
+  jobId: text("job_id"),
+  missionId: text("mission_id"),
+  movementType: text("movement_type").notNull(),
+  quantityMilli: integer("quantity_milli").notNull(),
+  beforeOnHandMilli: integer("before_on_hand_milli").notNull(),
+  afterOnHandMilli: integer("after_on_hand_milli").notNull(),
+  beforeReservedMilli: integer("before_reserved_milli").notNull(),
+  afterReservedMilli: integer("after_reserved_milli").notNull(),
+  note: text("note").notNull().default(""),
+  idempotencyKey: text("idempotency_key").notNull(),
+  actorId: text("actor_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("inventory_movements_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantItemCreatedIdx: index("inventory_movements_tenant_item_created_idx").on(table.tenantId, table.itemId, table.createdAt),
+  tenantJobCreatedIdx: index("inventory_movements_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
+}));
+
+/**
+ * Document provenance and security state. Binary storage remains provider
+ * backed; a metadata-only record can never be presented as a clean upload.
+ */
+export const operationalDocuments = sqliteTable("operational_documents", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id").notNull(),
+  category: text("category").notNull(),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  objectKey: text("object_key").notNull(),
+  storageStatus: text("storage_status").notNull().default("STORED"),
+  scanStatus: text("scan_status").notNull().default("NOT_RUN"),
+  provenance: text("provenance").notNull(),
+  status: text("status").notNull().default("REGISTERED"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantJobHashUnique: uniqueIndex("operational_documents_tenant_job_hash_uq").on(table.tenantId, table.jobId, table.sha256),
+  tenantIdempotencyUnique: uniqueIndex("operational_documents_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantJobCreatedIdx: index("operational_documents_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
 }));

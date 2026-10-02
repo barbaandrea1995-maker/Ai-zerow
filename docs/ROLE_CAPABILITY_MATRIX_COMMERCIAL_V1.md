@@ -31,9 +31,12 @@ Nelle superfici protette la sessione Neon autenticata e l'identita primaria anch
 - `authority.read`: Owner, Amministratore, Manager, Ufficio e Auditor;
 - `command.customize`: solo ruoli operativi con Command; Auditor escluso;
 - `events.write`: Owner, Amministratore e Manager;
+- `operations.write`: Owner, Amministratore, Manager, Ufficio e Tecnico; i profili field in sola lettura non vedono le CTA di mutazione;
+- `warehouse.request`: separata da `warehouse.write`; Operatore, Collaboratore, Tecnico, Caposquadra e Manutentore possono richiedere materiale senza alterare i saldi;
 - finance non e ereditata da Warehouse, Driver, Worker o Maintenance;
 - un widget viene restituito dal catalogo soltanto se tutte le capability richieste sono presenti;
-- layout manomessi, widget sconosciuti, duplicati o dimensioni invalide vengono sanificati dal server.
+- layout manomessi, widget sconosciuti, duplicati o dimensioni invalide vengono sanificati dal server;
+- menu desktop/mobile, CTA e modali di scrittura vengono filtrati con lo stesso contesto server-derived usato dalle API.
 
 ## Onboarding in sei gate
 
@@ -44,13 +47,17 @@ Nelle superfici protette la sessione Neon autenticata e l'identita primaria anch
 5. Company AI, approval e no-direct-write policy.
 6. Verifica negativa, audit e certificazione release.
 
-Invite, suspend/remove, session invalidation e review periodica degli accessi rimangono gate obbligatori prima della GA.
+Invito one-time hashato, cambio ruolo, sospensione, riattivazione, revoca e rimozione sono implementati con audit, versione ottimistica e protezione dell'ultimo Owner. Restano obbligatori prima della GA il test di accettazione con sessione Neon reale, la strategia provider di invalidazione sessione e la review periodica degli accessi.
 
-## Evidenza dinamica RC1
+## Evidenza dinamica RC2
 
 - un'identita Sites non censita riceve `401` dopo il provisioning del tenant canonico;
 - Worker riceve `403` su dashboard Command e preferenze;
 - Auditor legge Command ma non puo salvare il layout (`403`);
 - Owner legge e salva il layout; input manipolati vengono sanificati lato server;
 - l'Owner del tenant A non puo selezionare il tenant B (`403`);
-- l'Owner del tenant B riceve una directory composta dal solo tenant B.
+- l'Owner del tenant B riceve una directory composta dal solo tenant B;
+- Operatore vede Operations, Field, Workforce, richieste Magazzino, Missioni in lettura, Documenti e QR, ma non Command, Finance, Asset o Authority;
+- Operatore non vede Nuova commessa, Modifica scheda, cambio stato, avanzamento, pianificazione o rapportino e riceve comunque `403` forzando le API;
+- Operatore puo aprire una sessione field e creare una richiesta materiali, ma non puo approvare richieste o modificare stock;
+- sospensione del proprio Owner e rimozione dell'ultimo Owner restituiscono `409`.

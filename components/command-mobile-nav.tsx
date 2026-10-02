@@ -21,10 +21,16 @@ export function CommandMobileNav({
   active: MobileNavItem;
   allowedNavigation?: CommandNavigationId[];
 }) {
+  const canOpenCommand =
+    !allowedNavigation || allowedNavigation.includes("command");
   const canOpenOperations = !allowedNavigation || allowedNavigation.includes("operations");
   const moreHref = allowedNavigation?.includes("authority") ? "/onboarding" : "/settings";
   const visibleItems = items
-    .filter((item) => item.id !== "operations" || canOpenOperations)
+    .filter((item) => {
+      if (["home", "map", "ai"].includes(item.id)) return canOpenCommand;
+      if (item.id === "operations") return canOpenOperations;
+      return true;
+    })
     .map((item) => item.id === "more" ? { ...item, href: moreHref } : item);
 
   return (

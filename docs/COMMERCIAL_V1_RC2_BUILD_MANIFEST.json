@@ -1,0 +1,63 @@
+{
+  "schema": "ai_zerow_command.release_manifest/v1",
+  "buildId": "ai-zerow-commercial-v1-rc2-local-r2026-10-02",
+  "label": "COMMERCIAL-V1-RC2-LOCAL-R2026.10.02",
+  "status": "LOCAL_TECHNICAL_RELEASE_CANDIDATE_NOT_DEPLOYED",
+  "source": {
+    "tag": "commercial-v1-rc2-local-2026-10-02",
+    "tagPolicy": "The annotated local tag resolves the exact RC2 checkpoint commit.",
+    "parentCheckpoint": "1de9c6dbf927ffe54772b022796ff8b64f349229",
+    "baselineTag": "baseline-ai-zerow-sites-v65-2026-10-01"
+  },
+  "database": {
+    "engine": "Cloudflare D1",
+    "migrations": [
+      "0010_command_dashboard_preferences.sql",
+      "0011_ai_rate_limit_windows.sql",
+      "0012_authority_membership_lifecycle.sql",
+      "0013_commercial_job_journey.sql"
+    ],
+    "migrationMode": "append_only"
+  },
+  "storage": {
+    "engine": "Cloudflare R2",
+    "binding": "BUCKET",
+    "maxUploadBytes": 20971520,
+    "malwareScan": "NOT_RUN_PROVIDER_NOT_CONFIGURED"
+  },
+  "verification": {
+    "typecheck": "PASS",
+    "lint": "PASS_WITH_8_PREEXISTING_IMG_WARNINGS",
+    "productionBuild": "PASS",
+    "commercialContract": "PASS",
+    "desktopVisual": "PASS",
+    "mobileVisual": "PASS_NO_HORIZONTAL_OVERFLOW",
+    "automatedAccessibility": "PASS_0_VIOLATIONS",
+    "rbacRuntime": "PASS_OWNER_WORKER",
+    "tenantIsolationRuntime": "PASS_LOCAL_ISOLATED",
+    "commercialJourneyRuntime": "PASS_LOCAL_ISOLATED",
+    "documentUploadRuntime": "PASS_REAL_DOCX_R2",
+    "d1RestoreRehearsal": "PASS_19_TABLES_MATCH",
+    "r2RestoreRehearsal": "PASS_SHA256_MATCH",
+    "openAiLive": "NOT_RUN_NO_DEPLOY",
+    "neonInviteAcceptance": "NOT_RUN_PROVIDER_SESSION_REQUIRED",
+    "privacySecuritySignoff": "PENDING_HUMAN"
+  },
+  "promotion": {
+    "allowed": false,
+    "decision": "NO_GO",
+    "requiresExplicitHumanApproval": true,
+    "blockingGates": [
+      "OPENAI_LIVE",
+      "MALWARE_SCAN",
+      "NEON_INVITE_ACCEPTANCE",
+      "HUMAN_SECURITY_PRIVACY_COMMERCIAL_SIGNOFF"
+    ]
+  },
+  "rollback": {
+    "lastKnownBaselineTag": "baseline-ai-zerow-sites-v65-2026-10-01",
+    "previousCheckpointTag": "commercial-v1-rc1-local-2026-10-02",
+    "d1RestoreRehearsal": "PASS_LOCAL",
+    "r2RestoreRehearsal": "PASS_LOCAL"
+  }
+}

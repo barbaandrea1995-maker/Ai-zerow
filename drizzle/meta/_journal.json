@@ -78,6 +78,20 @@
       "when": 1790897425081,
       "tag": "0011_ai_rate_limit_windows",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790900149675,
+      "tag": "0012_authority_membership_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790901668859,
+      "tag": "0013_commercial_job_journey",
+      "breakpoints": true
     }
   ]
 }

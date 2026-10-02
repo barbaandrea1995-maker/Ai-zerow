@@ -1,5 +1,5 @@
-import S04ModulePage from "@/components/s04-module-page";
+import WarehouseControl from "@/components/warehouse-control";
 
 export default function WarehousePage() {
-  return <S04ModulePage module="warehouse" />;
+  return <WarehouseControl />;
 }

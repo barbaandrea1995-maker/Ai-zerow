@@ -7,6 +7,17 @@ import { FormEvent, useEffect, useState } from "react";
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
 type AuthMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
 
+function safeReturnPath(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  try {
+    const url = new URL(value, "https://app.local");
+    if (url.origin !== "https://app.local" || url.pathname === "/login") return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 async function getAuthClient() {
   const { createAuthClient } = await import("@neondatabase/auth/next");
   return createAuthClient();
@@ -26,6 +37,7 @@ export default function LoginClient({
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [returnTo, setReturnTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -36,6 +48,7 @@ export default function LoginClient({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMode(query.get("mode") === "forgotPassword" ? "forgotPassword" : "signIn");
     setResetToken(query.get("token"));
+    setReturnTo(safeReturnPath(query.get("return_to")));
   }, []);
 
   const activeMode: AuthMode = resetToken ? "resetPassword" : mode;
@@ -52,7 +65,7 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_in_failed");
         return;
       }
-      router.push("/command");
+      router.push(returnTo ?? "/command");
     } catch {
       setMessage("auth_sign_in_failed");
     } finally {
@@ -72,7 +85,7 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_up_failed");
         return;
       }
-      router.push("/tenants");
+      router.push(returnTo ?? "/tenants");
     } catch {
       setMessage("auth_sign_up_failed");
     } finally {

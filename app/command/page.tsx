@@ -1,8 +1,6 @@
-import { redirect } from "next/navigation";
 import CommandSurface from "@/components/command-surface";
-import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { commandSurfaceAccess } from "@/lib/command-dashboard";
-import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
+import { requirePageCapability } from "@/lib/page-access";
 
 /**
  * Canonical COMMAND route from the reconstruction catalog.
@@ -11,17 +9,7 @@ import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 export const dynamic = "force-dynamic";
 
 export default async function CommandPage() {
-  const identity = await getNeonAuthIdentity();
-
-  if (identity.status !== "authenticated") {
-    redirect("/login");
-  }
-
-  const authority = await getAuthorityContext();
-  if (!authority) redirect("/tenants?reason=membership_required");
-  if (!hasCapability(authority, "command.read")) {
-    redirect("/access-denied?required=command.read");
-  }
+  const authority = await requirePageCapability("command.read");
 
   return (
     <CommandSurface

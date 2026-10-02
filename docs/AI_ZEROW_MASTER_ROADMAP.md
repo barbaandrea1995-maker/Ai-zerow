@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.1 — riallineamento Commercial v1
+**Versione roadmap:** 1.2 — riallineamento Commercial v1 RC2
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC · locale · non pubblicato` sul parent commit `0e96a94417088327ad387ced3db0f746f39a706a`. La baseline v65 resta immutata. Il deploy è bloccato fino alla chiusura dei gate descritti in `COMMERCIAL_V1_CHECKPOINT_2026-10-01.md`.
+**Checkpoint corrente:** `Commercial v1 RC2 · locale · non pubblicato`, congelato dal tag `commercial-v1-rc2-local-2026-10-02` sul checkpoint RC1 `1de9c6dbf927ffe54772b022796ff8b64f349229`. La baseline v65 resta immutata. Il deploy è bloccato fino alla chiusura dei gate descritti in `COMMERCIAL_V1_RC2_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -72,23 +72,23 @@ persona/input
 | Workstream | Stato iniziale | Nota |
 |---|---|---|
 | W00 Baseline e governance | `FROZEN` | Tag v65 creato e pubblicato nel repository. |
-| W01 Shell e visual system | `COMMERCIAL RC — LOCAL` | Command ultra-carbon, visual core Z, griglia widget responsive e PWA parity implementati; gate visuale desktop/mobile e interazione personalizzatore superati. Lo smoke visuale autenticato per ogni famiglia di ruolo resta aperto, mentre la matrice API per ruolo passa. |
-| W02 Identity, tenant, authority | `COMMERCIAL RC — LOCAL / PARTIAL lifecycle` | 13 ruoli canonici, capability server-side, route guard, menu/widget filtering e Authority read/manage separati; bootstrap owner one-shot e isolamento A/B verificati. Invite/suspend/remove, invalidazione sessione e review periodica restano da chiudere. |
-| W03 Commessa e Job Workspace | `IMPLEMENTED — Sites W03 / PARTIAL external` | Creazione manuale o assistita da Company AI, codice, stato, attività, assegnazione, avanzamento, evidenze, rapportino, gate di completamento, eventi e readback sono chiusi nel bounded Sites adapter; il dominio esterno completo resta aperto. |
-| W04 Planning | `DEFERRED / PARTIAL` | Mancano motore di pianificazione, conflitti, revisioni e workers completi. |
-| W05 Workforce e FIELD | `PARTIAL` | Superfici e contratti bounded; runtime operativo, attendance e GPS da certificare. |
+| W01 Shell e visual system | `RC2 — PASS LOCALE` | Command ultra-carbon, core Z senza foglia, 11 widget personalizzabili, PWA parity e smoke desktop/mobile superati; axe rileva 0 violazioni automatiche sulle superfici critiche. |
+| W02 Identity, tenant, authority | `RC2 — IMPLEMENTED / PROVIDER GATE` | 13 ruoli, capability server-side, menu/CTA/widget filtering, bootstrap fail-closed e isolamento A/B verificati. Invite, role change, suspend/reactivate/revoke/remove e last-owner guard sono implementati; accettazione con sessione Neon reale resta `NOT RUN`. |
+| W03 Commessa e Job Workspace | `RC2 — CLOSED LOCAL CORE` | Creazione manuale/Company AI, preventivo DOCX diviso, scope al sottogruppo, workspace, completion gate, eventi, readback e journey cross-modulo sono verificati localmente. Chiusura GA dipende dai gate provider di W09/W12/W16. |
+| W04 Planning | `RC2 — BASIC FLOW PASS / ADVANCED DEFERRED` | Piano tipizzato create/publish, date, versione, idempotenza e capability passano; capacity engine, conflitti, revisioni e what-if restano fase successiva. |
+| W05 Workforce e FIELD | `RC2 — BASIC FLOW PASS / PARTIAL` | Apertura/chiusura sessione field e richiesta materiali dalla commessa sono operative; attendance, GPS governato e offline field completo restano da certificare. |
 | W06 Assets e manutenzione | `CLOSED — Sites / PARTIAL external` | Registro e codifica Sites presenti; manutenzione e disponibilità reale da chiudere. |
-| W07 Materiali e Warehouse | `CLOSED — Sites / PARTIAL external` | Shell e adapter presenti; inventario, stock movement e reconcile completi ancora aperti. |
-| W08 Mission e trasporti | `CLOSED — Sites / PARTIAL external` | Superficie presente; state machine, esecutori e POD reali da chiudere. |
-| W09 Documents | `CLOSED — Sites / PARTIAL external` | Catalogo e proposte bounded; storage/OCR/extraction provider-backed da chiudere. |
+| W07 Materiali e Warehouse | `RC2 — CLOSED LOCAL CORE` | Anagrafiche, stock, reserve/release/pick/load/consume/return/adjust, millesimali, versioni, idempotenza, invarianti e ledger passano in runtime locale. Lotti/seriali e replenishment avanzato restano evolutivi. |
+| W08 Mission e trasporti | `RC2 — CLOSED LOCAL CORE` | Create, dispatch, delivery/POD, collegamento commessa e guard di caricamento passano; routing/telematica provider-backed restano esterni. |
+| W09 Documents | `RC2 — STORAGE PASS / SECURITY GATE` | Upload R2 reale fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature, SHA-256, deduplica e download tenant-scoped passano. Malware scan, OCR e retention provider-backed restano bloccanti. |
 | W10 Finance e Procurement | `CLOSED — Sites / PARTIAL external` | Ledger/proposte bounded; accounting, PO e payment executor aperti. |
 | W11 Events, Outbox, Twin e Timeline | `PARTIAL` | Eventi/outbox/reconciliation Sites; consumer, Twin e worker persistenti da certificare. |
 | W12 AI, Tool Gateway e Approval | `IMPLEMENTED / LIVE GATE NOT RUN` | Intake e Command usano OpenAI Responses lato server con contesto capability-filtered, output strutturato, citation allowlist, quota D1 atomica, ledger e no-direct-write. Quota runtime 6/min → `429`, payload guard e preventivo DOCX reale sono verificati localmente. `OPENAI_API_KEY` e presente come secret nel runtime Sites; la chiamata live sul candidato non e ancora eseguibile senza pubblicarlo. |
 | W13 Communication, Voice, Telephony | `DEFERRED` | Contratti previsti; provider voice/SIP e policy operative da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
-| W16 Security, Privacy, Observability, DR | `PARTIAL` | Tenant isolation A/B, bootstrap fail-closed, payload JSON e quota AI passano in runtime locale; storage/antivirus, GDPR, provider-backed observability e SLO/RPO/RTO restano aperti. |
-| W17 Release e GA | `RC LOCAL / NOT READY TO DEPLOY` | TypeScript, lint, build, contract verification, manifest exact-build, migrazioni D1 isolate, RBAC/tenant abuse matrix e visual QA desktop/mobile passano; OpenAI live, journey cross-modulo, storage security/privacy e restore rehearsal restano gate bloccanti. |
+| W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
+| W17 Release e GA | `RC2 TECHNICAL PASS / NO-GO DEPLOY` | TypeScript, lint, build, contract, RBAC UI+API, tenant isolation, journey, storage, visual QA, axe e restore passano. OpenAI live, malware scan, invito Neon reale e sign-off umano privacy/security/commerciale restano i quattro gate bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
