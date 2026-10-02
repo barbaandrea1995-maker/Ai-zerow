@@ -216,6 +216,15 @@ assert(aiReadinessRoute.includes("getExternalSnapshot") && aiReadinessRoute.incl
 assert(aiReadinessRoute.includes('directWrite: false') && aiReadinessRoute.includes('commercialStatus: "NO_GO"'), "AI readiness must preserve no-direct-write and commercial gate semantics");
 const aiGovernance = await readFile(join(root, "components", "company-ai-governance.tsx"), "utf8");
 assert(aiGovernance.includes("/api/governance/ai-readiness") && aiGovernance.includes("COMMERCIAL NO-GO"), "Governance must expose the W12 readiness control plane");
+assert(aiGovernance.includes("/governance/security"), "W12 governance must link to the W16 security control plane");
+const securityContract = await readFile(join(root, "lib", "security-governance.ts"), "utf8");
+assert(securityContract.includes("document-fail-closed") && securityContract.includes("PENDING_REVIEW") && securityContract.includes("PASS_LOCAL"), "W16 contract must keep fail-closed, human review and restore evidence explicit");
+const securityReadinessRoute = await readFile(join(root, "app", "api", "governance", "security-readiness", "route.ts"), "utf8");
+assert(securityReadinessRoute.includes('hasCapability(context, "governance.read")') && securityReadinessRoute.includes("buildSecurityControlCatalog"), "W16 readiness must be tenant-scoped and capability-gated");
+assert(securityReadinessRoute.includes("MALWARE_SCAN_WEBHOOK_TOKEN") && securityReadinessRoute.includes('commercialStatus: "NO_GO"'), "W16 readiness must expose provider metadata without changing the commercial gate");
+const securityPage = await readFile(join(root, "app", "governance", "security", "page.tsx"), "utf8");
+const securitySurface = await readFile(join(root, "components", "security-privacy-control.tsx"), "utf8");
+assert(securityPage.includes("SecurityPrivacyControl") && securitySurface.includes("/api/governance/security-readiness"), "W16 must have a readable security/privacy surface");
 
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");
@@ -304,11 +313,11 @@ for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
 
-const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_7_LOCAL_BUILD_MANIFEST.json"), "utf8"));
-assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.7 manifest must share one build ID");
-assert.equal(releaseManifest.promotion.allowed, false, "RC2.7 must remain blocked from deployment");
-assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.7 must record the D1 restore rehearsal");
-assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.7 must record the R2 restore rehearsal");
+const releaseManifest = JSON.parse(await readFile(join(root, "docs", "COMMERCIAL_V1_RC2_8_LOCAL_BUILD_MANIFEST.json"), "utf8"));
+assert.equal(releaseManifest.buildId, RELEASE_BUILD_ID, "Runtime and RC2.8 manifest must share one build ID");
+assert.equal(releaseManifest.promotion.allowed, false, "RC2.8 must remain blocked from deployment");
+assert.equal(releaseManifest.rollback.d1RestoreRehearsal, "PASS_LOCAL", "RC2.8 must record the D1 restore rehearsal");
+assert.equal(releaseManifest.rollback.r2RestoreRehearsal, "PASS_LOCAL", "RC2.8 must record the R2 restore rehearsal");
 const serviceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(serviceWorker.includes(RELEASE_BUILD_ID), "The service worker cache must use the current RC build ID");
 
@@ -320,6 +329,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));
