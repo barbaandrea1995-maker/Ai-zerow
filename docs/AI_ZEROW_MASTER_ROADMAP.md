@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 1.8 — riallineamento Commercial v1 RC2.6 locale Command/W10
+**Versione roadmap:** 1.9 — riallineamento Commercial v1 RC2.7 locale Company AI Governance
 **Data:** 2 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** `Commercial v1 RC2.6 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-6-local-r2026-10-02` e parent locale `commercial-v1-rc2-5-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_6_LOCAL_CHECKPOINT_2026-10-02.md`.
+**Checkpoint corrente:** `Commercial v1 RC2.7 · candidato locale non pubblicato · non certificato commerciale`, sul build ID `ai-zerow-commercial-v1-rc2-7-local-r2026-10-02` e parent locale `commercial-v1-rc2-6-local-2026-10-02`. La baseline v65 resta immutata; il runtime Sites resta congelato a v84. La promozione commerciale resta bloccata fino alla chiusura dei gate descritti in `docs/COMMERCIAL_V1_RC2_7_LOCAL_CHECKPOINT_2026-10-02.md`.
 
 ## 1. Direzione prodotto
 
@@ -83,12 +83,12 @@ persona/input
 | W09 Documents | `RC2.4 — STORAGE PASS / FAIL-CLOSED SECURITY GATE` | Upload R2 fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature e SHA-256 passano; UI di quarantena/revisione e callback provider vincolato all’hash sono contrattualizzati e il download resta bloccato senza evidenza CLEAN. OCR e retention provider-backed restano bloccanti. |
 | W10 Finance e Procurement | `RC2.5 — LOCAL WORKFLOW PASS / EXTERNAL EXECUTOR DEFERRED` | Workflow Finance/Procurement con stati, approval, idempotenza, optimistic version, eventi, outbox e reconciliation in D1; accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
 | W11 Events, Outbox, Twin e Timeline | `RC2.4 — SITES CONTROL PASS / EXTERNAL CONSUMER DEFERRED` | Eventi, outbox, retry limitato, DLQ, requeue, block e reconciliation sono governati in Sites con controlli UI e fixture di stato; consumer, Twin e worker persistenti da certificare. |
-| W12 AI, Tool Gateway e Approval | `RC2.3 — IMPLEMENTED / LIVE GATE NOT RUN` | Intake e Command usano OpenAI Responses lato server con contesto capability-filtered, output strutturato, citation allowlist, quota D1 atomica, ledger, no-direct-write e binding runtime Site per il secret. Quota, payload guard e preventivo DOCX reale sono verificati localmente; la chiamata live richiede sessione Neon autenticata e runtime pubblicato. |
+| W12 AI, Tool Gateway e Approval | `RC2.7 — LOCAL GOVERNANCE PASS / LIVE GATE NOT RUN` | Company AI espone un control plane capability-gated con readiness dei contratti, ledger/readback, binding metadata-only, no-direct-write, approval boundary e blocchi commerciali. Command espone un widget W12 filtrato per `command.read`; OpenAI live richiede ancora sessione autenticata e runtime pubblicato. |
 | W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2 — DR PASS / PARTIAL` | Tenant isolation, payload guards e restore rehearsal D1+R2 con conteggi/hash identici passano. Scanner malware, GDPR/DPIA, osservabilità provider-backed e SLO/RPO/RTO formali restano aperti. |
-| W17 Release e GA | `RC2.6 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10 e Command bridge passano. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
+| W17 Release e GA | `RC2.7 LOCAL TECHNICAL PASS / NOT PUBLISHED / COMMERCIAL NO-GO` | TypeScript, lint, build, contract, fixture W10, Command readiness e W12 governance control plane passano localmente. OpenAI live, malware scan, invito Neon reale, executor esterni, device certification e sign-off umano privacy/security/commerciale restano bloccanti. |
 
 ## 5. Roadmap per fasi e moduli
 
