@@ -6,6 +6,7 @@ import { tenantMemberships, tenants } from "@/db/schema";
 import {
   ROLE_CAPABILITIES,
   isAuthorityRole,
+  normalizeAuthorityRoles,
   type AuthorityRole,
 } from "@/lib/authority-catalog";
 import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
@@ -54,6 +55,7 @@ export type AuthorityContext = {
   tenantId: string;
   environment: "sites-local-preview" | "sites-production";
   role: AuthorityRole;
+  roles: AuthorityRole[];
   capabilities: string[];
   operatingProfile: OperatingProfileId;
   operatingDomains: OperatingDomain[];
@@ -74,6 +76,7 @@ export type AuthorityMembershipRow = {
   actorEmail: string;
   displayName: string;
   membershipRole: string;
+  membershipRolesJson: string;
   membershipStatus: string;
   tenantId: string;
   slug: string;
@@ -135,6 +138,7 @@ async function queryMemberships(
       actorEmail: tenantMemberships.actorEmail,
       displayName: tenantMemberships.displayName,
       membershipRole: tenantMemberships.role,
+      membershipRolesJson: tenantMemberships.rolesJson,
       membershipStatus: tenantMemberships.status,
       tenantId: tenants.id,
       slug: tenants.slug,
@@ -196,7 +200,11 @@ function contextFromRow(
   identity: AuthenticatedIdentity,
   row: AuthorityMembershipRow,
 ): AuthorityContext | null {
-  if (!isAuthorityRole(row.membershipRole)) return null;
+  const roles = normalizeAuthorityRoles(row.membershipRolesJson, row.membershipRole);
+  if (roles.length === 0) return null;
+  const role = isAuthorityRole(row.membershipRole) && roles.includes(row.membershipRole)
+    ? row.membershipRole
+    : roles[0];
 
   const operatingProfile = isOperatingProfileId(row.operatingProfile)
     ? row.operatingProfile
@@ -217,8 +225,12 @@ function contextFromRow(
     membershipId: row.membershipId,
     tenantId: row.tenantId,
     environment,
-    role: row.membershipRole,
-    capabilities: filterCapabilitiesForDomains(ROLE_CAPABILITIES[row.membershipRole], operatingDomains),
+    role,
+    roles,
+    capabilities: filterCapabilitiesForDomains(
+      Array.from(new Set(roles.flatMap((membershipRole) => ROLE_CAPABILITIES[membershipRole]))),
+      operatingDomains,
+    ),
     operatingProfile,
     operatingDomains,
     operatingTransportModes,
@@ -231,7 +243,7 @@ function contextFromRow(
         : "neon-auth",
     sessionId: identity.sessionId,
     expiresAt: null,
-    approvalContext: row.membershipRole,
+    approvalContext: role,
   };
 }
 
@@ -250,6 +262,7 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
     tenantId: SITES_TENANT_ID,
     environment,
     role: "owner",
+    roles: ["owner"],
     capabilities: [...ROLE_CAPABILITIES.owner],
     operatingProfile: DEFAULT_OPERATING_PROFILE,
     operatingDomains: [...DEFAULT_OPERATING_DOMAINS],
@@ -347,6 +360,7 @@ export function publicAuthorityContext(context: AuthorityContext) {
     tenantId: context.tenantId,
     environment: context.environment,
     role: context.role,
+    roles: context.roles,
     capabilities: context.capabilities,
     operatingProfile: context.operatingProfile,
     operatingDomains: context.operatingDomains,

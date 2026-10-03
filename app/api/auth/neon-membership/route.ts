@@ -8,6 +8,7 @@ import {
   hasCapability,
   type AuthenticatedIdentity,
 } from "@/lib/authority-context";
+import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import { getNeonAuthIdentity as readNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ function publicMembership(row: {
   actorEmail: string;
   displayName: string;
   role: string;
+  rolesJson?: string;
   status: string;
 }) {
   return {
@@ -38,6 +40,7 @@ function publicMembership(row: {
     actorEmail: row.actorEmail,
     displayName: row.displayName,
     role: row.role,
+    roles: normalizeAuthorityRoles(row.rolesJson, row.role),
     status: row.status,
   };
 }
@@ -56,7 +59,7 @@ async function requireLinkGate() {
 
   if (
     sitesContext.identityProvider !== "sites" ||
-    sitesContext.role !== "owner" ||
+    !sitesContext.roles.includes("owner") ||
     !hasCapability(sitesContext, "tenant.manage")
   ) {
     return {
@@ -125,6 +128,7 @@ export async function GET() {
         actorEmail: tenantMemberships.actorEmail,
         displayName: tenantMemberships.displayName,
         role: tenantMemberships.role,
+        rolesJson: tenantMemberships.rolesJson,
         status: tenantMemberships.status,
       })
       .from(tenantMemberships)
@@ -201,6 +205,7 @@ export async function POST(request: Request) {
         actorEmail: tenantMemberships.actorEmail,
         displayName: tenantMemberships.displayName,
         role: tenantMemberships.role,
+        rolesJson: tenantMemberships.rolesJson,
         status: tenantMemberships.status,
       })
       .from(tenantMemberships)
@@ -240,6 +245,7 @@ export async function POST(request: Request) {
       actorEmail: neonIdentity.actor.email,
       displayName: neonIdentity.actor.name || neonIdentity.actor.email,
       role: "owner" as const,
+      rolesJson: '["owner"]',
       status: "active" as const,
       createdAt: now,
       updatedAt: now,

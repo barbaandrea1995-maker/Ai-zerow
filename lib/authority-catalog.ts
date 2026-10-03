@@ -14,6 +14,7 @@ const ATTENDANCE_MANAGE = ["attendance.read", "attendance.manage", "attendance.a
 const WAREHOUSE_READ = ["warehouse.read"];
 const WAREHOUSE_REQUEST = ["warehouse.read", "warehouse.request"];
 const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.request", "warehouse.write"];
+const WAREHOUSE_REGISTER = [...WAREHOUSE_WRITE, "warehouse.register"];
 const MISSION_READ = ["mission.read"];
 const MISSION_WRITE = ["mission.read", "mission.write"];
 const DOCUMENTS_READ = ["documents.read"];
@@ -40,13 +41,13 @@ function capabilitySet(...groups: readonly string[][]) {
 export const ROLE_CAPABILITIES = {
   owner: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
-    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    FIELD, WAREHOUSE_REGISTER, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
     ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, ["tenant.manage", "telephony.manage"],
   ),
   admin: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
-    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    FIELD, WAREHOUSE_REGISTER, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
     ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, ["telephony.manage"],
   ),
@@ -56,7 +57,7 @@ export const ROLE_CAPABILITIES = {
   ),
   manager: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_VIEW, OPERATIONS_WRITE, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
-    FIELD, WAREHOUSE_WRITE, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
+    FIELD, WAREHOUSE_REGISTER, MISSION_WRITE, DOCUMENTS_WRITE, PLANNING_WRITE,
     ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE,
   ),
@@ -81,7 +82,7 @@ export const ROLE_CAPABILITIES = {
     MISSION_READ, DOCUMENTS_READ, COMMUNICATION, QR_READ,
   ),
   warehouse_manager: capabilitySet(
-    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_WRITE,
+    PLATFORM, COMMAND, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_REGISTER,
     MISSION_WRITE, ASSET_READ, DOCUMENTS_READ, COMMUNICATION_CRITICAL, QR_WRITE,
   ),
   warehouse_operator: capabilitySet(
@@ -114,8 +115,8 @@ export const ROLE_METADATA = {
   technical: { label: "Tecnico", purpose: "Lavorazioni, pianificazione tecnica, asset e documenti." },
   field_supervisor: { label: "Caposquadra", purpose: "Coordinamento field e visibilita del team assegnato." },
   worker: { label: "Operatore", purpose: "Esecuzione sul campo nel solo perimetro assegnato." },
-  warehouse_manager: { label: "Responsabile magazzino", purpose: "Scorte, movimenti, missioni e controllo deposito." },
-  warehouse_operator: { label: "Operatore magazzino", purpose: "Registrazione materiali e movimenti autorizzati." },
+  warehouse_manager: { label: "Responsabile magazzino", purpose: "Anagrafica materiali, scorte, movimenti, missioni e controllo deposito." },
+  warehouse_operator: { label: "Magazziniere", purpose: "Movimenti, prelievi, carichi e operatività autorizzata senza creare anagrafiche materiali." },
   driver: { label: "Autista", purpose: "Missioni, mezzi e documenti di trasporto assegnati." },
   maintenance: { label: "Manutentore", purpose: "Asset, manutenzione ed evidenze tecniche assegnate." },
   auditor: { label: "Auditor", purpose: "Lettura trasversale, evidenze e controllo senza scrittura." },
@@ -127,4 +128,28 @@ export const AUTHORITY_ROLES = Object.keys(ROLE_CAPABILITIES) as AuthorityRole[]
 
 export function isAuthorityRole(value: string): value is AuthorityRole {
   return Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, value);
+}
+
+/**
+ * Memberships were originally single-role rows. Keep those rows readable and
+ * normalize the new multi-mansione payload into a de-duplicated canonical set.
+ */
+export function normalizeAuthorityRoles(value: unknown, fallback: unknown = "member"): AuthorityRole[] {
+  let candidates: unknown[] = [];
+  if (Array.isArray(value)) {
+    candidates = value;
+  } else if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      candidates = Array.isArray(parsed) ? parsed : [value];
+    } catch {
+      candidates = [value];
+    }
+  }
+  if (candidates.length === 0 && typeof fallback === "string") candidates = [fallback];
+  return Array.from(new Set(candidates.filter((item): item is AuthorityRole => typeof item === "string" && isAuthorityRole(item))));
+}
+
+export function authorityRolesJson(roles: readonly AuthorityRole[]) {
+  return JSON.stringify(Array.from(new Set(roles)));
 }

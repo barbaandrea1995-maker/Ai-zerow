@@ -56,7 +56,7 @@ export function canonicalPayload(entityType: QrEntityType, entityId: string): st
 }
 
 export function directoryMatch(entityType: QrEntityType, entityId: string): QrDirectoryMatch {
-  const labels: Record<QrEntityType, string> = { asset: "Asset", warehouse: "Materiale", commessa: "Commessa" };
+  const labels: Record<QrEntityType, string> = { asset: "Asset", warehouse: "Magazzino", commessa: "Commessa" };
   const moduleKey: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "warehouse" ? "warehouse" : "operations";
   return {
     entityType,

@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { entityCodeCounters, s04Records } from "@/db/schema";
 
-export type NamingEntity = "commessa" | "mission" | "asset" | "vehicle" | "equipment" | "material" | "driver" | "team";
+export type NamingEntity = "commessa" | "mission" | "asset" | "vehicle" | "equipment" | "material" | "warehouse" | "driver" | "team";
 
 export type ServerNamingResult = {
   canonicalCode: string;
@@ -159,7 +159,7 @@ export async function allocateServerName({
     : module === "mission"
       ? "mission"
     : module === "warehouse"
-      ? "material"
+      ? entityType === "warehouse" ? "warehouse" : "material"
       : module === "workforce"
         ? entityType === "team" ? "team" : "driver"
         : entityType === "vehicle" || entityType === "equipment" ? entityType : "asset";
@@ -175,6 +175,7 @@ export async function allocateServerName({
     asset: { namespace: "assets", prefix: "ASSET" },
     vehicle: { namespace: "vehicles", prefix: "MEZZI" },
     equipment: { namespace: "equipment", prefix: "ATT" },
+    warehouse: { namespace: "warehouses", prefix: "WH" },
     driver: { namespace: "drivers", prefix: "DRV" },
     team: { namespace: "teams", prefix: "TEAM" },
   };

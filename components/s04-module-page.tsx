@@ -144,7 +144,7 @@ const moduleConfigs: Record<ModuleKey, ModuleConfig> = {
     eyebrow: "AI-ZEROW / SUPPLY / WAREHOUSE",
     title: "Warehouse control",
     subtitle: "Scorte, richieste e riconciliazione · readback D1 tenant-scoped",
-    cta: "Nuova richiesta",
+    cta: "Apri Warehouse",
     registerTitle: "Registro materiali",
     registerHint: "Inventory, richieste e soglie · Sites adapter / readback",
     secondaryTitle: "Stato scorte",
@@ -355,7 +355,11 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
   };
 
   const openCreate = () => {
-    if (module === "assets" || module === "warehouse") {
+    if (module === "warehouse") {
+      router.push("/warehouse");
+      return;
+    }
+    if (module === "assets") {
       setCreateOpen(true);
       return;
     }
@@ -380,7 +384,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · {config.code} · S04 / D1 READBACK</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />Sites private · owner only · no domain mutation</span></div>
       </div>
     </section>
-  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{(module === "assets" || module === "warehouse") && createOpen && <ServerNamingDialog module={module} open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
+  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{module === "assets" && createOpen && <ServerNamingDialog module="assets" open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
 }
 
 export default S04ModulePage;

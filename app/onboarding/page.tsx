@@ -57,6 +57,7 @@ import AuthorityMembershipControl, {
   type AuthorityMembershipView,
 } from "@/components/authority-membership-control";
 import { TenantOperatingProfile } from "@/components/tenant-operating-profile";
+import TenantWarehouseControl from "@/components/tenant-warehouse-control";
 import {
   Dialog,
   DialogClose,
@@ -87,6 +88,7 @@ type AuthorityContextView = {
   tenantId: string;
   environment: string;
   role: string;
+  roles?: string[];
   capabilities: string[];
   operatingProfile: string;
   operatingDomains: string[];
@@ -941,7 +943,7 @@ function AuthorityVisualDashboard({
         >
           <div className="flex items-start justify-between gap-3">
             <SectionTitle
-              eyebrow="ROLE CATALOG / 13"
+              eyebrow="ROLE CATALOG / 13 · MULTI-MANSIONE"
               title="Ruoli"
               action="Vedi tutti"
               onAction={() => onSelectTab("roles", "authority-roles")}
@@ -1324,8 +1326,8 @@ export default function OnboardingPage() {
         },
         {
           key: "role",
-          value: authorityContext.role,
-          detail: "server-resolved application role",
+          value: authorityContext.roles?.join(" + ") || authorityContext.role,
+          detail: "mansioni server-resolved · capability union",
           tone: "lime" as Tone,
         },
         {
@@ -1816,7 +1818,7 @@ export default function OnboardingPage() {
                 </p>
                 <p className="text-[10px] text-slate-600">
                   {authorityContext
-                    ? `${authorityContext.role} · Sites owner`
+                    ? `${authorityContext.roles?.join(" + ") || authorityContext.role} · Sites owner`
                     : "Site owner · readback pending"}
                 </p>
               </div>
@@ -1966,6 +1968,11 @@ export default function OnboardingPage() {
             </section>
 
             <TenantOperatingProfile />
+
+            <TenantWarehouseControl
+              canManage={Boolean(authorityContext?.capabilities.includes("tenant.manage"))}
+              onNotify={notify}
+            />
 
             <AuthorityMembershipControl
               canManage={canManageAuthority}
@@ -2473,7 +2480,7 @@ export default function OnboardingPage() {
                   return (
                     <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[11px] transition ${selected ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/[0.08] text-slate-400 hover:border-lime-300/25"}`} key={membership.id}>
                       <input checked={selected} className="size-4 accent-lime-300" onChange={() => setTeamMemberIds((current) => selected ? current.filter((id) => id !== membership.id) : [...current, membership.id])} type="checkbox" />
-                      <span className="min-w-0 truncate">{membership.displayName}<span className="ml-1 text-[9px] text-slate-600">· {membership.roleLabel}</span></span>
+                      <span className="min-w-0 truncate">{membership.displayName}<span className="ml-1 text-[9px] text-slate-600">· {membership.rolesLabel?.join(" + ") ?? membership.roleLabel}</span></span>
                     </label>
                   );
                 })}

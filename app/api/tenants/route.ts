@@ -19,6 +19,7 @@ import {
   transportModesForProfile,
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
+import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ function tenantRows(identityProvider: IdentityProvider, actorId: string) {
     .select({
       membershipId: tenantMemberships.id,
       membershipRole: tenantMemberships.role,
+      membershipRolesJson: tenantMemberships.rolesJson,
       membershipStatus: tenantMemberships.status,
       tenantId: tenants.id,
       slug: tenants.slug,
@@ -78,6 +80,7 @@ function toTenantView(row: Awaited<ReturnType<typeof tenantRows>>[number]) {
     status: row.tenantStatus,
     membershipId: row.membershipId,
     role: row.membershipRole,
+    roles: normalizeAuthorityRoles(row.membershipRolesJson, row.membershipRole),
     membershipStatus: row.membershipStatus,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
@@ -221,6 +224,7 @@ export async function POST(request: Request) {
         actorEmail: context!.actorEmail,
         displayName: context!.actorName,
         role: "owner",
+        rolesJson: '["owner"]',
         status: "active",
         createdAt: now,
         updatedAt: now,

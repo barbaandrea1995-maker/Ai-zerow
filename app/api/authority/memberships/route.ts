@@ -9,7 +9,7 @@ import {
   tenantMemberships,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { isAuthorityRole, type AuthorityRole } from "@/lib/authority-catalog";
+import { authorityRolesJson, isAuthorityRole, normalizeAuthorityRoles, type AuthorityRole } from "@/lib/authority-catalog";
 import {
   createInvitationToken,
   hashInvitationToken,
@@ -30,6 +30,15 @@ function isRecord(value: unknown): value is JsonObject {
 
 function boundedText(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function rolesFromInput(input: JsonObject, fallback = "member") {
+  const raw = input.roles ?? input.role;
+  return normalizeAuthorityRoles(raw, fallback);
+}
+
+function sameRoles(left: readonly AuthorityRole[], right: readonly AuthorityRole[]) {
+  return left.length === right.length && left.every((role, index) => role === right[index]);
 }
 
 function requireAuthority(operation: "read" | "manage") {
@@ -93,14 +102,15 @@ export async function POST(request: Request) {
   }
 
   const email = normalizeAuthorityEmail(input.email);
-  const role = boundedText(input.role, 48);
+  const roles = rolesFromInput(input);
+  const role = roles[0] ?? "";
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
   const requestedDays = typeof input.expiresInDays === "number" ? Math.floor(input.expiresInDays) : 7;
   const expiresInDays = Math.min(30, Math.max(1, requestedDays));
 
   if (!isValidAuthorityEmail(email)) return Response.json({ error: "valid_email_required" }, { status: 400 });
-  if (!isAuthorityRole(role)) return Response.json({ error: "invalid_base_role" }, { status: 400 });
-  if (role === "owner" && context.role !== "owner") {
+  if (roles.length === 0 || !isAuthorityRole(role)) return Response.json({ error: "invalid_base_role" }, { status: 400 });
+  if (roles.includes("owner") && !context.roles.includes("owner")) {
     return Response.json({ error: "only_owner_can_assign_owner" }, { status: 403 });
   }
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
@@ -154,6 +164,7 @@ export async function POST(request: Request) {
         tenantId: context.tenantId,
         email,
         role,
+        rolesJson: authorityRolesJson(roles),
         tokenHash,
         status: "pending",
         version: 1,
@@ -176,7 +187,7 @@ export async function POST(request: Request) {
         aggregateType,
         aggregateId: invitationId,
         aggregateVersion: 1,
-        payloadJson: JSON.stringify({ email, role, expiresAt }),
+        payloadJson: JSON.stringify({ email, role, roles, expiresAt }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,
@@ -230,8 +241,8 @@ export async function POST(request: Request) {
   }
 }
 
-function canManageTarget(requesterRole: string, targetRole: string) {
-  return targetRole !== "owner" || requesterRole === "owner";
+function canManageTarget(requesterRoles: readonly AuthorityRole[], targetRoles: readonly AuthorityRole[]) {
+  return !targetRoles.includes("owner") || requesterRoles.includes("owner");
 }
 
 export async function PATCH(request: Request) {
@@ -335,24 +346,28 @@ export async function PATCH(request: Request) {
       eq(tenantMemberships.id, targetId),
     )).limit(1);
     if (!target) return Response.json({ error: "membership_not_found" }, { status: 404 });
-    if (!isAuthorityRole(target.role)) return Response.json({ error: "membership_role_invalid" }, { status: 409 });
-    if (!canManageTarget(context.role, target.role)) return Response.json({ error: "owner_authority_required" }, { status: 403 });
+    const targetRoles = normalizeAuthorityRoles(target.rolesJson, target.role);
+    if (targetRoles.length === 0 || !isAuthorityRole(target.role)) return Response.json({ error: "membership_role_invalid" }, { status: 409 });
+    if (!canManageTarget(context.roles, targetRoles)) return Response.json({ error: "owner_authority_required" }, { status: 403 });
     if (target.version !== expectedVersion) {
       return Response.json({ error: "version_conflict", currentVersion: target.version }, { status: 409 });
     }
 
     let nextRole: AuthorityRole = target.role;
+    let nextRoles: AuthorityRole[] = targetRoles;
     let nextStatus = target.status;
-    if (action === "set_role") {
-      const requestedRole = boundedText(input.role, 48);
-      if (!isAuthorityRole(requestedRole)) return Response.json({ error: "invalid_base_role" }, { status: 400 });
-      if (requestedRole === "owner" && context.role !== "owner") {
+    if (action === "set_role" || action === "set_roles") {
+      const requestedRoles = rolesFromInput(input, target.role);
+      const requestedRole = requestedRoles[0];
+      if (requestedRoles.length === 0 || !requestedRole || !isAuthorityRole(requestedRole)) return Response.json({ error: "invalid_base_role" }, { status: 400 });
+      if (requestedRoles.includes("owner") && !context.roles.includes("owner")) {
         return Response.json({ error: "only_owner_can_assign_owner" }, { status: 403 });
       }
-      if (target.actorId === context.actorId && requestedRole !== target.role) {
+      if (target.actorId === context.actorId && !sameRoles(requestedRoles, targetRoles)) {
         return Response.json({ error: "self_role_change_not_allowed" }, { status: 409 });
       }
       nextRole = requestedRole;
+      nextRoles = requestedRoles;
     } else if (action === "suspend") {
       if (target.actorId === context.actorId) return Response.json({ error: "self_suspend_not_allowed" }, { status: 409 });
       nextStatus = "suspended";
@@ -365,13 +380,13 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "unknown_membership_action" }, { status: 400 });
     }
 
-    const activeOwners = await db.select().from(tenantMemberships).where(and(
+    const activeMemberships = await db.select().from(tenantMemberships).where(and(
       eq(tenantMemberships.tenantId, context.tenantId),
-      eq(tenantMemberships.role, "owner"),
       eq(tenantMemberships.status, "active"),
     ));
-    const removesActiveOwner = target.role === "owner" && target.status === "active"
-      && (nextRole !== "owner" || nextStatus !== "active");
+    const activeOwners = activeMemberships.filter((membership) => normalizeAuthorityRoles(membership.rolesJson, membership.role).includes("owner"));
+    const removesActiveOwner = targetRoles.includes("owner") && target.status === "active"
+      && (!nextRoles.includes("owner") || nextStatus !== "active");
     if (removesActiveOwner && activeOwners.length <= 1) {
       return Response.json({ error: "last_active_owner_required" }, { status: 409 });
     }
@@ -379,15 +394,15 @@ export async function PATCH(request: Request) {
     const nextVersion = target.version + 1;
     const aggregateType = "authority.membership";
     const driverResourceId = `AUTH-DRIVER-${target.actorId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
-    const [driverResource] = target.role === "driver" || nextRole === "driver"
+    const [driverResource] = targetRoles.includes("driver") || nextRoles.includes("driver")
       ? await db.select().from(s04Records).where(and(
         eq(s04Records.tenantId, context.tenantId),
         eq(s04Records.id, driverResourceId),
       )).limit(1)
       : [];
-    const driverAvailable = nextRole === "driver" && nextStatus === "active";
-    const driverStatus = driverAvailable ? "AVAILABLE" : nextRole === "driver" ? "SUSPENDED" : "INACTIVE";
-    const driverNaming = nextRole === "driver" && !driverResource
+    const driverAvailable = nextRoles.includes("driver") && nextStatus === "active";
+    const driverStatus = driverAvailable ? "AVAILABLE" : nextRoles.includes("driver") ? "SUSPENDED" : "INACTIVE";
+    const driverNaming = nextRoles.includes("driver") && !driverResource
       ? await allocateServerName({
         tenantId: context.tenantId,
         module: "workforce",
@@ -449,6 +464,7 @@ export async function PATCH(request: Request) {
     const result = await db.batch([
       db.update(tenantMemberships).set({
         role: nextRole,
+        rolesJson: authorityRolesJson(nextRoles),
         status: nextStatus,
         version: nextVersion,
         updatedAt: now,
@@ -471,8 +487,8 @@ export async function PATCH(request: Request) {
         aggregateId: target.id,
         aggregateVersion: nextVersion,
         payloadJson: JSON.stringify({
-          before: { role: target.role, status: target.status, version: target.version },
-          after: { role: nextRole, status: nextStatus, version: nextVersion },
+          before: { role: target.role, roles: targetRoles, status: target.status, version: target.version },
+          after: { role: nextRole, roles: nextRoles, status: nextStatus, version: nextVersion },
           resource: driverNaming || driverResource ? { id: driverResourceId, status: driverStatus } : null,
         }),
         correlationId: crypto.randomUUID(),

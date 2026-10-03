@@ -177,7 +177,7 @@ const ROLE_LABELS: Record<string, string> = {
   field_supervisor: "Caposquadra",
   worker: "Operatore",
   warehouse_manager: "Responsabile magazzino",
-  warehouse_operator: "Operatore magazzino",
+  warehouse_operator: "Magazziniere",
   driver: "Autista",
   maintenance: "Manutenzione",
 };

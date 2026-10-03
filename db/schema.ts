@@ -24,6 +24,33 @@ export const tenants = sqliteTable("tenants", {
 }));
 
 /**
+ * Tenant-owned warehouse locations. Coordinates are persisted as microdegrees
+ * so the server can validate and compare them without floating point drift.
+ * The location label is deliberately provider-neutral until a geocoder is
+ * connected; the API only exposes SERVER_VALIDATED_COORDINATES when the
+ * coordinates and radius pass its validation rules.
+ */
+export const tenantWarehouses = sqliteTable("tenant_warehouses", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  locationLabel: text("location_label").notNull(),
+  latitudeE6: integer("latitude_e6").notNull(),
+  longitudeE6: integer("longitude_e6").notNull(),
+  geofenceRadiusMeters: integer("geofence_radius_meters").notNull().default(100),
+  locationSource: text("location_source").notNull().default("manual"),
+  status: text("status").notNull().default("active"),
+  version: integer("version").notNull().default(1),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantCodeUnique: uniqueIndex("tenant_warehouses_tenant_code_uq").on(table.tenantId, table.code),
+  tenantStatusIdx: index("tenant_warehouses_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+}));
+
+/**
  * Sites identity → D1 tenant membership projection. Identity values are
  * sourced from the server auth headers; the browser never supplies actorId.
  */
@@ -35,6 +62,7 @@ export const tenantMemberships = sqliteTable("tenant_memberships", {
   actorEmail: text("actor_email").notNull(),
   displayName: text("display_name").notNull(),
   role: text("role").notNull().default("owner"),
+  rolesJson: text("roles_json").notNull().default('["member"]'),
   status: text("status").notNull().default("active"),
   version: integer("version").notNull().default(1),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -55,6 +83,7 @@ export const tenantInvitations = sqliteTable("tenant_invitations", {
   tenantId: text("tenant_id").notNull().references(() => tenants.id),
   email: text("email").notNull(),
   role: text("role").notNull(),
+  rolesJson: text("roles_json").notNull().default('["member"]'),
   tokenHash: text("token_hash").notNull(),
   status: text("status").notNull().default("pending"),
   version: integer("version").notNull().default(1),
@@ -406,6 +435,7 @@ export const inventoryItems = sqliteTable("inventory_items", {
   sku: text("sku").notNull(),
   name: text("name").notNull(),
   unit: text("unit").notNull(),
+  warehouseId: text("warehouse_id"),
   location: text("location").notNull().default("MAGAZZINO"),
   onHandMilli: integer("on_hand_milli").notNull().default(0),
   reservedMilli: integer("reserved_milli").notNull().default(0),
@@ -418,6 +448,7 @@ export const inventoryItems = sqliteTable("inventory_items", {
 }, (table) => ({
   tenantSkuUnique: uniqueIndex("inventory_items_tenant_sku_uq").on(table.tenantId, table.sku),
   tenantStatusIdx: index("inventory_items_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+  tenantWarehouseIdx: index("inventory_items_tenant_warehouse_idx").on(table.tenantId, table.warehouseId, table.updatedAt),
 }));
 
 /** Append-only stock ledger with before/after balances and idempotency. */

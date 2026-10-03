@@ -66,6 +66,19 @@ export async function POST(request: Request, routeContext: RouteContext) {
     }, { status: 409 });
   }
 
+  // Material master data has one canonical write path. Warehouse registration
+  // must resolve the tenant warehouse and the server unit catalog through the
+  // inventory contract; the legacy generic S04 writer must not create a
+  // second, location-free inventory record.
+  if (moduleKey === "warehouse") {
+    return Response.json({
+      error: "warehouse_material_registration_moved_to_inventory",
+      route: "/api/warehouse/inventory",
+      action: "register_item",
+      detail: "Registra il materiale dal modulo Warehouse con un magazzino e un'unità di misura server-side.",
+    }, { status: 410 });
+  }
+
   let payload: Record<string, unknown>;
   try {
     const parsed = (await request.json()) as unknown;
@@ -133,7 +146,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
     }
-    const naming = moduleKey === "operations" || moduleKey === "assets" || moduleKey === "warehouse"
+    const naming = moduleKey === "operations" || moduleKey === "assets"
       ? await allocateServerName({
         tenantId: context!.tenantId,
         module: moduleKey,

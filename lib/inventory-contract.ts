@@ -1,4 +1,50 @@
-import type { inventoryItems, inventoryMovements } from "@/db/schema";
+import type { inventoryItems, inventoryMovements, tenantWarehouses } from "@/db/schema";
+
+/** Server-owned unit catalog. New material records may only use these codes. */
+export const INVENTORY_UNIT_CATALOG = [
+  { code: "PZ", label: "Pezzi", symbol: "pz", decimals: 0 },
+  { code: "M", label: "Metri", symbol: "m", decimals: 3 },
+  { code: "CM", label: "Centimetri", symbol: "cm", decimals: 1 },
+  { code: "MQ", label: "Metri quadrati", symbol: "m²", decimals: 3 },
+  { code: "MC", label: "Metri cubi", symbol: "m³", decimals: 3 },
+  { code: "KG", label: "Chilogrammi", symbol: "kg", decimals: 3 },
+  { code: "G", label: "Grammi", symbol: "g", decimals: 0 },
+  { code: "L", label: "Litri", symbol: "l", decimals: 3 },
+  { code: "ML", label: "Millilitri", symbol: "ml", decimals: 0 },
+  { code: "H", label: "Ore", symbol: "h", decimals: 3 },
+  { code: "SET", label: "Set", symbol: "set", decimals: 0 },
+  { code: "BOX", label: "Scatole", symbol: "box", decimals: 0 },
+] as const;
+
+export type InventoryUnitCode = (typeof INVENTORY_UNIT_CATALOG)[number]["code"];
+
+export function inventoryUnitForCode(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return INVENTORY_UNIT_CATALOG.find((unit) => unit.code === normalized) ?? null;
+}
+
+export function warehouseForResponse(row: typeof tenantWarehouses.$inferSelect) {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    locationLabel: row.locationLabel,
+    coordinates: {
+      latitude: row.latitudeE6 / 1_000_000,
+      longitude: row.longitudeE6 / 1_000_000,
+    },
+    geofence: {
+      radiusMeters: row.geofenceRadiusMeters,
+      status: "configured",
+    },
+    locationSource: row.locationSource,
+    locationStatus: "SERVER_VALIDATED_COORDINATES" as const,
+    status: row.status,
+    version: row.version,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 export const INVENTORY_MOVEMENT_TYPES = [
   "REGISTER",
@@ -38,6 +84,7 @@ export function inventoryItemForResponse(row: typeof inventoryItems.$inferSelect
     sku: row.sku,
     name: row.name,
     unit: row.unit,
+    warehouseId: row.warehouseId,
     location: row.location,
     onHand: milliToQuantity(row.onHandMilli),
     reserved: milliToQuantity(row.reservedMilli),
@@ -82,6 +129,7 @@ export function replenishmentProposalForItem(row: typeof inventoryItems.$inferSe
     sku: row.sku,
     name: row.name,
     unit: row.unit,
+    warehouseId: row.warehouseId,
     location: row.location,
     available: milliToQuantity(availableMilli),
     minimum: milliToQuantity(row.minStockMilli),

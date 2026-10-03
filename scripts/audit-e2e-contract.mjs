@@ -34,6 +34,15 @@ const operationsPlanning = await read("app/operations/page.tsx");
 const planningWriteRoute = await read("app/api/operations/jobs/[jobId]/planning/route.ts");
 const authorityContext = await read("lib/authority-context.ts");
 const authorityCatalog = await read("lib/authority-catalog.ts");
+const warehouseRoute = await read("app/api/authority/warehouses/route.ts");
+const warehouseCatalogRoute = await read("app/api/warehouse/catalog/route.ts");
+const inventoryRoute = await read("app/api/warehouse/inventory/route.ts");
+const membershipRoute = await read("app/api/authority/memberships/route.ts");
+const warehouseComponent = await read("components/tenant-warehouse-control.tsx");
+const warehouseControl = await read("components/warehouse-control.tsx");
+const legacyS04Page = await read("components/s04-module-page.tsx");
+const assetNamingDialog = await read("components/server-naming-dialog.tsx");
+const genericS04Route = await read("app/api/[module]/route.ts");
 
 requireContract(teamRoute, /hasCapability\(context, "authority\.read"\)/, "team read capability gate");
 requireContract(teamRoute, /hasCapability\(context, "authority\.manage"\)/, "team write capability gate");
@@ -71,6 +80,35 @@ requireContract(planningWriteRoute, /evaluateAgainstTenant/, "planning server te
 requireContract(authorityContext, /context\.tenantId/, "authority tenant context");
 requireContract(authorityContext, /assertTenantScope/, "authority tenant assertion");
 requireContract(authorityCatalog, /ROLE_CAPABILITIES/, "canonical capability catalog");
+requireContract(authorityContext, /normalizeAuthorityRoles/, "multi-role context normalization");
+requireContract(authorityContext, /roles.flatMap/, "multi-role capability union");
+requireContract(authorityCatalog, /warehouse\.register/, "warehouse registration capability");
+requireContract(membershipRoute, /rolesJson: authorityRolesJson/, "multi-role membership persistence");
+requireContract(membershipRoute, /action === "set_role" \|\| action === "set_roles"/, "multi-role membership update");
+requireContract(warehouseRoute, /operation === "manage" \? "tenant\.manage"/, "warehouse owner onboarding gate");
+requireContract(warehouseRoute, /latitudeE6: Math\.round/, "server coordinate normalization");
+requireContract(warehouseRoute, /geofenceRadiusMeters/, "warehouse geofence persistence");
+requireContract(warehouseRoute, /warehouse\.location\.created/, "warehouse location event ledger");
+requireContract(warehouseRoute, /zerow\.warehouse\.location\.created/, "warehouse location outbox");
+requireContract(warehouseRoute, /SITES_READBACK_VERIFIED/, "warehouse location reconciliation");
+requireContract(warehouseCatalogRoute, /INVENTORY_UNIT_CATALOG/, "server unit catalog");
+requireContract(warehouseCatalogRoute, /tenantWarehouses/, "tenant warehouse catalog readback");
+requireContract(inventoryRoute, /hasCapability\(context, "warehouse\.register"\)/, "material registration capability gate");
+const registrationGateIndex = inventoryRoute.indexOf('if (action === "register_item" && !hasCapability(context, "warehouse.register"))');
+const inventoryIdempotencyIndex = inventoryRoute.indexOf("const [existingEvent]");
+assert(registrationGateIndex >= 0 && registrationGateIndex < inventoryIdempotencyIndex, "material registration capability must be checked before idempotent readback");
+requireContract(inventoryRoute, /unit_must_be_selected_from_catalog/, "material unit catalog validation");
+requireContract(inventoryRoute, /warehouse_not_found_or_inactive/, "material warehouse validation");
+requireContract(warehouseControl, /fetch\("\/api\/warehouse\/catalog"/, "warehouse UI catalog readback");
+requireContract(warehouseControl, /name="warehouseId"/, "warehouse UI server warehouse selector");
+requireContract(warehouseControl, /name="unit"/, "warehouse UI server unit selector");
+requireContract(warehouseComponent, /fetch\("\/api\/authority\/warehouses"/, "onboarding warehouse readback");
+requireContract(legacyS04Page, /module === "warehouse"\)\s*\{\s*router\.push\("\/warehouse"\)/, "legacy warehouse CTA redirects to canonical module");
+requireContract(legacyS04Page, /module === "assets" && createOpen && <ServerNamingDialog module="assets"/, "legacy S04 naming dialog restricted to assets");
+assert.doesNotMatch(legacyS04Page, /ServerNamingDialog module=\{module\}/, "legacy S04 must not mount a warehouse naming dialog");
+assert.equal((assetNamingDialog.match(/Registra materiale/g) ?? []).length, 0, "asset naming dialog must not contain warehouse registration copy");
+requireContract(genericS04Route, /warehouse_material_registration_moved_to_inventory/, "legacy generic warehouse material write blocked");
+requireContract(genericS04Route, /status: 410/, "legacy generic warehouse material write returns gone");
 
 const sourceFiles = [
   ...(await walk(path.join(root, "app"))),
@@ -114,13 +152,16 @@ const unexplainedButtons = suspiciousButtons.filter((item) => !allowedDeclarativ
 const runtimeUrl = (process.env.ZEROW_RUNTIME_URL || "").replace(/\/$/, "");
 let runtime = { status: "NOT_RUN", reason: "ZEROW_RUNTIME_URL not supplied" };
 if (runtimeUrl) {
-  const paths = ["/", "/api/authority/teams", "/api/operations/jobs/unknown/planning/resource-options"];
+  const paths = ["/", "/api/authority/teams", "/api/authority/warehouses", "/api/warehouse/catalog", "/api/warehouse/inventory", "/api/operations/jobs/unknown/planning/resource-options"];
   const results = [];
   for (const route of paths) {
     const response = await fetch(`${runtimeUrl}${route}`, { redirect: "manual" });
     results.push({ route, status: response.status });
   }
   assert.equal(results.find((item) => item.route === "/api/authority/teams")?.status, 401, "team API must fail closed without identity");
+  assert.equal(results.find((item) => item.route === "/api/authority/warehouses")?.status, 401, "warehouse onboarding API must fail closed without identity");
+  assert.equal(results.find((item) => item.route === "/api/warehouse/catalog")?.status, 401, "warehouse catalog API must fail closed without identity");
+  assert.equal(results.find((item) => item.route === "/api/warehouse/inventory")?.status, 401, "inventory API must fail closed without identity");
   assert.equal(results.find((item) => item.route === "/api/operations/jobs/unknown/planning/resource-options")?.status, 401, "planning resource API must fail closed without identity");
   runtime = { status: "PASS", baseUrl: runtimeUrl, unauthenticatedBoundary: results };
 }
@@ -144,6 +185,10 @@ console.log(JSON.stringify({
     reason: "Requires a real authenticated owner/member session; source and unauthenticated fail-closed boundaries are verified separately.",
     journeys: [
       "authority team create → D1 s04 → s06 event/outbox/reconciliation → team GET readback",
+      "warehouse create → server coordinate/geofence validation → D1 location readback",
+      "warehouse manager register material → unit/warehouse catalog → append-only inventory readback",
+      "warehouse operator movement allowed → material registration denied by warehouse.register",
+      "multi-role membership → unioned capabilities → tenant-scoped access",
       "planning window → server resource-options → occupied resource disabled → planning write guard",
       "role capability deny/allow → tenant A/B isolation",
     ],

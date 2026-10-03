@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { AUTHORITY_ROLES, ROLE_CAPABILITIES } from "../lib/authority-catalog.ts";
+import { AUTHORITY_ROLES, ROLE_CAPABILITIES, normalizeAuthorityRoles } from "../lib/authority-catalog.ts";
 import {
   COMMAND_WIDGET_CATALOG,
   defaultCommandWidgetLayout,
@@ -95,12 +95,18 @@ assert(ROLE_CAPABILITIES.owner.includes("authority.manage"), "Owner must retain 
 assert(!ROLE_CAPABILITIES.worker.includes("command.read"), "Worker must not see the executive Command dashboard");
 assert(!ROLE_CAPABILITIES.auditor.includes("command.customize"), "Auditor must not persist dashboard changes");
 assert(ROLE_CAPABILITIES.warehouse_operator.includes("warehouse.write"), "Warehouse operator must retain warehouse writes");
+assert(!ROLE_CAPABILITIES.warehouse_operator.includes("warehouse.register"), "Warehouse operator must not create material master data");
+assert(ROLE_CAPABILITIES.warehouse_manager.includes("warehouse.register"), "Warehouse manager must register material master data");
 assert(!ROLE_CAPABILITIES.warehouse_operator.includes("finance.read"), "Warehouse operator must not inherit finance visibility");
 assert(ROLE_CAPABILITIES.worker.includes("warehouse.request"), "Field workers must be able to request materials");
 assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers must not mutate stock balances");
 assert(ROLE_CAPABILITIES.worker.includes("attendance.self"), "Field workers must retain self attendance capability");
 assert(ROLE_CAPABILITIES.manager.includes("attendance.approve"), "Managers must retain attendance approval capability");
 assert(ROLE_CAPABILITIES.worker.includes("pwa.read") && ROLE_CAPABILITIES.driver.includes("pwa.read"), "Operational roles must retain PWA diagnostics visibility");
+const multiRoleFixture = normalizeAuthorityRoles('["driver","warehouse_manager","driver"]');
+assert.deepEqual(multiRoleFixture, ["driver", "warehouse_manager"], "Multi-role memberships must normalize and deduplicate roles");
+const multiRoleCapabilities = new Set(multiRoleFixture.flatMap((role) => ROLE_CAPABILITIES[role]));
+assert(multiRoleCapabilities.has("mission.write") && multiRoleCapabilities.has("warehouse.register"), "Multi-role capabilities must be unioned server-side");
 
 for (const profile of ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
   assert(OPERATING_PROFILE_CATALOG[profile]?.domains?.length, `${profile} must declare at least one operating domain`);

@@ -1,5 +1,5 @@
 import type { tenantInvitations, tenantMemberships } from "@/db/schema";
-import { ROLE_METADATA, isAuthorityRole } from "@/lib/authority-catalog";
+import { ROLE_METADATA, isAuthorityRole, normalizeAuthorityRoles } from "@/lib/authority-catalog";
 
 export const MEMBERSHIP_STATUSES = ["active", "suspended", "removed"] as const;
 export type MembershipStatus = (typeof MEMBERSHIP_STATUSES)[number];
@@ -31,12 +31,15 @@ export async function hashInvitationToken(token: string) {
 }
 
 export function invitationForResponse(row: typeof tenantInvitations.$inferSelect) {
+  const roles = normalizeAuthorityRoles(row.rolesJson, row.role);
   return {
     id: row.id,
     tenantId: row.tenantId,
     email: row.email,
     role: row.role,
     roleLabel: isAuthorityRole(row.role) ? ROLE_METADATA[row.role].label : row.role,
+    roles,
+    rolesLabel: roles.map((role) => ROLE_METADATA[role].label),
     status: row.status,
     version: row.version,
     expiresAt: row.expiresAt,
@@ -49,6 +52,7 @@ export function invitationForResponse(row: typeof tenantInvitations.$inferSelect
 }
 
 export function membershipForResponse(row: typeof tenantMemberships.$inferSelect) {
+  const roles = normalizeAuthorityRoles(row.rolesJson, row.role);
   return {
     id: row.id,
     tenantId: row.tenantId,
@@ -58,6 +62,8 @@ export function membershipForResponse(row: typeof tenantMemberships.$inferSelect
     displayName: row.displayName,
     role: row.role,
     roleLabel: isAuthorityRole(row.role) ? ROLE_METADATA[row.role].label : row.role,
+    roles,
+    rolesLabel: roles.map((role) => ROLE_METADATA[role].label),
     status: row.status,
     version: row.version,
     createdAt: row.createdAt,

@@ -9,7 +9,7 @@ import {
   tenantMemberships,
   tenants,
 } from "@/db/schema";
-import { isAuthorityRole } from "@/lib/authority-catalog";
+import { authorityRolesJson, isAuthorityRole, normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import {
   hashInvitationToken,
   invitationForResponse,
@@ -56,7 +56,8 @@ export async function POST(request: Request) {
       .where(eq(tenantInvitations.tokenHash, tokenHash))
       .limit(1);
     if (!invitation) return Response.json({ error: "invitation_not_found" }, { status: 404 });
-    if (!isAuthorityRole(invitation.role)) return Response.json({ error: "invitation_role_invalid" }, { status: 409 });
+    const invitationRoles = normalizeAuthorityRoles(invitation.rolesJson, invitation.role);
+    if (invitationRoles.length === 0 || !isAuthorityRole(invitation.role)) return Response.json({ error: "invitation_role_invalid" }, { status: 409 });
 
     const normalizedIdentityEmail = normalizeAuthorityEmail(identity.actor.email);
     if (normalizedIdentityEmail !== normalizeAuthorityEmail(invitation.email)) {
@@ -99,6 +100,9 @@ export async function POST(request: Request) {
     const invitationVersion = invitation.version + 1;
     const membershipVersion = existingMembership ? existingMembership.version + 1 : 1;
     const membershipId = existingMembership?.id ?? `neon:${invitation.tenantId}:${identity.actor.id}`;
+    const membershipRoles = existingMembership?.role === "owner"
+      ? normalizeAuthorityRoles("owner")
+      : invitationRoles;
     const membershipRole = existingMembership?.role === "owner" ? "owner" : invitation.role;
     const eventId = crypto.randomUUID();
     const idempotencyKey = `authority:invitation:${invitation.id}:accept`;
@@ -108,13 +112,13 @@ export async function POST(request: Request) {
     // driver invitation provisions the operational resource once, so Mission
     // can select it through the normal tenant-scoped availability readback.
     const driverResourceId = `AUTH-DRIVER-${identity.actor.id}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
-    const [existingDriverResource] = membershipRole === "driver"
+    const [existingDriverResource] = membershipRoles.includes("driver")
       ? await db.select({ id: s04Records.id }).from(s04Records).where(and(
         eq(s04Records.tenantId, invitation.tenantId),
         eq(s04Records.id, driverResourceId),
       )).limit(1)
       : [];
-    const driverNaming = membershipRole === "driver" && !existingDriverResource
+    const driverNaming = membershipRoles.includes("driver") && !existingDriverResource
       ? await allocateServerName({
         tenantId: invitation.tenantId,
         module: "workforce",
@@ -216,6 +220,7 @@ export async function POST(request: Request) {
         actorEmail: normalizedIdentityEmail,
         displayName: identity.actor.name || normalizedIdentityEmail,
         role: membershipRole,
+        rolesJson: authorityRolesJson(membershipRoles),
         status: "active",
         version: membershipVersion,
         createdAt: existingMembership?.createdAt ?? now,
@@ -226,6 +231,7 @@ export async function POST(request: Request) {
           actorEmail: normalizedIdentityEmail,
           displayName: identity.actor.name || normalizedIdentityEmail,
           role: membershipRole,
+          rolesJson: authorityRolesJson(membershipRoles),
           status: "active",
           version: membershipVersion,
           updatedAt: now,
@@ -244,7 +250,7 @@ export async function POST(request: Request) {
         aggregateType,
         aggregateId: invitation.id,
         aggregateVersion: invitationVersion,
-        payloadJson: JSON.stringify({ membershipId, role: membershipRole, identityProvider: "neon" }),
+        payloadJson: JSON.stringify({ membershipId, role: membershipRole, roles: membershipRoles, identityProvider: "neon" }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,

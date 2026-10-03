@@ -8,11 +8,13 @@ import {
   s06Events,
   s06Outbox,
   s06Reconciliations,
+  tenantWarehouses,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import {
   inventoryItemForResponse,
   inventoryMovementForResponse,
+  inventoryUnitForCode,
   quantityToMilli,
   replenishmentProposalForItem,
   type InventoryMovementType,
@@ -166,6 +168,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
   }
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
+  if (action === "register_item" && !hasCapability(context, "warehouse.register")) {
+    return Response.json({ error: "forbidden", capability: "warehouse.register" }, { status: 403 });
+  }
 
   try {
     const db = getDb();
@@ -196,17 +201,24 @@ export async function POST(request: Request) {
 
     if (action === "register_item") {
       const name = boundedText(input.name, 160);
-      const unit = boundedText(input.unit, 24);
-      const location = boundedText(input.location, 120, "MAGAZZINO");
+      const unit = inventoryUnitForCode(input.unit);
+      const warehouseId = boundedText(input.warehouseId, 120);
       const requestedSku = boundedText(input.sku, 64).toUpperCase();
       const openingMilli = quantityToMilli(input.openingQuantity ?? 0, { allowZero: true });
       const minStockMilli = quantityToMilli(input.minStock ?? 0, { allowZero: true });
       if (name.length < 2) return Response.json({ error: "item_name_required" }, { status: 400 });
-      if (!unit || unit.length > 24) return Response.json({ error: "valid_unit_required" }, { status: 400 });
+      if (!unit) return Response.json({ error: "unit_must_be_selected_from_catalog" }, { status: 400 });
+      if (!warehouseId) return Response.json({ error: "warehouse_required" }, { status: 400 });
       if (openingMilli === null || minStockMilli === null) return Response.json({ error: "invalid_stock_quantity" }, { status: 400 });
       if (requestedSku && !/^[A-Z0-9][A-Z0-9._-]{1,63}$/.test(requestedSku)) {
         return Response.json({ error: "invalid_sku" }, { status: 400 });
       }
+      const [warehouse] = await db.select().from(tenantWarehouses).where(and(
+        eq(tenantWarehouses.tenantId, context.tenantId),
+        eq(tenantWarehouses.id, warehouseId),
+        eq(tenantWarehouses.status, "active"),
+      )).limit(1);
+      if (!warehouse) return Response.json({ error: "warehouse_not_found_or_inactive" }, { status: 404 });
 
       const naming = requestedSku ? null : await allocateServerName({
         tenantId: context.tenantId,
@@ -217,7 +229,7 @@ export async function POST(request: Request) {
       if (!sku) return Response.json({ error: "sku_unavailable" }, { status: 503 });
       const itemId = crypto.randomUUID();
       const status = itemStatus(openingMilli, 0, minStockMilli);
-      const eventPayload = JSON.stringify({ action, sku, name, unit, openingQuantityMilli: openingMilli, version: 1 });
+      const eventPayload = JSON.stringify({ action, sku, name, unit: unit.code, warehouseId, warehouseCode: warehouse.code, openingQuantityMilli: openingMilli, version: 1 });
 
       await db.batch([
         db.insert(inventoryItems).values({
@@ -225,8 +237,9 @@ export async function POST(request: Request) {
           tenantId: context.tenantId,
           sku,
           name,
-          unit,
-          location,
+          unit: unit.code,
+          warehouseId,
+          location: warehouse.code,
           onHandMilli: openingMilli,
           reservedMilli: 0,
           minStockMilli,
