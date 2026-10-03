@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.7 — W16 Security, Privacy, Observability e DR su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.8 — W17 OpenAI live check governato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W16 Security, Privacy, Observability e DR · technical pass Sites/D1 pubblicato privatamente owner-only come Sites v111 · commit `596eeba15c79cc63e78271e9d11c47cd0ee66d21` · deployment `appgdep_6ac0ecf79bfc819188771b560b8a708c` · non certificato commerciale. Checkpoint: docs/MODULE_16_SECURITY_PRIVACY_OBSERVABILITY_DR_CHECKPOINT_2026-10-03.md. W15 è pubblicato come Sites v110 nel proprio checkpoint; W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device e native mobile, osservabilità reale, DPIA/retention e sign-off restano aperti; i contratti Sites di offline queue/replay, security registry, audit e restore locale restano invece evidenze tecniche esplicite.
+**Checkpoint corrente:** W17 OpenAI live check governato · technical pass locale sul commit e7108ea; Sites v112 resta la pubblicazione privata owner-only verificata precedente e la nuova tranche attende il push sorgente autenticato. Checkpoint: docs/W17_OPENAI_LIVE_CHECKPOINT_2026-10-03.md. W16 è pubblicato come Sites v111 nel proprio checkpoint; W15 è pubblicato come Sites v110; W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Il check OpenAI live, malware/OCR provider, GPS/provider mappa, browser/device, osservabilità reale, DPIA/retention e sign-off restano aperti; i contratti Sites di offline queue/replay, security registry, audit e restore locale restano invece evidenze tecniche esplicite.
 
 ## 1. Direzione prodotto
 

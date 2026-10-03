@@ -21,7 +21,7 @@ function header(response, name) {
 const root = await request("/");
 if (expectOwnerOnlyEdge) {
   assert.equal(root.response.status, 401, "Owner-only production Sites must reject unauthenticated edge requests");
-  const protectedPaths = ["/login", "/release", "/api/release/readiness", "/api/command/overview", "/api/release/build"];
+  const protectedPaths = ["/login", "/release", "/api/release/readiness", "/api/command/overview", "/api/governance/ai-live-check", "/api/release/build"];
   const results = await Promise.all(protectedPaths.map((path) => request(path)));
   for (const [index, result] of results.entries()) {
     assert.equal(result.response.status, 401, `${protectedPaths[index]} must remain owner-only at the edge`);
@@ -46,7 +46,7 @@ const release = await request("/release");
 assert([307, 308].includes(release.response.status), `Release must be protected, got ${release.response.status}`);
 assert(header(release.response, "location").endsWith("/login"), "Release must redirect unauthenticated visitors");
 
-for (const path of ["/api/release/readiness", "/api/command/overview"]) {
+for (const path of ["/api/release/readiness", "/api/command/overview", "/api/governance/ai-live-check"]) {
   const protectedApi = await request(path);
   assert.equal(protectedApi.response.status, 401, `${path} must fail closed without a session`);
 }
