@@ -7,14 +7,14 @@ Riallineare l'intera piattaforma dal primo all'ultimo modulo a livello commercia
 ## Baseline verificata
 
 - Site attivo: AI-ZEROW-COMMAND, pubblicazione privata owner-only.
-- Versione pubblicata riletta: Sites v120.
-- Commit pubblicato: `590ac65d64b59c5543aa4c8dc76cc8344fe2e7b1`.
+- Versione pubblicata riletta: Sites v122.
+- Commit pubblicato: `ab6c383763159881a03489fdba1f3b1ced37096e`.
 - Route pagina: 31.
 - Layout: 21, di cui 20 protetti.
 - API route: 71.
 - Navigazione Command: 18 voci.
 - Endpoint referenziati dalla UI: 46; irrisolti: 0.
-- Pulsanti analizzati: 517; binding sospetti: 0.
+- Pulsanti analizzati: 520; binding sospetti: 0.
 - `tsc --noEmit`: PASS.
 - `verify:commercial`: PASS.
 - `audit:release`: PASS_WITH_EXTERNAL_GATES.
@@ -146,13 +146,13 @@ La prima tranche della revisione è stata applicata e verificata localmente:
 - `/command` è ora il percorso canonico del control deck; i link legacy che puntavano a `/` sono stati riallineati.
 - `COMMAND_NAVIGATION` è la fonte unica per il percorso e la capability di navigazione del Command; la superficie Command deriva da quel catalogo invece di duplicarlo.
 - Le superfici W13, Company AI, Adapter ed Event Authority ricevono la stessa base `zw-app-shell` / `zw-command-ultra` e la stessa illuminazione carbon/lime.
-- Authority e Command espongono anche back/refresh locali; gli altri moduli mantengono la rail globale come fallback verificabile.
+- Authority, Security, Settings e Command espongono back/refresh locali; gli altri moduli mantengono la rail globale come fallback verificabile.
 - È stato aggiunto il registro canonico [`config/commercial-modules.json`](../config/commercial-modules.json) per 19 superfici commerciali/account e lo script `pnpm run audit:ui`.
 - L’audit UI verifica per modulo route, capability navigation, marchio ZEROW ufficiale, vocabolario carbon, back/refresh, comportamento mobile e stato dei gate runtime.
 
-Evidence T01: `audit:ui` PASS_WITH_RUNTIME_GATES (19 superfici; 18 refresh locali, 18 back locali, fallback globale attivo), `audit:release` PASS_WITH_EXTERNAL_GATES, `audit:e2e` PASS_WITH_AUTHENTICATED_GATE, `verify:commercial` PASS, `tsc --noEmit` PASS, lint PASS con 6 warning preesistenti di ottimizzazione `<img>`.
+Evidence T01: `audit:ui` PASS_WITH_RUNTIME_GATES (19 superfici; 19 refresh locali, 19 back locali, fallback globale attivo), `audit:release` PASS_WITH_EXTERNAL_GATES, `audit:e2e` PASS_WITH_AUTHENTICATED_GATE (520 controlli, 0 sospetti), `verify:commercial` PASS, `tsc --noEmit` PASS, build PASS, lint PASS con 6 warning preesistenti di ottimizzazione `<img>`.
 
-Stato T01: `PUBLISHED_PRIVATE / NOT_CERTIFIED_RUNTIME`. La tranche è pubblicata su Sites v120 con audience custom owner-only. Il browser autenticato, il device PWA e i provider esterni restano gate espliciti; la revisione non li considera chiusi sulla sola presenza del codice.
+Stato T01: `PUBLISHED_PRIVATE / NOT_CERTIFIED_RUNTIME`. La tranche è pubblicata su Sites v122 con audience custom owner-only. Il browser autenticato, il device PWA e i provider esterni restano gate espliciti; la revisione non li considera chiusi sulla sola presenza del codice.
 
 ## Criterio di completamento
 
