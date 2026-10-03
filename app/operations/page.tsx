@@ -802,7 +802,7 @@ export default function OperationsPage() {
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
                   <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                  S04 / OPERATIONS / COMMESSE
+                  AI-ZEROW / OPERATIONS / COMMESSE
                 </div>
                 <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">
                   Commesse
