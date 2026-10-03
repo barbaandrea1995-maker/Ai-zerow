@@ -27,10 +27,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 assert.equal(packageJson.scripts["verify:runtime"], "node scripts/verify-runtime-smoke.mjs", "Runtime smoke verification must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["audit:release"], "node scripts/audit-release-surface.mjs", "Release surface audit must remain runnable from the package scripts");
+assert.equal(packageJson.scripts["audit:e2e"], "node scripts/audit-e2e-contract.mjs", "E2E contract audit must remain runnable from the package scripts");
 const runtimeSmoke = await readFile(join(root, "scripts", "verify-runtime-smoke.mjs"), "utf8");
 assert(runtimeSmoke.includes("protected_api_fail_closed") && runtimeSmoke.includes("service_worker_build_binding"), "Runtime smoke must cover auth boundaries and PWA build binding");
 const surfaceAudit = await readFile(join(root, "scripts", "audit-release-surface.mjs"), "utf8");
 assert(surfaceAudit.includes("unresolvedApiEndpoints") && surfaceAudit.includes("browserGpsApi"), "Release surface audit must cover endpoint bindings and GPS/map integration status");
+const e2eAudit = await readFile(join(root, "scripts", "audit-e2e-contract.mjs"), "utf8");
+assert(e2eAudit.includes("authenticatedE2E") && e2eAudit.includes("suspiciousButtons"), "E2E audit must keep authenticated gates and button inventory explicit");
 
 assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
@@ -332,10 +335,21 @@ assert(planningContract.includes("CAPACITY_EXCEEDED"), "Planning must validate r
 const planningOptionsRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "resource-options", "route.ts"), "utf8");
 assert(planningOptionsRoute.includes('hasCapability(context, "planning.read")'), "Planning resource options must require planning.read");
 assert(planningOptionsRoute.includes("unavailableAssets"), "Planning resource options must expose unavailable assets");
+assert(planningOptionsRoute.includes("startsAt") && planningOptionsRoute.includes("endsAt") && planningOptionsRoute.includes("unavailableForWindow"), "Planning resource options must expose server-side window availability readback");
+const planningResources = await readFile(join(root, "lib", "planning-resources.ts"), "utf8");
+assert(planningResources.includes("activePlanningAssignments") && planningResources.includes("DRAFT") && planningResources.includes("PUBLISHED") && planningResources.includes("availableForWindow"), "Planning resource registry must evaluate active tenant assignments server-side");
 const planningSurface = await readFile(join(root, "components", "planning-control.tsx"), "utf8");
 assert(planningSurface.includes("/api/planning") && planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: \"draft\"'), "Planning module must provide a central readback and canonical resource draft flow");
+const planningResourceFields = await readFile(join(root, "components", "planning-resource-fields.tsx"), "utf8");
+assert(planningResourceFields.includes("startsAt") && planningResourceFields.includes("endsAt") && planningResourceFields.includes("disabled={!available}"), "Planning UI must consume server-side availability and disable occupied resources");
 const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
 assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId"), "Central planning readback must be capability-gated and tenant-scoped");
+
+const teamsRoute = await readFile(join(root, "app", "api", "authority", "teams", "route.ts"), "utf8");
+assert(teamsRoute.includes('hasCapability(context, "authority.manage")') && teamsRoute.includes("team_membership_not_active"), "Team creation must be capability-gated and limited to active tenant memberships");
+assert(teamsRoute.includes("s04Records") && teamsRoute.includes("s06Outbox") && teamsRoute.includes("SITES_READBACK_VERIFIED"), "Team creation must persist a tenant resource and its append-only readback ledger");
+const authorityPage = await readFile(join(root, "app", "onboarding", "page.tsx"), "utf8");
+assert(authorityPage.includes("/api/authority/teams") && authorityPage.includes("Crea squadra"), "Authority must expose a real team creation and readback surface");
 
 const attendanceRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "attendance", "route.ts"), "utf8");
 assert(attendanceRoute.includes('tracking: "ON_DUTY_ONLY"'), "Attendance must declare on-duty tracking policy");
@@ -370,11 +384,12 @@ const missionResourceFields = await readFile(join(root, "components", "mission-r
 assert(missionResourceFields.includes("/api/mission/resources") && missionResourceFields.includes('name="driverId"') && missionResourceFields.includes('name="vehicleId"'), "Mission UI must select registered driver and vehicle IDs");
 assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
 const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
-assert(planningJourney.includes("PlanningResourceFields") && planningJourney.includes("resourceIds: planningResourceIds"), "Planning UI must select canonical resource IDs");
+assert(planningJourney.includes("PlanningResourceFields") && planningJourney.includes("resourceIds: planningResourceIds") && planningJourney.includes("startsAt={planningStartsAt}") && planningJourney.includes("endsAt={planningEndsAt}"), "Planning UI must select canonical resource IDs and server-window availability");
 assert(!planningJourney.includes('name="responsible"') && planningJourney.includes("Attività della giornata"), "Planning UI must not reintroduce a free-text responsible field");
 assert(planningJourney.includes("transportMode") && planningJourney.includes("TRANSPORT_MODE_CATALOG"), "Journey transport UI must expose tenant-enabled transport modes");
 const operationsPlanningPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
 assert(operationsPlanningPage.includes("savePlanningDraft") && operationsPlanningPage.includes("PlanningResourceFields"), "Operations planning surface must persist a real draft with canonical resources");
+assert(operationsPlanningPage.includes("startsAt={planningStartsAt}") && operationsPlanningPage.includes("endsAt={planningEndsAt}") && operationsPlanningPage.includes("unavailableForWindow"), "Operations planning surface must consume server-side window availability");
 const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
 assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");
 
@@ -463,6 +478,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "runtime_http_smoke", "full_surface_audit", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

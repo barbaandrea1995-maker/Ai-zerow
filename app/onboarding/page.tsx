@@ -28,6 +28,7 @@ import {
   Gauge,
   HardHat,
   KeyRound,
+  LoaderCircle,
   LocateFixed,
   LockKeyhole,
   Menu,
@@ -66,6 +67,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
 import {
@@ -104,6 +106,22 @@ type AccessProfile = {
   baseRole: string;
   capabilities: string[];
   createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AuthorityTeamView = {
+  id: string;
+  tenantId: string;
+  code: string | null;
+  name: string;
+  description: string;
+  status: string;
+  capacity: number;
+  qualifications: string[];
+  memberIds: string[];
+  members: AuthorityMembershipView[];
+  activeMemberCount: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -151,21 +169,12 @@ const authorityRoleDistribution: Array<{
   tone: string;
 }> = [];
 
-const accessLevels: Array<{ label: string; value: number }> = [];
-
 const authorityActivity: Array<{
   icon: typeof Users;
   title: string;
   detail: string;
   time: string;
   tone: Tone;
-}> = [];
-
-const authorityTeams: Array<{
-  label: string;
-  members: number;
-  initials: string;
-  tone: string;
 }> = [];
 
 const permissionMatrixRoles = [
@@ -561,22 +570,30 @@ function CapabilityPill({ capability }: { capability: string }) {
 
 function AuthorityVisualDashboard({
   activeTab,
+  canManageAuthority,
   filteredRoles,
   filteredUsers,
   onNotify,
   onNewUser,
+  onNewTeam,
+  onRefresh,
   onSelectRole,
   onSelectTab,
   selectedRole,
+  teams,
 }: {
   activeTab: AuthorityTabId;
+  canManageAuthority: boolean;
   filteredRoles: AuthorityRole[];
   filteredUsers: AuthorityUser[];
   onNotify: (message: string) => void;
   onNewUser: () => void;
+  onNewTeam: () => void;
+  onRefresh: () => void;
   onSelectRole: (role: AuthorityRole) => void;
   onSelectTab: (tab: AuthorityTabId, target: string) => void;
   selectedRole: AuthorityRole;
+  teams: AuthorityTeamView[];
 }) {
   const roleNodePositions = [
     { left: "18%", top: "24%" },
@@ -985,88 +1002,55 @@ function AuthorityVisualDashboard({
         >
           <div className="flex items-start justify-between gap-3">
             <SectionTitle
-              eyebrow="ACCESS CONTROL"
-              title="Livelli accesso"
-              action="Vedi tutti"
-              onAction={() =>
-                onNotify("Accessi: read model pronto per l'adapter Security")
-              }
+              eyebrow="WORKFORCE / TEAM"
+              title="Squadre operative"
+              action={canManageAuthority ? "Nuova squadra" : "Solo lettura"}
+              onAction={canManageAuthority ? onNewTeam : () => onNotify("Il tuo ruolo è in sola lettura per la gestione squadre")}
             />
             <button
               className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[10px] text-slate-400 hover:border-lime-300/30 hover:text-lime-200"
-              onClick={() => onNotify("Access levels: catalogo visuale")}
+              onClick={onRefresh}
               type="button"
+              aria-label="Aggiorna squadre operative"
             >
-              Live
-              <ChevronDown className="size-3" />
+              Aggiorna
+              <LoaderCircle className="size-3" />
             </button>
-          </div>
-          <div className="mt-4 flex h-[142px] items-end gap-1 border-b border-white/10 px-1 pb-0">
-            {accessLevels.length ? (
-              accessLevels.map((item) => (
-                <span
-                  className="group relative flex-1 rounded-t-sm bg-lime-300/85 transition hover:bg-lime-200"
-                  key={item.label}
-                  style={{
-                    height: `${Math.max(12, (item.value / 186) * 100)}%`,
-                  }}
-                >
-                  <span className="pointer-events-none absolute -top-6 left-1/2 hidden -translate-x-1/2 rounded bg-black px-1.5 py-1 text-[9px] text-lime-200 group-hover:block">
-                    {item.value}
-                  </span>
-                </span>
-              ))
-            ) : (
-              <p className="m-auto text-center text-xs text-slate-500">
-                Nessun livello accesso nel readback D1.
-              </p>
-            )}
-          </div>
-          <div className="mt-2 flex justify-between gap-1 text-[8px] text-slate-600">
-            <span>Lettura</span>
-            <span>Inserimento</span>
-            <span>Modifica</span>
-            <span>Admin</span>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2">
             <div className="carbon-inset rounded-lg p-2.5">
-              <p className="font-mono text-lg font-semibold text-lime-300">—</p>
-              <p className="mt-1 text-[10px] text-slate-500">
-                permessi nel readback
-              </p>
+              <p className="font-mono text-lg font-semibold text-lime-300">{teams.length}</p>
+              <p className="mt-1 text-[10px] text-slate-500">team nel readback D1</p>
             </div>
             <div className="carbon-inset rounded-lg p-2.5">
-              <p className="font-mono text-lg font-semibold text-cyan-300">—</p>
-              <p className="mt-1 text-[10px] text-slate-500">
-                team nel readback
-              </p>
+              <p className="font-mono text-lg font-semibold text-cyan-300">{teams.reduce((sum, team) => sum + team.activeMemberCount, 0)}</p>
+              <p className="mt-1 text-[10px] text-slate-500">membri attivi assegnabili</p>
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-1.5">
-            {authorityTeams.map((team) => (
-              <button
-                className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/15 px-2 py-2 text-left transition hover:border-lime-300/25"
-                key={team.label}
-                onClick={() =>
-                  onNotify(
-                    `${team.label}: ${team.members} membri nel read model`,
-                  )
-                }
-                type="button"
-              >
-                <span
-                  className={`grid size-6 place-items-center rounded-full border text-[8px] font-bold ${team.tone === "violet" ? "border-violet-300/30 bg-violet-300/15 text-violet-100" : "border-lime-300/25 bg-lime-300/10 text-lime-100"}`}
-                >
-                  {team.initials}
-                </span>
-                <span className="min-w-0 truncate text-[9px] text-slate-400">
-                  {team.label}
-                </span>
-              </button>
-            ))}
-            <p className="col-span-2 mt-1 text-center text-[10px] text-slate-600">
-              Nessun team nel readback D1.
-            </p>
+          <div className="mt-4 space-y-2">
+            {teams.length ? teams.map((team) => (
+              <div className="rounded-xl border border-white/[0.08] bg-black/15 p-3" key={team.id}>
+                <div className="flex items-start gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-100">
+                    <Users className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-xs font-semibold text-slate-100">{team.name}</p>
+                      <StatusBadge>{team.status}</StatusBadge>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500">{team.code ?? "Codice in assegnazione"} · {team.activeMemberCount} membri · capacità {team.capacity}</p>
+                    {team.description && <p className="mt-1 truncate text-[10px] text-slate-600">{team.description}</p>}
+                    {team.members.length > 0 && <p className="mt-2 truncate text-[10px] text-lime-100/70">{team.members.map((member) => member.displayName).join(" · ")}</p>}
+                  </div>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-xl border border-dashed border-white/10 bg-black/10 p-4 text-center">
+                <p className="text-xs text-slate-400">Nessuna squadra registrata.</p>
+                <p className="mt-1 text-[10px] text-slate-600">Crea una squadra con membri attivi: sarà subito selezionabile in Pianificazione.</p>
+              </div>
+            )}
           </div>
         </section>
       </div>
@@ -1250,13 +1234,21 @@ export default function OnboardingPage() {
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileLabel, setProfileLabel] = useState("");
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [teamDescription, setTeamDescription] = useState("");
+  const [teamCapacity, setTeamCapacity] = useState("1");
+  const [teamQualifications, setTeamQualifications] = useState("");
+  const [teamMemberIds, setTeamMemberIds] = useState<string[]>([]);
   const [toast, setToast] = useState("");
   const [authorityContext, setAuthorityContext] =
     useState<AuthorityContextView | null>(null);
   const [profiles, setProfiles] = useState<AccessProfile[]>([]);
   const [memberships, setMemberships] = useState<AuthorityMembershipView[]>([]);
   const [invitations, setInvitations] = useState<AuthorityInvitationView[]>([]);
+  const [teams, setTeams] = useState<AuthorityTeamView[]>([]);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const [teamSubmitting, setTeamSubmitting] = useState(false);
   const visibleNavItems = useMemo(
     () => navItems.filter((item) => Boolean(item.capability && authorityContext?.capabilities.includes(item.capability))),
     [authorityContext],
@@ -1444,10 +1436,8 @@ export default function OnboardingPage() {
     },
     {
       ...authorityKpis[3],
-      value: String(
-        new Set(memberships.map((membership) => membership.role)).size,
-      ),
-      delta: "Ruoli attivi",
+      value: String(teams.length),
+      delta: "D1 live",
     },
   ];
 
@@ -1458,9 +1448,10 @@ export default function OnboardingPage() {
 
   const refreshAuthority = useCallback(async () => {
     try {
-      const [profilesResponse, membershipsResponse] = await Promise.all([
+      const [profilesResponse, membershipsResponse, teamsResponse] = await Promise.all([
         fetch("/api/authority/access-profiles", { cache: "no-store" }),
         fetch("/api/authority/memberships", { cache: "no-store" }),
+        fetch("/api/authority/teams", { cache: "no-store" }),
       ]);
       const profilesPayload = (await profilesResponse.json()) as {
         context?: AuthorityContextView;
@@ -1473,11 +1464,17 @@ export default function OnboardingPage() {
         invitations?: AuthorityInvitationView[];
         error?: string;
       };
-      if (!profilesResponse.ok || !membershipsResponse.ok) {
+      const teamsPayload = (await teamsResponse.json()) as {
+        context?: AuthorityContextView;
+        teams?: AuthorityTeamView[];
+        error?: string;
+      };
+      if (!profilesResponse.ok || !membershipsResponse.ok || !teamsResponse.ok) {
         setToast(
           profilesPayload.error === "authority_store_unavailable" ||
             membershipsPayload.error ===
-              "authority_membership_store_unavailable"
+              "authority_membership_store_unavailable" ||
+            teamsPayload.error === "authority_team_store_unavailable"
             ? "Authority store Sites non disponibile"
             : "Readback Authority non riuscito",
         );
@@ -1489,6 +1486,7 @@ export default function OnboardingPage() {
       setProfiles(profilesPayload.profiles ?? []);
       setMemberships(membershipsPayload.memberships ?? []);
       setInvitations(membershipsPayload.invitations ?? []);
+      setTeams(teamsPayload.teams ?? []);
     } catch {
       setToast("Readback Authority non raggiungibile");
     }
@@ -1592,6 +1590,64 @@ export default function OnboardingPage() {
       notify("Profilo non salvato: errore di rete");
     } finally {
       setProfileSubmitting(false);
+    }
+  };
+
+  const createTeam = async () => {
+    if (!canManageAuthority) {
+      notify("Il tuo ruolo consente la lettura Authority ma non la gestione delle squadre");
+      return;
+    }
+    const name = teamName.trim();
+    if (name.length < 2) {
+      notify("Inserisci il nome della squadra");
+      return;
+    }
+    if (!teamMemberIds.length) {
+      notify("Seleziona almeno un membro attivo");
+      return;
+    }
+    setTeamSubmitting(true);
+    try {
+      const response = await fetch("/api/authority/teams", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: teamDescription,
+          capacity: Number(teamCapacity) || 1,
+          qualifications: teamQualifications.split(",").map((item) => item.trim()).filter(Boolean),
+          memberIds: teamMemberIds,
+        }),
+      });
+      const payload = (await response.json()) as {
+        team?: AuthorityTeamView;
+        teams?: AuthorityTeamView[];
+        error?: string;
+      };
+      if (!response.ok || !payload.team) {
+        const message = payload.error === "team_membership_not_active"
+          ? "Un membro selezionato non è più attivo"
+          : payload.error === "team_name_already_exists"
+            ? "Esiste già una squadra con questo nome"
+            : payload.error === "authority_team_store_unavailable"
+              ? "Authority store Sites non disponibile"
+              : "Squadra non salvata";
+        notify(message);
+        return;
+      }
+      setTeams(payload.teams ?? [payload.team, ...teams]);
+      setTeamOpen(false);
+      setTeamName("");
+      setTeamDescription("");
+      setTeamCapacity("1");
+      setTeamQualifications("");
+      setTeamMemberIds([]);
+      notify(`Squadra salvata su Sites: ${payload.team.name}`);
+    } catch {
+      notify("Squadra non salvata: errore di rete");
+    } finally {
+      setTeamSubmitting(false);
     }
   };
 
@@ -1932,13 +1988,17 @@ export default function OnboardingPage() {
 
             <AuthorityVisualDashboard
               activeTab={activeTab}
+              canManageAuthority={canManageAuthority}
               filteredRoles={filteredRoles}
               filteredUsers={filteredUsers}
               onNewUser={() => setProfileOpen(true)}
+              onNewTeam={() => setTeamOpen(true)}
               onNotify={notify}
+              onRefresh={() => void refreshAuthority()}
               onSelectRole={setSelectedRole}
               onSelectTab={selectAuthorityTab}
               selectedRole={selectedRole}
+              teams={teams}
             />
 
             <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
@@ -2380,6 +2440,58 @@ export default function OnboardingPage() {
       </div>
 
       <CommandMobileNav active="more" role={authorityContext?.role} />
+      <Dialog open={teamOpen} onOpenChange={setTeamOpen}>
+        <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[620px]">
+          <DialogHeader>
+            <DialogTitle>Crea squadra operativa</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              La squadra è tenant-scoped, riceve un codice server e diventa una risorsa reale per la pianificazione. I membri sono selezionabili solo dal roster attivo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <label className="text-xs text-slate-400" htmlFor="team-name">Nome squadra</label>
+              <Input id="team-name" className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setTeamName(event.target.value)} placeholder="Es. Squadra Rete Nord" value={teamName} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400" htmlFor="team-capacity">Capacità simultanea</label>
+              <Input id="team-capacity" className="border-white/10 bg-black/30 text-slate-100" min={1} max={100} onChange={(event) => setTeamCapacity(event.target.value)} type="number" value={teamCapacity} />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-400" htmlFor="team-qualifications">Qualifiche</label>
+              <Input id="team-qualifications" className="border-white/10 bg-black/30 text-slate-100" onChange={(event) => setTeamQualifications(event.target.value)} placeholder="ADR, PES-PAV" value={teamQualifications} />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <label className="text-xs text-slate-400" htmlFor="team-description">Descrizione</label>
+              <Textarea id="team-description" className="min-h-20 border-white/10 bg-black/30 text-slate-100" onChange={(event) => setTeamDescription(event.target.value)} placeholder="Perimetro operativo della squadra" value={teamDescription} />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <p className="text-xs text-slate-400">Membri attivi</p>
+              <div className="grid max-h-48 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-2 sm:grid-cols-2">
+                {memberships.filter((membership) => membership.status === "active").map((membership) => {
+                  const selected = teamMemberIds.includes(membership.id);
+                  return (
+                    <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[11px] transition ${selected ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/[0.08] text-slate-400 hover:border-lime-300/25"}`} key={membership.id}>
+                      <input checked={selected} className="size-4 accent-lime-300" onChange={() => setTeamMemberIds((current) => selected ? current.filter((id) => id !== membership.id) : [...current, membership.id])} type="checkbox" />
+                      <span className="min-w-0 truncate">{membership.displayName}<span className="ml-1 text-[9px] text-slate-600">· {membership.roleLabel}</span></span>
+                    </label>
+                  );
+                })}
+                {!memberships.some((membership) => membership.status === "active") && <p className="col-span-2 p-3 text-center text-[10px] text-amber-200">Nessun membro attivo disponibile: invita prima un operatore.</p>}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button>
+            </DialogClose>
+            <Button type="button" disabled={teamSubmitting || !canManageAuthority || !teamMemberIds.length} className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => void createTeam()}>
+              {teamSubmitting ? <LoaderCircle className="size-3.5 animate-spin" /> : <Users className="size-3.5" />}
+              {teamSubmitting ? "Salvataggio…" : canManageAuthority ? "Crea squadra" : "Solo lettura"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
         <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
           <DialogHeader>

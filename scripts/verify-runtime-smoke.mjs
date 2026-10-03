@@ -21,10 +21,17 @@ function header(response, name) {
 const root = await request("/");
 if (expectOwnerOnlyEdge) {
   assert.equal(root.response.status, 401, "Owner-only production Sites must reject unauthenticated edge requests");
-  const protectedPaths = ["/login", "/release", "/api/release/readiness", "/api/command/overview", "/api/governance/ai-live-check", "/api/release/build"];
-  const results = await Promise.all(protectedPaths.map((path) => request(path)));
+  const protectedPaths = [
+    { path: "/login" },
+    { path: "/release" },
+    { path: "/api/release/readiness" },
+    { path: "/api/command/overview" },
+    { path: "/api/governance/ai-live-check", options: { method: "POST" } },
+    { path: "/api/release/build" },
+  ];
+  const results = await Promise.all(protectedPaths.map((item) => request(item.path, item.options)));
   for (const [index, result] of results.entries()) {
-    assert.equal(result.response.status, 401, `${protectedPaths[index]} must remain owner-only at the edge`);
+    assert.equal(result.response.status, 401, `${protectedPaths[index].path} must remain owner-only at the edge`);
   }
   console.log(JSON.stringify({
     status: "PASS",
@@ -46,9 +53,14 @@ const release = await request("/release");
 assert([307, 308].includes(release.response.status), `Release must be protected, got ${release.response.status}`);
 assert(header(release.response, "location").endsWith("/login"), "Release must redirect unauthenticated visitors");
 
-for (const path of ["/api/release/readiness", "/api/command/overview", "/api/governance/ai-live-check"]) {
-  const protectedApi = await request(path);
-  assert.equal(protectedApi.response.status, 401, `${path} must fail closed without a session`);
+const protectedApiRequests = [
+  { path: "/api/release/readiness" },
+  { path: "/api/command/overview" },
+  { path: "/api/governance/ai-live-check", options: { method: "POST" } },
+];
+for (const item of protectedApiRequests) {
+  const protectedApi = await request(item.path, item.options);
+  assert.equal(protectedApi.response.status, 401, `${item.path} must fail closed without a session`);
 }
 
 const build = await request("/api/release/build");

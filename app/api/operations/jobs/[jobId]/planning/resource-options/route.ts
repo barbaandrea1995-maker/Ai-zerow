@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { getPlanningResourceOptions } from "@/lib/planning-resources";
+import { getPlanningResourceOptions, type PlanningAvailabilityWindow } from "@/lib/planning-resources";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,7 @@ async function findJob(tenantId: string, reference: string) {
   return byCode ?? null;
 }
 
-export async function GET(_request: Request, routeContext: RouteContext) {
+export async function GET(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   if (!hasCapability(context, "planning.read")) return Response.json({ error: "forbidden", capability: "planning.read" }, { status: 403 });
@@ -34,7 +34,16 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
-    const planningOptions = await getPlanningResourceOptions(context.tenantId);
+    const url = new URL(request.url);
+    const startsAt = url.searchParams.get("startsAt")?.trim() ?? "";
+    const endsAt = url.searchParams.get("endsAt")?.trim() ?? "";
+    const excludedPlanId = url.searchParams.get("excludePlanId")?.trim() || undefined;
+    const hasWindow = Boolean(startsAt || endsAt);
+    if (hasWindow && (!startsAt || !endsAt || !Number.isFinite(Date.parse(startsAt)) || !Number.isFinite(Date.parse(endsAt)) || Date.parse(endsAt) <= Date.parse(startsAt))) {
+      return Response.json({ error: "invalid_planning_window" }, { status: 400 });
+    }
+    const window: PlanningAvailabilityWindow | undefined = hasWindow ? { startsAt, endsAt } : undefined;
+    const planningOptions = await getPlanningResourceOptions(context.tenantId, window, excludedPlanId);
     const workforce = hasCapability(context, "workforce.read")
       ? planningOptions.filter((item) => item.kind === "person" || item.kind === "team")
       : [];
@@ -47,9 +56,24 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     return Response.json({
       context: publicAuthorityContext(context),
       job: { id: job.id, code: job.canonicalCode, title: job.title },
-      options: { workforce, assets: assets.filter((item) => item.assignable), unavailableAssets: assets.filter((item) => !item.assignable) },
+      options: {
+        workforce,
+        assets: assets.filter((item) => item.assignable),
+        unavailableAssets: assets.filter((item) => !item.assignable),
+        unavailableForWindow: planningOptions.filter((item) => item.assignable && !item.availableForWindow),
+      },
       existingPlans: plans.map((plan) => ({ id: plan.id, status: plan.status, version: plan.version, title: plan.title, updatedAt: plan.updatedAt })),
-      contract: { source: "sites-d1-planning-resource-readback", writes: "/api/operations/jobs/:jobId/planning", assignmentGuard: "asset.lifecycleStatus" },
+      contract: {
+        source: "sites-d1-planning-resource-readback",
+        writes: "/api/operations/jobs/:jobId/planning",
+        assignmentGuard: "server-window-lifecycle-and-tenant-active-plans",
+      },
+      availability: {
+        status: "verified",
+        window: window ?? null,
+        rule: "DRAFT/PUBLISHED tenant plans are checked for interval overlap before options are returned.",
+        checkedAt: new Date().toISOString(),
+      },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {

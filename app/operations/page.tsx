@@ -113,11 +113,13 @@ type OperationsAdapterRecord = IntakeAdapterRecord;
 type OperationsAdapterResponse = IntakeCreateResponse;
 type PlanningOptionsResponse = {
   options?: {
-    workforce?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
-    assets?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
-    unavailableAssets?: Array<{ id: string; label: string; kind: string; assignable: boolean }>;
+    workforce?: Array<{ id: string; label: string; kind: string; assignable: boolean; availableForWindow?: boolean; availabilityConflict?: { title: string } }>;
+    assets?: Array<{ id: string; label: string; kind: string; assignable: boolean; availableForWindow?: boolean; availabilityConflict?: { title: string } }>;
+    unavailableAssets?: Array<{ id: string; label: string; kind: string; assignable: boolean; availableForWindow?: boolean }>;
+    unavailableForWindow?: Array<{ id: string; label: string; kind: string; assignable: boolean; availableForWindow?: boolean; availabilityConflict?: { title: string } }>;
   };
   existingPlans?: Array<{ id: string; status: string; version: number; title: string }>;
+  availability?: { status?: string; window?: { startsAt: string; endsAt: string } | null };
   readback?: { status?: string };
 };
 
@@ -493,6 +495,7 @@ export default function OperationsPage() {
   const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
   const [planningSaving, setPlanningSaving] = useState(false);
   const [planningNotice, setPlanningNotice] = useState("");
+  const planningReadbackKey = `planning-options:${selectedJob.id}:${planningStartsAt}:${planningEndsAt}`;
   const resourceOptions = useMemo(() => {
     if (planningOptionsJobId !== selectedJob.id || !planningOptions?.options) return [];
     return [
@@ -505,9 +508,15 @@ export default function OperationsPage() {
     if (!planningOpen || selectedJob.id === "EMPTY") return;
     let active = true;
     const reference = encodeURIComponent(selectedJob.sourceId ?? selectedJob.id);
+    const params = new URLSearchParams();
+    if (planningStartsAt && planningEndsAt && Number.isFinite(Date.parse(planningStartsAt)) && Number.isFinite(Date.parse(planningEndsAt)) && Date.parse(planningEndsAt) > Date.parse(planningStartsAt)) {
+      params.set("startsAt", new Date(planningStartsAt).toISOString());
+      params.set("endsAt", new Date(planningEndsAt).toISOString());
+    }
+    const query = params.toString();
     readback<PlanningOptionsResponse>(
-      `planning-options:${selectedJob.id}`,
-      `/api/operations/jobs/${reference}/planning/resource-options`,
+      planningReadbackKey,
+      `/api/operations/jobs/${reference}/planning/resource-options${query ? `?${query}` : ""}`,
       { force: true },
     )
       .then((payload) => {
@@ -523,7 +532,7 @@ export default function OperationsPage() {
     return () => {
       active = false;
     };
-  }, [planningOpen, selectedJob.id, selectedJob.sourceId]);
+  }, [planningOpen, planningReadbackKey, planningStartsAt, planningEndsAt, selectedJob.id, selectedJob.sourceId]);
   const planningOptionsStatus = !planningOpen
     ? "idle"
     : planningOptionsJobId !== selectedJob.id
@@ -556,7 +565,7 @@ export default function OperationsPage() {
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "planning_write_failed");
-      invalidateReadback(`planning-options:${selectedJob.id}`);
+      invalidateReadback(planningReadbackKey);
       setPlanningOpen(false);
       notify("Piano creato in bozza · risorse validate dal server");
     } catch (error) {
@@ -1191,7 +1200,7 @@ export default function OperationsPage() {
                       <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5" key={resource.id}>
                         <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><Users className="size-3.5" /></span>
                         <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{resource.label}</p><p className="mt-0.5 text-[10px] uppercase tracking-[0.1em] text-slate-600">{resource.kind}</p></div>
-                        <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-lime-200">{resource.assignable ? "Disponibile" : "Non assegnabile"}</span>
+                        <span className={`text-[9px] font-semibold uppercase tracking-[0.08em] ${resource.availableForWindow === false ? "text-amber-200" : resource.assignable ? "text-lime-200" : "text-slate-500"}`}>{resource.availableForWindow === false ? `Occupata${resource.availabilityConflict?.title ? ` · ${resource.availabilityConflict.title}` : ""}` : resource.assignable ? "Disponibile" : "Non assegnabile"}</span>
                       </div>
                     ))}
                   </div>
@@ -1351,7 +1360,7 @@ export default function OperationsPage() {
             <label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningTitle(event.target.value)} value={planningTitle} required /></label>
             <label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label>
             <label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label>
-            <PlanningResourceFields jobId={selectedJob.sourceId ?? selectedJob.id} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} />
+            <PlanningResourceFields jobId={selectedJob.sourceId ?? selectedJob.id} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} />
             <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[10px] leading-5 text-lime-100/80 sm:col-span-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />{planningOptionsStatus === "online" ? `${planningOptions?.existingPlans?.length ?? 0} piani già riletti. Il server blocca sovrapposizioni e risorse non assegnabili.` : "Il readback resta tenant-scoped e non assegna automaticamente risorse."}</div>
             {planningNotice && <p className="rounded-xl border border-amber-300/20 bg-amber-300/[.04] px-3 py-2 text-[10px] text-amber-100 sm:col-span-2">{planningNotice}</p>}
             <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={planningSaving} type="submit" className="bg-lime-300 text-[#060806] hover:bg-lime-200">{planningSaving ? "Salvataggio…" : "Crea bozza"}</Button></DialogFooter>
