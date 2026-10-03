@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.2 — W11 Events, Twin, Timeline & Ledger su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 3.3 — W12 Company AI Control Plane su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W11 Events, Twin, Timeline & Ledger · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_11_EVENTS_TWIN_TIMELINE_CHECKPOINT_2026-10-03.md. W10 e W09 restano chiusi nei propri perimetri. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W12 Company AI Control Plane · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_12_COMPANY_AI_CONTROL_PLANE_CHECKPOINT_2026-10-03.md. W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -83,7 +83,7 @@ persona/input
 | W09 Documents | `RC2.9 — TECHNICAL PASS / SECURITY PROVIDER GATE` | Control deck Document Control pubblicato con catalogo tenant-scoped, commessa obbligatoria, upload R2 fino a 20 MB, MIME+magic signature, SHA-256, provenance, inspector, filtri e security actions. `/api/documents` legge il catalogo operativo; il download resta fail-closed senza CLEAN provider-backed. OCR, malware provider, version replacement e retention provider-backed restano gate espliciti. |
 | W10 Finance e Procurement | `RC2.9 — TECHNICAL PASS / EXTERNAL EXECUTOR GATE` | Control deck Command pubblicato privatamente con commessa selezionabile dal catalogo S04 e validata server-side, workflow Finance/Procurement, righe procurement, approval, idempotenza, optimistic version, eventi, outbox, reconciliation e handoff verso Operations/Warehouse/Documents. Accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
 | W11 Events, Outbox, Twin e Timeline | `RC2.9 — TECHNICAL PASS / EXTERNAL CONSUMER GATE` | Control deck Event Authority pubblicato privatamente con Event stream, inspector, outbox/DLQ control, retry budget, reconciliation, Twin read model derivato e Command ledger/timeline capability-gated. Consumer/worker esterni, Twin canonico, replay e proiezioni persistenti restano da certificare. |
-| W12 AI, Tool Gateway e Approval | `RC2.7 — LOCAL GOVERNANCE PASS / LIVE GATE NOT RUN` | Company AI espone un control plane capability-gated con readiness dei contratti, ledger/readback, binding metadata-only, no-direct-write, approval boundary e blocchi commerciali. Command espone un widget W12 filtrato per `command.read`; OpenAI live richiede ancora sessione autenticata e runtime pubblicato. |
+| W12 AI, Tool Gateway e Approval | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | `/governance` ora espone una control deck Company AI capability-gated con readiness, knowledge registry ricercabile, scope inspector commessa→sottogruppo, approval ledger, tool gateway e pipeline preview→approval→readback. Il contratto resta `directWrite=false`; OpenAI live, executor esterni e sign-off commerciale restano aperti. |
 | W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
@@ -557,6 +557,15 @@ NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT
 - whitelist per autonomia semi-autonomous;
 - rollback di workflow e tool manifest;
 - test sintetici prima del publish.
+
+#### Implementazione W12 corrente — Sites/D1
+
+- `GET /api/governance/ai-readiness` resta la fonte dei gate locali, del binding OpenAI metadata-only, dell’autorità e del blocco commerciale;
+- `GET /api/company-ai/knowledge` alimenta il registry ricercabile e mantiene il pack reference-only;
+- `GET /api/company-ai/scope?jobId=...` alimenta lo scope inspector da una commessa Operations reale e mostra il knowledge context derivato, fermando lo scope al sottogruppo;
+- `GET /api/command/overview` alimenta l’approval ledger; `POST /api/command/approval` è disponibile solo con `approvals.review` e registra una decisione umana append-only;
+- la UI rende espliciti tenant scope, capability, direct write bloccato, provider deferred e readback verificato;
+- il frontend non crea tool, non espone secret, non sceglie il tenant e non dichiara `executed` quando l’executor esterno non è osservato.
 
 ---
 
