@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, KeyRound, LogOut, Mail, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowLeft, KeyRound, LogOut, Mail, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 
 const authClient = createAuthClient();
@@ -13,6 +13,7 @@ const authClient = createAuthClient();
 export default function SettingsClient({ actor }: { actor: AccountActor }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"password" | "signOut" | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
 
@@ -56,8 +57,15 @@ export default function SettingsClient({ actor }: { actor: AccountActor }) {
     }
   }
 
+  function refreshSettings() {
+    setRefreshing(true);
+    router.refresh();
+    window.setTimeout(() => setRefreshing(false), 600);
+  }
+
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+    <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+      <div className="zw-command-ambient" aria-hidden="true" />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.08),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
       <div className="relative mx-auto max-w-6xl px-4 py-5 sm:px-7 sm:py-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
@@ -84,7 +92,17 @@ export default function SettingsClient({ actor }: { actor: AccountActor }) {
               </p>
             </div>
           </div>
-          <AccountMenu actor={actor} />
+          <div className="flex items-center gap-2">
+            <button
+              aria-label="Aggiorna impostazioni"
+              className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/60"
+              onClick={refreshSettings}
+              type="button"
+            >
+              <RefreshCw className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+            </button>
+            <AccountMenu actor={actor} />
+          </div>
         </header>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
