@@ -6,22 +6,31 @@ import type { AuthorityRole } from "@/lib/authority-catalog";
 type AuthorityAccess = {
   capabilities: ReadonlySet<string>;
   role: AuthorityRole;
+  actor: {
+    email: string;
+    name: string;
+  };
 };
 
 const AuthorityAccessContext = createContext<AuthorityAccess | null>(null);
 
 export function AuthorityAccessProvider({
+  actor,
   capabilities,
   children,
   role,
 }: {
+  actor: {
+    email: string;
+    name: string;
+  };
   capabilities: string[];
   children: ReactNode;
   role: AuthorityRole;
 }) {
   const value = useMemo(
-    () => ({ capabilities: new Set(capabilities), role }),
-    [capabilities, role],
+    () => ({ actor, capabilities: new Set(capabilities), role }),
+    [actor, capabilities, role],
   );
   return (
     <AuthorityAccessContext.Provider value={value}>

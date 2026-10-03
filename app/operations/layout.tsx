@@ -10,6 +10,7 @@ export default async function OperationsLayout({
   const authority = await requirePageCapability("operations.read");
   return (
     <AuthorityAccessProvider
+      actor={{ email: authority.actorEmail, name: authority.actorName }}
       capabilities={authority.capabilities}
       role={authority.role}
     >

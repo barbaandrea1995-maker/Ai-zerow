@@ -5,13 +5,13 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import {
   Activity,
+  ArrowLeft,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
   CalendarClock,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CircleGauge,
   ClipboardCheck,
@@ -36,6 +36,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AccountMenu } from "@/components/account-menu";
 import { useAuthorityAccess } from "@/components/authority-access-provider";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import {
@@ -59,6 +60,7 @@ import { invalidateReadback, readback } from "@/lib/client-readback";
 import { ROLE_METADATA } from "@/lib/authority-catalog";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 import { PlanningResourceFields } from "@/components/planning-resource-fields";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 
 const OperationsCommessaIntake = dynamic(
   () => import("@/components/operations-commessa-intake"),
@@ -661,6 +663,7 @@ export default function OperationsPage() {
       <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative flex min-h-screen">
         <aside
+          aria-label="Navigazione principale"
           className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}
         >
           <div className="flex items-center justify-between px-2">
@@ -712,7 +715,7 @@ export default function OperationsPage() {
           </button>
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
             <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">
-              Workspace
+              Authorized workspace
             </p>
             <div className="mt-2 space-y-1">
               {visibleNavItems.map((item) => {
@@ -742,30 +745,31 @@ export default function OperationsPage() {
               })}
             </div>
           </nav>
-          <div className="zw-command-sidebar__footer mt-5 border-t border-white/[0.08] pt-4">
-            <div className="flex items-center justify-between px-2 text-[10px] uppercase tracking-[0.14em] text-slate-600">
-              <span>System status</span>
+          <div className="zw-command-sidebar__footer mt-4 border-t border-white/[0.07] pt-4">
+            <div className="flex items-center justify-between px-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+              <span>System core</span>
               <span className="flex items-center gap-1.5 text-lime-200">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />
-                online
+                {adapterOnline ? "D1 VERIFIED" : adapterStatus === "loading" ? "READBACK" : "D1 EMPTY"}
               </span>
             </div>
-            <div className="carbon-inset mt-3 rounded-xl p-3">
+            <div className="zw-command-core-status mt-3 rounded-xl p-3">
               <div className="flex items-center gap-2 text-[10px] text-slate-400">
                 <Activity className="size-3.5 text-lime-300" />
                 Operations core
               </div>
-              <p className="mt-3 font-mono text-[9px] text-slate-600">
-                {adapterOnline
-                  ? "S04 · D1 ADAPTER ONLINE"
-                  : "S04 · D1 READBACK EMPTY"}
+              <p className="mt-2 font-mono text-[10px] text-slate-600">
+                S04 / {activeJobs.length} JOBS
+              </p>
+              <p className="mt-3 font-mono text-[10px] text-lime-300/60">
+                POLICY / {ROLE_METADATA[authority.role].label.toUpperCase()}
               </p>
             </div>
           </div>
         </aside>
         {mobileMenu && (
           <button
-            className="fixed inset-0 z-30 bg-black/75 lg:hidden"
+            className="zw-command-sidebar-backdrop fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm lg:hidden"
             onClick={() => setMobileMenu(false)}
             aria-label="Chiudi menu"
             type="button"
@@ -774,50 +778,37 @@ export default function OperationsPage() {
         <section className="min-w-0 flex-1">
           <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
-            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
+            <button aria-label="Apri Operations" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/operations")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
             <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
             <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle Operations" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={query} /></div></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
-              <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">
-                OPERATIONS
-              </span>
+              <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">OPERATIONS</span>
               <span className="size-1 rounded-full bg-lime-300" />
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
                 {adapterStatus === "loading" ? "READING" : adapterOnline ? "D1 VERIFIED" : adapterStatus === "error" ? "READBACK ERROR" : "D1 EMPTY"}
               </span>
-              <IconButton label="Aggiorna commesse" onClick={() => { setAdapterStatus("loading"); void loadOperations(); }}><RefreshCw className={adapterStatus === "loading" ? "size-4 animate-spin" : "size-4"} /></IconButton>
-              {authority.capabilities.has("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
-                <Bell className="size-4" />
-              </IconButton> : null}
-              <span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">
-                AB
-              </span>
-              <div className="hidden text-right lg:block">
-                <p className="text-xs font-medium text-slate-200">
-                  {ROLE_METADATA[authority.role].label}
-                </p>
-                <p className="text-[10px] text-slate-600">Tenant corrente</p>
-              </div>
-              <ChevronDown className="hidden size-3.5 text-slate-500 lg:block" />
+              <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
+              <IconButton className="zw-command-topbar__refresh" label="Aggiorna commesse" onClick={() => { setAdapterStatus("loading"); void loadOperations(); }}><RefreshCw className={adapterStatus === "loading" ? "size-4 animate-spin" : "size-4"} /></IconButton>
+              {authority.capabilities.has("communication.read") ? <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
+              <AccountMenu actor={authority.actor} />
             </div>
           </header>
           <div className="mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="zw-module-hero zw-page-enter mb-7 flex flex-wrap items-end justify-between gap-5">
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/80">
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
                   <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                  AI-ZEROW / WORK / OPERATIONS
+                  S04 / OPERATIONS / COMMESSE
                 </div>
-                <h1 className="mt-3 text-3xl font-semibold tracking-[-0.055em] text-lime-100 sm:text-[36px]">
+                <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">
                   Commesse
                 </h1>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
-                  Creazione, scope, pianificazione e attività{" "}
-                  <span className="text-slate-600">·</span> readback D1
-                  tenant-scoped
+                <p className="mt-1 text-xs text-slate-500">
+                  Creazione, scope, pianificazione e attività · {adapterOnline ? "readback server verificato" : "readback in corso"}
                 </p>
               </div>
               <div className="flex items-center gap-3">
