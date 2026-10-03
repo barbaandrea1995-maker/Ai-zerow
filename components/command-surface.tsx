@@ -52,7 +52,6 @@ import {
   toJobs,
 } from "@/app/page-client";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
-import { CommandHero } from "@/components/command-hero";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { OperationalMapBoard } from "@/components/operational-map-board";
 import {
@@ -760,23 +759,21 @@ export default function CommandSurface({
         <section className="min-w-0 flex-1">
           <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
             <IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton>
-            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">command</span></span></button>
+            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">command</span></span></button>
             <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
             <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca in COMMAND" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={search} /></div></div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">COMMAND</span><span className="size-1 rounded-full bg-lime-300" /></div>
             <div className="ml-auto flex items-center gap-2">
               <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />Live control</span>
-              <IconButton label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
-              <IconButton label="Aggiorna Command" onClick={() => window.location.reload()}><RefreshCw className="size-4" /></IconButton>
-              {access.allowedNavigation.includes("communications") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
+              <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
+              <IconButton className="zw-command-topbar__refresh" label="Aggiorna Command" onClick={() => window.location.reload()}><RefreshCw className="size-4" /></IconButton>
+              {access.allowedNavigation.includes("communications") ? <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
               <AccountMenu actor={actor} />
             </div>
           </header>
 
           <div className="mx-auto max-w-[1920px] px-4 py-5 sm:px-7 sm:py-7">
-            <CommandHero onNewJob={() => setNewJobOpen(true)} recordCount={records.length} statusLabel={readbackLabel(readbackStatus)} />
-            <div className="mt-4">
+            <div className="mt-5">
               <CommandPersonalizationBar canCustomize={access.canCustomize && preferencesReady} editMode={editMode} onEdit={() => setEditMode((value) => !value)} onOpenCustomizer={() => setCustomizerOpen(true)} saved={!dirtyLayout && preferencesSynced} totalCount={widgetLayout.length} visibleCount={visibleWidgets.length} />
             </div>
 
