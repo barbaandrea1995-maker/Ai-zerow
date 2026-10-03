@@ -83,4 +83,4 @@ superficie Sites/D1 e i vincoli server-side, non un provider esterno assente.
 
 - Site: https://ai-zerow-command.barba-andrea-1995.chatgpt.site
 - Accesso: custom owner-only invariato.
-- Versione: da aggiornare dopo la pubblicazione privata W08.
+- Versione: latest private Sites publication verificata dopo il checkpoint.
