@@ -29,6 +29,7 @@ The Sites-native authority remains canonical for the main command surfaces. A se
 
 ## Current continuation
 
+- Module 11 Events, Twin & Timeline: **TECHNICAL PASS · PUBLISHED PRIVATELY · OWNER-ONLY** — `/events` ora usa una control deck Command W11 con Event stream/Timeline, inspector, KPI, Outbox control, retry/requeue/block/DLQ, reconciliation, Twin read model derivato e Command ledger alimentato dal readback `/api/command/timeline-detail` quando `command.read` è disponibile. Event, outbox e reconciliation restano atomici e tenant-scoped; nessun consumer, worker, Twin canonico o `DELIVERED` viene simulato. Checkpoint: `docs/MODULE_11_EVENTS_TWIN_TIMELINE_CHECKPOINT_2026-10-03.md`.
 - Module 10 Finance & Procurement: **TECHNICAL PASS · PUBLISHED PRIVATELY · OWNER-ONLY** — `/finance` e `/procurement` condividono la shell Command e il control deck W10. Il registro legge i workflow tenant-scoped; la nuova richiesta seleziona solo commesse reali dal catalogo S04 e il server valida il riferimento nel tenant prima di persistere l’ID canonico. Stati, approval, optimistic version, idempotenza, eventi, outbox e reconciliation sono collegati; emissione PO, ricezione e contabilizzazione restano badge/provider gate non simulati. Cross-link operativi verso Operations, Warehouse e Documents. Checkpoint: `docs/MODULE_10_FINANCE_PROCUREMENT_CHECKPOINT_2026-10-03.md`.
 - Module 09 Document Control: **TECHNICAL PASS · PUBLISHED PRIVATELY · OWNER-ONLY** — `/documents` ora usa una control deck Command coerente e legge il catalogo operativo reale da `/api/documents/catalog`; ogni file è collegato a una commessa S04 reale, l’upload continua su R2 con limite 20 MB, MIME+magic signature, SHA-256 e provenance, mentre inspector, filtri, security hold, `queue_scan`, revisione manuale, quarantena e link Company AI/Operations sono collegati ai contratti server esistenti. `/api/documents` GET è riallineato al catalogo operativo; OCR, malware provider, replacement/versioning completo, retention e browser/device runtime restano gate espliciti. Checkpoint: `docs/MODULE_09_DOCUMENT_CONTROL_CHECKPOINT_2026-10-03.md`.
 - Module 08 Mission Control: TECHNICAL PASS · PUBLISHED PRIVATELY · OWNER-ONLY — /mission usa la shell Command condivisa e coordina la journey di trasporto senza duplicare i registri: commessa reale o missione autonoma secondo il profilo tenant, modalità trasporto abilitate dall’onboarding, autista/mezzo/asset selezionabili solo da catalogo canonico e disponibili nella finestra, poi partenza, consegna, POD, riconciliazione e chiusura con versioning, idempotenza, eventi, outbox e readback. Il guard server-side rifiuta asset transfer senza asset reale e magazzino → commessa senza commessa. Tracking GPS, provider mappa/telematica, upload POD verificato, offline/replay e device certification restano gate separati. Checkpoint: docs/MODULE_08_MISSION_CONTROL_CHECKPOINT_2026-10-03.md.
@@ -126,6 +127,14 @@ S01–S04 are therefore closed for the Sites reconstruction scope. The original 
 - La UI non consente più l’inserimento libero della commessa. Il server risolve ID o codice canonico nello stesso tenant, scarta `adapter-contract` e rifiuta il riferimento non esistente.
 - Le mutazioni locali usano la macchina W10 con `expectedVersion`, `idempotencyKey`, approval capability-gated, evento, outbox e reconciliation; i passaggi contabili, PO e ricezione restano `EXTERNAL_DEFERRED`.
 - Finance e Procurement rimandano a Operations, Warehouse e Documents senza creare registri duplicati o inventare esecuzioni provider-backed.
+
+### W11 evidence in Sites
+
+- `/events` usa la shell Command condivisa e separa in quattro viste collegate lo stream append-only, l’outbox, il Twin read model e il Command ledger.
+- `/api/events` rilegge eventi, outbox e reconciliation tenant-scoped; `/api/events/outbox` usa la macchina `transitionOutbox` per retry, requeue, block e dead-letter con budget massimo 5.
+- Il Twin mostrato dalla UI è dichiaratamente derivato da eventi, versioni aggregate, delivery e reconciliation D1; non viene presentato come proiezione canonica esterna.
+- `/api/command/timeline-detail` viene letto solo con `command.read` e alimenta l’inspector di preview, approval, model/runtime e readback Company AI senza direct write.
+- I controlli di ricerca, refresh, back, composizione evento, inspector e azioni outbox sono collegati; i passaggi di consumer/worker restano `EXTERNAL_DEFERRED`.
 
 ### U5 evidence in Sites
 

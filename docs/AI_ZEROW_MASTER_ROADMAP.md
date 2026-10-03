@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.1 — W10 Finance & Procurement su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 3.2 — W11 Events, Twin, Timeline & Ledger su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W10 Finance & Procurement · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_10_FINANCE_PROCUREMENT_CHECKPOINT_2026-10-03.md. W09 resta chiuso nel proprio perimetro. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W11 Events, Twin, Timeline & Ledger · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_11_EVENTS_TWIN_TIMELINE_CHECKPOINT_2026-10-03.md. W10 e W09 restano chiusi nei propri perimetri. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -82,7 +82,7 @@ persona/input
 | W08 Mission e trasporti | RC2.9 — TECHNICAL PASS / EXTERNAL GATES | Control deck Mission con shell Command, filtri, inspector, commessa o trasporto autonomo, risorse canoniche disponibili per finestra, create/dispatch/delivery/POD/reconciliation/close e handoff verso Operations, Planning, Warehouse e Documents. Routing GPS/telematica provider-backed, mappe reali e device certification restano esterni. |
 | W09 Documents | `RC2.9 — TECHNICAL PASS / SECURITY PROVIDER GATE` | Control deck Document Control pubblicato con catalogo tenant-scoped, commessa obbligatoria, upload R2 fino a 20 MB, MIME+magic signature, SHA-256, provenance, inspector, filtri e security actions. `/api/documents` legge il catalogo operativo; il download resta fail-closed senza CLEAN provider-backed. OCR, malware provider, version replacement e retention provider-backed restano gate espliciti. |
 | W10 Finance e Procurement | `RC2.9 — TECHNICAL PASS / EXTERNAL EXECUTOR GATE` | Control deck Command pubblicato privatamente con commessa selezionabile dal catalogo S04 e validata server-side, workflow Finance/Procurement, righe procurement, approval, idempotenza, optimistic version, eventi, outbox, reconciliation e handoff verso Operations/Warehouse/Documents. Accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
-| W11 Events, Outbox, Twin e Timeline | `RC2.4 — SITES CONTROL PASS / EXTERNAL CONSUMER DEFERRED` | Eventi, outbox, retry limitato, DLQ, requeue, block e reconciliation sono governati in Sites con controlli UI e fixture di stato; consumer, Twin e worker persistenti da certificare. |
+| W11 Events, Outbox, Twin e Timeline | `RC2.9 — TECHNICAL PASS / EXTERNAL CONSUMER GATE` | Control deck Event Authority pubblicato privatamente con Event stream, inspector, outbox/DLQ control, retry budget, reconciliation, Twin read model derivato e Command ledger/timeline capability-gated. Consumer/worker esterni, Twin canonico, replay e proiezioni persistenti restano da certificare. |
 | W12 AI, Tool Gateway e Approval | `RC2.7 — LOCAL GOVERNANCE PASS / LIVE GATE NOT RUN` | Company AI espone un control plane capability-gated con readiness dei contratti, ledger/readback, binding metadata-only, no-direct-write, approval boundary e blocchi commerciali. Command espone un widget W12 filtrato per `command.read`; OpenAI live richiede ancora sessione autenticata e runtime pubblicato. |
 | W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
@@ -493,6 +493,8 @@ NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT
 ### W11 — Event Store, Outbox, Company Twin, Timeline e Ledger
 
 **Obiettivo:** rendere ogni fatto ricostruibile e ogni proiezione rigenerabile.
+
+**Sites W11 checkpoint 3 ottobre 2026:** `/events` usa la shell Command e riunisce Event stream/Timeline, Outbox control, Twin read model e Command ledger. Eventi, outbox e reconciliation vengono riletti tenant-scoped; retry, requeue, block e DLQ passano dalla state machine locale senza dichiarare consegna esterna. Il Twin mostrato è una proiezione derivata da D1 e il ledger Company AI è visibile solo con `command.read`; consumer, worker, Twin canonico e replay esterni restano esplicitamente differiti. Evidenza: `docs/MODULE_11_EVENTS_TWIN_TIMELINE_CHECKPOINT_2026-10-03.md`.
 
 - `EventEnvelope` con tenant, actor, source, aggregate, schema version e provenance;
 - idempotenza per evento e aggregate-version uniqueness;
