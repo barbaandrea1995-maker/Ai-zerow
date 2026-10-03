@@ -108,8 +108,8 @@ type CommandDashboardResponse = {
 };
 
 type CommandReadinessResponse = {
-  summary?: { localGateReady?: number; localGateTotal?: number; ledgerCount?: number; ledgerStatus?: "READY" | "BLOCKED"; openAiLive?: "NOT_RUN" };
-  runtime?: { configured?: boolean; model?: string; liveRequest?: "NOT_RUN"; directWrite?: boolean };
+  summary?: { localGateReady?: number; localGateTotal?: number; ledgerCount?: number; ledgerStatus?: "READY" | "BLOCKED"; openAiLive?: "NOT_RUN" | "VERIFIED" | "FAILED" };
+  runtime?: { configured?: boolean; model?: string; liveRequest?: "NOT_RUN" | "VERIFIED" | "FAILED"; directWrite?: boolean };
   governanceRead?: boolean;
 };
 

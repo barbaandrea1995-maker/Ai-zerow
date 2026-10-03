@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
-import { getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { companyAiLiveRequestFromCheck, getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
 import { getExternalSnapshot } from "@/lib/external-adapter";
 import { PREVIOUS_PUBLISHED_SITES_VERSION, RELEASE_BUILD_ID, RELEASE_BUILD_LABEL, RELEASE_PUBLICATION_STATUS } from "@/lib/release";
 import { buildReleaseGateCatalog, releaseOverallStatus } from "@/lib/release-readiness";
@@ -21,7 +21,6 @@ export async function GET() {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const runtime = getCompanyAiRuntimeStatus();
   let ledgerStatus: "READY" | "BLOCKED" = "BLOCKED";
   let ledgerCount = 0;
   try {
@@ -40,6 +39,10 @@ export async function GET() {
     externalReadbackStatus = "BLOCKED";
   }
 
+  const openAiHealth = externalSnapshot?.checks.find(
+    (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
+  );
+  const runtime = getCompanyAiRuntimeStatus(companyAiLiveRequestFromCheck(openAiHealth?.result));
   const securityControls = buildSecurityControlCatalog({
     ledgerStatus,
     externalReadbackStatus,

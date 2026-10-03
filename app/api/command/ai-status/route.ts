@@ -1,5 +1,6 @@
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
-import { getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { companyAiLiveRequestFromCheck, getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { getExternalSnapshot } from "@/lib/external-adapter";
 
 export const dynamic = "force-dynamic";
 
@@ -10,5 +11,15 @@ export async function GET() {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  return Response.json(getCompanyAiRuntimeStatus(), { headers: { "cache-control": "private, no-store" } });
+  let liveRequest: "NOT_RUN" | "VERIFIED" | "FAILED" = "NOT_RUN";
+  try {
+    const snapshot = await getExternalSnapshot(context.tenantId);
+    const health = snapshot.checks.find(
+      (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
+    );
+    liveRequest = companyAiLiveRequestFromCheck(health?.result);
+  } catch {
+    liveRequest = "NOT_RUN";
+  }
+  return Response.json(getCompanyAiRuntimeStatus(liveRequest), { headers: { "cache-control": "private, no-store" } });
 }

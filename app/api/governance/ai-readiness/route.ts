@@ -2,7 +2,7 @@ import {
   getAuthorityContext,
   hasCapability,
 } from "@/lib/authority-context";
-import { getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { companyAiLiveRequestFromCheck, getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
 import { getExternalAdapter, getExternalSnapshot } from "@/lib/external-adapter";
 import { getS07Ledger } from "@/lib/s07-adapter";
 
@@ -28,7 +28,6 @@ export async function GET() {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const runtime = getCompanyAiRuntimeStatus();
   let ledgerCount = 0;
   let ledgerStatus: ReadinessStatus = "BLOCKED";
   let ledgerCheckedAt: string | null = null;
@@ -49,7 +48,7 @@ export async function GET() {
     externalReadback = "READY";
     persistedExternalChecks = snapshot.readback.persistedChecks;
     const health = snapshot.checks.find(
-      (check) => check.adapterKey === "openai-runtime" && check.checkType === "health",
+      (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
     );
     if (health) {
       latestOpenAiHealth = {
@@ -61,6 +60,13 @@ export async function GET() {
   } catch {
     externalReadback = "BLOCKED";
   }
+
+  const runtime = getCompanyAiRuntimeStatus(companyAiLiveRequestFromCheck(latestOpenAiHealth?.result));
+  const liveGateStatus: ReadinessStatus = runtime.liveRequest === "VERIFIED"
+    ? "READY"
+    : runtime.liveRequest === "FAILED"
+      ? "BLOCKED"
+      : "NOT_RUN";
 
   const openAiAdapter = getExternalAdapter("openai-runtime");
   const gates = [
@@ -127,12 +133,14 @@ export async function GET() {
     gate(
       "openai-live-request",
       "Richiesta OpenAI live",
-      "NOT_RUN",
-      "La presenza della chiave non certifica una chiamata autenticata né il readback del provider.",
+      liveGateStatus,
+      runtime.liveRequest === "VERIFIED"
+        ? "Una richiesta live è stata completata e l’evidenza redatta è stata riletta dal registry tenant-scoped."
+        : "La presenza della chiave non certifica una chiamata autenticata né il readback del provider.",
       latestOpenAiHealth
         ? `Evidenza registrata: ${latestOpenAiHealth.result} · ${latestOpenAiHealth.checkedAt}`
         : "Nessuna evidenza health provider nel tenant",
-      "Eseguire la prova live su runtime pubblicato e registrare request id/redacted evidence",
+      runtime.liveRequest === "VERIFIED" ? "Ripetere il check solo dopo una modifica del binding o del modello" : "Eseguire la prova live dal registry Integrazioni",
     ),
     gate(
       "external-readback",

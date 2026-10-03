@@ -243,7 +243,7 @@ const commandSurface = await readFile(join(root, "components", "command-surface.
 assert(commandSurface.includes("W10CommandPanel") && commandSurface.includes("finance-procurement"), "Command must render the capability-filtered W10 widget");
 const commandReadinessRoute = await readFile(join(root, "app", "api", "command", "readiness", "route.ts"), "utf8");
 assert(commandReadinessRoute.includes('hasCapability(context, "command.read")') && commandReadinessRoute.includes("getS07Ledger"), "Command readiness must be server-side and ledger-backed");
-assert(commandReadinessRoute.includes('commercialStatus: "NO_GO"') && commandReadinessRoute.includes('openAiLive: "NOT_RUN"'), "Command readiness must keep live and commercial status explicit");
+assert(commandReadinessRoute.includes('commercialStatus: "NO_GO"') && commandReadinessRoute.includes("openAiLive") && commandReadinessRoute.includes("getExternalSnapshot"), "Command readiness must keep live and commercial status explicit");
 assert(commandSurface.includes("CommandReadinessPanel") && commandSurface.includes("command-readiness"), "Command must surface the W12 readiness widget");
 
 const intakeRoute = await readFile(join(root, "app", "api", "operations", "intake", "route.ts"), "utf8");
@@ -252,7 +252,7 @@ assert(intakeRoute.includes("consumeCompanyAiRateLimit"), "Commessa intake must 
 const openAiAdapter = await readFile(join(root, "lib", "company-ai-openai.ts"), "utf8");
 assert(openAiAdapter.includes("authorizedRecordIds"), "Model citations must be filtered against authorized records");
 assert(openAiAdapter.includes("process.env[name]") && openAiAdapter.includes("cloudflare:workers"), "The OpenAI key must remain server-side");
-assert(openAiAdapter.includes("getCompanyAiRuntimeStatus") && openAiAdapter.includes('liveRequest: "NOT_RUN"'), "OpenAI runtime metadata must not be confused with live evidence");
+assert(openAiAdapter.includes("getCompanyAiRuntimeStatus") && openAiAdapter.includes("companyAiLiveRequestFromCheck") && openAiAdapter.includes('"NOT_RUN"'), "OpenAI runtime metadata must not be confused with live evidence");
 const aiReadinessRoute = await readFile(join(root, "app", "api", "governance", "ai-readiness", "route.ts"), "utf8");
 assert(aiReadinessRoute.includes('hasCapability(context, "governance.read")'), "AI readiness must require governance.read");
 assert(aiReadinessRoute.includes("getExternalSnapshot") && aiReadinessRoute.includes("getS07Ledger"), "AI readiness must combine provider evidence and Company AI ledger readback");
@@ -280,6 +280,11 @@ const releaseSurface = await readFile(join(root, "components", "release-certific
 assert(releasePage.includes("ReleaseCertificationCenter") && releaseSurface.includes("/api/release/readiness") && releaseSurface.includes("COMMERCIAL NO-GO"), "W17 must have a readable release certification surface");
 const releaseBuildRoute = await readFile(join(root, "app", "api", "release", "build", "route.ts"), "utf8");
 assert(releaseBuildRoute.includes('tranche: "W17"') && releaseBuildRoute.includes('promotionAllowed: false') && releaseBuildRoute.includes('commercialStatus: "NO_GO"'), "Release identity must remain local and non-promotable");
+const openAiLiveCheckRoute = await readFile(join(root, "app", "api", "governance", "ai-live-check", "route.ts"), "utf8");
+assert(openAiLiveCheckRoute.includes('hasCapability(context, "tenant.manage")') && openAiLiveCheckRoute.includes("askCompanyAiWithOpenAi"), "OpenAI live check must be owner-capability-gated and use the server adapter");
+assert(openAiLiveCheckRoute.includes('source: "sites-openai-live-check"') && openAiLiveCheckRoute.includes("outputPersisted: false"), "OpenAI live check must persist only redacted evidence and never model output");
+const aiRateLimit = await readFile(join(root, "lib", "ai-rate-limit.ts"), "utf8");
+assert(aiRateLimit.includes('"release-check"') && aiRateLimit.includes("fallback = action === \"intake\" ? 6 : action === \"release-check\" ? 2 : 12"), "OpenAI release checks must have a bounded dedicated rate limit");
 
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");

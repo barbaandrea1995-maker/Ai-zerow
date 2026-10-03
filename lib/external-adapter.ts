@@ -322,6 +322,8 @@ export function checkForResponse(row: typeof s05Records.$inferSelect): ExternalC
 
 function effectiveStatus(adapter: ExternalAdapterDefinition, lastCheck: ExternalCheck | null): ExternalStatus {
   if (!lastCheck) return adapter.status;
+  if (adapter.key === "openai-runtime" && lastCheck.source === "sites-openai-live-check" && lastCheck.result === "DECLARATIVE_PASS") return "READY";
+  if (adapter.key === "openai-runtime" && lastCheck.source === "sites-openai-live-check" && lastCheck.result === "BLOCKED") return "BLOCKED";
   if (lastCheck.result === "DECLARATIVE_PASS") return adapter.status;
   if (lastCheck.result === "BLOCKED") return "BLOCKED";
   return "NOT_RUN";
@@ -398,6 +400,7 @@ export function externalEnvelope(
 export async function appendExternalCheck(
   context: AuthorityContext,
   input: Record<string, unknown>,
+  options: { source?: string } = {},
 ) {
   const adapterKey = textValue(input.adapterKey).trim();
   const adapter = getExternalAdapter(adapterKey);
@@ -417,6 +420,7 @@ export async function appendExternalCheck(
   if (evidence.length > 360) throw new ExternalAdapterInputError("evidence_too_long");
 
   const now = new Date().toISOString();
+  const source = options.source ?? "sites-ui-declarative";
   const id = "EXT-" + adapterKey.toUpperCase().replace(/[^A-Z0-9]+/g, "-") + "-" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const db = getDb();
   const [row] = await db.insert(s05Records).values({
@@ -431,7 +435,7 @@ export async function appendExternalCheck(
     tone: result === "DECLARATIVE_PASS" ? "lime" : result === "BLOCKED" ? "red" : "amber",
     progress: result === "DECLARATIVE_PASS" ? 100 : result === "BLOCKED" ? 24 : 0,
     payloadJson: JSON.stringify({
-      source: "sites-ui-declarative",
+      source,
       adapterKey,
       checkType,
       result,

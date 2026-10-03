@@ -1,5 +1,6 @@
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
-import { getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { companyAiLiveRequestFromCheck, getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
+import { getExternalSnapshot } from "@/lib/external-adapter";
 import { getS07Ledger } from "@/lib/s07-adapter";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,17 @@ export async function GET() {
     return Response.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const runtime = getCompanyAiRuntimeStatus();
+  let openAiLive: ReturnType<typeof companyAiLiveRequestFromCheck> = "NOT_RUN";
+  try {
+    const snapshot = await getExternalSnapshot(context.tenantId);
+    const health = snapshot.checks.find(
+      (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
+    );
+    openAiLive = companyAiLiveRequestFromCheck(health?.result);
+  } catch {
+    openAiLive = "NOT_RUN";
+  }
+  const runtime = getCompanyAiRuntimeStatus(openAiLive);
   let ledgerCount = 0;
   let ledgerStatus: "READY" | "BLOCKED" = "BLOCKED";
   try {
@@ -34,7 +45,7 @@ export async function GET() {
       localGateTotal,
       ledgerCount,
       ledgerStatus,
-      openAiLive: "NOT_RUN",
+      openAiLive,
     },
     runtime: {
       configured: runtime.configured,

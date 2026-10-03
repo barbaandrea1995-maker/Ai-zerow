@@ -17,13 +17,15 @@ function runtimeSecret(name: "OPENAI_API_KEY" | "OPENAI_MODEL") {
   return typeof local === "string" ? local.trim() : "";
 }
 
+export type CompanyAiLiveRequestStatus = "NOT_RUN" | "VERIFIED" | "FAILED";
+
 export type CompanyAiRuntimeStatus = {
   provider: "openai";
   configured: boolean;
   model: string;
   mode: "server_side_governed_preview";
   directWrite: false;
-  liveRequest: "NOT_RUN";
+  liveRequest: CompanyAiLiveRequestStatus;
 };
 
 /**
@@ -31,14 +33,20 @@ export type CompanyAiRuntimeStatus = {
  * a successful provider request, so liveRequest intentionally remains NOT_RUN
  * until an authenticated runtime check records external evidence.
  */
-export function getCompanyAiRuntimeStatus(): CompanyAiRuntimeStatus {
+export function companyAiLiveRequestFromCheck(result?: string): CompanyAiLiveRequestStatus {
+  if (result === "DECLARATIVE_PASS") return "VERIFIED";
+  if (result === "BLOCKED") return "FAILED";
+  return "NOT_RUN";
+}
+
+export function getCompanyAiRuntimeStatus(liveRequest: CompanyAiLiveRequestStatus = "NOT_RUN"): CompanyAiRuntimeStatus {
   return {
     provider: "openai",
     configured: Boolean(runtimeSecret("OPENAI_API_KEY")),
     model: runtimeSecret("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL,
     mode: "server_side_governed_preview",
     directWrite: false,
-    liveRequest: "NOT_RUN",
+    liveRequest,
   };
 }
 

@@ -17,8 +17,8 @@ function boundedLimit(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) ? Math.min(120, Math.max(1, parsed)) : fallback;
 }
 
-export function companyAiRateLimit(action: "command" | "intake") {
-  const fallback = action === "intake" ? 6 : 12;
+export function companyAiRateLimit(action: "command" | "intake" | "release-check") {
+  const fallback = action === "intake" ? 6 : action === "release-check" ? 2 : 12;
   return boundedLimit(process.env.COMPANY_AI_RATE_LIMIT_PER_MINUTE, fallback);
 }
 
@@ -30,7 +30,7 @@ export async function consumeCompanyAiRateLimit({
 }: {
   tenantId: string;
   actorId: string;
-  action: "command" | "intake";
+  action: "command" | "intake" | "release-check";
   limit: number;
 }): Promise<AiRateLimitResult> {
   const now = new Date();

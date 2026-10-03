@@ -51,7 +51,8 @@ function securityStatus(controls: SecurityControl[], id: string): SecurityContro
 
 function openAiStatus(input: ReleaseReadinessInput): ReleaseGateStatus {
   const adapter = input.externalAdapters.find((item) => item.key === "openai-runtime");
-  if (input.runtime.liveRequest !== "NOT_RUN") return "READY";
+  if (input.runtime.liveRequest === "VERIFIED") return "READY";
+  if (input.runtime.liveRequest === "FAILED") return "BLOCKED";
   if (adapter?.effectiveStatus === "BLOCKED") return "BLOCKED";
   return "NOT_RUN";
 }
