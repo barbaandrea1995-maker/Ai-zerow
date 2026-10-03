@@ -108,9 +108,9 @@ type ActionKind =
   | null;
 
 function sectionLabel(status: WorkspaceSection["status"]) {
-  if (status === "readback") return "READBACK OK";
-  if (status === "deferred") return "GATE SUCCESSIVO";
-  return "DA PREPARARE";
+  if (status === "readback") return "VERIFICATO";
+  if (status === "deferred") return "PROSSIMO PASSO";
+  return "DA COMPLETARE";
 }
 
 function sectionTone(status: WorkspaceSection["status"]) {
@@ -142,6 +142,86 @@ function statusTone(status: string) {
   if (["DRAFT", "BOZZA", "QUEUED", "PROPOSTA", "DA PREPARARE"].includes(value))
     return "border-amber-300/25 bg-amber-300/10 text-amber-200";
   return "border-cyan-300/25 bg-cyan-300/10 text-cyan-200";
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "IN CORSO",
+  ANNULLATA: "ANNULLATA",
+  ASSIGNED: "ASSEGNATO",
+  APPROVED: "APPROVATO",
+  APPROVATA: "APPROVATA",
+  BLOCKED: "BLOCCATO",
+  BOZZA: "BOZZA",
+  CLOSED: "CHIUSA",
+  COMPLETED: "COMPLETATO",
+  COMPLETATA: "COMPLETATA",
+  CONFLICTED: "CONFLITTO",
+  DRAFT: "BOZZA",
+  DONE: "COMPLETATO",
+  IN_REVIEW: "IN VERIFICA",
+  "IN CORSO": "IN CORSO",
+  OPEN: "APERTO",
+  PLANNED: "PIANIFICATA",
+  PIANIFICATA: "PIANIFICATA",
+  PUBLISHED: "PUBBLICATO",
+  PROPOSED: "IN PROPOSTA",
+  PROPOSTA: "IN PROPOSTA",
+  REQUESTED: "RICHIESTO",
+  VERIFIED_SITES_READBACK: "VERIFICATO",
+};
+
+function displayStatus(value: string) {
+  const normalized = value.trim().toUpperCase();
+  return STATUS_LABELS[normalized] ?? value.replaceAll("_", " ");
+}
+
+function displayJourneyStep(key: string, fallback: string) {
+  const labels: Record<string, string> = {
+    activity: "Attività",
+    assignment: "Assegnazione",
+    attendance: "Presenze",
+    control: "Verifica finale",
+    field: "Esecuzione sul campo",
+    job: "Commessa",
+    planning: "Pianificazione",
+    rapportino: "Rapportino",
+    "work-context": "Contesto operativo",
+  };
+  return labels[key] ?? fallback;
+}
+
+function displayRecordType(value: string) {
+  const labels: Record<string, string> = {
+    attendance: "Presenza",
+    evidence: "Evidenza",
+    material_request: "Richiesta materiale",
+    plan: "Piano operativo",
+    rapportino: "Rapportino",
+    transport: "Trasporto",
+  };
+  return labels[value] ?? value.replaceAll("_", " ");
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  add_activity: "Attività aggiunta",
+  add_evidence: "Evidenza aggiunta",
+  add_report: "Rapportino aggiunto",
+  assign: "Risorse assegnate",
+  set_status: "Stato aggiornato",
+  update_details: "Scheda aggiornata",
+  update_progress: "Avanzamento aggiornato",
+};
+
+function displayAction(value: string) {
+  return ACTION_LABELS[value] ?? "Scheda aggiornata";
+}
+
+function compactDescription(value: string, maxLength = 260) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  const sentenceEnd = normalized.slice(0, maxLength).lastIndexOf(". ");
+  const cutoff = sentenceEnd > 120 ? sentenceEnd + 1 : maxLength;
+  return `${normalized.slice(0, cutoff).trim()}…`;
 }
 
 function valueOr(value: unknown, fallback = "—") {
@@ -190,15 +270,15 @@ function CompletionGate({
           </span>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200/75">
-              Completion gate
+              Chiusura commessa
             </p>
             <h2 className="mt-1 text-[15px] font-semibold text-slate-100">
-              Chiusura sotto controllo
+              Criteri di chiusura
             </h2>
             <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-500">
-              Il 100% è avanzamento operativo. La chiusura resta autorizzata
-              solo quando scheda, attività, assegnazione, evidenze e rapportino
-              sono verificati.
+              Il 100% indica l’avanzamento operativo. La commessa può essere
+              chiusa quando scheda, attività, assegnazione, evidenze e rapportino
+              risultano completi.
             </p>
           </div>
         </div>
@@ -253,10 +333,10 @@ function JourneyRail({
         </span>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200/70">
-            Lifecycle map
+            Percorso operativo
           </p>
           <h2 className="mt-1 text-[15px] font-semibold text-slate-100">
-            Dalla commessa al controllo
+            Dalla commessa alla chiusura
           </h2>
         </div>
       </div>
@@ -282,16 +362,16 @@ function JourneyRail({
                 <span
                   className={`text-[11px] ${complete ? "text-slate-200" : deferred ? "text-amber-100/70" : "text-slate-500"}`}
                 >
-                  {step.label}
+                  {displayJourneyStep(step.key, step.label)}
                 </span>
                 <span
                   className={`rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] ${complete ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-200" : deferred ? "border-amber-300/20 bg-amber-300/[0.05] text-amber-200" : "border-white/10 text-slate-600"}`}
                 >
                   {complete
-                    ? "readback"
+                    ? "completato"
                     : deferred
-                      ? "deferred"
-                      : "da preparare"}
+                      ? "prossimo passo"
+                      : "da iniziare"}
                 </span>
               </div>
             </div>
@@ -358,14 +438,13 @@ function WorkspaceSectionCard({
                   {record.title}
                 </p>
                 <p className="mt-1 truncate text-[10px] text-slate-500">
-                  {record.detail || "Record operativo"}
-                  {record.meta ? ` · ${record.meta}` : ""}
+                  {record.detail || displayRecordType(record.recordType)}
                 </p>
               </div>
               <span
                 className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.08em] sm:inline-flex ${statusTone(record.status)}`}
               >
-                {record.status}
+                {displayStatus(record.status)}
               </span>
               {onCompleteActivity && activityId && record.status !== "DONE" && (
                 <button
@@ -384,11 +463,11 @@ function WorkspaceSectionCard({
           <div className="rounded-xl border border-dashed border-white/[0.1] bg-black/15 px-3 py-5 text-center">
             <p className="text-[11px] text-slate-500">
               {section.status === "deferred"
-                ? "Disponibile nel gate successivo."
+                ? "Disponibile nel prossimo passaggio."
                 : "Nessun record collegato alla commessa."}
             </p>
             <p className="mt-1 text-[10px] text-slate-700">
-              Readback tenant-scoped
+              In attesa di dati operativi
             </p>
           </div>
         )}
@@ -524,8 +603,8 @@ export default function OperationsJobWorkspace({
           } else
             notify(
               nextPayload.error === "version_conflict"
-                ? "La commessa è cambiata: ricarico il readback."
-                : `Operazione non eseguita: ${nextPayload.error ?? "errore"}`,
+                ? "La commessa è cambiata: aggiorno la scheda."
+                : "Operazione non completata. Riprova.",
             );
           if (response.status === 409) await refresh();
           return;
@@ -533,7 +612,7 @@ export default function OperationsJobWorkspace({
         setPayload(nextPayload);
         setProgress(nextPayload.job.progress);
         setActionOpen(null);
-        notify(`Readback verificato · ${action.replaceAll("_", " ")}`);
+        notify(`Operazione completata · ${displayAction(action)}`);
       } catch {
         notify(
           "Connessione non disponibile: nessuna modifica è stata confermata.",
@@ -634,7 +713,7 @@ export default function OperationsJobWorkspace({
         : state === "forbidden"
           ? "Il ruolo corrente non dispone di operations.read."
           : state === "missing"
-            ? "La commessa non è presente nel readback tenant-scoped."
+            ? "La commessa non è presente nel workspace autorizzato."
             : "Il dossier non è momentaneamente disponibile.";
     return (
       <main className="zw-command-ultra grid min-h-screen place-items-center px-5 text-slate-100">
@@ -672,7 +751,6 @@ export default function OperationsJobWorkspace({
   }
 
   const { job, workspace } = payload;
-  const version = payload.readback?.version ?? 1;
   const jobData = job.payload ?? {};
   const payloadText = (key: string, fallback = "") =>
     typeof jobData[key] === "string" ? (jobData[key] as string) : fallback;
@@ -684,14 +762,15 @@ export default function OperationsJobWorkspace({
     jobData.description,
     "Descrizione operativa da completare.",
   );
+  const jobSummary = compactDescription(jobDescription);
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
       : "Nuova commessa";
   const sourceMode =
     payloadText("sourceMode") === "COMPANY_AI"
-      ? "Company AI"
-      : "Inserimento manuale";
+      ? "Analizzata da Company AI"
+      : "Inserimento guidato";
   const priority = payloadText("priority", "STANDARD");
   const rawScope = jobData.scope;
   const jobScope =
@@ -723,12 +802,12 @@ export default function OperationsJobWorkspace({
     <main className="zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
       <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative mx-auto max-w-[1560px] px-4 py-5 sm:px-7 sm:py-7">
-        <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-5 flex flex-wrap items-center justify-between gap-4 px-4 py-3 sm:-mx-7 sm:px-7">
+        <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-5 flex min-h-[72px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:-mx-7 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <button aria-label="Apri Command" className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]" onClick={() => router.push("/command")} type="button"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></button>
             <Button
               variant="outline"
-              className="h-9 shrink-0 border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100"
+              className="h-10 shrink-0 rounded-xl border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100"
               onClick={() => router.push("/operations")}
             >
               <ArrowLeft className="size-3.5" />
@@ -736,17 +815,17 @@ export default function OperationsJobWorkspace({
             </Button>
             <div className="min-w-0">
               <p className="truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                AI-ZEROW / OPERATIONS / DOSSIER COMMESSA
+                AI-ZEROW / OPERATIONS
               </p>
-              <p className="mt-1 truncate font-mono text-[11px] text-slate-400">
-                {job.id} · workspace operativo
+              <p className="mt-1 truncate text-[11px] text-slate-500">
+                Workspace commessa · quadro operativo
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:inline-flex">
               <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-              D1 readback · v{version}
+              Scheda aggiornata
             </span>
             <button
               aria-label="Rileggi dossier commessa"
@@ -785,8 +864,8 @@ export default function OperationsJobWorkspace({
                   <MapPin className="size-3.5 shrink-0 text-cyan-200" />
                   {valueOr(jobData.location ?? job.detail, "Luogo da definire")}
                 </p>
-                <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-300/85">
-                  {jobDescription}
+                <p className="mt-4 line-clamp-4 max-w-3xl text-sm leading-6 text-slate-300/85">
+                  {jobSummary}
                 </p>
               </div>
               <div className="shrink-0 text-left sm:text-right">
@@ -796,11 +875,8 @@ export default function OperationsJobWorkspace({
                 <span
                   className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(job.status)}`}
                 >
-                  {job.status}
+                  {displayStatus(job.status)}
                 </span>
-                <p className="mt-2 font-mono text-[10px] text-slate-600">
-                  {job.id}
-                </p>
               </div>
             </div>
             <div className="relative mt-7 grid gap-2 sm:grid-cols-3">
@@ -892,10 +968,10 @@ export default function OperationsJobWorkspace({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                  Command snapshot
+                  Quadro commessa
                 </p>
                 <h2 className="mt-1 text-[17px] font-semibold text-slate-100">
-                  Stato del dossier
+                  Stato operativo
                 </h2>
               </div>
               <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200">
@@ -916,17 +992,17 @@ export default function OperationsJobWorkspace({
                     : "Costruzione in corso"}
                 </p>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  La superficie riunisce dati, lifecycle e operazioni collegate.
+                  Una vista unica per dati, attività e prossimi passaggi.
                 </p>
               </div>
             </div>
             <div className="mt-6 space-y-3">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Origine dati</span>
+                <span className="text-slate-500">Origine scheda</span>
                 <span className="text-cyan-100">{sourceMode}</span>
               </div>
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Controlli chiusura</span>
+                <span className="text-slate-500">Stato chiusura</span>
                 <span
                   className={
                     workspace.completion.ready
@@ -934,22 +1010,18 @@ export default function OperationsJobWorkspace({
                       : "text-amber-200"
                   }
                 >
-                  {workspace.completion.ready ? "READY" : "IN REVIEW"}
+                  {workspace.completion.ready ? "PRONTA" : "IN VERIFICA"}
                 </span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-500">Versione readback</span>
-                <span className="font-mono text-lime-200">v{version}</span>
               </div>
             </div>
             {sourcePreviewId && (
               <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
                 <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100/75">
                   <Sparkles className="size-3.5" />
-                  Preview Company AI collegata
+                  Analisi Company AI collegata
                 </div>
-                <p className="mt-2 truncate font-mono text-[9px] text-slate-500">
-                  {sourcePreviewId}
+                <p className="mt-2 text-[10px] leading-4 text-slate-500">
+                  I dati rilevati dal preventivo sono disponibili nelle lavorazioni e nello scope operativo.
                 </p>
               </div>
             )}
@@ -961,14 +1033,14 @@ export default function OperationsJobWorkspace({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                  Preventivo / lavorazioni
+                  Lavorazioni della commessa
                 </p>
                 <h2 className="mt-1 text-[15px] font-semibold text-lime-100">
-                  Voci operative separate
+                  Attività rilevate dal preventivo
                 </h2>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  Le voci sono state estratte dal documento e mantenute separate
-                  dalla gerarchia dello scope.
+                  Le lavorazioni restano organizzate e collegate allo scope, senza
+                  riversare il testo integrale del documento nella scheda.
                 </p>
               </div>
               <span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-2.5 py-1 font-mono text-[10px] text-lime-200">
@@ -1002,7 +1074,6 @@ export default function OperationsJobWorkspace({
                         : ""}
                     </span>
                     <span className="text-slate-700">·</span>
-                    <span>{valueOr(item.source, "Company AI")}</span>
                   </div>
                 </div>
               ))}
@@ -1023,7 +1094,7 @@ export default function OperationsJobWorkspace({
                   </span>
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">
-                      Operations desk
+                      Centro operativo
                     </p>
                     <h2 className="mt-1 text-[15px] font-semibold">
                       Azioni sulla commessa
@@ -1032,7 +1103,7 @@ export default function OperationsJobWorkspace({
                 </div>
                 <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.05] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">
                   {canWriteOperations
-                    ? "server write · readback"
+                    ? "Modifiche abilitate"
                     : "lettura autorizzata"}
                 </span>
               </div>
@@ -1138,7 +1209,7 @@ export default function OperationsJobWorkspace({
                 </span>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                    Dossier operativo
+                    Riepilogo commessa
                   </p>
                   <h2 className="mt-1 text-[15px] font-semibold">
                     Dati di riferimento
@@ -1180,21 +1251,20 @@ export default function OperationsJobWorkspace({
                 </span>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">
-                    Guardrail operativo
+                    Controllo operativo
                   </p>
                   <h2 className="mt-1 text-[14px] font-semibold">
-                    Write + readback verificato
+                    Modifiche verificate
                   </h2>
                 </div>
               </div>
               <p className="mt-4 text-[11px] leading-5 text-slate-500">
-                Ogni azione passa dal server, dal ledger e dalla rilettura della
-                versione della commessa. Le aree differite restano dichiarate
-                nel lifecycle.
+                Ogni azione viene verificata prima di essere confermata. Le aree
+                ancora da completare restano visibili nel percorso operativo.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-2.5 py-1 text-[9px] text-lime-200">
-                  TENANT SCOPED
+                  ACCESSO AUTORIZZATO
                 </span>
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-2.5 py-1 text-[9px] text-cyan-100">
                   AUDITABLE
@@ -1208,7 +1278,7 @@ export default function OperationsJobWorkspace({
           <span>AI-ZEROW OPERATIONS · COMMESSA WORKSPACE</span>
           <span className="flex items-center gap-2">
             <CheckCircle2 className="size-3.5 text-lime-300" />
-            Scheda tipizzata · eventi · readback verificato
+            Scheda completa · attività collegate · stato verificato
           </span>
         </footer>
       </div>
@@ -1234,8 +1304,7 @@ export default function OperationsJobWorkspace({
                           : "Aggiorna avanzamento"}
               </DialogTitle>
               <DialogDescription className="text-slate-500">
-                La modifica viene autorizzata dal server, registrata come evento
-                e riletta dal readback D1.
+                Le modifiche vengono verificate e confermate nella scheda della commessa.
               </DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={submitAction}>
