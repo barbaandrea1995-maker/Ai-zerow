@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.8 — W17 OpenAI live check governato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.9 — W17 OpenAI live check governato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W17 OpenAI live check governato · technical pass locale sul commit e7108ea; Sites v112 resta la pubblicazione privata owner-only verificata precedente e la nuova tranche attende il push sorgente autenticato. Checkpoint: docs/W17_OPENAI_LIVE_CHECKPOINT_2026-10-03.md. W16 è pubblicato come Sites v111 nel proprio checkpoint; W15 è pubblicato come Sites v110; W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Il check OpenAI live, malware/OCR provider, GPS/provider mappa, browser/device, osservabilità reale, DPIA/retention e sign-off restano aperti; i contratti Sites di offline queue/replay, security registry, audit e restore locale restano invece evidenze tecniche esplicite.
+**Checkpoint corrente:** W17 OpenAI live check governato · technical pass sul commit funzionale e7108ea, sorgente pubblicata 9a72ab0, Sites v113 owner-only verificato. Checkpoint: docs/W17_OPENAI_LIVE_CHECKPOINT_2026-10-03.md. W16 è pubblicato come Sites v111 nel proprio checkpoint; W15 è pubblicato come Sites v110; W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Il check OpenAI live, malware/OCR provider, GPS/provider mappa, browser/device, osservabilità reale, DPIA/retention e sign-off restano aperti; i contratti Sites di offline queue/replay, security registry, audit e restore locale restano invece evidenze tecniche esplicite.
 
 ## 1. Direzione prodotto
 
@@ -92,7 +92,7 @@ persona/input
 
 ### Riallineamento trasversale 2.4 — multi-tenant e mission resources
 
-Questo passaggio è **implementato localmente, non deployato** e attraversa W02, W05, W06, W08 e W17:
+Questo passaggio è **implementato e pubblicato privatamente in Sites v113** e attraversa W02, W05, W06, W08 e W17:
 
 - W02 ora persiste il profilo operativo del tenant (`operations`, `warehouse`, `transport`) e filtra le capability server-side per dominio; il selettore cross-tenant verifica sempre la membership D1.
 - W05 aggiunge la registrazione esplicita dell’autista nel registro Workforce; non basta più una stringa inserita nella missione.
@@ -723,7 +723,7 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 
 **Sites RC2.9:** `/release` e `/api/release/readiness` costituiscono il centro unico di promozione W17. Il registro non esegue deploy e non trasforma un candidato locale in una release commerciale: espone `READY`, `PARTIAL`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`, con evidenza e prossimo passo per ogni gate.
 
-Il candidato RC2.9 è tecnicamente pubblicato su Sites v111, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale.
+Il candidato RC2.9 è tecnicamente pubblicato su Sites v113 owner-only, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale.
 
 **Obiettivo:** promuovere solo ciò che è verificato end-to-end.
 

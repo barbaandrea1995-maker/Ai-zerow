@@ -1,8 +1,9 @@
 # AI-ZEROW COMMAND — W17 OpenAI live check checkpoint
 
-**Stato:** TECHNICAL PASS · IMPLEMENTATO LOCALMENTE · COMMERCIAL NO-GO  
-**Commit:** e7108ea — feat(w17): add governed OpenAI live check  
-**Pubblicazione corrente:** Sites v112 resta la release privata verificata precedente; questa tranche non è stata ancora pubblicata perché il push della sorgente verso il repository Sites non ha completato l’autenticazione.
+**Stato:** TECHNICAL PASS · PUBBLICATO PRIVATAMENTE · OWNER-ONLY · COMMERCIAL NO-GO
+**Commit funzionale:** e7108ea — feat(w17): add governed OpenAI live check
+**Commit sorgente pubblicato:** 9a72ab0 — docs(w17): record OpenAI live check gate
+**Pubblicazione corrente:** Sites v113, deployment riuscito `appgdep_6ac0fe2df3b081919b69cdc8cea9fbbc`, URL owner-only invariato.
 
 ## Cosa è stato chiuso
 
