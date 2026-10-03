@@ -268,6 +268,8 @@ assert(securityReadinessRoute.includes("MALWARE_SCAN_WEBHOOK_TOKEN") && security
 const securityPage = await readFile(join(root, "app", "governance", "security", "page.tsx"), "utf8");
 const securitySurface = await readFile(join(root, "components", "security-privacy-control.tsx"), "utf8");
 assert(securityPage.includes("SecurityPrivacyControl") && securitySurface.includes("/api/governance/security-readiness"), "W16 must have a readable security/privacy surface");
+assert(securityPage.includes('requirePageCapability("governance.read")') && securityPage.includes("commandSurfaceAccess"), "W16 page must resolve authority server-side before rendering the control plane");
+assert(securitySurface.includes("zw-command-ultra") && securitySurface.includes("CommandMobileNav") && securitySurface.includes("AccountMenu"), "W16 must share the Command shell and role-aware mobile navigation");
 const releaseReadinessRoute = await readFile(join(root, "app", "api", "release", "readiness", "route.ts"), "utf8");
 assert(releaseReadinessRoute.includes('hasCapability(context, "governance.read")') && releaseReadinessRoute.includes("buildReleaseGateCatalog"), "W17 release readiness must be tenant-scoped and capability-gated");
 assert(releaseReadinessRoute.includes('promotionAllowed: summary.promotionAllowed') && releaseReadinessRoute.includes('tranche: "W17"'), "W17 release readiness must expose the promotion boundary");
