@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.6 — W15 PWA, Mobile e Offline su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.7 — W16 Security, Privacy, Observability e DR su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W15 PWA, Mobile e Offline · technical pass Sites/D1 pubblicato privatamente owner-only come Sites v109 · commit `9309a6cf527861c4a6fffe4a900372525fe640fe` · deployment `appgdep_6ac0e925a3448191b3863bc0f0bb8b1f` · non certificato commerciale. Checkpoint: docs/MODULE_15_PWA_MOBILE_OFFLINE_CHECKPOINT_2026-10-03.md. W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device e native mobile, privacy, installability reale e sign-off restano aperti; il contratto Sites di offline queue/replay resta invece chiuso tecnicamente e visibilmente come W15 evidence.
+**Checkpoint corrente:** W16 Security, Privacy, Observability e DR · technical pass Sites/D1 pubblicato privatamente owner-only come Sites v111 · commit `596eeba15c79cc63e78271e9d11c47cd0ee66d21` · deployment `appgdep_6ac0ecf79bfc819188771b560b8a708c` · non certificato commerciale. Checkpoint: docs/MODULE_16_SECURITY_PRIVACY_OBSERVABILITY_DR_CHECKPOINT_2026-10-03.md. W15 è pubblicato come Sites v110 nel proprio checkpoint; W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device e native mobile, osservabilità reale, DPIA/retention e sign-off restano aperti; i contratti Sites di offline queue/replay, security registry, audit e restore locale restano invece evidenze tecniche esplicite.
 
 ## 1. Direzione prodotto
 
@@ -87,7 +87,7 @@ persona/input
 | W13 Communication, Voice, Telephony | `RC2.9 — TECHNICAL PASS / PROVIDER GATES` | `/communications` ora è una control deck Command capability-gated: briefing, broadcast, acknowledgement readback, filtri e proposta voice. La commessa è selezionabile solo dal catalogo Operations e validata server-side nel tenant; delivery esterna, voice/SIP/telephony, webhook firmati, consenso runtime e policy operative restano differiti. |
 | W14 Integrazioni e adapter esterni | `RC3.0 — TECHNICAL PASS / PROVIDER GATES` | Control deck Integrazioni capability-gated con registry, evidenze append-only, health/readback dichiarativi e mappa dei confini. Provider reali, consumer, promotion e certificazione restano differiti. |
 | W15 PWA, iOS e Android | `RC3.1 — TECHNICAL PASS / DEVICE GATES` | `/pwa/diagnostics` è una control deck Command con capability `pwa.read`, shell/cache/service worker, IndexedDB FIFO queue, replay `/api/events` con idempotenza e install prompt osservabile. Browser/device, iOS/Android nativi e certificazione reale restano `NOT RUN`. |
-| W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
+| W16 Security, Privacy, Observability, DR | `RC3.2 — TECHNICAL PASS / PROVIDER + HUMAN GATES` | `/governance/security` è pubblicato come control plane Command con authority server-side, capability filtering, registro ricercabile Security/Privacy/Resilience/Provider/Release, audit ledger, restore evidence e boundary `NO_GO`. Malware provider, DPIA/retention, osservabilità/SLO/RPO/RTO e sign-off umano restano aperti. |
 | W17 Release e GA | `RC2.9-AUDIT-1 — TECHNICAL PASS / COMMERCIAL NO-GO` | Audit completo route/API/capability/pulsanti e PWA aggiunto; Command attiva non ha controlli iconici non collegati e i path UI/API risolvono. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, GPS/provider mappa, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
 
 ### Riallineamento trasversale 2.4 — multi-tenant e mission resources
@@ -668,7 +668,15 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 
 ### W16 — Security, privacy, compliance, observability e DR
 
-**Sites RC2.8:** il control plane `/governance/security` e il readback `/api/governance/security-readiness` rendono visibili i controlli locali chiusi e separano `READY`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`. La superficie non promuove token, provider, DPIA o sign-off umano a certificazione automatica.
+**Sites W16 technical pass:** il control plane `/governance/security` e il readback `/api/governance/security-readiness` usano la shell Command condivisa, ricevono il contesto `role`/capability dal server, rendono visibili i controlli locali chiusi e separano `READY`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`. La superficie non promuove token, provider, DPIA o sign-off umano a certificazione automatica.
+
+**Chiusure della tranche:**
+
+- sidebar collassabile, topbar, ricerca, refresh, account menu, back-to-Command e bottom navigation role-aware seguono la stessa gerarchia carbon/lime del Command;
+- il registro è filtrabile per dominio e ricerca testuale e ogni controllo espone evidenza e prossimo passo senza CTA non collegate;
+- il readback è tenant-scoped e capability-gated, il ledger e il registry adapter sono mostrati come evidenze e i segreti restano metadata-only;
+- restore D1/R2, document security fail-closed, tracking on-duty, audit append-only, provider, osservabilità, DPIA/retention e sign-off mantengono stati distinti;
+- `COMMERCIAL NO-GO` resta visibile e non esiste alcun controllo UI che possa promuovere automaticamente il candidato.
 
 **Obiettivo:** rendere la piattaforma operabile e difendibile in produzione.
 
@@ -715,7 +723,7 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 
 **Sites RC2.9:** `/release` e `/api/release/readiness` costituiscono il centro unico di promozione W17. Il registro non esegue deploy e non trasforma un candidato locale in una release commerciale: espone `READY`, `PARTIAL`, `NOT_RUN`, `BLOCKED` e `PENDING_REVIEW`, con evidenza e prossimo passo per ogni gate.
 
-Il candidato RC2.9 è tecnicamente pubblicato su Sites v86, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale.
+Il candidato RC2.9 è tecnicamente pubblicato su Sites v111, ma resta `NO_GO` finché non sono chiusi i gate OpenAI live, malware provider, executor/consumer esterni, osservabilità/SLO, test invito Neon, browser/device certification, DPIA/retention e sign-off umano security/privacy/commerciale.
 
 **Obiettivo:** promuovere solo ciò che è verificato end-to-end.
 
