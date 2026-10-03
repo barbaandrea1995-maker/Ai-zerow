@@ -725,7 +725,7 @@ export default function OperationsJobWorkspace({
       <div className="relative mx-auto max-w-[1560px] px-4 py-5 sm:px-7 sm:py-7">
         <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-5 flex flex-wrap items-center justify-between gap-4 px-4 py-3 sm:-mx-7 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
-            <button aria-label="Apri Command" className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]" onClick={() => router.push("/")} type="button"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></button>
+            <button aria-label="Apri Command" className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]" onClick={() => router.push("/command")} type="button"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></button>
             <Button
               variant="outline"
               className="h-9 shrink-0 border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100"

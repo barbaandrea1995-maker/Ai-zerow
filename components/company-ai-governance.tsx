@@ -401,7 +401,7 @@ export default function CompanyAiGovernance() {
     setMobileNavOpen(false);
   }
 
-  return <main className="min-h-screen bg-[#030504] text-slate-100"><div className="flex min-h-screen">
+  return <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100"><div className="zw-command-ambient" aria-hidden="true" /><div className="flex min-h-screen">
     <aside className={`hidden shrink-0 flex-col border-r border-lime-300/10 bg-[#050706]/95 px-3 py-4 backdrop-blur-xl transition-[width] duration-200 lg:flex ${collapsed ? "w-[76px]" : "w-[248px]"}`}>
       <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"}`}>
         <button className="flex items-center gap-3 px-1 text-left" onClick={() => nav("/command")} type="button" aria-label="Apri Command">

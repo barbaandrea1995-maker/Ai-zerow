@@ -139,6 +139,21 @@ Ogni provider resta `NOT_RUN` o `DEFERRED` finché non esistono credenziali, con
 
 Questo documento è il checkpoint `REVISION-TOTAL-01`. La prossima tranche di lavoro è **T01 — Shell commerciale condivisa**, con audit visuale di Command come riferimento e senza modificare i contratti di dominio.
 
+## T01 — stato eseguito
+
+La prima tranche della revisione è stata applicata e verificata localmente:
+
+- `/command` è ora il percorso canonico del control deck; i link legacy che puntavano a `/` sono stati riallineati.
+- `COMMAND_NAVIGATION` è la fonte unica per il percorso e la capability di navigazione del Command; la superficie Command deriva da quel catalogo invece di duplicarlo.
+- Le superfici W13, Company AI, Adapter ed Event Authority ricevono la stessa base `zw-app-shell` / `zw-command-ultra` e la stessa illuminazione carbon/lime.
+- Authority e Command espongono anche back/refresh locali; gli altri moduli mantengono la rail globale come fallback verificabile.
+- È stato aggiunto il registro canonico [`config/commercial-modules.json`](../config/commercial-modules.json) per 19 superfici commerciali/account e lo script `pnpm run audit:ui`.
+- L’audit UI verifica per modulo route, capability navigation, marchio ZEROW ufficiale, vocabolario carbon, back/refresh, comportamento mobile e stato dei gate runtime.
+
+Evidence T01: `audit:ui` PASS_WITH_RUNTIME_GATES (19 superfici; 18 refresh locali, 18 back locali, fallback globale attivo), `audit:release` PASS_WITH_EXTERNAL_GATES, `audit:e2e` PASS_WITH_AUTHENTICATED_GATE, `verify:commercial` PASS, `tsc --noEmit` PASS, lint PASS con 6 warning preesistenti di ottimizzazione `<img>`.
+
+Stato T01: `READY_LOCAL / NOT_CERTIFIED_RUNTIME`. Il browser autenticato, il device PWA e i provider esterni restano gate espliciti; la revisione non li considera chiusi sulla sola presenza del codice.
+
 ## Criterio di completamento
 
 La roadmap sarà chiusa solo quando ogni modulo avrà:

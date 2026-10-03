@@ -669,7 +669,7 @@ export default function OperationsPage() {
               className="flex min-w-0 items-center gap-3 text-left"
               onClick={() => {
                 setMobileMenu(false);
-                router.push("/");
+                router.push("/command");
               }}
               type="button"
             >
@@ -774,7 +774,7 @@ export default function OperationsPage() {
         <section className="min-w-0 flex-1">
           <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
-            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
+            <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
             <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
             <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle Operations" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={query} /></div></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">

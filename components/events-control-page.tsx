@@ -396,7 +396,7 @@ export default function EventsControlPage() {
     }
   }
 
-  return <main className="min-h-screen bg-[#030504] text-slate-100">
+  return <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100">
 <div className="flex min-h-screen">
 <aside className={cn("zw-command-sidebar z-40 shrink-0 flex-col border-r border-lime-300/10 bg-[#050806]/95 px-3 py-4 backdrop-blur-xl lg:relative lg:flex", sidebarCollapsed ? "w-[78px]" : "w-[252px]", mobileMenu ? "fixed inset-y-0 left-0 flex w-[280px] shadow-[0_0_60px_rgba(0,0,0,.7)]" : "hidden")}>
 <div className={cn("flex items-center gap-3 px-2", sidebarCollapsed && "justify-center px-0")}>

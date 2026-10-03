@@ -10,6 +10,7 @@ import {
 import Image from "next/image";
 import {
   Activity,
+  ArrowLeft,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
@@ -38,6 +39,7 @@ import {
   PanelRight,
   Plus,
   Search,
+  RefreshCw,
   Send,
   Settings2,
   ShieldCheck,
@@ -1502,7 +1504,7 @@ export default function OnboardingPage() {
   const navigate = (id: string, label: string) => {
     setMobileMenu(false);
     if (id === "command") {
-      router.push("/");
+      router.push("/command");
       return;
     }
     if (id === "operations") {
@@ -1665,7 +1667,7 @@ export default function OnboardingPage() {
               className="flex items-center gap-3 text-left"
               onClick={() => {
                 setMobileMenu(false);
-                router.push("/");
+                router.push("/command");
               }}
               type="button"
             >
@@ -1806,6 +1808,8 @@ export default function OnboardingPage() {
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
                 Sites native
               </span>
+              <button aria-label="Torna indietro" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 hover:border-lime-300/30 hover:text-lime-200" onClick={() => router.back()} type="button"><ArrowLeft className="size-4" /></button>
+              <button aria-label="Aggiorna Authority" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 hover:border-lime-300/30 hover:text-lime-200" onClick={() => void refreshAuthority()} type="button"><RefreshCw className="size-4" /></button>
               {authorityContext?.capabilities.includes("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
                 <Bell className="size-4" />
               </IconButton> : null}

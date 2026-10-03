@@ -1,6 +1,7 @@
 "use client";
 
 import { createAuthClient } from "@neondatabase/auth/next";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -68,6 +69,9 @@ export default function SettingsClient({ actor }: { actor: AccountActor }) {
             >
               <ArrowLeft className="size-4" />
             </Link>
+            <span className="relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/40 bg-black shadow-[0_0_22px_rgba(200,255,34,.12)]">
+              <Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" />
+            </span>
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70">
                 AI-ZEROW / ACCOUNT

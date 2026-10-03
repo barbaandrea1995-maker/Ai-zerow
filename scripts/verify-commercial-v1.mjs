@@ -28,12 +28,15 @@ const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"
 assert.equal(packageJson.scripts["verify:runtime"], "node scripts/verify-runtime-smoke.mjs", "Runtime smoke verification must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["audit:release"], "node scripts/audit-release-surface.mjs", "Release surface audit must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["audit:e2e"], "node scripts/audit-e2e-contract.mjs", "E2E contract audit must remain runnable from the package scripts");
+assert.equal(packageJson.scripts["audit:ui"], "node scripts/audit-ui-alignment.mjs", "UI alignment audit must remain runnable from the package scripts");
 const runtimeSmoke = await readFile(join(root, "scripts", "verify-runtime-smoke.mjs"), "utf8");
 assert(runtimeSmoke.includes("protected_api_fail_closed") && runtimeSmoke.includes("service_worker_build_binding"), "Runtime smoke must cover auth boundaries and PWA build binding");
 const surfaceAudit = await readFile(join(root, "scripts", "audit-release-surface.mjs"), "utf8");
 assert(surfaceAudit.includes("unresolvedApiEndpoints") && surfaceAudit.includes("browserGpsApi"), "Release surface audit must cover endpoint bindings and GPS/map integration status");
 const e2eAudit = await readFile(join(root, "scripts", "audit-e2e-contract.mjs"), "utf8");
 assert(e2eAudit.includes("authenticatedE2E") && e2eAudit.includes("suspiciousButtons"), "E2E audit must keep authenticated gates and button inventory explicit");
+const uiAudit = await readFile(join(root, "scripts", "audit-ui-alignment.mjs"), "utf8");
+assert(uiAudit.includes("commercial-modules.json") && uiAudit.includes("globalFallbackContract"), "UI audit must cover the canonical module registry and global action fallback");
 
 assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
@@ -486,6 +489,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "ui_alignment_audit", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

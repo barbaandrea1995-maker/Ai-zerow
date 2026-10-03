@@ -161,7 +161,7 @@ export type CommandSurfaceAccess = {
 };
 
 export const COMMAND_NAVIGATION = [
-  { id: "command", path: "/", requiredCapability: "command.read" },
+  { id: "command", path: "/command", requiredCapability: "command.read" },
   { id: "operations", path: "/operations", requiredCapability: "operations.read" },
   { id: "workforce", path: "/workforce", requiredCapability: "workforce.read" },
   { id: "planning", path: "/planning", requiredCapability: "planning.read" },

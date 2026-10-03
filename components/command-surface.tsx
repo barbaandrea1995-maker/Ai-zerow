@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   AlarmClock,
+  ArrowLeft,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
@@ -26,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  RefreshCw,
   Send,
   Settings,
   ShoppingCart,
@@ -52,7 +54,6 @@ import {
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 import { CommandHero } from "@/components/command-hero";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
-import { TenantSwitcher } from "@/components/tenant-switcher";
 import { OperationalMapBoard } from "@/components/operational-map-board";
 import {
   CommandPersonalizationBar,
@@ -60,6 +61,7 @@ import {
   CommandWidgetFrame,
 } from "@/components/command-widget-customizer";
 import { Input } from "@/components/ui/input";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -71,6 +73,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { readback } from "@/lib/client-readback";
+import { COMMAND_NAVIGATION } from "@/lib/command-dashboard";
 import type {
   CommandNavigationId,
   CommandSurfaceAccess,
@@ -146,32 +149,54 @@ type CommunicationsResponse = {
 
 const commandModules = ["operations", "assets", "workforce"] as const;
 
-const navItems: Array<{
-  id: CommandNavigationId;
-  label: string;
-  path: string;
-  icon: LucideIcon;
-  badge?: string;
-}> = [
-  { id: "command", label: "CONTROL", path: "/", icon: MessageSquareText, badge: "AI" },
-  { id: "operations", label: "OPERATIONS", path: "/operations", icon: BriefcaseBusiness },
-  { id: "workforce", label: "WORKFORCE", path: "/workforce", icon: Users },
-  { id: "planning", label: "PLANNING", path: "/planning", icon: CalendarClock },
-  { id: "attendance", label: "PRESENZE", path: "/presenze", icon: Clock3 },
-  { id: "finance", label: "FINANCE", path: "/finance", icon: Gauge },
-  { id: "procurement", label: "PROCUREMENT", path: "/procurement", icon: ShoppingCart },
-  { id: "assets", label: "ASSETS", path: "/assets", icon: Package },
-  { id: "warehouse", label: "WAREHOUSE", path: "/warehouse", icon: Package },
-  { id: "mission", label: "MISSION", path: "/mission", icon: Truck },
-  { id: "documents", label: "DOCUMENTS", path: "/documents", icon: FileText },
-  { id: "governance", label: "GOVERNANCE", path: "/governance", icon: ShieldCheck },
-  { id: "communications", label: "COMMUNICATIONS", path: "/communications", icon: MessageSquareText },
-  { id: "externals", label: "EXTERNAL ADAPTERS", path: "/externals", icon: Network },
-  { id: "authority", label: "AUTHORITY", path: "/onboarding", icon: ShieldCheck },
-  { id: "events", label: "EVENTS", path: "/events", icon: Activity },
-  { id: "pwa", label: "PWA / DIAGNOSTICS", path: "/pwa/diagnostics", icon: CircleGauge },
-  { id: "settings", label: "SETTINGS", path: "/settings", icon: Settings },
-];
+const navigationLabels: Record<CommandNavigationId, string> = {
+  command: "CONTROL",
+  operations: "OPERATIONS",
+  workforce: "WORKFORCE",
+  planning: "PLANNING",
+  attendance: "PRESENZE",
+  finance: "FINANCE",
+  procurement: "PROCUREMENT",
+  assets: "ASSETS",
+  warehouse: "WAREHOUSE",
+  mission: "MISSION",
+  documents: "DOCUMENTS",
+  governance: "GOVERNANCE",
+  communications: "COMMUNICATIONS",
+  externals: "EXTERNAL ADAPTERS",
+  authority: "AUTHORITY",
+  events: "EVENTS",
+  pwa: "PWA / DIAGNOSTICS",
+  settings: "SETTINGS",
+};
+
+const navigationIcons: Record<CommandNavigationId, LucideIcon> = {
+  command: MessageSquareText,
+  operations: BriefcaseBusiness,
+  workforce: Users,
+  planning: CalendarClock,
+  attendance: Clock3,
+  finance: Gauge,
+  procurement: ShoppingCart,
+  assets: Package,
+  warehouse: Package,
+  mission: Truck,
+  documents: FileText,
+  governance: ShieldCheck,
+  communications: MessageSquareText,
+  externals: Network,
+  authority: ShieldCheck,
+  events: Activity,
+  pwa: CircleGauge,
+  settings: Settings,
+};
+
+const navItems = COMMAND_NAVIGATION.map((item) => ({
+  ...item,
+  label: navigationLabels[item.id],
+  icon: navigationIcons[item.id],
+  badge: item.id === "command" ? "AI" : undefined,
+}));
 
 function W10CommandPanel({ summary }: { summary: W10Summary | null }) {
   const router = useRouter();
@@ -685,7 +710,7 @@ export default function CommandSurface({
       <div className="relative flex min-h-screen">
         <aside className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
           <div className="flex items-center justify-between px-2">
-            <button aria-label="Apri Command" className="flex min-w-0 items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/"); }} type="button">
+            <button aria-label="Apri Command" className="flex min-w-0 items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/command"); }} type="button">
               <span className="neon-pulse relative grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span>
               <span className="zw-command-sidebar__brand-copy min-w-0"><span className="block text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[0.22em] text-lime-300/75">command</span></span>
             </button>
@@ -742,6 +767,8 @@ export default function CommandSurface({
             <div className="ml-auto flex items-center gap-2">
               <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />Live control</span>
+              <IconButton label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
+              <IconButton label="Aggiorna Command" onClick={() => window.location.reload()}><RefreshCw className="size-4" /></IconButton>
               {access.allowedNavigation.includes("communications") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
               <AccountMenu actor={actor} />
             </div>

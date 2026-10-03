@@ -303,7 +303,7 @@ export default function ExternalIntegrationsControl() {
   }
 
   return (
-    <main className="min-h-screen bg-[#020403] text-slate-100">
+    <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100">
       <div className="flex min-h-screen">
         <aside className={cn("hidden shrink-0 flex-col border-r border-lime-300/10 bg-[#050806]/95 px-3 py-4 transition-all duration-300 lg:flex", sidebarCollapsed ? "w-[76px]" : "w-[248px]")}>
           <div className={cn("flex items-center gap-3", sidebarCollapsed ? "justify-center" : "px-2")}>
