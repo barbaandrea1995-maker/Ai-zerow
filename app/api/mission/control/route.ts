@@ -161,6 +161,12 @@ export async function POST(request: Request) {
   if (!context.operatingTransportModes.includes(transportMode)) {
     return Response.json({ error: "transport_mode_not_enabled", transportMode, enabledModes: context.operatingTransportModes.length ? context.operatingTransportModes : transportModesForProfile(context.operatingProfile) }, { status: 403 });
   }
+  if (transportMode === "ASSET_TRANSFER" && !cargoAssetId) {
+    return Response.json({ error: "cargo_asset_required_for_asset_transfer" }, { status: 400 });
+  }
+  if (transportMode === "WAREHOUSE_TO_JOB") {
+    return Response.json({ error: "warehouse_to_job_requires_commessa" }, { status: 400 });
+  }
   if (Object.prototype.hasOwnProperty.call(input, "driver") || Object.prototype.hasOwnProperty.call(input, "vehicle")) {
     return Response.json({ error: "mission_free_text_resources_not_allowed" }, { status: 400 });
   }
