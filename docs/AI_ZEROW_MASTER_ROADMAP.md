@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.4 — W13 Communications / Voice Boundary su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.5 — W14 Integrazioni e Adapter su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W13 Communications / Voice Boundary · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_13_COMMUNICATIONS_VOICE_CHECKPOINT_2026-10-03.md. W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W14 Integrazioni e Adapter · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_14_INTEGRATIONS_ADAPTERS_CHECKPOINT_2026-10-03.md. W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -85,7 +85,7 @@ persona/input
 | W11 Events, Outbox, Twin e Timeline | `RC2.9 — TECHNICAL PASS / EXTERNAL CONSUMER GATE` | Control deck Event Authority pubblicato privatamente con Event stream, inspector, outbox/DLQ control, retry budget, reconciliation, Twin read model derivato e Command ledger/timeline capability-gated. Consumer/worker esterni, Twin canonico, replay e proiezioni persistenti restano da certificare. |
 | W12 AI, Tool Gateway e Approval | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | `/governance` ora espone una control deck Company AI capability-gated con readiness, knowledge registry ricercabile, scope inspector commessa→sottogruppo, approval ledger, tool gateway e pipeline preview→approval→readback. Il contratto resta `directWrite=false`; OpenAI live, executor esterni e sign-off commerciale restano aperti. |
 | W13 Communication, Voice, Telephony | `RC2.9 — TECHNICAL PASS / PROVIDER GATES` | `/communications` ora è una control deck Command capability-gated: briefing, broadcast, acknowledgement readback, filtri e proposta voice. La commessa è selezionabile solo dal catalogo Operations e validata server-side nel tenant; delivery esterna, voice/SIP/telephony, webhook firmati, consenso runtime e policy operative restano differiti. |
-| W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
+| W14 Integrazioni e adapter esterni | `RC3.0 — TECHNICAL PASS / PROVIDER GATES` | Control deck Integrazioni capability-gated con registry, evidenze append-only, health/readback dichiarativi e mappa dei confini. Provider reali, consumer, promotion e certificazione restano differiti. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
 | W17 Release e GA | `RC2.9-AUDIT-1 — TECHNICAL PASS / COMMERCIAL NO-GO` | Audit completo route/API/capability/pulsanti e PWA aggiunto; Command attiva non ha controlli iconici non collegati e i path UI/API risolvono. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, GPS/provider mappa, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
@@ -595,7 +595,7 @@ NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT
 
 ---
 
-### W14 — Adapter esterni e integrazione NEXUS
+### W14 — Integrazioni e adapter esterni
 
 **Obiettivo:** collegare provider e sistemi esterni con confini espliciti e senza bypass.
 
@@ -614,7 +614,7 @@ NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT
 
 Ogni adapter espone capability, health, readback, versione contratto, owner e stato (`DECLARATIVE`, `HEALTHY`, `READBACK`, `BLOCKED`, `DEFERRED`).
 
-#### NEXUS
+#### Confini di integrazione
 
 1. congelare il canonical read contract;
 2. definire endpoint, auth, tenant mapping e versioning ufficiali;
@@ -810,7 +810,7 @@ Gli stream non devono inventare dati quando il servizio dipendente è `DEFERRED`
 ### Tranche 5 — Estensione e certificazione
 
 - W13 communication/voice/telephony;
-- W14 NEXUS e adapter production;
+- W14 integrazioni e adapter production;
 - W15 mobile device certification;
 - W16 security/privacy/DR;
 - W17 release e GA.

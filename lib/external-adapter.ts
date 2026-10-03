@@ -267,7 +267,7 @@ export function externalAccessDenied(
   operation: "read" | "write",
 ): Response | null {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  const capability = operation === "write" ? "tenant.manage" : "command.read";
+  const capability = operation === "write" ? "tenant.manage" : "external_adapters.read";
   if (!hasCapability(context, capability)) {
     return Response.json({ error: "forbidden", operation }, { status: 403 });
   }

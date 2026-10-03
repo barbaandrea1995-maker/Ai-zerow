@@ -397,6 +397,13 @@ assert(communicationsPage.includes("CommunicationsControl") && communicationsSur
 assert(communicationsRoute.includes('hasCapability(context, "communication.send")') && communicationsRoute.includes("job_not_found_in_tenant"), "W13 writes must be capability-gated and tenant-bound");
 assert(communicationsRoute.includes("voice_requires_acknowledgement") && communicationsRoute.includes("EXTERNAL_DEFERRED"), "W13 voice must preserve consent and provider-deferred boundaries");
 assert(communicationsSurface.includes("acknowledgement") && communicationsSurface.includes("VOICE_PROPOSAL") && communicationsSurface.includes("deliveryStatus"), "W13 must expose acknowledgement, voice proposal and delivery readback");
+const integrationsPage = await readFile(join(root, "app", "externals", "page.tsx"), "utf8");
+const integrationsSurface = await readFile(join(root, "components", "external-integrations-control.tsx"), "utf8");
+const externalAdapterContract = await readFile(join(root, "lib", "external-adapter.ts"), "utf8");
+assert(integrationsPage.includes("ExternalIntegrationsControl") && integrationsSurface.includes("/api/externals"), "W14 must use the Integrazioni control deck");
+assert(integrationsSurface.includes("INTEGRATIONS CONTROL") && integrationsSurface.includes("APPEND-ONLY CHECK LOG") && integrationsSurface.includes("NO FAKE HEALTH"), "W14 must expose registry, evidence and no-fake-health boundaries");
+assert(integrationsSurface.includes("tenant.manage") && integrationsSurface.includes("direct external write"), "W14 UI must expose the server-owned write boundary");
+assert(externalAdapterContract.includes('operation === "write" ? "tenant.manage" : "external_adapters.read"'), "W14 adapter access must align read and write capabilities");
 assert(journeyRoute.includes('document_security: hasCapability(context, "documents.write")'), "Document security controls must be capability-gated in the journey readback");
 const eventsControl = await readFile(join(root, "components", "events-control-page.tsx"), "utf8");
 assert(eventsControl.includes("/api/events/outbox"), "Events Authority must expose outbox controls");
