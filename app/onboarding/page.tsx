@@ -18,7 +18,6 @@ import {
   Check,
   CheckCircle2,
   Clock3,
-  ChevronDown,
   ChevronRight,
   CircleGauge,
   CircleHelp,
@@ -36,6 +35,8 @@ import {
   MessageSquareText,
   Navigation,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Plus,
   Search,
@@ -53,6 +54,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AccountMenu } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import AuthorityMembershipControl, {
   type AuthorityInvitationView,
@@ -72,6 +74,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { useRouter } from "next/navigation";
 import {
   AUTHORITY_ROLES,
@@ -1233,6 +1236,7 @@ function AuthorityVisualDashboard({
 export default function OnboardingPage() {
   const router = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<AuthorityTabId>("overview");
   const [selectedRole, setSelectedRole] = useState<AuthorityRole>("owner");
   const [query, setQuery] = useState("");
@@ -1656,15 +1660,17 @@ export default function OnboardingPage() {
   };
 
   return (
-    <main className="authority-page zw-app-shell min-h-screen overflow-x-hidden bg-[#050607] text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.08),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
+    <main className="authority-page zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
+      <div className="zw-command-ambient" aria-hidden="true" />
       <div className="relative flex min-h-screen">
         <aside
-          className={`fixed inset-y-0 left-0 z-40 flex w-[232px] flex-col border-r border-lime-300/10 bg-[#050607]/96 px-3 py-4 backdrop-blur-xl transition-transform lg:static lg:translate-x-0 ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}
+          aria-label="Navigazione principale"
+          className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}
         >
           <div className="flex items-center justify-between px-2">
             <button
-              className="flex items-center gap-3 text-left"
+              aria-label="Apri Command"
+              className="flex min-w-0 items-center gap-3 text-left"
               onClick={() => {
                 setMobileMenu(false);
                 router.push("/command");
@@ -1680,7 +1686,7 @@ export default function OnboardingPage() {
                   className="size-full object-cover"
                 />
               </span>
-              <span>
+              <span className="zw-command-sidebar__brand-copy min-w-0">
                 <span className="block text-sm font-bold tracking-[0.18em] text-slate-50">
                   AI-ZEROW
                 </span>
@@ -1689,36 +1695,45 @@ export default function OnboardingPage() {
                 </span>
               </span>
             </button>
-            <button
-              className="grid size-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white lg:hidden"
-              onClick={() => setMobileMenu(false)}
-              type="button"
-              aria-label="Chiudi menu"
-            >
-              <X className="size-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                aria-label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"}
+                className="zw-command-sidebar__collapse hidden size-8 place-items-center rounded-lg text-slate-500 hover:bg-lime-300/10 hover:text-lime-200 lg:grid"
+                onClick={() => setSidebarCollapsed((value) => !value)}
+                type="button"
+              >
+                {sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+              </button>
+              <button
+                className="grid size-9 place-items-center rounded-xl text-slate-500 hover:bg-white/5 hover:text-white lg:hidden"
+                onClick={() => setMobileMenu(false)}
+                type="button"
+                aria-label="Chiudi menu"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
           </div>
           <button
-            className="carbon-card mt-8 flex w-full items-center gap-3 rounded-xl p-3 text-left transition hover:border-lime-300/25"
+            className="zw-command-tenant mt-7 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:border-lime-300/25"
             type="button"
             onClick={() => notify("Workspace ZEROW · contesto owner Sites")}
           >
             <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/10 text-lime-200">
               <HardHat className="size-4" />
             </span>
-            <span className="min-w-0 flex-1">
+            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-200">
                 ZEROW workspace
               </span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-600">
-                owner · Sites tenant context
+                {authorityContext?.roles?.join(" + ") || authorityContext?.role || "readback pending"} · tenant scoped
               </span>
             </span>
-            <ChevronRight className="size-3.5 text-slate-600" />
           </button>
-          <nav className="mt-7 flex-1" aria-label="Navigazione principale">
-            <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
-              Workspace
+          <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
+            <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">
+              Authorized workspace
             </p>
             <div className="mt-2 space-y-1">
               {visibleNavItems.map((item) => {
@@ -1727,51 +1742,43 @@ export default function OnboardingPage() {
                 return (
                   <button
                     aria-current={active ? "page" : undefined}
-                    className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${active ? "border border-lime-300/20 bg-lime-300/10 text-lime-200 shadow-[inset_0_0_20px_rgba(190,255,60,0.04)]" : "text-slate-500 hover:bg-white/[0.045] hover:text-slate-100"}`}
+                    aria-label={sidebarCollapsed ? item.label : undefined}
+                    className={`zw-command-nav-item ${active ? "is-active" : ""}`}
                     key={item.id}
                     onClick={() => navigate(item.id, item.label)}
+                    title={sidebarCollapsed ? item.label : undefined}
                     type="button"
                   >
-                    <Icon
-                      className={`size-4 ${active ? "text-lime-200" : "text-slate-600 group-hover:text-slate-300"}`}
-                    />
-                    <span>{item.label}</span>
-                    {item.id === "command" && (
-                      <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-slate-600">
-                        AI
-                      </span>
-                    )}
+                    <Icon className="size-4" />
+                    <span className="zw-command-sidebar__nav-label">{item.label}</span>
+                    {item.id === "command" && <span className="zw-command-sidebar__nav-badge ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.08em] text-lime-200">AI</span>}
                   </button>
                 );
               })}
             </div>
           </nav>
-          <div className="mt-5 border-t border-white/[0.08] pt-4">
-            <div className="flex items-center justify-between px-2 text-[10px] uppercase tracking-[0.14em] text-slate-600">
-              <span>System status</span>
+          <div className="zw-command-sidebar__footer mt-4 border-t border-white/[0.07] pt-4">
+            <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[0.14em] text-slate-600">
+              <span>System core</span>
               <span className="flex items-center gap-1.5 text-lime-200">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />
-                online
+                {authorityContext ? "D1 VERIFIED" : "READBACK PENDING"}
               </span>
             </div>
-            <div className="carbon-inset mt-3 rounded-xl p-3">
-              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+            <div className="zw-command-core-status mt-3 rounded-xl p-3">
+              <div className="flex items-center gap-2 text-[11px] text-slate-400">
                 <ShieldCheck className="size-3.5 text-lime-300" />
                 Authority core
               </div>
-              <p className="mt-2 font-mono text-[9px] text-slate-600">
-                D1 · nessun trend senza readback
-              </p>
-              <p className="mt-3 font-mono text-[9px] text-slate-600">
-                S02 · SITES NATIVE
-              </p>
+              <p className="mt-2 font-mono text-[10px] text-slate-600">D1 / {memberships.length} MEMBERS</p>
+              <p className="mt-3 font-mono text-[10px] text-lime-300/60">POLICY / {authorityContext?.role?.toUpperCase() ?? "PENDING"}</p>
             </div>
           </div>
         </aside>
 
         {mobileMenu && (
           <button
-            className="fixed inset-0 z-30 bg-black/75 lg:hidden"
+            className="zw-command-sidebar-backdrop fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm lg:hidden"
             onClick={() => setMobileMenu(false)}
             aria-label="Chiudi menu"
             type="button"
@@ -1779,101 +1786,25 @@ export default function OnboardingPage() {
         )}
 
         <section className="min-w-0 flex-1">
-          <header className="authority-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-white/[0.08] bg-[#050607]/88 px-4 backdrop-blur-xl sm:gap-5 sm:px-7">
-            <IconButton
-              label="Apri menu"
-              onClick={() => setMobileMenu(true)}
-              className="lg:hidden"
-            >
-              <Menu className="size-4" />
-            </IconButton>
-            <div className="relative hidden min-w-0 flex-1 md:block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" />
-              <Input
-                aria-label="Cerca utenti, ruoli, permessi, team"
-                className="h-10 max-w-[440px] border-white/10 bg-black/30 pl-10 text-xs text-slate-100 placeholder:text-slate-600 focus-visible:border-lime-300/40"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cerca utenti, ruoli, permessi, team…"
-                value={query}
-              />
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
-              <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">
-                AUTHORITY
-              </span>
-              <span className="size-1 rounded-full bg-lime-300" />
-            </div>
+          <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
+            <IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton>
+            <button aria-label="Apri Authority" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/onboarding")} type="button">
+              <span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span>
+              <span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[.2em] text-lime-300/75">authority</span></span>
+            </button>
+            <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
+            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca utenti, ruoli, permessi, team" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca utenti, ruoli, permessi, team…" value={query} /></div></div>
             <div className="ml-auto flex items-center gap-2">
-              <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex">
-                <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                Sites native
-              </span>
-              <button aria-label="Torna indietro" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 hover:border-lime-300/30 hover:text-lime-200" onClick={() => router.back()} type="button"><ArrowLeft className="size-4" /></button>
-              <button aria-label="Aggiorna Authority" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 hover:border-lime-300/30 hover:text-lime-200" onClick={() => void refreshAuthority()} type="button"><RefreshCw className="size-4" /></button>
-              {authorityContext?.capabilities.includes("communication.read") ? <IconButton label="Apri comunicazioni" onClick={() => router.push("/communications")}>
-                <Bell className="size-4" />
-              </IconButton> : null}
-              <span className="hidden size-8 place-items-center rounded-full border border-white/15 bg-gradient-to-br from-slate-200 to-slate-500 text-xs font-bold text-[#080a0b] sm:grid">
-                AB
-              </span>
-              <div className="hidden text-right lg:block">
-                <p className="text-xs font-medium text-slate-200">
-                  {authorityContext?.actorName ?? "Operatore"}
-                </p>
-                <p className="text-[10px] text-slate-600">
-                  {authorityContext
-                    ? `${authorityContext.roles?.join(" + ") || authorityContext.role} · Sites owner`
-                    : "Site owner · readback pending"}
-                </p>
-              </div>
-              <ChevronDown className="hidden size-3.5 text-slate-500 lg:block" />
+              <TenantSwitcher />
+              <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{authorityContext ? "D1 VERIFIED" : "READBACK PENDING"}</span>
+              <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
+              <IconButton className="zw-command-topbar__refresh" label="Aggiorna Authority" onClick={() => void refreshAuthority()}><RefreshCw className="size-4" /></IconButton>
+              {authorityContext?.capabilities.includes("communication.read") ? <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
+              <AccountMenu actor={{ email: authorityContext?.actorEmail ?? "owner@sites.local", name: authorityContext?.actorName ?? "Operatore" }} />
             </div>
           </header>
 
           <div className="authority-content mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="authority-hero mb-5">
-              <div className="authority-hero-grid" aria-hidden="true" />
-              <div className="relative flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-                <div className="flex items-center gap-4">
-                  <span className="authority-mark">
-                    <Image
-                      src="/ai-zerow-icon.jpeg"
-                      alt="AI-ZEROW"
-                      width={52}
-                      height={52}
-                      className="size-full object-cover"
-                    />
-                  </span>
-                  <div>
-                    <p className="authority-kicker">
-                      COMMAND / AUTHORITY CONTROL PLANE
-                    </p>
-                    <p className="mt-1 text-sm font-medium tracking-wide text-slate-200 sm:text-base">
-                      Access matrix <span className="text-slate-600">·</span>{" "}
-                      tenant boundary <span className="text-slate-600">·</span>{" "}
-                      governed profiles
-                    </p>
-                    <p className="mt-2 text-xs text-slate-500">
-                      S02 is locked for the Sites-native operating scope.
-                    </p>
-                  </div>
-                </div>
-                <div className="authority-hero-meta grid grid-cols-3 gap-2 sm:min-w-[330px]">
-                  <div>
-                    <span>STATE</span>
-                    <strong>LOCKED</strong>
-                  </div>
-                  <div>
-                    <span>STORE</span>
-                    <strong>D1 / SITES</strong>
-                  </div>
-                  <div>
-                    <span>EDGE</span>
-                    <strong>OWNER PRIVATE</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
             <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
