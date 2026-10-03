@@ -177,7 +177,7 @@ export const COMMAND_NAVIGATION = [
   { id: "externals", path: "/externals", requiredCapability: "external_adapters.read" },
   { id: "authority", path: "/onboarding", requiredCapability: "authority.read" },
   { id: "events", path: "/events", requiredCapability: "events.read" },
-  { id: "pwa", path: "/pwa/diagnostics", requiredCapability: "command.read" },
+  { id: "pwa", path: "/pwa/diagnostics", requiredCapability: "pwa.read" },
   { id: "settings", path: "/settings", requiredCapability: "settings.read" },
 ] as const;
 

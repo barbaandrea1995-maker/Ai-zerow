@@ -97,6 +97,7 @@ assert(ROLE_CAPABILITIES.worker.includes("warehouse.request"), "Field workers mu
 assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers must not mutate stock balances");
 assert(ROLE_CAPABILITIES.worker.includes("attendance.self"), "Field workers must retain self attendance capability");
 assert(ROLE_CAPABILITIES.manager.includes("attendance.approve"), "Managers must retain attendance approval capability");
+assert(ROLE_CAPABILITIES.worker.includes("pwa.read") && ROLE_CAPABILITIES.driver.includes("pwa.read"), "Operational roles must retain PWA diagnostics visibility");
 
 for (const profile of ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
   assert(OPERATING_PROFILE_CATALOG[profile]?.domains?.length, `${profile} must declare at least one operating domain`);
@@ -148,6 +149,7 @@ const guardFiles = {
   communications: "communication.read",
   events: "events.read",
   externals: "external_adapters.read",
+  pwa: "pwa.read",
   release: "governance.read",
   onboarding: "authority.read",
   qr: "qr.read",
@@ -404,6 +406,14 @@ assert(integrationsPage.includes("ExternalIntegrationsControl") && integrationsS
 assert(integrationsSurface.includes("INTEGRATIONS CONTROL") && integrationsSurface.includes("APPEND-ONLY CHECK LOG") && integrationsSurface.includes("NO FAKE HEALTH"), "W14 must expose registry, evidence and no-fake-health boundaries");
 assert(integrationsSurface.includes("tenant.manage") && integrationsSurface.includes("direct external write"), "W14 UI must expose the server-owned write boundary");
 assert(externalAdapterContract.includes('operation === "write" ? "tenant.manage" : "external_adapters.read"'), "W14 adapter access must align read and write capabilities");
+const pwaPage = await readFile(join(root, "app", "pwa", "diagnostics", "page.tsx"), "utf8");
+const pwaSurface = await readFile(join(root, "components", "pwa-mobile-control.tsx"), "utf8");
+const pwaManifest = await readFile(join(root, "public", "manifest.webmanifest"), "utf8");
+const pwaServiceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
+assert(pwaPage.includes("PwaMobileControl") && pwaSurface.includes("indexedDB") && pwaSurface.includes("/api/events"), "W15 must expose the governed PWA surface, local queue and event replay");
+assert(pwaSurface.includes("beforeinstallprompt") && pwaSurface.includes("NOT RUN") && pwaSurface.includes("navigator.serviceWorker"), "W15 must distinguish observed installability from unrun device certification");
+assert(pwaManifest.includes('"display": "standalone"') && pwaManifest.includes('"start_url": "/command"'), "W15 PWA manifest must remain standalone and start at Command");
+assert(pwaServiceWorker.includes("request.method !== \"GET\"") && pwaServiceWorker.includes("/offline"), "W15 service worker must keep API writes out of cache and provide offline fallback");
 assert(journeyRoute.includes('document_security: hasCapability(context, "documents.write")'), "Document security controls must be capability-gated in the journey readback");
 const eventsControl = await readFile(join(root, "components", "events-control-page.tsx"), "utf8");
 assert(eventsControl.includes("/api/events/outbox"), "Events Authority must expose outbox controls");

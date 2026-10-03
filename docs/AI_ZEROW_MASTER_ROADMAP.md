@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.5 — W14 Integrazioni e Adapter su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.6 — W15 PWA, Mobile e Offline su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W14 Integrazioni e Adapter · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_14_INTEGRATIONS_ADAPTERS_CHECKPOINT_2026-10-03.md. W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W15 PWA, Mobile e Offline · technical pass Sites/D1 in preparazione alla pubblicazione privata owner-only · innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_15_PWA_MOBILE_OFFLINE_CHECKPOINT_2026-10-03.md. W14, W13, W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device e native mobile, privacy, installability reale e sign-off restano aperti; il contratto Sites di offline queue/replay resta invece chiuso tecnicamente e visibilmente come W15 evidence.
 
 ## 1. Direzione prodotto
 
@@ -86,7 +86,7 @@ persona/input
 | W12 AI, Tool Gateway e Approval | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | `/governance` ora espone una control deck Company AI capability-gated con readiness, knowledge registry ricercabile, scope inspector commessa→sottogruppo, approval ledger, tool gateway e pipeline preview→approval→readback. Il contratto resta `directWrite=false`; OpenAI live, executor esterni e sign-off commerciale restano aperti. |
 | W13 Communication, Voice, Telephony | `RC2.9 — TECHNICAL PASS / PROVIDER GATES` | `/communications` ora è una control deck Command capability-gated: briefing, broadcast, acknowledgement readback, filtri e proposta voice. La commessa è selezionabile solo dal catalogo Operations e validata server-side nel tenant; delivery esterna, voice/SIP/telephony, webhook firmati, consenso runtime e policy operative restano differiti. |
 | W14 Integrazioni e adapter esterni | `RC3.0 — TECHNICAL PASS / PROVIDER GATES` | Control deck Integrazioni capability-gated con registry, evidenze append-only, health/readback dichiarativi e mappa dei confini. Provider reali, consumer, promotion e certificazione restano differiti. |
-| W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
+| W15 PWA, iOS e Android | `RC3.1 — TECHNICAL PASS / DEVICE GATES` | `/pwa/diagnostics` è una control deck Command con capability `pwa.read`, shell/cache/service worker, IndexedDB FIFO queue, replay `/api/events` con idempotenza e install prompt osservabile. Browser/device, iOS/Android nativi e certificazione reale restano `NOT RUN`. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
 | W17 Release e GA | `RC2.9-AUDIT-1 — TECHNICAL PASS / COMMERCIAL NO-GO` | Audit completo route/API/capability/pulsanti e PWA aggiunto; Command attiva non ha controlli iconici non collegati e i path UI/API risolvono. TypeScript, lint, build, contract e runtime HTTP smoke passano localmente; OpenAI live, GPS/provider mappa, malware scan, invito Neon reale, executor esterni, device certification, osservabilità e sign-off umano restano bloccanti. |
 
@@ -631,6 +631,8 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 
 **Obiettivo:** rendere l’esecuzione affidabile anche sul campo e con connettività intermittente.
 
+**Sites W15 technical pass:** `/pwa/diagnostics` e `/mobile/diagnostics` ora usano una control deck coerente con Command, con sidebar collassabile, topbar, icona ZEROW ufficiale, KPI di runtime, readiness matrix e tre viste operative. La route richiede `pwa.read`; la bottom navigation mobile è esposta solo ai ruoli operativi autorizzati e non amplia il perimetro delle capability.
+
 #### PWA
 
 - manifest, service worker e offline fallback;
@@ -639,6 +641,14 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 - conflitto esplicito e retry safe;
 - diagnostica di cache, queue e sync;
 - installability e responsive touch.
+
+**Contratti verificati nella tranche:**
+
+- il service worker usa una cache shell versionata, conserva `/offline` come fallback e lascia fuori tutte le route `POST`/`/api/` dalla cache;
+- la queue locale usa `zerow-offline / queue`, ordina per `createdAt`, invia gli elementi in FIFO con `x-idempotency-key` e rimuove un elemento solo dopo HTTP `2xx`;
+- un errore di replay arresta la sequenza, senza dichiarare consegna o cancellare gli elementi non confermati;
+- il pannello mostra `NOT OBSERVED` quando il browser non espone `beforeinstallprompt`, senza inventare installabilità o certificazione device;
+- le azioni di diagnostica sono locali o readback-bound: nessun worker esterno, GPS reale, push, telemetria continua o app nativa viene simulato.
 
 #### iOS/Android
 
@@ -652,7 +662,7 @@ Finché questi passaggi non sono conclusi, `mock_read_only` resta lo stato corre
 - TestFlight/signing e Android equivalent;
 - certificazione su dispositivi fisici con evidenze.
 
-**Gate:** device certification completa prima di dichiarare il mobile production-ready.
+**Gate:** device certification completa prima di dichiarare il mobile production-ready. W15 è quindi `TECHNICAL PASS / COMMERCIAL NO-GO` finché non sono raccolte prove su browser/device reali, offline-online controllato, installabilità, iOS/Android e sign-off umano.
 
 ---
 
