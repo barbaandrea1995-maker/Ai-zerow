@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   inventoryItems,
@@ -62,6 +62,29 @@ function itemStatus(onHandMilli: number, reservedMilli: number, minStockMilli: n
   if (onHandMilli === 0) return "OUT_OF_STOCK";
   if (available < minStockMilli) return "LOW_STOCK";
   return "ACTIVE";
+}
+
+function normalizedIdentifier(value: unknown) {
+  return boundedText(value, 180).toUpperCase();
+}
+
+async function findItemByIdentifier(tenantId: string, value: unknown) {
+  const raw = boundedText(value, 180);
+  const normalized = raw.toUpperCase();
+  if (!raw) return null;
+  const [item] = await getDb().select().from(inventoryItems).where(and(
+    eq(inventoryItems.tenantId, tenantId),
+    or(
+      eq(inventoryItems.id, raw),
+      eq(inventoryItems.id, normalized),
+      eq(inventoryItems.sku, normalized),
+      eq(inventoryItems.barcode, raw),
+      eq(inventoryItems.barcode, normalized),
+      eq(inventoryItems.qrCode, raw),
+      eq(inventoryItems.qrCode, normalized),
+    ),
+  )).limit(1);
+  return item ?? null;
 }
 
 async function inventoryReadback(tenantId: string, filters: { itemId?: string; jobId?: string } = {}) {
@@ -139,10 +162,16 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const itemId = boundedText(url.searchParams.get("itemId"), 120);
   const jobId = boundedText(url.searchParams.get("jobId"), 160);
+  const identifier = boundedText(url.searchParams.get("identifier"), 180);
   try {
+    const resolvedItem = identifier ? await findItemByIdentifier(context.tenantId, identifier) : null;
+    if (identifier && !resolvedItem) {
+      return Response.json({ error: "inventory_identifier_not_found" }, { status: 404 });
+    }
     return Response.json({
       context: publicAuthorityContext(context),
-      ...(await inventoryReadback(context.tenantId, { itemId: itemId || undefined, jobId: jobId || undefined })),
+      ...(await inventoryReadback(context.tenantId, { itemId: itemId || resolvedItem?.id || undefined, jobId: jobId || undefined })),
+      resolvedItem: resolvedItem ? inventoryItemForResponse(resolvedItem) : null,
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {
@@ -203,15 +232,16 @@ export async function POST(request: Request) {
       const name = boundedText(input.name, 160);
       const unit = inventoryUnitForCode(input.unit);
       const warehouseId = boundedText(input.warehouseId, 120);
-      const requestedSku = boundedText(input.sku, 64).toUpperCase();
+      const barcode = normalizedIdentifier(input.barcode);
+      const storageShelf = boundedText(input.shelf, 120);
       const openingMilli = quantityToMilli(input.openingQuantity ?? 0, { allowZero: true });
       const minStockMilli = quantityToMilli(input.minStock ?? 0, { allowZero: true });
       if (name.length < 2) return Response.json({ error: "item_name_required" }, { status: 400 });
       if (!unit) return Response.json({ error: "unit_must_be_selected_from_catalog" }, { status: 400 });
       if (!warehouseId) return Response.json({ error: "warehouse_required" }, { status: 400 });
       if (openingMilli === null || minStockMilli === null) return Response.json({ error: "invalid_stock_quantity" }, { status: 400 });
-      if (requestedSku && !/^[A-Z0-9][A-Z0-9._-]{1,63}$/.test(requestedSku)) {
-        return Response.json({ error: "invalid_sku" }, { status: 400 });
+      if (barcode && !/^[A-Z0-9][A-Z0-9._:/-]{1,179}$/.test(barcode)) {
+        return Response.json({ error: "invalid_barcode" }, { status: 400 });
       }
       const [warehouse] = await db.select().from(tenantWarehouses).where(and(
         eq(tenantWarehouses.tenantId, context.tenantId),
@@ -220,16 +250,18 @@ export async function POST(request: Request) {
       )).limit(1);
       if (!warehouse) return Response.json({ error: "warehouse_not_found_or_inactive" }, { status: 404 });
 
-      const naming = requestedSku ? null : await allocateServerName({
+      const naming = await allocateServerName({
         tenantId: context.tenantId,
         module: "warehouse",
+        entityType: "material",
         description: name,
       });
-      const sku = requestedSku || naming?.canonicalCode;
+      const sku = naming?.canonicalCode;
       if (!sku) return Response.json({ error: "sku_unavailable" }, { status: 503 });
+      const qrCode = barcode ? null : `AZ1|MATERIAL|${sku}`;
       const itemId = crypto.randomUUID();
       const status = itemStatus(openingMilli, 0, minStockMilli);
-      const eventPayload = JSON.stringify({ action, sku, name, unit: unit.code, warehouseId, warehouseCode: warehouse.code, openingQuantityMilli: openingMilli, version: 1 });
+      const eventPayload = JSON.stringify({ action, sku, name, unit: unit.code, warehouseId, warehouseCode: warehouse.code, shelf: storageShelf || null, barcode: barcode || null, qrCode, openingQuantityMilli: openingMilli, version: 1 });
 
       await db.batch([
         db.insert(inventoryItems).values({
@@ -240,6 +272,9 @@ export async function POST(request: Request) {
           unit: unit.code,
           warehouseId,
           location: warehouse.code,
+          storageShelf,
+          barcode: barcode || null,
+          qrCode,
           onHandMilli: openingMilli,
           reservedMilli: 0,
           minStockMilli,
@@ -309,7 +344,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "unsupported_inventory_action", allowed: ["register_item", ...Object.keys(MUTATION_ACTIONS)] }, { status: 400 });
     }
     const movementType = MUTATION_ACTIONS[action as keyof typeof MUTATION_ACTIONS];
-    const itemId = boundedText(input.itemId, 120);
+    const submittedItemId = boundedText(input.itemId, 120);
+    const identifier = boundedText(input.identifier, 180);
+    const resolvedByIdentifier = identifier ? await findItemByIdentifier(context.tenantId, identifier) : null;
+    if (identifier && !resolvedByIdentifier) return Response.json({ error: "inventory_identifier_not_found" }, { status: 404 });
+    if (submittedItemId && resolvedByIdentifier && submittedItemId !== resolvedByIdentifier.id) {
+      return Response.json({ error: "inventory_identifier_item_mismatch" }, { status: 409 });
+    }
+    const itemId = submittedItemId || resolvedByIdentifier?.id || "";
     const jobReference = boundedText(input.jobId, 160);
     const missionId = boundedText(input.missionId, 160);
     const expectedVersion = typeof input.expectedVersion === "number" && Number.isInteger(input.expectedVersion)
@@ -392,6 +434,7 @@ export async function POST(request: Request) {
       action,
       movementType,
       itemId,
+      identifier: identifier || null,
       sku: current.sku,
       quantityMilli,
       jobId: canonicalJobId,
@@ -474,6 +517,8 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof CanonicalCodeConflictError) return Response.json({ error: error.code }, { status: 409 });
     const message = error instanceof Error ? error.message : "";
+    if (/inventory_items_tenant_barcode_uq/.test(message)) return Response.json({ error: "inventory_barcode_already_registered" }, { status: 409 });
+    if (/inventory_items_tenant_qr_code_uq/.test(message)) return Response.json({ error: "inventory_qr_already_registered" }, { status: 409 });
     if (/unique|constraint/i.test(message)) return Response.json({ error: "inventory_idempotency_or_version_conflict" }, { status: 409 });
     return Response.json({ error: "inventory_write_unavailable" }, { status: 503 });
   }

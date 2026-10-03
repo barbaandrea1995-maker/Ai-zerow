@@ -308,6 +308,8 @@ assert(inventoryRoute.includes('hasCapability(context, "warehouse.write")'), "St
 assert(inventoryRoute.includes("inventory_invariant_violation"), "Stock mutation must enforce balance invariants");
 assert(inventoryRoute.includes("expected_version_required"), "Stock mutation must require optimistic versions");
 assert(inventoryRoute.includes("mission_not_loadable"), "Material loading must reject missions outside the planned state");
+assert(inventoryRoute.includes("findItemByIdentifier") && inventoryRoute.includes("inventory_identifier_not_found"), "Warehouse movement must resolve identifiers server-side");
+assert(inventoryRoute.includes("storageShelf") && inventoryRoute.includes("qrCode"), "Warehouse material identity must persist shelf and server QR state");
 
 const journeyRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "journey", "route.ts"), "utf8");
 assert(journeyRoute.includes("ACTION_CAPABILITY"), "Journey actions must be capability-gated");

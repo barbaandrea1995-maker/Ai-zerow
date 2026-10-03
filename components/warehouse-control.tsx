@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import QRCode from "qrcode";
 import {
   Activity,
   AlertTriangle,
@@ -32,6 +33,7 @@ import {
   QrCode,
   RefreshCw,
   Search,
+  ScanLine,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -44,6 +46,7 @@ import {
 import { AccountMenu } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { TenantSwitcher } from "@/components/tenant-switcher";
+import { WarehouseCodeScanner } from "@/components/warehouse-code-scanner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -54,6 +57,8 @@ type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type StockFilter = "ALL" | "ACTIVE" | "LOW_STOCK" | "OUT_OF_STOCK";
 type Modal = "register" | "movement" | null;
 type MovementAction = "receive" | "reserve" | "release" | "pick" | "load" | "consume" | "return" | "adjust";
+type RegistrationMode = "barcode" | "qr";
+type MovementMode = "scan" | "catalog";
 
 type InventoryItem = {
   id: string;
@@ -62,6 +67,10 @@ type InventoryItem = {
   unit: string;
   warehouseId: string | null;
   location: string;
+  shelf: string;
+  barcode: string | null;
+  qrCode: string | null;
+  identification: "BARCODE" | "QR";
   onHand: number;
   reserved: number;
   available: number;
@@ -117,6 +126,7 @@ type InventoryPayload = {
   movements: InventoryMovement[];
   replenishment: ReplenishmentProposal[];
   summary: { itemCount: number; lowStockCount: number; movementCount: number };
+  resolvedItem?: InventoryItem | null;
   readback?: { status?: string; scope?: string; checkedAt?: string };
 };
 
@@ -228,7 +238,29 @@ function StockCard({ item, selected, canWrite, onSelect, onMovement }: { item: I
   const denominator = Math.max(item.onHand, item.minStock, 1);
   const width = Math.max(0, Math.min(100, item.available / denominator * 100));
   const tone = stockTone(item.status);
-  return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_26px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Boxes className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{item.name}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{item.sku} · {item.location}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={stockLabel(item.status)} tone={tone} /><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2 py-1 text-[10px] text-cyan-100">{item.unit}</span></div><div className="mt-4 grid grid-cols-3 gap-2"><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Fisico</p><p className="mt-1 font-mono text-sm text-slate-200">{item.onHand.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Riservato</p><p className="mt-1 font-mono text-sm text-cyan-100">{item.reserved.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Libero</p><p className="mt-1 font-mono text-sm text-lime-100">{item.available.toLocaleString("it-IT")}</p></div></div><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/70"><div className={cn("h-full rounded-full transition-[width]", item.status === "OUT_OF_STOCK" ? "bg-rose-400" : item.belowMinimum ? "bg-amber-300" : "bg-gradient-to-r from-lime-400 to-lime-200")} style={{ width: width + "%" }} /></div><p className="mt-2 text-[10px] text-slate-600">Minimo {formatQuantity(item.minStock, item.unit)} · v{item.version}</p></button>{canWrite && <Button className="mt-4 h-9 w-full border-white/10 bg-black/20 text-[11px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={onMovement} variant="outline"><ArrowDownToLine className="size-3.5" />Registra movimento</Button>}</article>;
+  return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_26px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Boxes className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{item.name}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{item.sku} · {item.location}{item.shelf ? " · " + item.shelf : ""}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={stockLabel(item.status)} tone={tone} /><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2 py-1 text-[10px] text-cyan-100">{item.unit}</span><span className={cn("inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-1 text-[10px]", item.barcode ? "border-cyan-300/20 bg-cyan-300/[.05] text-cyan-100" : "border-lime-300/20 bg-lime-300/[.05] text-lime-100")}><QrCode className="size-3" />{item.barcode ? "BARCODE · " + item.barcode : "QR SERVER · " + (item.qrCode ?? "—")}</span></div><div className="mt-4 grid grid-cols-3 gap-2"><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Fisico</p><p className="mt-1 font-mono text-sm text-slate-200">{item.onHand.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Riservato</p><p className="mt-1 font-mono text-sm text-cyan-100">{item.reserved.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Libero</p><p className="mt-1 font-mono text-sm text-lime-100">{item.available.toLocaleString("it-IT")}</p></div></div><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/70"><div className={cn("h-full rounded-full transition-[width]", item.status === "OUT_OF_STOCK" ? "bg-rose-400" : item.belowMinimum ? "bg-amber-300" : "bg-gradient-to-r from-lime-400 to-lime-200")} style={{ width: width + "%" }} /></div><p className="mt-2 text-[10px] text-slate-600">Minimo {formatQuantity(item.minStock, item.unit)} · v{item.version}</p></button>{canWrite && <Button className="mt-4 h-9 w-full border-white/10 bg-black/20 text-[11px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={onMovement} variant="outline"><ArrowDownToLine className="size-3.5" />Registra movimento</Button>}</article>;
+}
+
+function MaterialQrPreview({ code, sku }: { code: string; sku: string }) {
+  const [dataUrl, setDataUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void QRCode.toDataURL(code, {
+      width: 240,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#050607", light: "#efffb9" },
+    }).then((nextDataUrl) => {
+      if (active) setDataUrl(nextDataUrl);
+    }).catch(() => {
+      if (active) setDataUrl("");
+    });
+    return () => { active = false; };
+  }, [code]);
+
+  if (!dataUrl) return null;
+  return <div className="mt-4 flex items-center gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3"><img alt={"QR " + sku} className="size-20 rounded-lg bg-[#efffb9] p-1" src={dataUrl} /><div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-lime-200/75">QR DA STAMPARE</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{code}</p><p className="mt-1 text-[10px] text-slate-600">Payload server-side collegato alla movimentazione.</p><a className="mt-2 inline-flex text-[10px] font-semibold text-lime-200 hover:text-lime-100" download={"ai-zerow-" + sku.toLowerCase() + ".png"} href={dataUrl}>Scarica PNG</a></div></div>;
 }
 
 export default function WarehouseControl() {
@@ -247,6 +279,12 @@ export default function WarehouseControl() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [movementAction, setMovementAction] = useState<MovementAction>("receive");
+  const [registrationMode, setRegistrationMode] = useState<RegistrationMode>("qr");
+  const [registrationBarcode, setRegistrationBarcode] = useState("");
+  const [movementMode, setMovementMode] = useState<MovementMode>("scan");
+  const [movementIdentifier, setMovementIdentifier] = useState("");
+  const [movementItemId, setMovementItemId] = useState("");
+  const [movementResolving, setMovementResolving] = useState(false);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -305,6 +343,15 @@ export default function WarehouseControl() {
     });
   }, [items, locationFilter, query, stockFilter, warehouseById]);
   const selected = items.find((item) => item.id === selectedId) ?? filteredItems[0] ?? null;
+  const movementItem = items.find((item) => item.id === movementItemId) ?? null;
+  const movementNeedsAvailable = ["reserve", "pick", "load", "consume"].includes(movementAction);
+  const movementNeedsReserved = movementAction === "release";
+  const movementCatalogItems = useMemo(() => items.filter((item) => movementNeedsAvailable
+    ? item.available > 0 || item.id === movementItemId
+    : movementNeedsReserved
+      ? item.reserved > 0 || item.id === movementItemId
+      : true), [items, movementItemId, movementNeedsAvailable, movementNeedsReserved]);
+
   const canWrite = capabilities.includes("warehouse.write");
   const canRegister = capabilities.includes("warehouse.register");
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
@@ -328,7 +375,45 @@ export default function WarehouseControl() {
   function openMovement(item: InventoryItem) {
     setSelectedId(item.id);
     setMovementAction("receive");
+    setMovementMode("scan");
+    setMovementIdentifier("");
+    setMovementItemId(item.id);
     setModal("movement");
+  }
+
+  function openRegistration() {
+    setRegistrationMode("qr");
+    setRegistrationBarcode("");
+    setModal("register");
+  }
+
+  async function resolveMovementIdentifier(identifier: string) {
+    const normalized = identifier.trim();
+    if (!normalized) {
+      notify("Scansiona o inserisci un barcode/QR prima di procedere.");
+      return;
+    }
+    setMovementResolving(true);
+    try {
+      const response = await fetch(`/api/warehouse/inventory?identifier=${encodeURIComponent(normalized)}`, { cache: "no-store" });
+      const result = await response.json() as InventoryPayload & { error?: string };
+      if (!response.ok || !result.resolvedItem) throw new Error(result.error ?? "inventory_identifier_not_found");
+      setMovementIdentifier(normalized);
+      setMovementItemId(result.resolvedItem.id);
+      setSelectedId(result.resolvedItem.id);
+      notify(`Materiale verificato · ${result.resolvedItem.name}`);
+    } catch {
+      setMovementItemId("");
+      notify("Codice non riconosciuto nel catalogo materiali del tenant.");
+    } finally {
+      setMovementResolving(false);
+    }
+  }
+
+  function selectMovementCatalogItem(item: InventoryItem) {
+    setMovementItemId(item.id);
+    setSelectedId(item.id);
+    setMovementIdentifier("");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -340,14 +425,22 @@ export default function WarehouseControl() {
       return typeof entry === "string" ? entry.trim() : "";
     };
     const action = modal === "register" ? "register_item" : field("action");
+    if (modal === "movement" && movementMode === "scan" && !movementIdentifier) {
+      notify("La movimentazione sul posto deve iniziare dalla scansione del barcode o del QR.");
+      return;
+    }
+    if (modal === "movement" && !movementItem) {
+      notify(movementMode === "scan" ? "Risolvi prima il codice del materiale." : "Seleziona un materiale disponibile dal catalogo.");
+      return;
+    }
     const body: Record<string, unknown> = modal === "register"
-      ? { action, name: field("name"), sku: field("sku"), unit: field("unit"), warehouseId: field("warehouseId"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
-      : { action, itemId: selected?.id, expectedVersion: selected?.version, quantity: field("quantity"), jobId: field("jobId"), missionId: field("missionId"), note: field("note") };
+      ? { action, name: field("name"), barcode: registrationMode === "barcode" ? registrationBarcode : "", unit: field("unit"), warehouseId: field("warehouseId"), shelf: field("shelf"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
+      : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", expectedVersion: movementItem?.version, quantity: field("quantity"), jobId: field("jobId"), missionId: field("missionId"), note: field("note") };
     body.idempotencyKey = "warehouse-" + action + "-" + crypto.randomUUID();
     setBusy(true);
     try {
       const response = await fetch("/api/warehouse/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as InventoryPayload & { error?: string };
       if (!response.ok) {
         if (response.status === 409) await refresh();
         notify(result.error === "version_conflict" ? "Il saldo è cambiato: readback aggiornato." : "Operazione non eseguita: " + (result.error ?? "errore"));
@@ -355,7 +448,11 @@ export default function WarehouseControl() {
       }
       await refresh();
       setModal(null);
-      notify(modal === "register" ? "Materiale registrato e riletto su D1." : "Movimento registrato e saldo verificato.");
+      notify(modal === "register"
+        ? result.items?.[0]?.barcode
+          ? `Materiale registrato · barcode ${result.items[0].barcode}`
+          : `Materiale registrato · QR server ${result.items?.[0]?.qrCode ?? "generato"}`
+        : "Movimento registrato e saldo verificato.");
     } catch {
       notify("Connessione non disponibile: nessun saldo modificato.");
     } finally {
@@ -378,15 +475,15 @@ export default function WarehouseControl() {
     <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton><button aria-label="Apri Magazzino" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => navigate("/warehouse")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[10px] uppercase tracking-[.2em] text-lime-300/75">warehouse</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca materiale" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-sm text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca SKU, materiale, ubicazione…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">MAGAZZINO</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "READING" : "D1 VERIFIED"}</span><IconButton label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton label="Aggiorna magazzino" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
 
       <div className="mx-auto w-full max-w-[1600px] px-4 pb-24 pt-5 sm:px-7 sm:pb-8 sm:pt-7">
-        <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MODULE 07 · MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Anagrafiche, giacenze, prenotazioni e movimenti vivono nello stesso ledger tenant-scoped. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={() => setModal("register")} title={canRegister ? "Registra una nuova anagrafica materiale" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">inventory · tenant</p></div></section>
+        <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MODULE 07 · MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Anagrafiche, giacenze, prenotazioni e movimenti vivono nello stesso ledger tenant-scoped. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica materiale" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">inventory · tenant</p></div></section>
 
         <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Anagrafiche" value={payload?.summary.itemCount ?? 0} detail="Materiali censiti nel tenant" icon={Boxes} tone="cyan" /><KpiCard label="Disponibile" value={totals.available.toLocaleString("it-IT")} detail="Unità non prenotate" icon={CheckCircle2} tone="lime" /><KpiCard label="Riservato" value={totals.reserved.toLocaleString("it-IT")} detail="Unità per commesse" icon={ClipboardList} tone="cyan" /><KpiCard label="Sotto scorta" value={payload?.summary.lowStockCount ?? 0} detail="Da valutare nel replenishment" icon={AlertTriangle} tone="amber" /></section>
 
         <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">WAREHOUSE CONTROL DECK</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Registro e disponibilità</h2><p className="mt-1 text-xs text-slate-500">Il saldo disponibile è fisico meno prenotato; ogni modifica richiede la versione attesa.</p></div><span className="flex items-center gap-2 font-mono text-[10px] text-slate-600"><span className="size-1.5 rounded-full bg-lime-300" />{filteredItems.length} / {items.length} RECORD</span></div><div className="mt-4 flex flex-wrap gap-2"><label className="relative min-w-[240px] flex-1 md:hidden"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Filtra materiali" className="h-10 border-white/10 bg-black/25 pl-9 text-xs" onChange={(event) => setQuery(event.target.value)} placeholder="Filtra questa superficie…" value={query} /></label><select aria-label="Filtra stato scorta" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setStockFilter(event.target.value as StockFilter)} value={stockFilter}><option className="bg-[#080c09]" value="ALL">Tutti gli stati</option><option className="bg-[#080c09]" value="ACTIVE">Operativi</option><option className="bg-[#080c09]" value="LOW_STOCK">Sotto scorta</option><option className="bg-[#080c09]" value="OUT_OF_STOCK">Esauriti</option></select><select aria-label="Filtra ubicazione" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setLocationFilter(event.target.value)} value={locationFilter}><option className="bg-[#080c09]" value="ALL">Tutte le ubicazioni</option>{locations.map((location) => <option className="bg-[#080c09]" key={location} value={location}>{location}</option>)}</select><Button className="h-10 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => { setQuery(""); setStockFilter("ALL"); setLocationFilter("ALL"); }} variant="outline"><RefreshCw className="size-3.5" />Reset filtri</Button></div></section>
 
-        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">REGISTRO CANONICO</p><h2 className="mt-1 text-base font-semibold text-slate-100">Materiali e saldi</h2></div><IconButton label="Aggiorna registro materiali" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div><div className="mt-4 space-y-3">{filteredItems.map((item) => <StockCard canWrite={canWrite} item={item} key={item.id} onMovement={() => openMovement(item)} onSelect={() => setSelectedId(item.id)} selected={item.id === selected?.id} />)}{filteredItems.length === 0 && <div className="rounded-2xl border border-dashed border-lime-300/15 bg-black/15 p-12 text-center"><Boxes className="mx-auto size-9 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessun materiale nel perimetro</p><p className="mt-1 text-xs text-slate-600">Registra un materiale oppure rimuovi i filtri.</p><Button className="mt-5 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={() => setModal("register")}><PackagePlus className="size-3.5" />Registra materiale</Button></div>}</div></section>
+        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">REGISTRO CANONICO</p><h2 className="mt-1 text-base font-semibold text-slate-100">Materiali e saldi</h2></div><IconButton label="Aggiorna registro materiali" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div><div className="mt-4 space-y-3">{filteredItems.map((item) => <StockCard canWrite={canWrite} item={item} key={item.id} onMovement={() => openMovement(item)} onSelect={() => setSelectedId(item.id)} selected={item.id === selected?.id} />)}{filteredItems.length === 0 && <div className="rounded-2xl border border-dashed border-lime-300/15 bg-black/15 p-12 text-center"><Boxes className="mx-auto size-9 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessun materiale nel perimetro</p><p className="mt-1 text-xs text-slate-600">Registra un materiale oppure rimuovi i filtri.</p><Button className="mt-5 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration}><PackagePlus className="size-3.5" />Registra materiale</Button></div>}</div></section>
 
-          <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">MATERIAL INSPECTOR</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{selected?.name ?? "Nessun materiale selezionato"}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected ? selected.sku + " · " + selected.id : "Seleziona una riga dal registro"}</p></div>{selected && <StatusPill label={stockLabel(selected.status)} tone={stockTone(selected.status)} />}</div>{selected ? <><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Disponibilità</p><p className="mt-2 font-mono text-xl text-lime-100">{formatQuantity(selected.available, selected.unit)}</p><p className="mt-1 text-[10px] text-slate-600">fisico {selected.onHand.toLocaleString("it-IT")} · riservato {selected.reserved.toLocaleString("it-IT")}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Guard stock</p><p className={cn("mt-2 text-sm font-semibold", selected.status === "ACTIVE" ? "text-lime-200" : "text-amber-200")}>{selected.status === "ACTIVE" ? "AVAILABLE" : "ATTENTION"}</p><p className="mt-1 text-[10px] text-slate-600">minimo {formatQuantity(selected.minStock, selected.unit)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Ubicazione</p><p className="mt-2 text-sm text-slate-200">{selected.location}</p><p className="mt-1 text-[10px] text-slate-600">ultimo readback · {formatDate(selected.updatedAt)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Versione</p><p className="mt-2 font-mono text-sm text-cyan-100">v{selected.version}</p><p className="mt-1 text-[10px] text-slate-600">optimistic concurrency</p></div></div><div className="mt-4 flex flex-wrap gap-2">{canWrite && <Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" onClick={() => openMovement(selected)}><ArrowDownToLine className="size-3.5" />Movimenta</Button>}<Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href="/operations">Richiesta da commessa <BriefcaseBusiness className="size-3.5" /></Link></div></> : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-7 text-center text-xs text-slate-600">Seleziona un materiale per vedere saldo, versione e collegamenti.</div>}</section>
+          <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">MATERIAL INSPECTOR</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{selected?.name ?? "Nessun materiale selezionato"}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected ? selected.sku + " · " + selected.id : "Seleziona una riga dal registro"}</p>{selected && <p className="mt-1 text-[10px] text-slate-500">{selected.barcode ? "BARCODE · " + selected.barcode : "QR SERVER · " + (selected.qrCode ?? "—")} {selected.shelf ? "· scaffale " + selected.shelf : ""}</p>}</div>{selected && <StatusPill label={stockLabel(selected.status)} tone={stockTone(selected.status)} />}</div>{selected ? <><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Disponibilità</p><p className="mt-2 font-mono text-xl text-lime-100">{formatQuantity(selected.available, selected.unit)}</p><p className="mt-1 text-[10px] text-slate-600">fisico {selected.onHand.toLocaleString("it-IT")} · riservato {selected.reserved.toLocaleString("it-IT")}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Guard stock</p><p className={cn("mt-2 text-sm font-semibold", selected.status === "ACTIVE" ? "text-lime-200" : "text-amber-200")}>{selected.status === "ACTIVE" ? "AVAILABLE" : "ATTENTION"}</p><p className="mt-1 text-[10px] text-slate-600">minimo {formatQuantity(selected.minStock, selected.unit)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Ubicazione</p><p className="mt-2 text-sm text-slate-200">{selected.location}</p><p className="mt-1 text-[10px] text-slate-600">ultimo readback · {formatDate(selected.updatedAt)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Versione</p><p className="mt-2 font-mono text-sm text-cyan-100">v{selected.version}</p><p className="mt-1 text-[10px] text-slate-600">optimistic concurrency</p></div></div>{selected.qrCode && <MaterialQrPreview code={selected.qrCode} sku={selected.sku} />}<div className="mt-4 flex flex-wrap gap-2">{canWrite && <Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" onClick={() => openMovement(selected)}><ArrowDownToLine className="size-3.5" />Movimenta</Button>}<Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href="/operations">Richiesta da commessa <BriefcaseBusiness className="size-3.5" /></Link></div></> : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-7 text-center text-xs text-slate-600">Seleziona un materiale per vedere saldo, versione e collegamenti.</div>}</section>
 
             <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-amber-300/25 bg-amber-300/10 text-amber-200"><Gauge className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-amber-200/70">REPLENISHMENT</p><h2 className="mt-1 text-base font-semibold text-slate-100">Proposte da valutare</h2></div><StatusPill label="PROPOSAL ONLY" tone="amber" /></div><p className="mt-3 text-xs leading-5 text-slate-500">Il sistema segnala una quantità suggerita, ma non emette ordini automaticamente.</p><div className="mt-4 space-y-2">{payload?.replenishment.slice(0, 5).map((proposal) => <button className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-left transition hover:border-amber-300/30 hover:bg-amber-300/[.04]" key={proposal.itemId} onClick={() => setSelectedId(proposal.itemId)} type="button"><span className="grid size-8 shrink-0 place-items-center rounded-lg border border-amber-300/20 bg-amber-300/[.08] text-amber-200"><AlertTriangle className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">{proposal.name}</span><span className="mt-1 block truncate text-[10px] text-slate-600">libero {formatQuantity(proposal.available, proposal.unit)} · suggerito {formatQuantity(proposal.suggestedQuantity, proposal.unit)}</span></span><ChevronRight className="size-4 text-slate-700" /></button>)}{proposalCount === 0 && <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-xs text-slate-600">Nessuna proposta di reintegro nel readback.</div>}</div>{capabilities.includes("procurement.read") && <Link className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-lime-200 hover:text-lime-100" href="/procurement">Apri Procurement <ArrowUpRight className="size-3.5" /></Link>}</section></aside>
         </section>
@@ -399,7 +496,166 @@ export default function WarehouseControl() {
       </div>
     </section>
   </div><CommandMobileNav active="warehouse" allowedNavigation={allowedNavigation} role={context?.role} />
-    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[680px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "register" ? "Registra materiale" : "Movimenta · " + (selected?.name ?? "materiale")}</DialogTitle><DialogDescription className="text-slate-500">{modal === "register" ? "Il responsabile sceglie unità e magazzino dai cataloghi server-side. Lo SKU viene assegnato dal server se non viene indicato." : "Ogni movimento verifica saldo, commessa, missione e versione prima del readback."}</DialogDescription></DialogHeader>{modal === "register" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Descrizione<Input autoFocus className="mt-2 border-white/10 bg-black/30 text-slate-100" name="name" placeholder="Es. Tubo corrugato DN160" required /></label><label className="text-xs text-slate-400">SKU opzionale<Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="sku" placeholder="Generato dal server" /></label><label className="text-xs text-slate-400">Unità di misura<select aria-label="Unità di misura" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" defaultValue="" name="unit" required><option className="bg-[#080c09]" disabled value="">Seleziona dal catalogo</option>{units.map((unit) => <option className="bg-[#080c09]" key={unit.code} value={unit.code}>{unit.label} · {unit.symbol}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Magazzino di ubicazione<select aria-label="Magazzino di ubicazione" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" defaultValue="" name="warehouseId" required><option className="bg-[#080c09]" disabled value="">Seleziona un magazzino server-side</option>{warehouses.filter((warehouse) => warehouse.status === "active").map((warehouse) => <option className="bg-[#080c09]" key={warehouse.id} value={warehouse.id}>{warehouse.name} · {warehouse.code} · {warehouse.locationLabel}</option>)}</select>{warehouses.length === 0 && <span className="mt-2 block text-[10px] text-amber-200/75">Nessun magazzino configurato. L’Owner deve crearne almeno uno da Authority / onboarding.</span>}</label><label className="text-xs text-slate-400">Giacenza iniziale<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0" name="openingQuantity" step="0.001" type="number" defaultValue="0" required /></label><label className="text-xs text-slate-400">Scorta minima<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0" name="minStock" step="0.001" type="number" defaultValue="0" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder="Provenienza, ubicazione o vincoli…" /></label></div> : <div className="grid gap-4 sm:grid-cols-2"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3 sm:col-span-2"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">RISORSA SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.name ?? "Nessun materiale"}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{selected?.sku ?? "—"} · v{selected?.version ?? "—"} · libero {selected ? formatQuantity(selected.available, selected.unit) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Tipo<select aria-label="Tipo movimento" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" name="action" onChange={(event) => setMovementAction(event.target.value as MovementAction)} value={movementAction}><option value="receive">Carico / ricezione</option><option value="reserve">Prenota per commessa</option><option value="release">Rilascia prenotazione</option><option value="pick">Prelievo fisico</option><option value="load">Carica missione</option><option value="consume">Consumo su commessa</option><option value="return">Reso da commessa</option><option value="adjust">Rettifica inventariale (+/-)</option></select></label><label className="text-xs text-slate-400">Quantità<Input autoFocus className="mt-2 border-white/10 bg-black/30 text-slate-100" min={movementAction === "adjust" ? undefined : "0.001"} name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Commessa / job ID<Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="jobId" placeholder={["reserve", "release", "pick", "load", "consume", "return"].includes(movementAction) ? "Richiesto per questo movimento" : "Opzionale"} /></label><label className="text-xs text-slate-400">Missione ID<Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="missionId" placeholder={movementAction === "load" ? "Richiesto per il carico" : "Solo per carico missione"} /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota di tracciabilità<Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder="Motivo, documento o riferimento operativo…" required={movementAction !== "receive"} /></label></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (modal === "register" ? !canRegister : !canWrite)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <PackagePlus className="size-3.5" />}{modal === "register" ? "Registra e rileggi" : "Salva movimento"}</Button></DialogFooter></form></DialogContent></Dialog>
++    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}>
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
+        <form className="space-y-5" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{modal === "register" ? "Registra materiale" : "Movimenta materiale"}</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              {modal === "register"
+                ? "L’anagrafica viene creata dal Responsabile magazzino. L’ID viene assegnato dal server; qui colleghi il barcode esistente oppure il QR server-side."
+                : "Sul posto parti dalla scansione. Se stai preparando una movimentazione da remoto, usa il catalogo server-side dei materiali disponibili."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {modal === "register" ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-xs text-slate-400 sm:col-span-2">
+                  Descrizione materiale
+                  <Input autoFocus className="mt-2 border-white/10 bg-black/30 text-slate-100" name="name" placeholder="Es. Tubo corrugato DN160" required />
+                </label>
+                <div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3 sm:col-span-2">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.08] text-lime-200"><ShieldCheck className="size-4" /></span>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-lime-200/80">ID MATERIALE SERVER-SIDE</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Il codice non è modificabile: viene assegnato dal server al salvataggio e collegato al ledger.</p>
+                    </div>
+                  </div>
+                </div>
+                <label className="text-xs text-slate-400">
+                  Unità di misura
+                  <select aria-label="Unità di misura" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" defaultValue="" name="unit" required>
+                    <option className="bg-[#080c09]" disabled value="">Seleziona dal catalogo server-side</option>
+                    {units.map((unit) => <option className="bg-[#080c09]" key={unit.code} value={unit.code}>{unit.label} · {unit.symbol}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Magazzino di ubicazione
+                  <select aria-label="Magazzino di ubicazione" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" defaultValue="" name="warehouseId" required>
+                    <option className="bg-[#080c09]" disabled value="">Seleziona un magazzino server-side</option>
+                    {warehouses.filter((warehouse) => warehouse.status === "active").map((warehouse) => <option className="bg-[#080c09]" key={warehouse.id} value={warehouse.id}>{warehouse.name} · {warehouse.code} · {warehouse.locationLabel}</option>)}
+                  </select>
+                  {warehouses.length === 0 && <span className="mt-2 block text-[10px] text-amber-200/75">Nessun magazzino configurato. L’Owner deve crearne almeno uno da Authority / onboarding.</span>}
+                </label>
+                <label className="text-xs text-slate-400">
+                  Scaffale di stoccaggio <span className="text-slate-600">· opzionale</span>
+                  <Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="shelf" placeholder="Es. A-03-02" />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Giacenza iniziale
+                  <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0" name="openingQuantity" step="0.001" type="number" defaultValue="0" required />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Scorta minima
+                  <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0" name="minStock" step="0.001" type="number" defaultValue="0" required />
+                </label>
+              </div>
+
+              <section className="rounded-2xl border border-lime-300/20 bg-black/20 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-lime-200/80">IDENTIFICAZIONE FISICA</p>
+                    <p className="mt-1 text-[11px] text-slate-600">Scegli una sola modalità: il barcode rimane quello letto sul prodotto; senza barcode il server genera il QR associato al catalogo.</p>
+                  </div>
+                  <span className="rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2.5 py-1 font-mono text-[9px] text-lime-200">{registrationMode === "barcode" ? "BARCODE ESISTENTE" : "QR SERVER"}</span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button className={cn("rounded-xl border p-3 text-left transition", registrationMode === "barcode" ? "border-cyan-300/35 bg-cyan-300/[.08]" : "border-white/10 bg-black/20 hover:border-cyan-300/20")} onClick={() => setRegistrationMode("barcode")} type="button">
+                    <span className="block text-xs font-semibold text-slate-100">Il materiale ha un barcode</span>
+                    <span className="mt-1 block text-[10px] text-slate-600">Leggilo con il dispositivo e conservalo nel registro.</span>
+                  </button>
+                  <button className={cn("rounded-xl border p-3 text-left transition", registrationMode === "qr" ? "border-lime-300/35 bg-lime-300/[.08]" : "border-white/10 bg-black/20 hover:border-lime-300/20")} onClick={() => setRegistrationMode("qr")} type="button">
+                    <span className="block text-xs font-semibold text-slate-100">Il materiale non ha barcode</span>
+                    <span className="mt-1 block text-[10px] text-slate-600">Il server crea un QR unico collegato al materiale.</span>
+                  </button>
+                </div>
+                {registrationMode === "barcode" ? (
+                  <div className="mt-3">
+                    <WarehouseCodeScanner compact label="Barcode del materiale" name="barcode" onChange={setRegistrationBarcode} onDetected={setRegistrationBarcode} placeholder="Leggi o inserisci il barcode" value={registrationBarcode} />
+                  </div>
+                ) : (
+                  <div className="mt-3 flex items-start gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3">
+                    <QrCode className="mt-0.5 size-5 shrink-0 text-lime-200" />
+                    <div>
+                      <p className="text-xs font-semibold text-lime-100">QR generato dal server dopo il salvataggio</p>
+                      <p className="mt-1 text-[10px] leading-5 text-slate-600">Il payload viene associato all’ID materiale e sarà visibile nel registro per la stampa e la movimentazione.</p>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <label className="text-xs text-slate-400">
+                Nota operativa
+                <Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder="Provenienza, vincoli o note di stoccaggio…" />
+              </label>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-black/30 p-1">
+                <button className={cn("rounded-lg px-3 py-2.5 text-xs font-semibold transition", movementMode === "scan" ? "bg-lime-300 text-[#071006] shadow-[0_0_18px_rgba(190,255,60,.12)]" : "text-slate-500 hover:text-slate-200")} onClick={() => setMovementMode("scan")} type="button"><ScanLine className="mr-2 inline size-3.5" />Scansiona sul posto</button>
+                <button className={cn("rounded-lg px-3 py-2.5 text-xs font-semibold transition", movementMode === "catalog" ? "bg-lime-300 text-[#071006] shadow-[0_0_18px_rgba(190,255,60,.12)]" : "text-slate-500 hover:text-slate-200")} onClick={() => setMovementMode("catalog")} type="button"><Boxes className="mr-2 inline size-3.5" />Catalogo da remoto</button>
+              </div>
+
+              {movementMode === "scan" ? (
+                <div className="space-y-3">
+                  <WarehouseCodeScanner compact description="La risoluzione verifica barcode, QR server, SKU e tenant prima di consentire il movimento." label="Scansione identificativo materiale" name="identifier" onChange={setMovementIdentifier} onDetected={(value) => void resolveMovementIdentifier(value)} placeholder="Inquadra oppure inserisci barcode / QR" value={movementIdentifier} />
+                  {movementItem && <div className="rounded-xl border border-lime-300/20 bg-lime-300/[.05] p-3"><p className="text-[10px] uppercase tracking-[.14em] text-lime-200/75">READBACK MATERIALE</p><p className="mt-1 text-sm font-semibold text-slate-100">{movementItem.name}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{movementItem.sku} · libero {formatQuantity(movementItem.available, movementItem.unit)} · v{movementItem.version}</p></div>}
+                  {movementResolving && <p className="text-[10px] text-cyan-200">Verifica server-side in corso…</p>}
+                </div>
+              ) : (
+                <label className="text-xs text-slate-400">
+                  Materiali disponibili al movimento
+                  <select aria-label="Materiale dal catalogo server-side" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" onChange={(event) => { const item = movementCatalogItems.find((candidate) => candidate.id === event.target.value); if (item) selectMovementCatalogItem(item); }} value={movementItem?.id ?? ""}>
+                    <option className="bg-[#080c09]" disabled value="">Seleziona dal catalogo server-side</option>
+                    {movementCatalogItems.map((item) => <option className="bg-[#080c09]" key={item.id} value={item.id}>{item.name} · {item.sku} · libero {formatQuantity(item.available, item.unit)}</option>)}
+                  </select>
+                  <span className="mt-2 block text-[10px] text-slate-600">{movementNeedsAvailable ? "Disponibilità positiva riletta dal server." : movementNeedsReserved ? "Sono mostrati i materiali con prenotazione riletta dal server." : "Il server verificherà comunque saldo e versione al salvataggio."}</span>
+                </label>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-xs text-slate-400 sm:col-span-2">
+                  Tipo movimento
+                  <select aria-label="Tipo movimento" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" name="action" onChange={(event) => setMovementAction(event.target.value as MovementAction)} value={movementAction}>
+                    <option value="receive">Carico / ricezione</option>
+                    <option value="reserve">Prenota per commessa</option>
+                    <option value="release">Rilascia prenotazione</option>
+                    <option value="pick">Prelievo fisico</option>
+                    <option value="load">Carica missione</option>
+                    <option value="consume">Consumo su commessa</option>
+                    <option value="return">Reso da commessa</option>
+                    <option value="adjust">Rettifica inventariale (+/-)</option>
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Quantità
+                  <Input autoFocus={movementMode === "catalog"} className="mt-2 border-white/10 bg-black/30 text-slate-100" min={movementAction === "adjust" ? undefined : "0.001"} name="quantity" step="0.001" type="number" required />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Commessa / job ID
+                  <Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="jobId" placeholder={["reserve", "release", "pick", "load", "consume", "return"].includes(movementAction) ? "Richiesto per questo movimento" : "Opzionale"} />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Missione ID
+                  <Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="missionId" placeholder={movementAction === "load" ? "Richiesto per il carico" : "Solo per carico missione"} />
+                </label>
+                <label className="text-xs text-slate-400 sm:col-span-2">
+                  Nota di tracciabilità
+                  <Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder="Motivo, documento o riferimento operativo…" required={movementAction !== "receive"} />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose>
+            <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || movementResolving || (modal === "register" ? !canRegister : !canWrite)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : modal === "register" ? <PackagePlus className="size-3.5" /> : <ArrowDownToLine className="size-3.5" />}{modal === "register" ? "Registra materiale" : "Salva movimentazione"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
     {notice && <button aria-label="Chiudi messaggio" className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_34px_rgba(200,255,34,.16)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CheckCircle2 className="size-4 shrink-0 text-lime-300" />{notice}</button>}
   </main>;
 }

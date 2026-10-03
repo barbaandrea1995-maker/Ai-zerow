@@ -437,6 +437,9 @@ export const inventoryItems = sqliteTable("inventory_items", {
   unit: text("unit").notNull(),
   warehouseId: text("warehouse_id"),
   location: text("location").notNull().default("MAGAZZINO"),
+  storageShelf: text("storage_shelf").notNull().default(""),
+  barcode: text("barcode"),
+  qrCode: text("qr_code"),
   onHandMilli: integer("on_hand_milli").notNull().default(0),
   reservedMilli: integer("reserved_milli").notNull().default(0),
   minStockMilli: integer("min_stock_milli").notNull().default(0),
@@ -447,6 +450,8 @@ export const inventoryItems = sqliteTable("inventory_items", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
   tenantSkuUnique: uniqueIndex("inventory_items_tenant_sku_uq").on(table.tenantId, table.sku),
+  tenantBarcodeUnique: uniqueIndex("inventory_items_tenant_barcode_uq").on(table.tenantId, table.barcode),
+  tenantQrCodeUnique: uniqueIndex("inventory_items_tenant_qr_code_uq").on(table.tenantId, table.qrCode),
   tenantStatusIdx: index("inventory_items_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
   tenantWarehouseIdx: index("inventory_items_tenant_warehouse_idx").on(table.tenantId, table.warehouseId, table.updatedAt),
 }));

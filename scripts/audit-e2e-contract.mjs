@@ -99,9 +99,18 @@ const inventoryIdempotencyIndex = inventoryRoute.indexOf("const [existingEvent]"
 assert(registrationGateIndex >= 0 && registrationGateIndex < inventoryIdempotencyIndex, "material registration capability must be checked before idempotent readback");
 requireContract(inventoryRoute, /unit_must_be_selected_from_catalog/, "material unit catalog validation");
 requireContract(inventoryRoute, /warehouse_not_found_or_inactive/, "material warehouse validation");
+requireContract(inventoryRoute, /storageShelf/, "material storage shelf persistence");
+requireContract(inventoryRoute, /barcode/, "material barcode binding");
+requireContract(inventoryRoute, /qrCode/, "server QR binding");
+requireContract(inventoryRoute, /findItemByIdentifier/, "server identifier resolution");
+requireContract(inventoryRoute, /inventory_identifier_not_found/, "unknown scan fails closed");
 requireContract(warehouseControl, /fetch\("\/api\/warehouse\/catalog"/, "warehouse UI catalog readback");
 requireContract(warehouseControl, /name="warehouseId"/, "warehouse UI server warehouse selector");
 requireContract(warehouseControl, /name="unit"/, "warehouse UI server unit selector");
+requireContract(warehouseControl, /WarehouseCodeScanner/, "warehouse local barcode and QR scanner");
+requireContract(warehouseControl, /Scansiona sul posto/, "movement scan-first path");
+requireContract(warehouseControl, /Catalogo da remoto/, "movement remote catalog path");
+requireContract(warehouseControl, /name="shelf"/, "warehouse shelf field");
 requireContract(warehouseComponent, /fetch\("\/api\/authority\/warehouses"/, "onboarding warehouse readback");
 requireContract(legacyS04Page, /module === "warehouse"\)\s*\{\s*router\.push\("\/warehouse"\)/, "legacy warehouse CTA redirects to canonical module");
 requireContract(legacyS04Page, /module === "assets" && createOpen && <ServerNamingDialog module="assets"/, "legacy S04 naming dialog restricted to assets");
