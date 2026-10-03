@@ -57,6 +57,14 @@ function kindLabel(kind: ResourceOption["kind"]) {
   return "Asset";
 }
 
+function resourceStatusLabel(status: string) {
+  if (status === "ACTIVE" || status === "AVAILABLE") return "Disponibile";
+  if (status === "INACTIVE" || status === "UNAVAILABLE") return "Non disponibile";
+  if (status === "MAINTENANCE") return "In manutenzione";
+  if (status === "ASSIGNED" || status === "BUSY") return "Impegnata";
+  return status.replaceAll("_", " ").toLowerCase();
+}
+
 export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, onChange }: PlanningResourceFieldsProps) {
   const [resources, setResources] = useState<ResourceOption[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -115,13 +123,13 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
       <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><Users className="size-4" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">RISORSE REALI · PIANO GIORNALIERO</p>
-        <p className="mt-1 text-[10px] leading-4 text-slate-500">Seleziona soltanto persone, squadre, asset e mezzi registrati nel tenant. Il server ricalcola disponibilità e conflitti prima della pubblicazione.</p>
+        <p className="mt-1 text-[10px] leading-4 text-slate-500">Seleziona soltanto persone, squadre, asset e mezzi registrati nell’azienda. La disponibilità viene verificata prima della pubblicazione.</p>
       </div>
-      <span className="shrink-0 font-mono text-[9px] text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : state === "error" ? "UNAVAILABLE" : `${selectedIds.length} SEL.`}</span>
+      <span className="shrink-0 font-mono text-[9px] text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : state === "error" ? "NON DISPONIBILE" : `${selectedIds.length} SELEZIONATE`}</span>
     </div>
     {state === "error" && <p className="mt-3 text-[10px] text-amber-200">Registro risorse non disponibile: il piano non può essere confermato.</p>}
-    {state === "ready" && availabilityWindow?.window && <p className="mt-3 text-[10px] text-cyan-200/80">Readback server verificato per la finestra selezionata: le risorse occupate da un’altra attività sono disabilitate.</p>}
-    {state === "ready" && !resources.length && <p className="mt-3 text-[10px] text-amber-200">Nessuna risorsa assegnabile nel registro tenant.</p>}
+    {state === "ready" && availabilityWindow?.window && <p className="mt-3 text-[10px] text-cyan-200/80">Disponibilità verificata per la finestra selezionata: le risorse già occupate da un’altra attività non sono selezionabili.</p>}
+    {state === "ready" && !resources.length && <p className="mt-3 text-[10px] text-amber-200">Nessuna risorsa disponibile nel registro aziendale.</p>}
     <div className="mt-3 grid gap-3 md:grid-cols-2">
       {groups.map((group) => <div key={group.label}>
         <div className="mb-2 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500"><group.icon className="size-3.5 text-lime-200/70" />{group.label}</div>
@@ -130,7 +138,7 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
           const conflict = resource.availabilityConflict;
           return <label className={`flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 transition ${available ? "cursor-pointer" : "cursor-not-allowed opacity-55"} ${selectedIds.includes(resource.id) ? "border-lime-300/35 bg-lime-300/[0.07]" : "border-white/[0.08] bg-black/15 hover:border-lime-300/20"}`} key={resource.id}>
             <input aria-label={`Seleziona ${labelFor(resource)}`} checked={selectedIds.includes(resource.id)} className="size-4 accent-lime-300" disabled={!available} onChange={() => toggle(resource.id)} type="checkbox" value={resource.id} />
-            <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-medium text-slate-200">{labelFor(resource)}</span><span className="mt-0.5 block truncate text-[9px] text-slate-600">{kindLabel(resource.kind)} · {resource.status}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</span>{conflict && <span className="mt-1 block truncate text-[9px] text-amber-200/80">Occupata: {conflict.title}</span>}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-medium text-slate-200">{labelFor(resource)}</span><span className="mt-0.5 block truncate text-[9px] text-slate-600">{kindLabel(resource.kind)} · {resourceStatusLabel(resource.status)}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</span>{conflict && <span className="mt-1 block truncate text-[9px] text-amber-200/80">Impegnata: {conflict.title}</span>}</span>
           </label>;
         })}</div>
       </div>)}
