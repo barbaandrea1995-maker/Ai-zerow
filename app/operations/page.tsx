@@ -139,11 +139,11 @@ const navItems = [
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
   { label: "GOVERNANCE", id: "governance", icon: ShieldCheck, capability: "governance.read" },
   { label: "COMMUNICATIONS", id: "communications", icon: MessageSquareText, capability: "communication.read" },
-  { label: "EXTERNAL ADAPTERS", id: "externals", icon: Layers3, capability: "external_adapters.read" },
-  { label: "AUTHORITY", id: "authority", icon: ShieldCheck, capability: "authority.read" },
+  { label: "INTEGRAZIONI", id: "externals", icon: Layers3, capability: "external_adapters.read" },
+  { label: "AUTORIZZAZIONI", id: "authority", icon: ShieldCheck, capability: "authority.read" },
   { label: "QR / BARCODE", id: "qr", icon: QrCode, capability: "qr.read" },
-  { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "events.read" },
-  { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
+  { label: "ATTIVITÀ DI SISTEMA", id: "events_authority", icon: ShieldCheck, capability: "events.read" },
+  { label: "STATO PWA", id: "pwa", icon: CircleGauge, capability: "command.read" },
   { label: "SETTINGS", id: "settings", icon: Settings2, capability: "settings.read" },
 ];
 
@@ -152,9 +152,9 @@ const jobs: OperationsJob[] = [];
 const emptyJob: OperationsJob = {
   id: "EMPTY",
   title: "Nessuna commessa",
-  description: "Il readback server non contiene commesse.",
+  description: "Non ci sono ancora commesse da mostrare.",
   client: "—",
-  location: "Il readback server non contiene commesse.",
+  location: "Nessun luogo disponibile",
   status: "BOZZA",
   statusCode: "DRAFT",
   priority: "LOW",
@@ -334,6 +334,21 @@ function ActivityState({ state }: { state: JobActivity["state"] }) {
   );
 }
 
+function priorityLabel(value: OperationsJob["priority"]) {
+  return value === "HIGH" ? "Alta" : value === "LOW" ? "Bassa" : "Standard";
+}
+
+function resourceKindLabel(value: string) {
+  const labels: Record<string, string> = {
+    ASSET: "Asset",
+    EQUIPMENT: "Attrezzatura",
+    VEHICLE: "Mezzo",
+    WORKFORCE: "Personale",
+    OPERATOR: "Operatore",
+  };
+  return labels[value.trim().toUpperCase()] ?? value.replaceAll("_", " ");
+}
+
 function jobsFromAdapter(records: OperationsAdapterRecord[]): OperationsJob[] {
   return records.map((record) => {
     const payload = record.payload ?? {};
@@ -404,7 +419,7 @@ function jobsFromAdapter(records: OperationsAdapterRecord[]): OperationsJob[] {
       category:
         typeof payload.category === "string"
           ? payload.category
-          : "Adapter readback",
+          : "Da classificare",
       priority:
         payload.priority === "HIGH" || payload.priority === "LOW"
           ? payload.priority
@@ -569,7 +584,7 @@ export default function OperationsPage() {
       if (!response.ok) throw new Error(payload.error ?? "planning_write_failed");
       invalidateReadback(planningReadbackKey);
       setPlanningOpen(false);
-      notify("Piano creato in bozza · risorse validate dal server");
+      notify("Piano creato in bozza · risorse disponibili verificate");
     } catch (error) {
       setPlanningNotice(error instanceof Error ? error.message : "Piano non salvato");
     } finally {
@@ -609,7 +624,7 @@ export default function OperationsPage() {
       : undefined;
     if (createdJob) setSelectedId(createdJob.id);
     notify(
-      `Commessa ${createdJob?.id ?? "assegnata"} salvata in bozza · readback verificato`,
+      `Commessa ${createdJob?.id ?? "nuova"} salvata in bozza · pronta per la revisione`,
     );
   };
 
@@ -648,14 +663,14 @@ export default function OperationsPage() {
   const readbackTimeLabel = lastReadbackAt
     ? new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(new Date(lastReadbackAt))
     : adapterStatus === "loading"
-      ? "Lettura in corso"
+      ? "Aggiornamento in corso"
       : "Non disponibile";
   const operationalFlow = [
-    { id: "operations", label: "Commesse", detail: `${activeJobs.length} visibili`, icon: BriefcaseBusiness, state: adapterOnline ? "READBACK" : "EMPTY", path: "/operations", capability: "operations.read" },
-    { id: "planning", label: "Pianificazione", detail: "Attività e risorse", icon: CalendarClock, state: authority.capabilities.has("planning.read") ? "COLLEGATO" : "LIMITATO", path: "/planning", capability: "planning.read" },
-    { id: "workforce", label: "Presenze", detail: "Turni e squadre", icon: Clock3, state: authority.capabilities.has("workforce.read") ? "COLLEGATO" : "LIMITATO", path: "/presenze", capability: "workforce.read" },
-    { id: "mission", label: "Missioni", detail: "Trasporto e consegna", icon: Truck, state: authority.capabilities.has("mission.read") ? "COLLEGATO" : "LIMITATO", path: "/mission", capability: "mission.read" },
-    { id: "warehouse", label: "Magazzino", detail: "Materiali e stock", icon: Package, state: authority.capabilities.has("warehouse.read") ? "COLLEGATO" : "LIMITATO", path: "/warehouse", capability: "warehouse.read" },
+    { id: "operations", label: "Commesse", detail: `${activeJobs.length} visibili`, icon: BriefcaseBusiness, state: adapterOnline ? "AGGIORNATO" : "IN ATTESA", path: "/operations", capability: "operations.read" },
+    { id: "planning", label: "Pianificazione", detail: "Attività e risorse", icon: CalendarClock, state: authority.capabilities.has("planning.read") ? "PRONTO" : "LIMITATO", path: "/planning", capability: "planning.read" },
+    { id: "workforce", label: "Presenze", detail: "Turni e squadre", icon: Clock3, state: authority.capabilities.has("workforce.read") ? "PRONTO" : "LIMITATO", path: "/presenze", capability: "workforce.read" },
+    { id: "mission", label: "Trasporti", detail: "Trasporto e consegna", icon: Truck, state: authority.capabilities.has("mission.read") ? "PRONTO" : "LIMITATO", path: "/mission", capability: "mission.read" },
+    { id: "warehouse", label: "Magazzino", detail: "Materiali e stock", icon: Package, state: authority.capabilities.has("warehouse.read") ? "PRONTO" : "LIMITATO", path: "/warehouse", capability: "warehouse.read" },
   ].filter((node) => authority.capabilities.has(node.capability));
 
   return (
@@ -708,14 +723,14 @@ export default function OperationsPage() {
                 ZEROW workspace
               </span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-600">
-                {ROLE_METADATA[authority.role].label} · tenant context
+                {ROLE_METADATA[authority.role].label} · profilo operativo
               </span>
             </span>
             <ChevronRight className="size-3.5 text-slate-600" />
           </button>
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
             <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">
-              Authorized workspace
+              Area autorizzata
             </p>
             <div className="mt-2 space-y-1">
               {visibleNavItems.map((item) => {
@@ -747,22 +762,22 @@ export default function OperationsPage() {
           </nav>
           <div className="zw-command-sidebar__footer mt-4 border-t border-white/[0.07] pt-4">
             <div className="flex items-center justify-between px-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-              <span>System core</span>
+              <span>Sistema</span>
               <span className="flex items-center gap-1.5 text-lime-200">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />
-                {adapterOnline ? "READBACK VERIFICATO" : adapterStatus === "loading" ? "READBACK" : "READBACK VUOTO"}
+                {adapterOnline ? "DATI AGGIORNATI" : adapterStatus === "loading" ? "AGGIORNAMENTO" : "IN ATTESA"}
               </span>
             </div>
             <div className="zw-command-core-status mt-3 rounded-xl p-3">
               <div className="flex items-center gap-2 text-[10px] text-slate-400">
                 <Activity className="size-3.5 text-lime-300" />
-                Operations core
+                Area commesse
               </div>
               <p className="mt-2 font-mono text-[10px] text-slate-600">
-                OPERATIONS / {activeJobs.length} JOBS
+                {activeJobs.length} COMMESSE
               </p>
               <p className="mt-3 font-mono text-[10px] text-lime-300/60">
-                POLICY / {ROLE_METADATA[authority.role].label.toUpperCase()}
+                PROFILO / {ROLE_METADATA[authority.role].label.toUpperCase()}
               </p>
             </div>
           </div>
@@ -789,7 +804,7 @@ export default function OperationsPage() {
               <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                {adapterStatus === "loading" ? "LETTURA" : adapterOnline ? "READBACK VERIFICATO" : adapterStatus === "error" ? "ERRORE READBACK" : "READBACK VUOTO"}
+                {adapterStatus === "loading" ? "AGGIORNAMENTO" : adapterOnline ? "DATI AGGIORNATI" : adapterStatus === "error" ? "ERRORE DATI" : "IN ATTESA"}
               </span>
               <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
               <IconButton className="zw-command-topbar__refresh" label="Aggiorna commesse" onClick={() => { setAdapterStatus("loading"); void loadOperations(); }}><RefreshCw className={adapterStatus === "loading" ? "size-4 animate-spin" : "size-4"} /></IconButton>
@@ -808,13 +823,13 @@ export default function OperationsPage() {
                   Commesse
                 </h1>
                 <p className="mt-1 text-xs text-slate-500">
-                  Creazione, scope, pianificazione e attività · {adapterOnline ? "readback server verificato" : "readback in corso"}
+                  Creazione, scope, pianificazione e attività · {adapterOnline ? "dati operativi aggiornati" : "dati operativi in caricamento"}
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="hidden items-center rounded-xl border border-white/[0.1] bg-black/25 px-3.5 py-2.5 font-mono text-[10px] text-slate-500 sm:inline-flex">
                   <Clock3 className="mr-2 size-3.5 text-lime-300" />
-                  Readback {readbackTimeLabel}
+                  Aggiornato {readbackTimeLabel}
                 </span>
                 {canWriteOperations && (
                   <Button
@@ -837,16 +852,16 @@ export default function OperationsPage() {
               <MetricCard
                 label="Commesse attive"
                 value={String(activeCount)}
-                detail={adapterOnline ? "Readback verificato" : "In attesa"}
-                footnote={adapterOnline ? "Stato IN CORSO nel tenant corrente" : "Nessun dato operativo simulato"}
+                detail={adapterOnline ? "Dati aggiornati" : "In attesa"}
+                footnote={adapterOnline ? "Stato in corso" : "Nessuna commessa ancora presente"}
                 icon={BriefcaseBusiness}
                 tone="lime"
               />
               <MetricCard
                 label="In pianificazione"
                 value={String(plannedCount)}
-                detail={adapterOnline ? "DRAFT / PLAN" : "In attesa"}
-                footnote={adapterOnline ? "Proposte, approvate e pianificate" : "Nessun piano nel readback"}
+                detail={adapterOnline ? "Piani attivi" : "In attesa"}
+                footnote={adapterOnline ? "Proposte, approvate e pianificate" : "Nessun piano ancora presente"}
                 icon={CalendarClock}
                 tone="cyan"
               />
@@ -872,26 +887,26 @@ export default function OperationsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <SectionTitle
-                      eyebrow="OPERATIONS / REGISTER"
+                      eyebrow="COMMESSE / REGISTRO"
                       title="Registro commesse"
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
                       {adapterOnline
-                        ? "Readback server attivo · Operations collegato"
-                        : "Readback server vuoto · Operations in attesa"}
+                        ? "Dati operativi aggiornati · area collegata"
+                        : "Nessun dato operativo disponibile al momento"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     {adapterOnline ? (
-                      <StatusBadge tone="lime">ADAPTER ONLINE</StatusBadge>
+                      <StatusBadge tone="lime">DATI AGGIORNATI</StatusBadge>
                     ) : (
-                      <StatusBadge tone="cyan">ADAPTER REQUIRED</StatusBadge>
+                      <StatusBadge tone="cyan">IN ATTESA</StatusBadge>
                     )}
                     <IconButton
                       label="Impostazioni registro"
                       onClick={() =>
                         notify(
-                          "Filtri avanzati disponibili con l'adapter Operations",
+                          "I filtri avanzati saranno disponibili qui a breve.",
                         )
                       }
                     >
@@ -1008,7 +1023,7 @@ export default function OperationsPage() {
                     })}
                     {filteredJobs.length === 0 && (
                       <div className="px-4 py-10 text-center text-xs text-slate-500">
-                        Nessuna commessa corrisponde ai filtri locali.
+                        Nessuna commessa corrisponde ai filtri selezionati.
                       </div>
                     )}
                   </div>
@@ -1018,8 +1033,8 @@ export default function OperationsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <SectionTitle
-                      eyebrow="SELECTED JOB / READ MODEL"
-                      title={selectedJob.id}
+                      eyebrow="COMMESSA SELEZIONATA"
+                      title={selectedJob.title}
                     />
                     <p className="mt-1 text-xs text-slate-500">
                       {selectedJob.title} · {selectedJob.location}
@@ -1033,7 +1048,7 @@ export default function OperationsPage() {
                             `/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}`,
                           )
                         : notify(
-                            `Dettaglio ${selectedJob.id}: disponibile dopo il readback server`,
+                            "Il dettaglio sarà disponibile quando la commessa sarà caricata.",
                           )
                     }
                     type="button"
@@ -1052,7 +1067,7 @@ export default function OperationsPage() {
                           : "amber"
                     }
                   >
-                    {selectedJob.priority}
+                    {priorityLabel(selectedJob.priority)}
                   </StatusBadge>
                   <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] text-slate-500">
                     {selectedJob.due}
@@ -1083,7 +1098,7 @@ export default function OperationsPage() {
                   </div>
                   <div className="mt-2 flex justify-between text-[10px] text-slate-600">
                     <span>Avvio</span>
-                    <span>Chiusura e readback</span>
+                    <span>Chiusura</span>
                   </div>
                 </div>
                 <div className="mt-5 space-y-3">
@@ -1144,7 +1159,7 @@ export default function OperationsPage() {
             <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)_minmax(300px,0.75fr)]">
               <section className="carbon-card rounded-2xl p-4 sm:p-5">
                 <SectionTitle
-                  eyebrow="ACTIVITY CONTRACT"
+                  eyebrow="ATTIVITÀ"
                   title="Attività operative"
                   action="Apri workspace"
                   onAction={() => selectedJob.id === "EMPTY"
@@ -1172,7 +1187,7 @@ export default function OperationsPage() {
                     ))
                   ) : (
                     <div className="py-6 text-center text-xs text-slate-500">
-                      Nessuna attività nel readback server.
+                      Nessuna attività collegata.
                     </div>
                   )}
                 </div>
@@ -1180,28 +1195,28 @@ export default function OperationsPage() {
               <section className="carbon-card rounded-2xl p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <SectionTitle
-                    eyebrow="PLANNING / RESOURCES"
+                    eyebrow="PIANIFICAZIONE / RISORSE"
                     title="Risorse verificabili"
                   />
-                  <StatusBadge tone={resourceOptions.length ? "lime" : "cyan"}>{resourceOptions.length ? "SERVER CHECKED" : "ON DEMAND"}</StatusBadge>
+                  <StatusBadge tone={resourceOptions.length ? "lime" : "cyan"}>{resourceOptions.length ? "DISPONIBILI" : "DA VERIFICARE"}</StatusBadge>
                 </div>
                 {resourceOptions.length ? (
                   <div className="mt-4 space-y-2">
                     {resourceOptions.slice(0, 4).map((resource) => (
                       <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5" key={resource.id}>
                         <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><Users className="size-3.5" /></span>
-                        <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{resource.label}</p><p className="mt-0.5 text-[10px] uppercase tracking-[0.1em] text-slate-600">{resource.kind}</p></div>
+                        <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{resource.label}</p><p className="mt-0.5 text-[10px] uppercase tracking-[0.1em] text-slate-600">{resourceKindLabel(resource.kind)}</p></div>
                         <span className={`text-[9px] font-semibold uppercase tracking-[0.08em] ${resource.availableForWindow === false ? "text-amber-200" : resource.assignable ? "text-lime-200" : "text-slate-500"}`}>{resource.availableForWindow === false ? `Occupata${resource.availabilityConflict?.title ? ` · ${resource.availabilityConflict.title}` : ""}` : resource.assignable ? "Disponibile" : "Non assegnabile"}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-xs text-slate-500">Apri Pianifica per rileggere workforce e asset realmente assegnabili.</div>
+                  <div className="mt-4 rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-xs text-slate-500">Apri Pianifica per verificare personale e asset realmente assegnabili.</div>
                 )}
                 <div className="mt-5 border-t border-white/[0.08] pt-4">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-slate-500">Controllo disponibilità</span>
-                    <span className="font-mono text-slate-600">{resourceOptions.length || "—"} risorse rilevate</span>
+                    <span className="font-mono text-slate-600">{resourceOptions.length || "—"} risorse disponibili</span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300" style={{ width: `${Math.min(100, resourceOptions.length * 16)}%` }} /></div>
                 </div>
@@ -1220,11 +1235,12 @@ export default function OperationsPage() {
                       <p className="text-xs font-semibold text-slate-200">
                         {selectedJob.id === emptyJob.id
                           ? "Nessuna commessa selezionata"
-                          : `${selectedJob.id} · bozza locale`}
+                          : `${selectedJob.title} · da completare`}
                       </p>
                       <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                        Il documento sarà composto quando il readback operativo
-                        restituirà una commessa.
+                        {selectedJob.id === emptyJob.id
+                          ? "Apri una commessa per preparare il rapportino."
+                          : "Completa il rapportino dal workspace della commessa."}
                       </p>
                     </div>
                   </div>
@@ -1243,11 +1259,9 @@ export default function OperationsPage() {
                   <Button
                     variant="outline"
                     className="mt-4 h-9 w-full border-lime-300/25 bg-lime-300/5 text-xs text-lime-200 hover:bg-lime-300/10"
-                    onClick={() =>
-                      notify(
-                        "Rapportino disponibile dopo il readback di una commessa",
-                      )
-                    }
+                    onClick={() => selectedJob.id === emptyJob.id
+                      ? notify("Seleziona una commessa per preparare il rapportino")
+                      : router.push(`/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}#rapportino`)}
                   >
                     <ClipboardCheck className="size-3.5" />
                     Prepara rapportino
@@ -1258,11 +1272,11 @@ export default function OperationsPage() {
             <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">OPERATIONAL CHAIN</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">PERCORSO OPERATIVO</p>
                   <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Dalla commessa all’esecuzione</h2>
-                  <p className="mt-1 text-[11px] text-slate-500">Ogni passaggio apre solo il perimetro autorizzato e usa lo stesso jobId come collegamento operativo.</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Ogni passaggio apre il modulo autorizzato e resta collegato alla commessa.</p>
                 </div>
-                <StatusBadge tone="lime">TENANT SCOPED</StatusBadge>
+                <StatusBadge tone="lime">ACCESSO AUTORIZZATO</StatusBadge>
               </div>
               <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                 {operationalFlow.map((node) => {
@@ -1279,26 +1293,26 @@ export default function OperationsPage() {
                 <div>
                   <p className="text-sm font-semibold text-slate-100">
                     {adapterOnline
-                      ? "Modulo Operations collegato al Sites adapter"
-                      : "Modulo Operations pronto per il prossimo adapter"}
+                      ? "Area commesse pronta"
+                      : "Area commesse in attesa di dati"}
                   </p>
                   <p className="mt-1 text-[11px] text-slate-500">
                     {adapterOnline
-                      ? "Commesse e readback sono collegati al servizio operativo; pianificazione e rapportini restano vincolati."
-                      : "Commesse, attività, planning, risorse e rapportino sono rappresentati senza simulare scritture su Neon."}
+                      ? "Commesse e attività sono aggiornate; pianificazione e rapportini restano disponibili nel workspace."
+                      : "Commesse, attività, pianificazione, risorse e rapportini saranno disponibili con i primi dati operativi."}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 {adapterOnline ? (
-                  <StatusBadge>ADAPTER READ/WRITE READY</StatusBadge>
+                  <StatusBadge>OPERATIVO</StatusBadge>
                 ) : (
-                  <StatusBadge>READBACK VUOTO</StatusBadge>
+                  <StatusBadge>IN ATTESA</StatusBadge>
                 )}
                 <button
                   className="grid size-8 place-items-center rounded-lg border border-white/10 text-slate-500 hover:border-lime-300/30 hover:text-lime-200"
                   onClick={() =>
-                    notify("Evidenze operative: readback e contratti verificati")
+                    notify("Area operativa verificata")
                   }
                   type="button"
                   aria-label="Apri evidenze"
@@ -1314,10 +1328,10 @@ export default function OperationsPage() {
                   : "AI-ZEROW OPERATIONS · superficie operativa"}
               </span>
               <span className="flex items-center gap-2">
-                <span>black carbon core</span>
+                <span>carbon command core</span>
                 <span className="size-1 rounded-full bg-lime-300" />
                 <span>
-                  {adapterOnline ? "server adapter read/write" : "no backend write"}
+                  {adapterOnline ? "dati operativi verificati" : "in attesa di dati"}
                 </span>
               </span>
             </footer>
@@ -1344,7 +1358,7 @@ export default function OperationsPage() {
               Nuova attività giornaliera
             </DialogTitle>
             <DialogDescription className="text-slate-500">
-              {selectedJob.id} · la bozza viene sottoposta a controllo di disponibilità, qualifica e conflitti.
+              {selectedJob.title} · la bozza verifica disponibilità, qualifica e possibili sovrapposizioni.
             </DialogDescription>
           </DialogHeader>
           <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void savePlanningDraft(); }}>
@@ -1352,7 +1366,7 @@ export default function OperationsPage() {
             <label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label>
             <label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label>
             <PlanningResourceFields jobId={selectedJob.sourceId ?? selectedJob.id} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} />
-            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[10px] leading-5 text-lime-100/80 sm:col-span-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />{planningOptionsStatus === "online" ? `${planningOptions?.existingPlans?.length ?? 0} piani già riletti. Il server blocca sovrapposizioni e risorse non assegnabili.` : "Il readback resta tenant-scoped e non assegna automaticamente risorse."}</div>
+            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[10px] leading-5 text-lime-100/80 sm:col-span-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />{planningOptionsStatus === "online" ? `${planningOptions?.existingPlans?.length ?? 0} piani già presenti. Le sovrapposizioni e le risorse non disponibili vengono bloccate automaticamente.` : "Le risorse vengono verificate per l’azienda e non assegnate automaticamente."}</div>
             {planningNotice && <p className="rounded-xl border border-amber-300/20 bg-amber-300/[.04] px-3 py-2 text-[10px] text-amber-100 sm:col-span-2">{planningNotice}</p>}
             <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={planningSaving} type="submit" className="bg-lime-300 text-[#060806] hover:bg-lime-200">{planningSaving ? "Salvataggio…" : "Crea bozza"}</Button></DialogFooter>
           </form>
