@@ -1,12 +1,65 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleAlert, CircleDollarSign, ExternalLink, FileCheck2, LoaderCircle, Plus, RefreshCw, ShieldCheck, ShoppingCart, X } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Bell,
+  BriefcaseBusiness,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
+  CircleDollarSign,
+  Clock3,
+  ExternalLink,
+  FileCheck2,
+  FileText,
+  FolderOpen,
+  Layers3,
+  LoaderCircle,
+  LockKeyhole,
+  Menu,
+  MessageSquareText,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  ShoppingCart,
+  SlidersHorizontal,
+  Truck,
+  Users,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { AccountMenu } from "@/components/account-menu";
+import { CommandMobileNav } from "@/components/command-mobile-nav";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import type { W10Module } from "@/lib/w10-contract";
+
+type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
+
+type JobOption = {
+  id: string;
+  code: string | null;
+  title: string;
+  client: string | null;
+  location: string | null;
+  status: string;
+};
 
 type Workflow = {
   id: string;
@@ -19,6 +72,7 @@ type Workflow = {
   currency: string;
   jobId: string | null;
   supplier: string;
+  lines: Array<{ description?: string; quantity?: number; unit?: string }>;
   version: number;
   progress: number;
   nextActions: string[];
@@ -27,84 +81,185 @@ type Workflow = {
   updatedAt: string;
 };
 
-type ApiResponse = {
-  context?: { capabilities?: string[] };
-  workflows?: Workflow[];
-  error?: string;
-  detail?: string;
+type W10Payload = {
+  context?: { actorName?: string; actorEmail?: string; role?: string; capabilities?: string[] };
+  workflows: Workflow[];
+  jobs: JobOption[];
+  contract?: { canonicalExecutor?: string; transitions?: string };
+  readback?: { status?: string; checkedAt?: string };
 };
+
+type NavItem = { id: CommandNavigationId; label: string; path: string; capability: string; icon: LucideIcon };
+
+const navItems: NavItem[] = [
+  { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
+  { id: "operations", label: "OPERATIONS", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
+  { id: "workforce", label: "WORKFORCE", path: "/workforce", capability: "workforce.read", icon: Users },
+  { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: FolderOpen },
+  { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: Clock3 },
+  { id: "assets", label: "ASSET", path: "/assets", capability: "asset.read", icon: Package },
+  { id: "warehouse", label: "MAGAZZINO", path: "/warehouse", capability: "warehouse.read", icon: Layers3 },
+  { id: "mission", label: "MISSIONI", path: "/mission", capability: "mission.read", icon: Truck },
+  { id: "documents", label: "DOCUMENTI", path: "/documents", capability: "documents.read", icon: FileText },
+  { id: "finance", label: "FINANCE", path: "/finance", capability: "finance.read", icon: CircleDollarSign },
+  { id: "procurement", label: "PROCUREMENT", path: "/procurement", capability: "procurement.read", icon: ShoppingCart },
+  { id: "authority", label: "AUTHORITY", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
+  { id: "events", label: "EVENTI", path: "/events", capability: "events.read", icon: CheckCircle2 },
+  { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: SlidersHorizontal },
+];
 
 const actionLabels: Record<string, string> = {
   request: "Invia richiesta",
   submit_review: "Invia in revisione",
-  approve: "Approva",
-  prepare_po: "Prepara bozza PO",
-  external_issue: "Invio a fornitore",
-  receive_partial: "Ricezione parziale",
-  receive: "Segna ricevuto",
-  reconcile: "Riconcilia",
+  approve: "Approva workflow",
+  prepare_po: "Prepara bozza ordine",
+  external_issue: "Emetti ordine",
+  receive_partial: "Registra ricezione parziale",
+  receive: "Registra ricezione",
+  reconcile: "Riconcilia e chiudi",
 };
 
 const externalActions = new Set(["external_issue", "receive_partial", "receive"]);
 
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  admin: "Amministratore",
+  manager: "Manager",
+  office: "Ufficio",
+  technical: "Tecnico",
+  auditor: "Auditor",
+};
+
+const toneStyles: Record<Tone, { icon: string; badge: string }> = {
+  lime: { icon: "text-lime-200", badge: "border-lime-300/25 bg-lime-300/10 text-lime-100" },
+  cyan: { icon: "text-cyan-200", badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100" },
+  amber: { icon: "text-amber-200", badge: "border-amber-300/25 bg-amber-300/10 text-amber-100" },
+  red: { icon: "text-rose-200", badge: "border-rose-300/25 bg-rose-300/10 text-rose-100" },
+  muted: { icon: "text-slate-400", badge: "border-white/10 bg-white/[.03] text-slate-400" },
+};
+
+function cn(...values: Array<string | false | null | undefined>) { return values.filter(Boolean).join(" "); }
+
+function roleLabel(role: string) { return ROLE_LABELS[role] ?? role; }
+
 function formatAmount(value: number, currency: string) {
-  return new Intl.NumberFormat("it-IT", { style: "currency", currency }).format(value / 1000);
+  return new Intl.NumberFormat("it-IT", { style: "currency", currency: currency || "EUR" }).format(value / 1000);
 }
 
-function statusTone(status: string) {
-  if (["APPROVED", "RECONCILED"].includes(status)) return "border-lime-300/25 bg-lime-300/10 text-lime-100";
-  if (["REVIEW", "PO_DRAFT"].includes(status)) return "border-cyan-300/25 bg-cyan-300/10 text-cyan-100";
-  if (["PO_ISSUED", "PARTIALLY_RECEIVED"].includes(status)) return "border-amber-300/25 bg-amber-300/10 text-amber-100";
-  return "border-white/10 bg-white/[0.04] text-slate-300";
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" });
+}
+
+function statusLabel(status: string) {
+  const labels: Record<string, string> = {
+    PROPOSED: "PROPOSTO",
+    NEED: "NECESSITÀ",
+    REQUESTED: "RICHIESTO",
+    REVIEW: "IN REVISIONE",
+    APPROVED: "APPROVATO",
+    PO_DRAFT: "BOZZA ORDINE",
+    PO_ISSUED: "ORDINE EMESSO",
+    PARTIALLY_RECEIVED: "RICEZIONE PARZIALE",
+    RECEIVED: "RICEVUTO",
+    RECONCILED: "RICONCILIATO",
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
+function statusTone(status: string): Tone {
+  if (["APPROVED", "RECONCILED", "RECEIVED"].includes(status)) return "lime";
+  if (["REVIEW", "PO_DRAFT"].includes(status)) return "cyan";
+  if (["PO_ISSUED", "PARTIALLY_RECEIVED", "REQUESTED"].includes(status)) return "amber";
+  return "muted";
+}
+
+function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
+  return <button aria-label={label} className={cn("grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300", className)} onClick={onClick} type="button">{children}</button>;
+}
+
+function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; value: number | string; detail: string; icon: LucideIcon; tone: Tone }) {
+  return <article className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><span className={cn("grid size-10 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Icon className="size-[18px]" /></span><span className="font-mono text-[10px] text-slate-600">D1</span></div><p className="mt-5 text-[11px] font-semibold uppercase tracking-[.16em] text-slate-600">{label}</p><p className="mt-2 font-mono text-[29px] font-semibold leading-none tracking-[-.07em] text-slate-50">{value}</p><p className="mt-4 text-[11px] text-slate-600">{detail}</p></article>;
 }
 
 export default function W10WorkflowControl({ module }: { module: W10Module }) {
   const router = useRouter();
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [capabilities, setCapabilities] = useState<string[]>([]);
+  const [payload, setPayload] = useState<W10Payload | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "forbidden" | "error">("loading");
+  const [refreshing, setRefreshing] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [selectedId, setSelectedId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [composerOpen, setComposerOpen] = useState(false);
   const [notice, setNotice] = useState("");
-  const [form, setForm] = useState({ title: "", detail: "", amount: "", supplier: "", jobId: "" });
+  const [form, setForm] = useState({ title: "", detail: "", amount: "", supplier: "", jobId: "", lineDescription: "", lineQuantity: "1", lineUnit: "pz" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const isProcurement = module === "procurement";
+  const Icon = isProcurement ? ShoppingCart : CircleDollarSign;
+  const title = isProcurement ? "Procurement control" : "Finance control";
+  const headline = isProcurement ? "Turn need into governed supply." : "Make every euro explainable.";
+  const subtitle = isProcurement
+    ? "Dalla necessità alla bozza d’ordine, con commessa reale, approval e confine provider sempre visibile."
+    : "Costi, voci e riconciliazioni con origine operativa, approval umano e nessuna scrittura contabile simulata.";
+
+  const notify = useCallback((message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 4600); }, []);
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
       const response = await fetch(`/api/${module}/workflow`, { cache: "no-store" });
-      const data = await response.json() as ApiResponse;
-      if (!response.ok) throw new Error(data.error ?? "w10_readback_unavailable");
-      setWorkflows(data.workflows ?? []);
-      setCapabilities(data.context?.capabilities ?? []);
-      setSelectedId((current) => current && (data.workflows ?? []).some((item) => item.id === current) ? current : data.workflows?.[0]?.id ?? "");
+      if (response.status === 403) { setState("forbidden"); return; }
+      const next = await response.json() as W10Payload & { error?: string };
+      if (!response.ok) throw new Error(next.error ?? "w10_readback_unavailable");
+      setPayload(next);
+      setSelectedId((current) => current && next.workflows.some((workflow) => workflow.id === current) ? current : next.workflows[0]?.id ?? "");
+      setState("ready");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Readback W10 non disponibile");
-    } finally {
-      setLoading(false);
-    }
-  }, [module]);
+      notify(error instanceof Error ? error.message : "Readback W10 non disponibile.");
+      setState((current) => current === "ready" ? current : "error");
+    } finally { setRefreshing(false); }
+  }, [module, notify]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
 
-  const selected = useMemo(() => workflows.find((item) => item.id === selectedId) ?? workflows[0], [selectedId, workflows]);
-  const canWrite = capabilities.includes(`${module}.write`);
+  const context = payload?.context;
+  const capabilities = useMemo(() => context?.capabilities ?? [module + ".read"], [context, module]);
+  const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
+  const visibleNavItems = useMemo(() => navItems.filter((item) => allowedNavigation.includes(item.id) || capabilities.includes(item.capability)), [allowedNavigation, capabilities]);
+  const workflows = useMemo(() => payload?.workflows ?? [], [payload?.workflows]);
+  const jobs = useMemo(() => payload?.jobs ?? [], [payload?.jobs]);
+  const jobById = useMemo(() => new Map(jobs.map((job) => [job.id, job])), [jobs]);
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return workflows.filter((workflow) => {
+      const job = workflow.jobId ? jobById.get(workflow.jobId) : null;
+      const haystack = [workflow.id, workflow.title, workflow.detail, workflow.status, workflow.supplier, workflow.jobId, job?.code, job?.title, job?.client].join(" ").toLowerCase();
+      return (!normalized || haystack.includes(normalized)) && (statusFilter === "ALL" || workflow.status === statusFilter);
+    });
+  }, [jobById, query, statusFilter, workflows]);
+  const selected = workflows.find((workflow) => workflow.id === selectedId) ?? filtered[0] ?? null;
+  const canWrite = capabilities.includes(module + ".write");
   const canApprove = capabilities.includes("approvals.review");
-  const title = module === "procurement" ? "Procurement command" : "Finance command";
-  const subtitle = module === "procurement"
-    ? "Dalla necessità alla bozza d’ordine, con approval e confine provider esplicito."
-    : "Costi e movimenti governati, con approval e riconciliazione prima del ledger esterno.";
-  const Icon = module === "procurement" ? ShoppingCart : CircleDollarSign;
+  const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
+  const openValue = workflows.filter((workflow) => workflow.status !== "RECONCILED").reduce((sum, workflow) => sum + workflow.amountMilli, 0);
 
-  function notify(message: string) {
-    setNotice(message);
-    window.setTimeout(() => setNotice(""), 4200);
+  function navigate(path: string) { setMobileMenu(false); router.push(path); }
+  function goBack() { if (window.history.length > 1) router.back(); else router.push("/command"); }
+  function openCreate() {
+    setForm({ title: "", detail: "", amount: "", supplier: "", jobId: "", lineDescription: "", lineQuantity: "1", lineUnit: "pz" });
+    setDialogOpen(true);
   }
 
-  async function createWorkflow() {
-    if (form.title.trim().length < 2) { notify("Inserisci un titolo descrittivo."); return; }
+  async function createWorkflow(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canWrite) return;
     const amount = Number(form.amount.replace(",", "."));
+    const quantity = Number(form.lineQuantity.replace(",", "."));
+    if (form.title.trim().length < 2) { notify("Inserisci un titolo descrittivo."); return; }
     if (!Number.isFinite(amount) || amount < 0) { notify("Importo non valido."); return; }
+    if (isProcurement && (form.lineDescription.trim().length < 2 || !Number.isFinite(quantity) || quantity <= 0)) { notify("Inserisci la riga materiale e una quantità valida."); return; }
     setSaving(true);
     try {
       const response = await fetch(`/api/${module}/workflow`, {
@@ -117,73 +272,60 @@ export default function W10WorkflowControl({ module }: { module: W10Module }) {
           amountMilli: Math.round(amount * 1000),
           supplier: form.supplier,
           jobId: form.jobId || undefined,
-          idempotencyKey: `w10-create-${module}-${crypto.randomUUID()}`,
+          lines: isProcurement ? [{ description: form.lineDescription, quantity, unit: form.lineUnit }] : [],
+          idempotencyKey: "w10-create-" + module + "-" + crypto.randomUUID(),
         }),
       });
-      const data = await response.json() as ApiResponse;
-      if (!response.ok) throw new Error(data.error ?? "w10_create_failed");
-      setForm({ title: "", detail: "", amount: "", supplier: "", jobId: "" });
-      setComposerOpen(false);
-      notify("Workflow creato e riletto dal registro Sites.");
-      await load();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Creazione non disponibile");
-    } finally {
-      setSaving(false);
-    }
+      const result = await response.json() as { error?: string };
+      if (!response.ok) { notify("Workflow non creato: " + (result.error ?? "errore")); return; }
+      setDialogOpen(false);
+      notify("Workflow creato e riletto dal registro D1.");
+      await refresh();
+    } catch { notify("Connessione non disponibile: nessun workflow confermato."); }
+    finally { setSaving(false); }
   }
 
   async function transition(action: string) {
-    if (!selected) return;
-    if (externalActions.has(action)) { notify("Azione mantenuta in attesa: executor esterno non configurato."); return; }
+    if (!selected || externalActions.has(action)) return;
+    const allowed = action === "approve" ? canApprove : canWrite;
+    if (!allowed) { notify("La capability richiesta non è presente nel ruolo corrente."); return; }
     setSaving(true);
     try {
       const response = await fetch(`/api/${module}/workflow`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, id: selected.id, expectedVersion: selected.version, idempotencyKey: `w10-transition-${selected.id}-${selected.version}-${action}`, evidence: "Sites workflow control" }),
+        body: JSON.stringify({ action, id: selected.id, expectedVersion: selected.version, idempotencyKey: "w10-transition-" + selected.id + "-" + selected.version + "-" + action, evidence: "Sites W10 control deck" }),
       });
-      const data = await response.json() as ApiResponse;
-      if (!response.ok) throw new Error(data.detail ?? data.error ?? "w10_transition_failed");
-      notify(`Stato aggiornato: ${actionLabels[action] ?? action}.`);
-      await load();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Transizione non disponibile");
-      await load();
-    } finally {
-      setSaving(false);
-    }
+      const result = await response.json() as { error?: string; detail?: string };
+      if (!response.ok) { notify("Transizione non eseguita: " + (result.detail ?? result.error ?? "errore")); return; }
+      notify("Stato aggiornato: " + (actionLabels[action] ?? action) + ".");
+      await refresh();
+    } catch { notify("Connessione non disponibile: nessuna transizione confermata."); }
+    finally { setSaving(false); }
   }
 
-  return <main className="min-h-screen overflow-x-hidden bg-[#030504] px-4 py-5 text-slate-100 sm:px-7 sm:py-7">
-    <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_75%_0%,rgba(200,255,34,0.09),transparent_26%),linear-gradient(145deg,#020403,#071008_48%,#030504)]" />
-    <div className="relative mx-auto max-w-[1580px]">
-      <header className="overflow-hidden rounded-[28px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(18,27,19,0.98),rgba(4,7,5,0.99)_62%,rgba(13,20,14,0.98))] p-6 shadow-[0_30px_90px_rgba(0,0,0,.45)] sm:p-8">
-        <div className="pointer-events-none absolute -right-48 -top-52 size-[34rem] rounded-full bg-lime-300/[0.06] blur-3xl" />
-        <div className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/80 to-transparent" />
-        <div className="relative flex flex-wrap items-start justify-between gap-6">
-          <div className="flex items-start gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-lime-300/30 bg-lime-300/10 text-lime-200 shadow-[0_0_30px_rgba(200,255,34,.14)]"><Icon className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300/75">AI-ZEROW / W10 / {module.toUpperCase()}</p><h1 className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-lime-50 sm:text-[42px]">{title}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">{subtitle}</p></div></div>
-          <div className="flex flex-wrap gap-2"><Button variant="outline" className="border-white/10 bg-black/25 text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/command")}><ArrowLeft className="size-3.5" />Command</Button><Button className="bg-lime-300 text-xs font-semibold text-[#050705] hover:bg-lime-200" disabled={!canWrite} onClick={() => setComposerOpen((value) => !value)}><Plus className="size-3.5" />Nuovo workflow</Button><button aria-label="Aggiorna workflow" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 hover:border-lime-300/30 hover:text-lime-200" onClick={() => void load()} type="button"><RefreshCw className="size-4" /></button></div>
-        </div>
-        <div className="relative mt-7 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.14em]"><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 text-lime-100">SITES CONTROL · D1 READBACK</span><span className="rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-3 py-1.5 text-amber-100">EXECUTOR ESTERNO DIFFERITO</span>{canApprove && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-cyan-100">APPROVAL AUTHORITY</span>}</div>
-      </header>
+  if (state === "loading" && !payload) return <main className="grid min-h-screen place-items-center bg-[#030504] text-sm text-slate-500"><span className="flex items-center gap-3"><LoaderCircle className="size-4 animate-spin text-lime-300" />Allineamento W10…</span></main>;
+  if (state === "forbidden") return <main className="grid min-h-screen place-items-center bg-[#030504] px-5 text-slate-100"><section className="carbon-card max-w-lg rounded-3xl p-7 text-center"><ShieldCheck className="mx-auto size-8 text-amber-200" /><h1 className="mt-4 text-lg font-semibold">Modulo non visibile</h1><p className="mt-2 text-sm text-slate-500">Il ruolo corrente non dispone della capability {module}.read.</p><Button className="mt-5 bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => router.push("/command")}>Torna al Command</Button></section></main>;
+  if (state === "error" && !payload) return <main className="grid min-h-screen place-items-center bg-[#030504] text-slate-100"><section className="carbon-card rounded-2xl p-7 text-center"><CircleAlert className="mx-auto size-7 text-amber-200" /><p className="mt-3 text-sm text-slate-300">Readback W10 non disponibile</p><Button className="mt-4 bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => void refresh()}><RefreshCw className="size-4" />Riprova</Button></section></main>;
 
-      <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[
-        { label: "Workflow", value: workflows.length, detail: "tenant-scoped", icon: FileCheck2 },
-        { label: "In revisione", value: workflows.filter((item) => item.status === "REVIEW").length, detail: "approval gate", icon: ShieldCheck },
-        { label: "Valore aperto", value: formatAmount(workflows.filter((item) => item.status !== "RECONCILED").reduce((sum, item) => sum + item.amountMilli, 0), "EUR"), detail: "stato Sites", icon: CircleDollarSign },
-        { label: "Riconciliati", value: workflows.filter((item) => item.status === "RECONCILED").length, detail: "readback verified", icon: Check },
-      ].map((kpi) => <article className="rounded-[20px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(19,28,20,.92),rgba(6,9,7,.98))] p-4 shadow-[0_16px_46px_rgba(0,0,0,.28)]" key={kpi.label}><div className="flex items-start justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{kpi.label}</p><p className="mt-2 font-mono text-2xl font-semibold tracking-[-0.04em] text-lime-100">{kpi.value}</p><p className="mt-1 text-[10px] text-slate-600">{kpi.detail}</p></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.07] text-lime-200"><kpi.icon className="size-4" /></span></div></article>)}
-      </section>
-
-      {composerOpen && <section className="mt-4 rounded-2xl border border-lime-300/25 bg-[linear-gradient(180deg,rgba(18,28,19,.96),rgba(5,8,6,.98))] p-5 shadow-[0_0_34px_rgba(200,255,34,.12)]"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/75">W10 / GOVERNED INTAKE</p><h2 className="mt-1 text-base font-semibold">{module === "procurement" ? "Nuova richiesta di acquisto" : "Nuova voce finanziaria"}</h2><p className="mt-1 text-xs text-slate-500">La creazione apre uno stato locale; nessun ordine o pagamento viene eseguito automaticamente.</p></div><button aria-label="Chiudi" className="text-slate-500 hover:text-white" onClick={() => setComposerOpen(false)} type="button"><X className="size-4" /></button></div><div className="mt-5 grid gap-3 md:grid-cols-2"><label className="text-xs text-slate-400">Titolo<Input className="mt-2 border-white/10 bg-black/35 text-sm" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder={module === "procurement" ? "Materiale per commessa" : "Costo trasporto / fornitore"} /></label><label className="text-xs text-slate-400">Importo (EUR)<Input className="mt-2 border-white/10 bg-black/35 text-sm" inputMode="decimal" type="number" min="0" step="0.001" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="0,00" /></label><label className="text-xs text-slate-400">Fornitore / controparte<Input className="mt-2 border-white/10 bg-black/35 text-sm" value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="Facoltativo" /></label><label className="text-xs text-slate-400">Commessa<Input className="mt-2 border-white/10 bg-black/35 text-sm" value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} placeholder="Codice o ID" /></label></div><label className="mt-3 block text-xs text-slate-400">Dettaglio<Textarea className="mt-2 min-h-24 border-white/10 bg-black/35 text-sm" value={form.detail} onChange={(event) => setForm({ ...form, detail: event.target.value })} placeholder="Contesto operativo, righe, evidenza o nota…" /></label><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-[11px] text-slate-600"><ShieldCheck className="size-3.5 text-lime-300" />Tenant, actor e versione sono assegnati dal server.</span><Button className="bg-lime-300 text-xs font-semibold text-[#050705] hover:bg-lime-200" disabled={saving || !canWrite} onClick={() => void createWorkflow()}>{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}Crea e rileggi</Button></div></section>}
-
-      <section className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,.9fr)]"><article className="rounded-[24px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(14,21,15,.94),rgba(5,8,6,.98))] p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">{module.toUpperCase()} / REGISTER</p><h2 className="mt-1 text-base font-semibold">Stato workflow</h2><p className="mt-1 text-xs text-slate-500">Ogni passaggio genera evento, outbox e reconciliation nello stesso tenant.</p></div><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 text-[10px] font-semibold text-lime-100">{loading ? "READING" : "VERIFIED"}</span></div><div className="mt-5 space-y-2">{workflows.map((item) => <button className={`w-full rounded-2xl border p-4 text-left transition ${selected?.id === item.id ? "border-lime-300/35 bg-lime-300/[0.07] shadow-[0_0_22px_rgba(200,255,34,.09)]" : "border-white/[0.07] bg-black/20 hover:border-lime-300/20"}`} key={item.id} onClick={() => setSelectedId(item.id)} type="button"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-semibold text-slate-100">{item.title}</span><span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${statusTone(item.status)}`}>{item.status}</span></div><p className="mt-1 truncate text-[11px] text-slate-500">{item.id} · v{item.version}{item.jobId ? ` · ${item.jobId}` : ""}</p></div><span className="font-mono text-sm text-lime-100">{formatAmount(item.amountMilli, item.currency)}</span></div><div className="mt-4 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/60"><span className="block h-full rounded-full bg-gradient-to-r from-lime-500 via-lime-300 to-lime-100" style={{ width: `${item.progress}%` }} /></div><span className="font-mono text-[10px] text-slate-500">{item.progress}%</span></div></button>)}{!loading && workflows.length === 0 && <div className="rounded-2xl border border-dashed border-white/[0.1] px-5 py-14 text-center"><Icon className="mx-auto size-8 text-slate-700" /><p className="mt-3 text-sm text-slate-500">Nessun workflow nel tenant.</p><p className="mt-1 text-xs text-slate-700">Crea il primo elemento per aprire il ciclo governato.</p></div>}{loading && <div className="flex items-center justify-center gap-3 py-14 text-xs text-slate-500"><LoaderCircle className="size-4 animate-spin text-lime-300" />Lettura workflow…</div>}</div></article>
-
-        <aside className="rounded-[24px] border border-lime-300/20 bg-[linear-gradient(180deg,rgba(18,28,19,.96),rgba(5,8,6,.99))] p-5 shadow-[0_0_30px_rgba(200,255,34,.07)]"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">SELECTED / CONTROL</p><h2 className="mt-1 text-base font-semibold">{selected?.title ?? "Seleziona un workflow"}</h2><p className="mt-1 text-xs text-slate-500">{selected?.id ?? "—"}</p></div>{selected && <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${statusTone(selected.status)}`}>{selected.status}</span>}</div>{selected ? <><div className="mt-5 grid grid-cols-2 gap-2"><div className="rounded-xl border border-white/[0.08] bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Valore</p><p className="mt-2 font-mono text-sm text-lime-100">{formatAmount(selected.amountMilli, selected.currency)}</p></div><div className="rounded-xl border border-white/[0.08] bg-black/25 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Boundary</p><p className={`mt-2 text-[11px] font-semibold ${selected.externalStatus === "EXTERNAL_DEFERRED" ? "text-amber-100" : "text-lime-100"}`}>{selected.externalStatus}</p></div></div><div className="mt-4 rounded-xl border border-white/[0.08] bg-black/25 p-4"><p className="text-xs leading-5 text-slate-400">{selected.detail || "Nessun dettaglio."}</p><div className="mt-4 h-2 overflow-hidden rounded-full bg-black/60"><span className="block h-full rounded-full bg-gradient-to-r from-lime-500 via-lime-300 to-lime-100" style={{ width: `${selected.progress}%` }} /></div><div className="mt-2 flex justify-between text-[10px] text-slate-600"><span>Versione {selected.version}</span><span>{selected.progress}%</span></div></div><div className="mt-4 space-y-2"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-600">Azioni disponibili</p>{selected.nextActions.map((action) => { const external = externalActions.has(action); const allowed = action === "approve" ? canApprove : canWrite; return <Button className={`h-10 w-full justify-between text-xs ${external ? "border-amber-300/20 bg-amber-300/[0.06] text-amber-100 hover:bg-amber-300/[0.1]" : "border-lime-300/20 bg-lime-300/[0.06] text-lime-100 hover:bg-lime-300/[0.12]"}`} disabled={saving || !allowed || external} key={action} onClick={() => void transition(action)} variant="outline"> <span className="flex items-center gap-2">{external ? <ExternalLink className="size-3.5" /> : action === "approve" ? <ShieldCheck className="size-3.5" /> : <ArrowRight className="size-3.5" />}{actionLabels[action] ?? action}</span><span className="text-[10px] opacity-60">{external ? "provider" : action === "approve" && !canApprove ? "authority" : "esegui"}</span></Button>; })}{selected.nextActions.length === 0 && <p className="rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs text-slate-600">Nessuna transizione locale disponibile.</p>}</div></> : <div className="mt-6 rounded-2xl border border-dashed border-white/[0.1] p-6 text-center"><CircleAlert className="mx-auto size-7 text-slate-700" /><p className="mt-3 text-sm text-slate-500">Il pannello si attiva dopo il primo readback.</p></div>}<div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100"><ExternalLink className="size-3.5" />Confine esterno</div><p className="mt-2 text-xs leading-5 text-slate-500">Invio ordine, ricezione fisica e contabilizzazione esterna restano bloccati fino all’adapter provider-backed.</p></div></aside></section>
-
-      <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · W10 {module.toUpperCase()}</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300" />Sites private · approval governed · no external mutation</span></footer>
-    </div>
-    {notice && <button className="fixed bottom-5 right-5 z-50 max-w-[380px] rounded-xl border border-lime-300/25 bg-[#080d09]/95 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_30px_rgba(190,255,60,.16)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><Check className="mr-2 inline size-4 text-lime-300" />{notice}</button>}
+  return <main className="zw-app-shell zw-w10-module min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]"><div className="zw-command-ambient" aria-hidden="true" /><div className="relative flex min-h-screen">
+    <aside className={cn("zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0", sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]", mobileMenu ? "translate-x-0" : "-translate-x-full")}>
+      <div className="flex items-center justify-between px-2"><button aria-label="Apri Command" className="flex min-w-0 items-center gap-3 text-left" onClick={() => navigate("/command")} type="button"><span className="neon-pulse relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span><span className="zw-command-sidebar__brand-copy min-w-0"><span className="block text-sm font-bold tracking-[.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[.22em] text-lime-300/75">command</span></span></button><div className="flex items-center gap-1"><IconButton label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} className="hidden lg:grid" onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><IconButton label="Chiudi menu" className="lg:hidden" onClick={() => setMobileMenu(false)}><X className="size-4" /></IconButton></div></div>
+      <div className="zw-command-tenant mt-7 flex items-center gap-3 rounded-2xl p-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><Icon className="size-4" /></span><span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[.1em] text-slate-600">{roleLabel(context?.role ?? "operator")} · tenant scoped</span></span></div>
+      <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale"><p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[.22em] text-slate-700">Authorized workspace</p><div className="mt-2 space-y-1">{visibleNavItems.map((item) => { const NavIcon = item.icon; const active = item.id === module; return <button aria-current={active ? "page" : undefined} aria-label={sidebarCollapsed ? item.label : undefined} className={cn("zw-command-nav-item", active && "is-active")} key={item.id} onClick={() => navigate(item.path)} title={sidebarCollapsed ? item.label : undefined} type="button"><NavIcon className={cn("size-4", active ? "text-lime-200" : "text-slate-600")} /><span className="zw-command-sidebar__nav-label">{item.label}</span>{item.id === "command" && <span className="zw-command-sidebar__nav-badge ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] tracking-[.08em] text-lime-200">AI</span>}</button>; })}</div></nav>
+      <div className="zw-command-sidebar__footer mt-4 border-t border-white/[.07] pt-4"><div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[.14em] text-slate-600"><span>System core</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(200,255,34,.8)]" />D1 ONLINE</span></div><div className="carbon-inset mt-3 rounded-xl p-3"><div className="flex items-center gap-2 text-[11px] text-slate-400"><Settings2 className="size-3.5 text-lime-300" />W10 workflow</div><p className="mt-2 font-mono text-[10px] text-slate-600">{workflows.length} record · {isProcurement ? "supply" : "ledger"}</p><p className="mt-3 font-mono text-[10px] text-slate-600">Sites · approval boundary</p></div></div>
+    </aside>
+    <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton><button aria-label={"Apri " + title} className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => navigate("/" + module)} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[10px] uppercase tracking-[.2em] text-lime-300/75">{module} control</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label={"Cerca in " + module} className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca workflow, commessa, fornitore…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">{module.toUpperCase()} CONTROL</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "READING" : "D1 VERIFIED"}</span><IconButton label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton label={"Aggiorna " + module} onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
+      <div className="mx-auto max-w-[1680px] px-4 py-5 pb-24 sm:px-7 sm:py-7 lg:pb-8"><section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-4xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Icon className="size-3.5" />CONTROL DECK / MODULE 10 · {module.toUpperCase()}</p><h1 className="mt-3 max-w-4xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">{headline.split(" ").slice(0, -2).join(" ")}<br /><span className="text-lime-300">{headline.split(" ").slice(-2).join(" ")}</span></h1><p className="mt-4 max-w-3xl text-sm leading-6 text-slate-400">{subtitle}</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canWrite} onClick={openCreate}><Plus className="size-3.5" />{isProcurement ? "Nuova richiesta" : "Nuova voce"}</Button><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href={isProcurement ? "/finance" : "/procurement"}>{isProcurement ? <CircleDollarSign className="size-3.5" /> : <ShoppingCart className="size-3.5" />}{isProcurement ? "Apri Finance" : "Apri Procurement"}</Link><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-[11px] text-slate-400 hover:border-lime-300/25 hover:text-lime-100" href="/operations"><BriefcaseBusiness className="size-3.5" />Collega commessa</Link></div></div><div className="absolute -right-16 -top-20 size-[24rem] rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-0 right-8 hidden w-[300px] lg:block"><div className="relative h-28 overflow-hidden rounded-t-[26px] border border-lime-300/20 bg-black/25 p-4"><div className="absolute inset-x-0 top-1/2 border-t border-dashed border-lime-300/25" /><div className="absolute left-[18%] top-[42%] size-3 rounded-full bg-cyan-200 shadow-[0_0_18px_rgba(89,217,255,.75)]" /><div className="absolute right-[18%] top-[42%] size-3 rounded-full bg-lime-300 shadow-[0_0_18px_rgba(200,255,34,.8)]" /><Icon className="absolute left-1/2 top-[28%] size-8 -translate-x-1/2 text-lime-300/70" /><p className="absolute bottom-3 left-4 text-[9px] uppercase tracking-[.16em] text-slate-600">CONTROL FLOW · SCHEMATIC</p><p className="absolute bottom-3 right-4 font-mono text-[9px] text-amber-200/70">PROVIDER GATED</p></div></div><div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-lime-300/55 to-transparent" /></section>
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><KpiCard label="Workflow" value={workflows.length} detail="Tenant scoped" icon={FileCheck2} tone="lime" /><KpiCard label="In revisione" value={workflows.filter((workflow) => workflow.status === "REVIEW").length} detail="Approval gate" icon={ShieldCheck} tone="amber" /><KpiCard label="Valore aperto" value={formatAmount(openValue, "EUR")} detail="Readback Sites" icon={CircleDollarSign} tone="cyan" /><KpiCard label="Approvati" value={workflows.filter((workflow) => workflow.status === "APPROVED").length} detail="Pronti al passaggio" icon={Check} tone="lime" /><KpiCard label="Riconciliati" value={workflows.filter((workflow) => workflow.status === "RECONCILED").length} detail="Ledger verificato" icon={CheckCircle2} tone="lime" /></section>
+        <section className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,.82fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">{module.toUpperCase()} / REGISTER</p><h2 className="mt-1 text-base font-semibold text-slate-100">Registro dei workflow</h2><p className="mt-1 text-[11px] text-slate-500">Stati, importi, commesse e versioni riletti dal ledger Sites.</p></div><span className="rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2.5 py-1.5 font-mono text-[9px] text-lime-200">{filtered.length} / {workflows.length}</span></div><div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_190px]"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Filtra workflow" className="h-10 border-white/10 bg-black/25 pl-9 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Titolo, commessa, controparte…" value={query} /></div><select aria-label="Filtra stato workflow" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-200 outline-none focus:border-lime-300/40" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}><option value="ALL">Tutti gli stati</option>{[...new Set(workflows.map((workflow) => workflow.status))].map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></div><div className="mt-4 space-y-2">{filtered.map((workflow) => { const selectedRow = selected?.id === workflow.id; const job = workflow.jobId ? jobById.get(workflow.jobId) : null; return <button className={cn("group w-full rounded-2xl border p-4 text-left transition", selectedRow ? "border-lime-300/35 bg-lime-300/[.065] shadow-[0_0_24px_rgba(200,255,34,.07)]" : "border-white/[.07] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")} key={workflow.id} onClick={() => setSelectedId(workflow.id)} type="button"><div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[statusTone(workflow.status)].icon)}><Icon className="size-[18px]" /></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-semibold text-slate-100">{workflow.title}</span><span className={cn("rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[.05em]", toneStyles[statusTone(workflow.status)].badge)}>{statusLabel(workflow.status)}</span></div><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{workflow.id} · v{workflow.version}{job ? " · " + (job.code ?? job.title) : " · Generale"}</p></div></div><span className="font-mono text-sm text-lime-100">{formatAmount(workflow.amountMilli, workflow.currency)}</span></div><div className="mt-4 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/60"><span className="block h-full rounded-full bg-gradient-to-r from-lime-600 via-lime-300 to-lime-100" style={{ width: workflow.progress + "%" }} /></div><span className="font-mono text-[10px] text-slate-500">{workflow.progress}%</span></div></button>; })}{filtered.length === 0 && <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center"><Icon className="mx-auto size-7 text-slate-700" /><p className="mt-3 text-xs text-slate-500">Nessun workflow corrisponde ai filtri.</p><p className="mt-1 text-[10px] text-slate-700">Il registro non inventa movimenti né aggiorna il provider esterno.</p></div>}</div></section>
+          <aside className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">WORKFLOW INSPECTOR</p><h2 className="mt-1 text-base font-semibold text-slate-100">Controllo e autorizzazioni</h2></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><ShieldCheck className="size-[18px]" /></span></div>{selected ? <div className="mt-5 space-y-4"><div><div className="flex flex-wrap items-center gap-2"><p className="break-words text-sm font-semibold text-slate-100">{selected.title}</p><span className={cn("rounded-full border px-2 py-1 text-[9px] font-semibold", toneStyles[statusTone(selected.status)].badge)}>{statusLabel(selected.status)}</span></div><p className="mt-1 font-mono text-[10px] text-slate-600">{selected.id} · versione {selected.version}</p></div><div className="grid grid-cols-2 gap-2"><div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">VALORE</p><p className="mt-1 font-mono text-sm text-lime-100">{formatAmount(selected.amountMilli, selected.currency)}</p></div><div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">BOUNDARY</p><p className={cn("mt-1 text-[10px] font-semibold", selected.externalStatus === "EXTERNAL_DEFERRED" ? "text-amber-100" : "text-lime-100")}>{selected.externalStatus}</p></div></div>{selected.jobId && <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">COMMESSA</p>{jobById.get(selected.jobId) ? <Link className="mt-1 block text-xs font-semibold text-lime-100 hover:text-lime-300" href={"/operations/" + encodeURIComponent(selected.jobId)}>{jobById.get(selected.jobId)?.code ?? selected.jobId} · {jobById.get(selected.jobId)?.title}<ArrowRight className="ml-1 inline size-3" /></Link> : <p className="mt-1 text-xs text-amber-200">Commessa non disponibile nel readback</p>}</div>}<div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">CONTROPARTE</p><p className="mt-1 text-xs text-slate-300">{selected.supplier || "Non valorizzata"}</p><p className="mt-2 text-[10px] text-slate-600">Creato {formatDate(selected.createdAt)} · aggiornato {formatDate(selected.updatedAt)}</p></div>{isProcurement && selected.lines.length > 0 && <div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><p className="text-[9px] uppercase tracking-[.14em] text-cyan-200/70">RIGA RICHIESTA</p>{selected.lines.map((line, index) => <p className="mt-1 text-xs text-slate-300" key={index}>{line.description || "Materiale"} · {line.quantity ?? 0} {line.unit || "pz"}</p>)}</div>}<div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><div className="flex items-center justify-between text-[9px] uppercase tracking-[.14em] text-slate-600"><span>Avanzamento</span><span className="font-mono text-lime-200">{selected.progress}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-black/60"><span className="block h-full rounded-full bg-gradient-to-r from-lime-600 via-lime-300 to-lime-100" style={{ width: selected.progress + "%" }} /></div></div><div className="space-y-2"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">Azioni disponibili</p>{selected.nextActions.map((action) => { const external = externalActions.has(action); const allowed = action === "approve" ? canApprove : canWrite; return external ? <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5 text-[10px] text-amber-100" key={action}><span className="flex items-center gap-2"><ExternalLink className="size-3.5" />{actionLabels[action] ?? action}</span><span className="font-mono text-[9px] text-amber-200/70">PROVIDER</span></div> : <Button className="h-10 w-full justify-between border-lime-300/20 bg-lime-300/[.05] text-xs text-lime-100 hover:bg-lime-300/[.12]" disabled={saving || !allowed} key={action} onClick={() => void transition(action)} variant="outline"><span className="flex items-center gap-2">{action === "approve" ? <ShieldCheck className="size-3.5" /> : <ArrowRight className="size-3.5" />}{actionLabels[action] ?? action}</span><span className="text-[9px] opacity-60">{allowed ? "esegui" : "capability"}</span></Button>; })}{selected.nextActions.length === 0 && <p className="rounded-xl border border-white/[.08] bg-black/20 p-3 text-xs text-slate-600">Nessuna transizione locale disponibile.</p>}</div></div> : <div className="py-12 text-center"><FileCheck2 className="mx-auto size-8 text-slate-700" /><p className="mt-3 text-xs text-slate-500">Seleziona un workflow per ispezionarlo.</p></div>}<div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[.05] p-3 text-[10px] leading-5 text-slate-500"><p className="flex items-center gap-2 text-amber-100"><LockKeyhole className="size-3.5" />Confine provider</p><p className="mt-2">Sites governa la proposta, l’approvazione e il readback. Emissione ordine, ricezione fisica e contabilizzazione restano bloccate finché l’executor esterno non produce evidenza.</p></div></aside>
+        </section>
+        <section className="mt-4 grid gap-4 lg:grid-cols-3"><article className="carbon-card rounded-2xl p-4 sm:p-5 lg:col-span-2"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><BriefcaseBusiness className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">CROSS-MODULE HANDOFF</p><h2 className="mt-1 text-base font-semibold text-slate-100">Il valore resta legato all’operatività</h2></div></div><p className="mt-4 text-xs leading-6 text-slate-500">Un workflow può nascere generale oppure dalla commessa selezionata. Il dato economico resta leggibile insieme a documenti, materiali e lavoro reale, ma nessun passaggio esterno viene dato per eseguito.</p><div className="mt-4 grid gap-2 sm:grid-cols-3"><Link className="group rounded-xl border border-white/[.08] bg-black/20 p-3 hover:border-lime-300/25" href="/operations"><BriefcaseBusiness className="size-4 text-lime-200" /><p className="mt-3 text-[11px] font-semibold text-slate-200">Commesse</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Origine e perimetro di spesa.</p><ChevronRight className="mt-3 size-3.5 text-slate-700 group-hover:text-lime-200" /></Link><Link className="group rounded-xl border border-white/[.08] bg-black/20 p-3 hover:border-cyan-300/25" href="/warehouse"><Layers3 className="size-4 text-cyan-200" /><p className="mt-3 text-[11px] font-semibold text-slate-200">Warehouse</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Shortage e materiali collegati.</p><ChevronRight className="mt-3 size-3.5 text-slate-700 group-hover:text-cyan-200" /></Link><Link className="group rounded-xl border border-white/[.08] bg-black/20 p-3 hover:border-lime-300/25" href="/documents"><FileText className="size-4 text-lime-200" /><p className="mt-3 text-[11px] font-semibold text-slate-200">Documenti</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Evidenze e provenance.</p><ChevronRight className="mt-3 size-3.5 text-slate-700 group-hover:text-lime-200" /></Link></div></article><article className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-amber-300/20 bg-amber-300/10 text-amber-200"><ShieldCheck className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-amber-200/70">W10 / GOVERNANCE</p><h2 className="mt-1 text-base font-semibold text-slate-100">Approval boundary</h2></div></div><div className="mt-4 space-y-3 text-[10px] leading-5 text-slate-500"><p className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-lime-200" />{canApprove ? "Il ruolo corrente può approvare workflow in revisione." : "L’approvazione richiede approvals.review."}</p><p className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-lime-200" />Versione e idempotenza vengono assegnate e verificate dal server.</p><p className="flex items-start gap-2"><AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-200" />Provider contabile/fornitore, ricezione e pagamento restano gate esterni.</p></div><div className="mt-5 grid grid-cols-2 gap-2"><span className="rounded-xl border border-lime-300/20 bg-lime-300/[.05] px-3 py-2 text-center font-mono text-[9px] text-lime-200">APPROVAL</span><span className="rounded-xl border border-amber-300/20 bg-amber-300/[.05] px-3 py-2 text-center font-mono text-[9px] text-amber-200">PROVIDER HOLD</span></div></article></section>
+        <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.08] py-5 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · W10 / {module.toUpperCase()}</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300" />Sites private · workflow governed · no external mutation</span></footer>
+      </div><CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={context?.role} />
+    </section>
+  </div>{notice && <button className="fixed bottom-5 right-5 z-50 max-w-[380px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)]" onClick={() => setNotice("")} type="button"><Check className="mr-2 inline size-4 text-lime-300" />{notice}</button>}
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={createWorkflow}><DialogHeader><DialogTitle>{isProcurement ? "Nuova richiesta di acquisto" : "Nuova voce finanziaria"}</DialogTitle><DialogDescription className="text-slate-500">La proposta entra nel workflow Sites; nessun ordine, pagamento o movimento contabile esterno viene eseguito da questa schermata.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input autoFocus className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder={isProcurement ? "Materiale per commessa" : "Costo trasporto / fornitore"} value={form.title} required /></label><label className="text-xs text-slate-400">Importo totale (EUR)<Input className="mt-2 border-white/10 bg-black/30" inputMode="decimal" min="0" onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="0,00" step="0.001" type="number" value={form.amount} required /></label><label className="text-xs text-slate-400">Controparte / fornitore<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="Facoltativo" value={form.supplier} /></label><label className="text-xs text-slate-400 sm:col-span-2">Commessa collegata<select aria-label="Commessa collegata" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" onChange={(event) => setForm({ ...form, jobId: event.target.value })} value={form.jobId}><option value="">Voce generale · nessuna commessa</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select><span className="mt-1 block text-[10px] text-slate-600">Il riferimento viene scelto dal readback server, non digitato.</span></label>{isProcurement && <><label className="text-xs text-slate-400 sm:col-span-2">Riga materiale richiesta<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, lineDescription: event.target.value })} placeholder="Es. Tubo corrugato DN160" value={form.lineDescription} required /></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" inputMode="decimal" min="0.001" onChange={(event) => setForm({ ...form, lineQuantity: event.target.value })} step="0.001" type="number" value={form.lineQuantity} required /></label><label className="text-xs text-slate-400">Unità<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, lineUnit: event.target.value })} placeholder="pz, m, kg…" value={form.lineUnit} /></label></>}<label className="text-xs text-slate-400 sm:col-span-2">Dettaglio operativo<Textarea className="mt-2 min-h-24 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, detail: event.target.value })} placeholder="Contesto, evidenza, righe o nota…" value={form.detail} /></label></div><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] leading-5 text-amber-100/80"><LockKeyhole className="mr-1.5 inline size-3.5" />Sites governa proposta, approval, versioning, eventi e readback. L’executor provider-backed resta esplicitamente bloccato.</div><DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={saving || !canWrite} type="submit">{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}Crea e rileggi</Button></DialogFooter></form></DialogContent></Dialog>
   </main>;
 }

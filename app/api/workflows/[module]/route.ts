@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s06Events, s06Outbox, s06Reconciliations, w10Workflows } from "@/db/schema";
+import { s04Records, s06Events, s06Outbox, s06Reconciliations, w10Workflows } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -58,6 +58,44 @@ function arrayValue(value: unknown) {
   });
 }
 
+function jobForResponse(row: typeof s04Records.$inferSelect) {
+  const payload = jsonValue(row.payloadJson);
+  return {
+    id: row.id,
+    code: row.canonicalCode ?? null,
+    title: row.title,
+    client: textValue(payload.client ?? payload.customer ?? payload.committente, "Cliente da verificare") || null,
+    location: textValue(payload.location ?? payload.address ?? payload.cantiere, row.meta) || null,
+    status: row.status,
+  };
+}
+
+async function findOperationJob(tenantId: string, reference: string) {
+  const value = textValue(reference).slice(0, 160);
+  if (!value) return null;
+  const db = getDb();
+  const [byId] = await db.select().from(s04Records).where(and(
+    eq(s04Records.tenantId, tenantId),
+    eq(s04Records.module, "operations"),
+    eq(s04Records.id, value),
+  )).limit(1);
+  if (byId && byId.recordType !== "adapter-contract") return byId;
+  const [byCode] = await db.select().from(s04Records).where(and(
+    eq(s04Records.tenantId, tenantId),
+    eq(s04Records.module, "operations"),
+    eq(s04Records.canonicalCode, value),
+  )).limit(1);
+  return byCode && byCode.recordType !== "adapter-contract" ? byCode : null;
+}
+
+async function readOperationJobs(tenantId: string) {
+  const rows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, tenantId),
+    eq(s04Records.module, "operations"),
+  )).orderBy(desc(s04Records.updatedAt)).limit(250);
+  return rows.filter((row) => row.recordType !== "adapter-contract").map(jobForResponse);
+}
+
 function moduleFromRoute(routeContext: RouteContext) {
   return routeContext.params.then(({ module }) => isW10Module(module) ? module : null);
 }
@@ -106,6 +144,7 @@ function envelope(
   context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
   moduleKey: W10Module,
   workflows: ReturnType<typeof workflowForResponse>[],
+  jobs: ReturnType<typeof jobForResponse>[] = [],
 ) {
   return {
     context: publicAuthorityContext(context),
@@ -120,6 +159,7 @@ function envelope(
         : "PROPOSED → REVIEW → APPROVED → RECONCILED",
     },
     workflows,
+    jobs,
     readback: {
       status: "ok",
       count: workflows.length,
@@ -152,7 +192,8 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   if (denied) return denied;
   try {
     const workflows = await readWorkflows(context!, moduleKey);
-    return Response.json(envelope(context!, moduleKey, workflows), { headers: { "cache-control": "no-store" } });
+    const jobs = hasCapability(context!, "operations.read") ? await readOperationJobs(context!.tenantId) : [];
+    return Response.json(envelope(context!, moduleKey, workflows, jobs), { headers: { "cache-control": "no-store" } });
   } catch {
     return Response.json({ error: "w10_readback_unavailable", module: moduleKey }, { status: 503 });
   }
@@ -184,7 +225,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const detail = textValue(payload.detail);
     const currency = textValue(payload.currency, "EUR").toUpperCase();
     const amountMilli = integerValue(payload.amountMilli, 0);
-    const jobId = textValue(payload.jobId) || null;
+    const jobReference = textValue(payload.jobId);
     const supplier = textValue(payload.supplier).slice(0, 160);
     const lines = arrayValue(payload.lines);
     if (title.length < 2 || title.length > 140) return Response.json({ error: "title_must_be_2_to_140_characters" }, { status: 400 });
@@ -192,6 +233,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (amountMilli < 0 || amountMilli > 9_000_000_000_000) return Response.json({ error: "amount_out_of_range" }, { status: 400 });
 
     try {
+      const operationJob = jobReference ? await findOperationJob(context.tenantId, jobReference) : null;
+      if (jobReference && !operationJob) return Response.json({ error: "w10_job_not_found" }, { status: 404 });
+      const jobId = operationJob?.id ?? null;
       const existing = await existingByIdempotency(context.tenantId, requestedIdempotencyKey);
       if (existing[0]) {
         if (existing[0].aggregateType !== `w10.${moduleKey}`) return Response.json({ error: "w10_idempotency_key_conflict" }, { status: 409 });

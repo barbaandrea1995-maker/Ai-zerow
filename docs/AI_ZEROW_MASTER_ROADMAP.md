@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.0 — W09 Document Control su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 3.1 — W10 Finance & Procurement su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W09 Document Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_09_DOCUMENT_CONTROL_CHECKPOINT_2026-10-03.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, malware/OCR provider, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W10 Finance & Procurement · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_10_FINANCE_PROCUREMENT_CHECKPOINT_2026-10-03.md. W09 resta chiuso nel proprio perimetro. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -81,7 +81,7 @@ persona/input
 | W07 Materiali e Warehouse | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Control deck Command pubblicato privatamente con anagrafica, saldo in millesimi, filtri, inspector, movimenti, collegamenti commessa/missione e proposta replenishment. Prenotazioni, prelievi, carico missione, consumo/reso, idempotenza, versioning, eventi, outbox e reconciliation restano server-side; procurement automatico e provider esterni sono gate separati. |
 | W08 Mission e trasporti | RC2.9 — TECHNICAL PASS / EXTERNAL GATES | Control deck Mission con shell Command, filtri, inspector, commessa o trasporto autonomo, risorse canoniche disponibili per finestra, create/dispatch/delivery/POD/reconciliation/close e handoff verso Operations, Planning, Warehouse e Documents. Routing GPS/telematica provider-backed, mappe reali e device certification restano esterni. |
 | W09 Documents | `RC2.9 — TECHNICAL PASS / SECURITY PROVIDER GATE` | Control deck Document Control pubblicato con catalogo tenant-scoped, commessa obbligatoria, upload R2 fino a 20 MB, MIME+magic signature, SHA-256, provenance, inspector, filtri e security actions. `/api/documents` legge il catalogo operativo; il download resta fail-closed senza CLEAN provider-backed. OCR, malware provider, version replacement e retention provider-backed restano gate espliciti. |
-| W10 Finance e Procurement | `RC2.5 — LOCAL WORKFLOW PASS / EXTERNAL EXECUTOR DEFERRED` | Workflow Finance/Procurement con stati, approval, idempotenza, optimistic version, eventi, outbox e reconciliation in D1; accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
+| W10 Finance e Procurement | `RC2.9 — TECHNICAL PASS / EXTERNAL EXECUTOR GATE` | Control deck Command pubblicato privatamente con commessa selezionabile dal catalogo S04 e validata server-side, workflow Finance/Procurement, righe procurement, approval, idempotenza, optimistic version, eventi, outbox, reconciliation e handoff verso Operations/Warehouse/Documents. Accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
 | W11 Events, Outbox, Twin e Timeline | `RC2.4 — SITES CONTROL PASS / EXTERNAL CONSUMER DEFERRED` | Eventi, outbox, retry limitato, DLQ, requeue, block e reconciliation sono governati in Sites con controlli UI e fixture di stato; consumer, Twin e worker persistenti da certificare. |
 | W12 AI, Tool Gateway e Approval | `RC2.7 — LOCAL GOVERNANCE PASS / LIVE GATE NOT RUN` | Company AI espone un control plane capability-gated con readiness dei contratti, ledger/readback, binding metadata-only, no-direct-write, approval boundary e blocchi commerciali. Command espone un widget W12 filtrato per `command.read`; OpenAI live richiede ancora sessione autenticata e runtime pubblicato. |
 | W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
@@ -457,7 +457,7 @@ Nessun valore estratto diventa automaticamente fatto contabile o ordine. La UI d
 
 **Obiettivo:** collegare lavori, materiali, documenti e acquisti senza trasformare l’AI in autorità finanziaria.
 
-**Sites RC2.5:** il controllo locale implementa la macchina `NEED/PROPOSED → REVIEW → APPROVED → PO_DRAFT/RECONCILED`, con approval capability-gated, versione ottimistica, idempotenza, eventi, outbox e reconciliation. Le transizioni di emissione ordine, ricezione e contabilizzazione sono visibili ma restano bloccate finché l’executor provider-backed non produce evidenza.
+**Sites W10 checkpoint 3 ottobre 2026:** il control deck Command di `/finance` e `/procurement` è pubblicato privatamente owner-only. La creazione usa un selettore di commesse alimentato da S04; il server accetta solo una commessa reale dello stesso tenant e persiste l’ID canonico. Il ciclo locale implementa `NEED/PROPOSED → REVIEW → APPROVED → PO_DRAFT/RECONCILED`, con approval capability-gated, versione ottimistica, idempotenza, eventi, outbox e reconciliation. Emissione ordine, ricezione e contabilizzazione restano visibili come confini provider ma non sono azioni simulate. Evidenza: `docs/MODULE_10_FINANCE_PROCUREMENT_CHECKPOINT_2026-10-03.md`.
 
 #### Finance
 

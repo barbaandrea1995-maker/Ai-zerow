@@ -1,0 +1,59 @@
+# AI-ZEROW COMMAND — W10 Finance & Procurement checkpoint
+
+**Data:** 3 ottobre 2026  
+**Stato:** TECHNICAL PASS · PRIVATE OWNER-ONLY RELEASE  
+**Release line:** Commercial v1 RC2.9-AUDIT-1 technical candidate, not commercial certification
+
+## Esito
+
+Finance e Procurement avanzano dal workflow generico a un control deck Command coerente con il resto della piattaforma. Le due superfici condividono shell carbon/lime, authority server-side, registro filtrabile, inspector, KPI, ricerca, refresh, ritorno, cross-link operativi e dialog di creazione. La pubblicazione resta privata e owner-only.
+
+Il perimetro chiuso è Sites/D1: proposta, approval, versioning, idempotenza, eventi, outbox e reconciliation. Nessuna azione provider-backed viene presentata come già eseguita.
+
+## Contratto implementato
+
+- `GET /api/finance/workflow` e `GET /api/procurement/workflow` restituiscono workflow tenant-scoped e, quando il ruolo può leggere Operations, il catalogo delle commesse reali.
+- La nuova richiesta seleziona una commessa dal catalogo S04; non esiste un campo testo libero per `jobId`.
+- Il server risolve l’ID o il codice canonico della commessa nel tenant corrente, scarta i record `adapter-contract` e rifiuta riferimenti inesistenti con `w10_job_not_found`.
+- Il workflow conserva il solo `s04_records.id` canonico come relazione cross-modulo; la UI mostra codice, titolo, sede e stato riletti dal server.
+- Finance segue `PROPOSED → REVIEW → APPROVED → RECONCILED`.
+- Procurement segue `NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT → provider issue/receipt → RECONCILED`.
+- Approval richiede `approvals.review`; le transizioni concorrenti usano `expectedVersion` e ogni mutazione richiede `idempotencyKey`.
+- Le transizioni persistono evento, outbox e reconciliation; il readback è la fonte visibile dello stato.
+- Le righe procurement espongono descrizione, quantità e unità, senza trasformarle in disponibilità di magazzino o ordine esterno.
+
+## Superficie UI/UX
+
+- sidebar Command collassabile con icona ufficiale ZEROW;
+- topbar con ricerca, tenant switcher, stato D1, back, refresh, comunicazioni e profilo;
+- hero differenziato per Finance e Procurement, KPI reali e registro ad alta densità;
+- inspector con commessa, controparte, importo, versione, stato esterno e timestamp;
+- azioni locali collegate al workflow; i passaggi provider-backed sono badge informativi `PROVIDER`, non pulsanti simulati;
+- link reali verso Operations, Warehouse e Documents per mantenere il filo commessa → costo/materiale → evidenza;
+- mobile responsive coerente con Command; la bottom navigation resta soggetta al profilo operativo e alle capability.
+
+## Verifiche eseguite
+
+| Controllo | Esito |
+|---|---|
+| TypeScript | PASS |
+| lint | PASS · 8 warning legacy `<img>` fuori dal modulo |
+| build Vinext | PASS · client/server/RSC/SSR compilati |
+| audit release surface | PASS_WITH_EXTERNAL_GATES · endpoint W10 risolti, nessun gap Command attivo |
+| verify commercial static contract | PASS |
+| git diff check | PASS |
+| runtime smoke locale | NOT RUN se il sandbox blocca `127.0.0.1:5173`/`::1:5173` con `EPERM` |
+| browser/device certification | NOT RUN: sessione autenticata e harness device non disponibili |
+
+## Gate ancora aperti
+
+- adapter contabile reale e contabilizzazione provider-backed;
+- emissione PO, ricezione fisica parziale/totale e pagamento con provider e callback verificati;
+- catalogo fornitori, prezzi e documenti fiscali se non forniti da un sistema master;
+- consumer outbox, osservabilità/SLO, privacy/retention e replay operativo;
+- Company AI/OpenAI live su sessione autenticata e tool execution governata;
+- browser/device certification, offline/replay e sign-off umano commerciale.
+
+## Decisione checkpoint
+
+`W10 SITES TECHNICAL PASS` nel perimetro owner-only privato. Finance e Procurement sono pronti per il prossimo gate di integrazione, ma non sono certificati come ERP, contabilità o procurement provider-backed e la roadmap commerciale resta `NO_GO` finché i gate sopra non sono chiusi.
