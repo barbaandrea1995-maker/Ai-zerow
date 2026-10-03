@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 3.3 — W12 Company AI Control Plane su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
+**Versione roadmap:** 3.4 — W13 Communications / Voice Boundary su Commercial v1 RC2.9-AUDIT-1 candidato tecnico
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W12 Company AI Control Plane · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_12_COMPANY_AI_CONTROL_PLANE_CHECKPOINT_2026-10-03.md. W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W13 Communications / Voice Boundary · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_13_COMMUNICATIONS_VOICE_CHECKPOINT_2026-10-03.md. W12, W11, W10 e W09 restano chiusi nei propri perimetri Sites/D1. La baseline v65 resta immutata; latest private Sites publication resta owner-only. Consumer/worker esterni, delivery provider, voice/SIP/telephony, Twin canonico, OpenAI live, accounting/PO/receipt provider, malware/OCR provider, GPS/provider mappa, browser/device, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -84,7 +84,7 @@ persona/input
 | W10 Finance e Procurement | `RC2.9 — TECHNICAL PASS / EXTERNAL EXECUTOR GATE` | Control deck Command pubblicato privatamente con commessa selezionabile dal catalogo S04 e validata server-side, workflow Finance/Procurement, righe procurement, approval, idempotenza, optimistic version, eventi, outbox, reconciliation e handoff verso Operations/Warehouse/Documents. Accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
 | W11 Events, Outbox, Twin e Timeline | `RC2.9 — TECHNICAL PASS / EXTERNAL CONSUMER GATE` | Control deck Event Authority pubblicato privatamente con Event stream, inspector, outbox/DLQ control, retry budget, reconciliation, Twin read model derivato e Command ledger/timeline capability-gated. Consumer/worker esterni, Twin canonico, replay e proiezioni persistenti restano da certificare. |
 | W12 AI, Tool Gateway e Approval | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | `/governance` ora espone una control deck Company AI capability-gated con readiness, knowledge registry ricercabile, scope inspector commessa→sottogruppo, approval ledger, tool gateway e pipeline preview→approval→readback. Il contratto resta `directWrite=false`; OpenAI live, executor esterni e sign-off commerciale restano aperti. |
-| W13 Communication, Voice, Telephony | `RC2.3 — COMMUNICATIONS SITES BOUNDARY / VOICE DEFERRED` | Communications readback/proposal è capability-gated e tenant-scoped; provider voice/SIP, telephony, policy operative e delivery reale restano da configurare. |
+| W13 Communication, Voice, Telephony | `RC2.9 — TECHNICAL PASS / PROVIDER GATES` | `/communications` ora è una control deck Command capability-gated: briefing, broadcast, acknowledgement readback, filtri e proposta voice. La commessa è selezionabile solo dal catalogo Operations e validata server-side nel tenant; delivery esterna, voice/SIP/telephony, webhook firmati, consenso runtime e policy operative restano differiti. |
 | W14 NEXUS e adapter esterni | `PARTIAL` | Registry dichiarativo e adapter `mock_read_only`; integrazione reale non attiva. |
 | W15 PWA, iOS e Android | `PARTIAL / NOT RUN` | PWA/offline surface presente; device certification non chiusa. |
 | W16 Security, Privacy, Observability, DR | `RC2.8 — LOCAL CONTROL PASS / PARTIAL PROVIDER GATES` | Nuovo registro W16 capability-gated per isolamento tenant, payload/segreti, documenti fail-closed, tracking on-duty, audit, restore e registry adapter. Malware provider, DPIA/retention, osservabilità/SLO e sign-off umano restano aperti. |
@@ -583,6 +583,15 @@ NEED → REQUESTED → REVIEW → APPROVED → PO_DRAFT
 - pilot SIP con webhook firmato, routing e audit;
 - niente raw audio/transcript persistente quando non necessario;
 - retention e accesso separati per comunicazioni sensibili.
+
+#### Implementazione W13 corrente — Sites/D1
+
+- `/communications` usa una control deck Command uniforme, responsive e role-aware; il menu mostra solo le route per cui esiste capability.
+- `GET /api/communications` espone readback tenant-scoped; `POST /api/communications` richiede `communication.send`, accetta solo tipi/canali/audience dichiarati e mantiene la proposta append-only tramite S05, evento, outbox e reconciliation.
+- Le comunicazioni legate a una commessa usano esclusivamente il catalogo Operations canonico; il server risolve ID/codice nello stesso tenant e rifiuta riferimenti liberi o cross-tenant.
+- Acknowledgement, delivery status e provider status restano distinti: `PENDING_EXTERNAL_CONSUMER`, `SITES_READBACK_ONLY` e `EXTERNAL_DEFERRED` non vengono presentati come consegna riuscita.
+- La superficie Voice mostra adapter, consenso, identità, transcript e credenziale effimera come confini espliciti; crea solo `VOICE_PROPOSAL`, non apre microfono, non persiste raw audio e non simula SIP, webhook o chiamate.
+- Provider di delivery, notification transport, voice/SIP, telephony, webhook firmati, retention e runtime browser/device restano gate esterni prima della certificazione commerciale.
 
 ---
 

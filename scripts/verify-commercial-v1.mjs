@@ -390,6 +390,13 @@ const externalAdapters = await readFile(join(root, "lib", "external-adapter.ts")
 assert(externalAdapters.includes('key: "openai-runtime"') && externalAdapters.includes('status: "NOT_RUN"'), "OpenAI external adapter must distinguish local binding from live certification");
 const communicationsLayout = await readFile(join(root, "app", "communications", "layout.tsx"), "utf8");
 assert(communicationsLayout.includes('requirePageCapability("communication.read")'), "Communications must be capability-gated");
+const communicationsPage = await readFile(join(root, "app", "communications", "page.tsx"), "utf8");
+const communicationsRoute = await readFile(join(root, "app", "api", "communications", "route.ts"), "utf8");
+const communicationsSurface = await readFile(join(root, "components", "communications-control.tsx"), "utf8");
+assert(communicationsPage.includes("CommunicationsControl") && communicationsSurface.includes("/api/communications"), "W13 must use the governed Communications control deck");
+assert(communicationsRoute.includes('hasCapability(context, "communication.send")') && communicationsRoute.includes("job_not_found_in_tenant"), "W13 writes must be capability-gated and tenant-bound");
+assert(communicationsRoute.includes("voice_requires_acknowledgement") && communicationsRoute.includes("EXTERNAL_DEFERRED"), "W13 voice must preserve consent and provider-deferred boundaries");
+assert(communicationsSurface.includes("acknowledgement") && communicationsSurface.includes("VOICE_PROPOSAL") && communicationsSurface.includes("deliveryStatus"), "W13 must expose acknowledgement, voice proposal and delivery readback");
 assert(journeyRoute.includes('document_security: hasCapability(context, "documents.write")'), "Document security controls must be capability-gated in the journey readback");
 const eventsControl = await readFile(join(root, "components", "events-control-page.tsx"), "utf8");
 assert(eventsControl.includes("/api/events/outbox"), "Events Authority must expose outbox controls");
