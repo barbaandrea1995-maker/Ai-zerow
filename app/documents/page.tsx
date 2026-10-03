@@ -1,7 +1,7 @@
-import S05ModulePage from "@/components/s05-module-page";
+import DocumentsControlDeck from "@/components/documents-control-deck";
 import { requirePageCapability } from "@/lib/page-access";
 
 export default async function DocumentsPage() {
   await requirePageCapability("documents.read");
-  return <S05ModulePage module="documents" />;
+  return <DocumentsControlDeck />;
 }

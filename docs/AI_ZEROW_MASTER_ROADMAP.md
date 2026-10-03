@@ -1,11 +1,11 @@
 # AI-ZEROW — Master Roadmap operativa
 
-**Versione roadmap:** 2.9 — W08 Mission Control su Commercial v1 RC2.9-AUDIT-1 locale
+**Versione roadmap:** 3.0 — W09 Document Control su Commercial v1 RC2.9-AUDIT-1 locale
 **Data:** 3 ottobre 2026
 **Baseline di partenza:** Sites v65 / tag `baseline-ai-zerow-sites-v65-2026-10-01`  
 **Obiettivo:** portare AI-ZEROW da ricostruzione Sites certificata nei suoi confini a piattaforma operativa enterprise completa, senza perdere tracciabilità, sicurezza, continuità visiva o controllo umano.
 
-**Checkpoint corrente:** W08 Mission Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_08_MISSION_CONTROL_CHECKPOINT_2026-10-03.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
+**Checkpoint corrente:** W09 Document Control · technical pass Sites/D1 pubblicato privatamente · owner-only, innestato su Commercial v1 RC2.9-AUDIT-1 candidato tecnico locale · non certificato commerciale. Checkpoint: docs/MODULE_09_DOCUMENT_CONTROL_CHECKPOINT_2026-10-03.md. La baseline v65 resta immutata; latest private Sites publication resta owner-only. OpenAI live, malware/OCR provider, GPS/provider mappa, browser/device, provider esterni, privacy, offline/replay e sign-off restano aperti.
 
 ## 1. Direzione prodotto
 
@@ -80,7 +80,7 @@ persona/input
 | W06 Assets e manutenzione | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Registro tenant-scoped per asset, mezzi e attrezzature; registrazione tecnica, lifecycle, manutenzione, blocco/rilascio, guard di assegnabilità, eventi, outbox e reconciliation sono collegati nella superficie Command. Telemetria, certificazioni, provider GPS/mappe e documenti manutentivi esterni restano gate separati. |
 | W07 Materiali e Warehouse | `RC2.9 — TECHNICAL PASS / EXTERNAL GATES` | Control deck Command pubblicato privatamente con anagrafica, saldo in millesimi, filtri, inspector, movimenti, collegamenti commessa/missione e proposta replenishment. Prenotazioni, prelievi, carico missione, consumo/reso, idempotenza, versioning, eventi, outbox e reconciliation restano server-side; procurement automatico e provider esterni sono gate separati. |
 | W08 Mission e trasporti | RC2.9 — TECHNICAL PASS / EXTERNAL GATES | Control deck Mission con shell Command, filtri, inspector, commessa o trasporto autonomo, risorse canoniche disponibili per finestra, create/dispatch/delivery/POD/reconciliation/close e handoff verso Operations, Planning, Warehouse e Documents. Routing GPS/telematica provider-backed, mappe reali e device certification restano esterni. |
-| W09 Documents | `RC2.4 — STORAGE PASS / FAIL-CLOSED SECURITY GATE` | Upload R2 fino a 20 MB, DOC/DOCX/PDF/XLS/XLSX/CSV/TXT/immagini, MIME+magic signature e SHA-256 passano; UI di quarantena/revisione e callback provider vincolato all’hash sono contrattualizzati e il download resta bloccato senza evidenza CLEAN. OCR e retention provider-backed restano bloccanti. |
+| W09 Documents | `RC2.9 — TECHNICAL PASS / SECURITY PROVIDER GATE` | Control deck Document Control pubblicato con catalogo tenant-scoped, commessa obbligatoria, upload R2 fino a 20 MB, MIME+magic signature, SHA-256, provenance, inspector, filtri e security actions. `/api/documents` legge il catalogo operativo; il download resta fail-closed senza CLEAN provider-backed. OCR, malware provider, version replacement e retention provider-backed restano gate espliciti. |
 | W10 Finance e Procurement | `RC2.5 — LOCAL WORKFLOW PASS / EXTERNAL EXECUTOR DEFERRED` | Workflow Finance/Procurement con stati, approval, idempotenza, optimistic version, eventi, outbox e reconciliation in D1; accounting, PO issue, ricezione provider-backed e payment executor restano aperti. |
 | W11 Events, Outbox, Twin e Timeline | `RC2.4 — SITES CONTROL PASS / EXTERNAL CONSUMER DEFERRED` | Eventi, outbox, retry limitato, DLQ, requeue, block e reconciliation sono governati in Sites con controlli UI e fixture di stato; consumer, Twin e worker persistenti da certificare. |
 | W12 AI, Tool Gateway e Approval | `RC2.7 — LOCAL GOVERNANCE PASS / LIVE GATE NOT RUN` | Company AI espone un control plane capability-gated con readiness dei contratti, ledger/readback, binding metadata-only, no-direct-write, approval boundary e blocchi commerciali. Command espone un widget W12 filtrato per `command.read`; OpenAI live richiede ancora sessione autenticata e runtime pubblicato. |
@@ -414,6 +414,8 @@ Una missione non è completata quando l’autista preme “consegnato”: è com
 ### W09 — Documenti, OCR, provenance e intelligence
 
 **Obiettivo:** trasformare file e documenti in informazioni verificabili collegate al lavoro reale.
+
+**Sites W09 checkpoint 3 ottobre 2026:** il vecchio adapter S05 non è più la superficie primaria di `/documents`. Il modulo usa `components/documents-control-deck.tsx` e `/api/documents/catalog`, mentre l’upload resta vincolato a `/api/operations/jobs/:jobId/documents`. La commessa viene selezionata dal readback S04, mai digitata come testo libero; l’inspector espone categoria, MIME, dimensione, versione, provenance, storage, SHA-256 e stato security. Le azioni `queue_scan`, `manual_review` e `quarantine` scrivono solo tramite il security state machine esistente, con eventi, outbox, reconciliation e readback. Il flusso Company AI è collegato come handoff verso Operations: questo modulo non simula estrazione OCR né attribuisce un esito AI al file. Evidenza: `docs/MODULE_09_DOCUMENT_CONTROL_CHECKPOINT_2026-10-03.md`.
 
 #### Ingest e storage
 
