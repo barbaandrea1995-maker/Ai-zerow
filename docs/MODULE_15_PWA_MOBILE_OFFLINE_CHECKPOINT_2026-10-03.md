@@ -4,6 +4,8 @@
 **Stato tranche:** `TECHNICAL PASS / DEVICE CERTIFICATION NOT RUN`
 **Commercial status:** `NO-GO` finché non sono raccolte evidenze browser/device e sign-off umano
 **Scope:** Sites/D1, control deck `/pwa/diagnostics` e alias `/mobile/diagnostics`
+**Private publication:** Sites v109 · deployment `appgdep_6ac0e925a3448191b3863bc0f0bb8b1f` · commit `9309a6cf527861c4a6fffe4a900372525fe640fe`
+**Access:** owner-only · `barba.andrea.1995@icloud.com`
 
 ## Risultato
 
