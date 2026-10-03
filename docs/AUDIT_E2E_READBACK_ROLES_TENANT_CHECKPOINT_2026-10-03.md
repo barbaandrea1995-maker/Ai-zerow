@@ -2,7 +2,7 @@
 
 **Data:** 3 ottobre 2026
 **Perimetro:** Authority/team, Planning/resource availability, capability, tenant isolation, pulsanti e runtime locale
-**Decisione:** `TECHNICAL PASS LOCALE · COMMERCIAL NO-GO · PUBBLICATO PRIVATAMENTE · SITES v115`
+**Decisione:** `TECHNICAL PASS LOCALE · COMMERCIAL NO-GO · PUBBLICATO PRIVATAMENTE · SITES v116`
 
 ## Risultato
 
@@ -77,4 +77,4 @@ Planning
 - live check OpenAI con `OPENAI_API_KEY` nel runtime Sites;
 - malware/OCR provider, executor esterni e sign-off umano commerciale.
 
-Finché questi gate non producono evidenza runtime verificabile, il prodotto resta `COMMERCIAL NO-GO`; la tranche è comunque pubblicata privatamente come Sites v115, owner-only.
+Finché questi gate non producono evidenza runtime verificabile, il prodotto resta `COMMERCIAL NO-GO`; la tranche è comunque pubblicata privatamente come Sites v116, owner-only.
