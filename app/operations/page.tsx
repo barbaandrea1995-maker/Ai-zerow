@@ -152,9 +152,9 @@ const jobs: OperationsJob[] = [];
 const emptyJob: OperationsJob = {
   id: "EMPTY",
   title: "Nessuna commessa",
-  description: "Il readback D1 non contiene commesse.",
+  description: "Il readback server non contiene commesse.",
   client: "—",
-  location: "Il readback D1 non contiene commesse.",
+  location: "Il readback server non contiene commesse.",
   status: "BOZZA",
   statusCode: "DRAFT",
   priority: "LOW",
@@ -750,7 +750,7 @@ export default function OperationsPage() {
               <span>System core</span>
               <span className="flex items-center gap-1.5 text-lime-200">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />
-                {adapterOnline ? "D1 VERIFIED" : adapterStatus === "loading" ? "READBACK" : "D1 EMPTY"}
+                {adapterOnline ? "READBACK VERIFICATO" : adapterStatus === "loading" ? "READBACK" : "READBACK VUOTO"}
               </span>
             </div>
             <div className="zw-command-core-status mt-3 rounded-xl p-3">
@@ -759,7 +759,7 @@ export default function OperationsPage() {
                 Operations core
               </div>
               <p className="mt-2 font-mono text-[10px] text-slate-600">
-                S04 / {activeJobs.length} JOBS
+                OPERATIONS / {activeJobs.length} JOBS
               </p>
               <p className="mt-3 font-mono text-[10px] text-lime-300/60">
                 POLICY / {ROLE_METADATA[authority.role].label.toUpperCase()}
@@ -789,7 +789,7 @@ export default function OperationsPage() {
               <TenantSwitcher />
               <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex">
                 <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                {adapterStatus === "loading" ? "READING" : adapterOnline ? "D1 VERIFIED" : adapterStatus === "error" ? "READBACK ERROR" : "D1 EMPTY"}
+                {adapterStatus === "loading" ? "LETTURA" : adapterOnline ? "READBACK VERIFICATO" : adapterStatus === "error" ? "ERRORE READBACK" : "READBACK VUOTO"}
               </span>
               <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
               <IconButton className="zw-command-topbar__refresh" label="Aggiorna commesse" onClick={() => { setAdapterStatus("loading"); void loadOperations(); }}><RefreshCw className={adapterStatus === "loading" ? "size-4 animate-spin" : "size-4"} /></IconButton>
@@ -877,8 +877,8 @@ export default function OperationsPage() {
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
                       {adapterOnline
-                        ? "Readback D1 attivo · API Operations adapter online"
-                        : "Readback D1 vuoto · adapter Operations in attesa"}
+                        ? "Readback server attivo · Operations collegato"
+                        : "Readback server vuoto · Operations in attesa"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1033,7 +1033,7 @@ export default function OperationsPage() {
                             `/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}`,
                           )
                         : notify(
-                            `Dettaglio ${selectedJob.id}: disponibile dopo il readback D1`,
+                            `Dettaglio ${selectedJob.id}: disponibile dopo il readback server`,
                           )
                     }
                     type="button"
@@ -1172,7 +1172,7 @@ export default function OperationsPage() {
                     ))
                   ) : (
                     <div className="py-6 text-center text-xs text-slate-500">
-                      Nessuna attività nel readback D1.
+                      Nessuna attività nel readback server.
                     </div>
                   )}
                 </div>
@@ -1284,7 +1284,7 @@ export default function OperationsPage() {
                   </p>
                   <p className="mt-1 text-[11px] text-slate-500">
                     {adapterOnline
-                      ? "Commesse e readback sono collegati al D1 adapter; planning e rapportino restano bounded."
+                      ? "Commesse e readback sono collegati al servizio operativo; pianificazione e rapportini restano vincolati."
                       : "Commesse, attività, planning, risorse e rapportino sono rappresentati senza simulare scritture su Neon."}
                   </p>
                 </div>
@@ -1293,12 +1293,12 @@ export default function OperationsPage() {
                 {adapterOnline ? (
                   <StatusBadge>ADAPTER READ/WRITE READY</StatusBadge>
                 ) : (
-                  <StatusBadge>D1 READBACK EMPTY</StatusBadge>
+                  <StatusBadge>READBACK VUOTO</StatusBadge>
                 )}
                 <button
                   className="grid size-8 place-items-center rounded-lg border border-white/10 text-slate-500 hover:border-lime-300/30 hover:text-lime-200"
                   onClick={() =>
-                    notify("Evidenze S04: readback D1 e contratti verificati")
+                    notify("Evidenze operative: readback e contratti verificati")
                   }
                   type="button"
                   aria-label="Apri evidenze"
@@ -1310,14 +1310,14 @@ export default function OperationsPage() {
             <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600">
               <span>
                 {adapterOnline
-                  ? "AI-ZEROW OPERATIONS · S04 adapter surface"
-                  : "AI-ZEROW OPERATIONS · S04 static surface"}
+                  ? "AI-ZEROW OPERATIONS · workspace operativo"
+                  : "AI-ZEROW OPERATIONS · superficie operativa"}
               </span>
               <span className="flex items-center gap-2">
                 <span>black carbon core</span>
                 <span className="size-1 rounded-full bg-lime-300" />
                 <span>
-                  {adapterOnline ? "D1 adapter read/write" : "no backend write"}
+                  {adapterOnline ? "server adapter read/write" : "no backend write"}
                 </span>
               </span>
             </footer>
