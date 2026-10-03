@@ -7,8 +7,8 @@ Riallineare l'intera piattaforma dal primo all'ultimo modulo a livello commercia
 ## Baseline verificata
 
 - Site attivo: AI-ZEROW-COMMAND, pubblicazione privata owner-only.
-- Versione pubblicata riletta: Sites v119.
-- Commit pubblicato: `99f0ce86098e81fd43f396887f65cad1be70f07a`.
+- Versione pubblicata riletta: Sites v120.
+- Commit pubblicato: `590ac65d64b59c5543aa4c8dc76cc8344fe2e7b1`.
 - Route pagina: 31.
 - Layout: 21, di cui 20 protetti.
 - API route: 71.
@@ -152,7 +152,7 @@ La prima tranche della revisione è stata applicata e verificata localmente:
 
 Evidence T01: `audit:ui` PASS_WITH_RUNTIME_GATES (19 superfici; 18 refresh locali, 18 back locali, fallback globale attivo), `audit:release` PASS_WITH_EXTERNAL_GATES, `audit:e2e` PASS_WITH_AUTHENTICATED_GATE, `verify:commercial` PASS, `tsc --noEmit` PASS, lint PASS con 6 warning preesistenti di ottimizzazione `<img>`.
 
-Stato T01: `READY_LOCAL / NOT_CERTIFIED_RUNTIME`. Il browser autenticato, il device PWA e i provider esterni restano gate espliciti; la revisione non li considera chiusi sulla sola presenza del codice.
+Stato T01: `PUBLISHED_PRIVATE / NOT_CERTIFIED_RUNTIME`. La tranche è pubblicata su Sites v120 con audience custom owner-only. Il browser autenticato, il device PWA e i provider esterni restano gate espliciti; la revisione non li considera chiusi sulla sola presenza del codice.
 
 ## Criterio di completamento
 
