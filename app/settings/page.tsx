@@ -1,3 +1,4 @@
+import { hasCapability } from "@/lib/authority-context";
 import { requirePageCapability } from "@/lib/page-access";
 import SettingsClient from "./settings-client";
 
@@ -12,6 +13,7 @@ export default async function SettingsPage() {
         email: authority.actorEmail,
         name: authority.actorName,
       }}
+      canManageLocation={hasCapability(authority, "location.manage.tracking.devices")}
     />
   );
 }

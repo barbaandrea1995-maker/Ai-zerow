@@ -157,8 +157,17 @@ export type TrackingPosition = {
   metadata?: Record<string, unknown>;
 };
 
+export type RemoteTrackingDevice = {
+  id: string;
+  name: string;
+  uniqueId: string;
+  status: string;
+  lastUpdate: string | null;
+};
+
 export interface TrackingProvider {
   readonly providerType: "TRACCAR" | "NATIVE_DEVICE";
+  listDevices(): Promise<RemoteTrackingDevice[] | null>;
   getDevice(deviceId: string): Promise<unknown>;
   getVehicleCurrentPosition(deviceId: string): Promise<TrackingPosition | null>;
   getVehiclePositionHistory(deviceId: string, from: string, to: string): Promise<TrackingPosition[]>;
@@ -210,6 +219,20 @@ function positionFromRecord(value: unknown): TrackingPosition | null {
   };
 }
 
+function remoteDeviceFromRecord(value: unknown): RemoteTrackingDevice | null {
+  const row = asRecord(value);
+  if (!row) return null;
+  const id = String(row.id ?? "").trim().slice(0, 160);
+  if (!id) return null;
+  return {
+    id,
+    name: String(row.name ?? row.uniqueId ?? `Dispositivo ${id}`).trim().slice(0, 160),
+    uniqueId: String(row.uniqueId ?? "").trim().slice(0, 160),
+    status: String(row.status ?? "unknown").trim().slice(0, 40),
+    lastUpdate: typeof row.lastUpdate === "string" ? row.lastUpdate.slice(0, 40) : null,
+  };
+}
+
 export class TraccarAdapter implements TrackingProvider {
   readonly providerType = "TRACCAR" as const;
   private readonly base = baseUrl(runtimeSecret("TRACCAR_BASE_URL"));
@@ -227,6 +250,15 @@ export class TraccarAdapter implements TrackingProvider {
     });
     if (!response.ok) return null;
     return response.json() as Promise<unknown>;
+  }
+
+  async listDevices() {
+    const result = await this.request("/api/devices");
+    if (!Array.isArray(result)) return null;
+    return result.flatMap((item) => {
+      const device = remoteDeviceFromRecord(item);
+      return device ? [device] : [];
+    });
   }
 
   async getDevice(deviceId: string) {
@@ -293,6 +325,7 @@ export class TraccarAdapter implements TrackingProvider {
 export class NativeDeviceAdapter implements TrackingProvider {
   readonly providerType = "NATIVE_DEVICE" as const;
 
+  async listDevices() { return []; }
   async getDevice(deviceId: string) { return { id: deviceId, source: "NATIVE_DEVICE" }; }
   async getVehicleCurrentPosition() { return null; }
   async getVehiclePositionHistory() { return []; }

@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, KeyRound, LogOut, Mail, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
+import GpsProviderControl from "@/components/gps-provider-control";
 
 const authClient = createAuthClient();
 
-export default function SettingsClient({ actor }: { actor: AccountActor }) {
+export default function SettingsClient({ actor, canManageLocation }: { actor: AccountActor; canManageLocation: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"password" | "signOut" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,6 +105,8 @@ export default function SettingsClient({ actor }: { actor: AccountActor }) {
             <AccountMenu actor={actor} />
           </div>
         </header>
+
+        {canManageLocation ? <div className="mt-6"><GpsProviderControl /></div> : null}
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
           <section className="carbon-card rounded-2xl p-5 sm:p-6">

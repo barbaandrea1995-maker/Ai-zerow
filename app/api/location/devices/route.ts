@@ -1,9 +1,10 @@
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { trackingDevices, trackingProviders, vehicleDeviceBindings } from "@/db/schema";
+import { trackingDevices, trackingProviders, trackingSessions, vehicleDeviceBindings } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { auditLocationAccess } from "@/lib/location-intelligence/repository";
-import { getLocationProviderStatus } from "@/lib/location-intelligence/providers";
+import { ingestLocationPosition } from "@/lib/location-intelligence/ingest";
+import { getLocationProviderStatus, trackingProviderFor } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ function responseHeaders() {
   return { "cache-control": "private, no-store" };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   const capability = hasCapability(context, "location.manage.tracking.devices")
@@ -35,6 +36,18 @@ export async function GET() {
       db.select().from(trackingDevices).where(eq(trackingDevices.tenantId, context.tenantId)).orderBy(asc(trackingDevices.label)),
       db.select().from(vehicleDeviceBindings).where(eq(vehicleDeviceBindings.tenantId, context.tenantId)).orderBy(asc(vehicleDeviceBindings.vehicleId)),
     ]);
+    const remoteRequested = new URL(request.url).searchParams.get("remote") === "traccar";
+    let remoteDevices: Awaited<ReturnType<ReturnType<typeof trackingProviderFor>["listDevices"]>> = null;
+    let remoteError: string | null = null;
+    if (remoteRequested) {
+      try {
+        remoteDevices = await trackingProviderFor("TRACCAR").listDevices();
+        if (remoteDevices === null) remoteError = "traccar_devices_unavailable";
+        await auditLocationAccess({ context, capability, action: "READ", resourceType: "TRACCAR_REMOTE_DEVICES", purpose: "Sincronizzazione owner-side dei dispositivi GPS dal provider configurato.", metadata: { count: remoteDevices?.length ?? 0, available: remoteDevices !== null } });
+      } catch {
+        remoteError = "traccar_devices_unavailable";
+      }
+    }
     await auditLocationAccess({ context, capability, action: "READ", resourceType: "TRACKING_REGISTRY", purpose: "Verifica provider, dispositivi e associazioni mezzo-tracker.", metadata: { providers: providers.length, devices: devices.length, bindings: bindings.length } });
     return Response.json({
       context: publicAuthorityContext(context),
@@ -51,6 +64,7 @@ export async function GET() {
       devices,
       bindings,
       runtime: getLocationProviderStatus(),
+      remote: remoteRequested ? { provider: "TRACCAR", devices: remoteDevices ?? [], error: remoteError } : null,
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: responseHeaders() });
   } catch {
@@ -77,6 +91,57 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const db = getDb();
   try {
+    if (action === "sync") {
+      const runtime = getLocationProviderStatus();
+      if (!runtime.tracking.configured) return Response.json({ error: "traccar_runtime_not_configured" }, { status: 409 });
+      const remoteDevices = await trackingProviderFor("TRACCAR").listDevices();
+      if (remoteDevices === null) return Response.json({ error: "traccar_devices_unavailable" }, { status: 502 });
+      let [provider] = await db.select().from(trackingProviders).where(and(eq(trackingProviders.tenantId, context.tenantId), eq(trackingProviders.providerType, "TRACCAR"))).limit(1);
+      if (!provider) {
+        const providerId = `TRACKING-PROVIDER-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        await db.insert(trackingProviders).values({
+          id: providerId,
+          tenantId: context.tenantId,
+          providerType: "TRACCAR",
+          label: "Traccar GPS",
+          status: "READY",
+          endpointUrl: "",
+          tokenReference: "SERVER_RUNTIME_SECRET",
+          configJson: JSON.stringify({ source: "zerow_sync", configured: true }),
+          createdBy: context.actorId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        [provider] = await db.select().from(trackingProviders).where(eq(trackingProviders.id, providerId)).limit(1);
+      }
+      if (!provider) return Response.json({ error: "tracking_provider_readback_unavailable" }, { status: 503 });
+      const imported: Array<{ id: string; externalDeviceId: string; label: string }> = [];
+      for (const remote of remoteDevices) {
+        const [existing] = await db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), eq(trackingDevices.providerId, provider.id), eq(trackingDevices.externalDeviceId, remote.id))).limit(1);
+        if (existing) continue;
+        const id = `TRACKING-DEVICE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        await db.insert(trackingDevices).values({ id, tenantId: context.tenantId, providerId: provider.id, externalDeviceId: remote.id, label: remote.name, deviceType: "VEHICLE_GPS", status: "ACTIVE", metadataJson: JSON.stringify({ source: "TRACCAR", uniqueId: remote.uniqueId, remoteStatus: remote.status, lastUpdate: remote.lastUpdate }), createdBy: context.actorId, createdAt: now, updatedAt: now });
+        imported.push({ id, externalDeviceId: remote.id, label: remote.name });
+      }
+      await auditLocationAccess({ context, capability: "location.manage.tracking.devices", action: "IMPORT", resourceType: "TRACCAR_REMOTE_DEVICES", purpose: "Importazione dei dispositivi GPS nel registro ZEROW.", metadata: { remote: remoteDevices.length, imported: imported.length } });
+      return Response.json({ provider: { id: provider.id, label: provider.label, status: provider.status }, remoteCount: remoteDevices.length, importedCount: imported.length, imported, readback: "verified" }, { headers: responseHeaders() });
+    }
+
+    if (action === "poll") {
+      const deviceId = bounded(input.deviceId, 160);
+      if (!deviceId) return Response.json({ error: "device_id_required" }, { status: 400 });
+      const [device] = await db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), eq(trackingDevices.id, deviceId), eq(trackingDevices.status, "ACTIVE"))).limit(1);
+      if (!device) return Response.json({ error: "tracking_device_not_found" }, { status: 404 });
+      const [provider] = await db.select().from(trackingProviders).where(and(eq(trackingProviders.tenantId, context.tenantId), eq(trackingProviders.id, device.providerId))).limit(1);
+      if (!provider) return Response.json({ error: "tracking_provider_not_found" }, { status: 404 });
+      const position = await trackingProviderFor(provider.providerType).getVehicleCurrentPosition(device.externalDeviceId);
+      if (!position) return Response.json({ error: "tracking_position_unavailable", deviceId, externalDeviceId: device.externalDeviceId }, { status: 502 });
+      const [session] = await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.trackingDeviceId, device.id), eq(trackingSessions.status, "ACTIVE"))).limit(1);
+      const ingestion = session ? await ingestLocationPosition({ tenantId: context.tenantId, trackingSessionId: session.id, source: provider.providerType, position }) : null;
+      await auditLocationAccess({ context, capability: "location.manage.tracking.devices", action: "POLL", resourceType: "TRACCAR_POSITION", purpose: "Lettura on-demand della posizione GPS tramite ZEROW.", metadata: { deviceId, externalDeviceId: device.externalDeviceId, ingested: Boolean(ingestion) } });
+      return Response.json({ deviceId, externalDeviceId: device.externalDeviceId, position, ingested: Boolean(ingestion), trackingSessionId: session?.id ?? null, ingestion: ingestion ? { idempotent: ingestion.idempotent, events: ingestion.events.length } : null, readback: "verified" }, { headers: responseHeaders() });
+    }
+
     if (action === "provider") {
       const providerType = bounded(input.providerType, 32).toUpperCase();
       if (providerType !== "TRACCAR" && providerType !== "NATIVE_DEVICE") return Response.json({ error: "unsupported_tracking_provider" }, { status: 400 });
