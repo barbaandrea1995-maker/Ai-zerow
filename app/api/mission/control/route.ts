@@ -55,7 +55,7 @@ export async function GET() {
   }
   try {
     const db = getDb();
-    const [missions, operationJobs] = await Promise.all([
+    const [missions, operationJobs, materialRequestRows] = await Promise.all([
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.domain, "mission"),
@@ -64,8 +64,19 @@ export async function GET() {
         eq(s04Records.tenantId, context.tenantId),
         eq(s04Records.module, "operations"),
       )).orderBy(desc(s04Records.updatedAt)).limit(500),
+      context.operatingDomains.includes("warehouse") && hasCapability(context, "mission.write")
+        ? db.select().from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.domain, "warehouse"),
+          eq(jobJourneyRecords.recordType, "MATERIAL_REQUEST"),
+          inArray(jobJourneyRecords.status, ["REQUESTED", "APPROVED", "FULFILLED", "REJECTED"]),
+        )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500)
+        : Promise.resolve([]),
     ]);
-    const jobIds = [...new Set(missions.map((mission) => mission.jobId))];
+    const jobIds = [...new Set([
+      ...missions.map((mission) => mission.jobId),
+      ...materialRequestRows.map((request) => request.jobId),
+    ])];
     const jobs = jobIds.length ? await db.select().from(s04Records).where(and(
       eq(s04Records.tenantId, context.tenantId),
       inArray(s04Records.module, ["operations", "mission"]),
@@ -89,6 +100,24 @@ export async function GET() {
         updatedAt: mission.updatedAt,
       };
     });
+    const materialRequests = materialRequestRows.map((request) => {
+      const requestPayload = parseJson(request.payloadJson);
+      const job = jobById.get(request.jobId);
+      const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
+      return {
+        id: request.id,
+        jobId: request.jobId,
+        jobCode: job?.canonicalCode ?? null,
+        jobTitle: jobPayload?.title ?? "Commessa",
+        title: request.title,
+        status: request.status,
+        version: request.version,
+        payload: requestPayload,
+        scheduledMissionId: boundedText(requestPayload.missionId, 120) || null,
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+      };
+    });
     const jobView = (job: typeof s04Records.$inferSelect) => {
       const jobPayload = parseJobPayload(job.payloadJson);
       return {
@@ -105,11 +134,13 @@ export async function GET() {
       context: publicAuthorityContext(context),
       jobs: operationJobs.filter((job) => job.recordType !== "adapter-contract").map(jobView),
       missions: records,
+      materialRequests,
       summary: {
         total: records.length,
         planned: records.filter((record) => record.status === "PLANNED").length,
         dispatched: records.filter((record) => record.status === "DISPATCHED").length,
         delivered: records.filter((record) => record.status === "DELIVERED").length,
+        toSchedule: materialRequests.filter((request) => request.status === "APPROVED" && !request.scheduledMissionId).length,
       },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {

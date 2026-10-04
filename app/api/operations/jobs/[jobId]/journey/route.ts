@@ -9,6 +9,7 @@ import {
   s06Events,
   s06Outbox,
   s06Reconciliations,
+  tenantWarehouses,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext, type AuthorityContext } from "@/lib/authority-context";
 import { documentCanDownload } from "@/lib/document-security";
@@ -292,6 +293,16 @@ function normalizeLines(value: unknown) {
   return lines.every(Boolean) ? lines as NonNullable<(typeof lines)[number]>[] : null;
 }
 
+async function inventoryLinesExist(tenantId: string, lines: Array<{ itemId: string | null }>) {
+  const referencedIds = lines.flatMap((line) => line.itemId ? [line.itemId] : []);
+  if (!referencedIds.length) return true;
+  const found = await getDb().select({ id: inventoryItems.id }).from(inventoryItems).where(and(
+    eq(inventoryItems.tenantId, tenantId),
+    inArray(inventoryItems.id, referencedIds),
+  ));
+  return new Set(found.map((item) => item.id)).size === new Set(referencedIds).size;
+}
+
 export async function GET(_request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -373,6 +384,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let status = "";
     let payload: JsonObject;
     let existing: typeof jobJourneyRecords.$inferSelect | null = null;
+    let materialRequest: typeof jobJourneyRecords.$inferSelect | null = null;
     let eventType = "";
 
     if (action === "planning_create") {
@@ -448,15 +460,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
       title = boundedText(input.title, 160, "Richiesta materiali");
       const lines = normalizeLines(input.lines);
       if (!lines) return Response.json({ error: "valid_material_lines_required", maxLines: 50 }, { status: 400 });
-      const referencedIds = lines.flatMap((line) => line.itemId ? [line.itemId] : []);
-      if (referencedIds.length) {
-        const found = await db.select({ id: inventoryItems.id }).from(inventoryItems).where(and(
-          eq(inventoryItems.tenantId, context.tenantId),
-          inArray(inventoryItems.id, referencedIds),
-        ));
-        if (new Set(found.map((item) => item.id)).size !== new Set(referencedIds).size) {
-          return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
-        }
+      if (!(await inventoryLinesExist(context.tenantId, lines))) {
+        return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
       }
       status = "REQUESTED";
       payload = {
@@ -464,23 +469,44 @@ export async function POST(request: Request, routeContext: RouteContext) {
         deliveryPoint: boundedText(input.deliveryPoint, 240),
         notes: boundedText(input.notes, 2_000),
         lines,
+        requestedLines: lines,
       };
       eventType = "warehouse.material_request.created";
     } else if (action === "mission_create") {
       domain = "mission";
       recordType = "TRANSPORT";
       title = boundedText(input.title, 160, "Missione di trasporto");
-      const pickup = boundedText(input.pickup, 240);
+      let pickup = boundedText(input.pickup, 240);
       const dropoff = boundedText(input.dropoff, 240);
       const plannedAt = boundedText(input.plannedAt, 40);
       const plannedEndAtInput = boundedText(input.plannedEndAt, 40);
       const driverId = boundedText(input.driverId, 120);
       const vehicleId = boundedText(input.vehicleId, 120);
       const cargoAssetId = boundedText(input.cargoAssetId, 120);
+      const materialRequestId = boundedText(input.materialRequestId, 120);
       const requestedTransportMode = boundedText(input.transportMode, 48);
       const transportMode: TransportMode = isTransportMode(requestedTransportMode)
         ? requestedTransportMode
         : cargoAssetId ? "ASSET_TRANSFER" : "WAREHOUSE_TO_JOB";
+      if (materialRequestId) {
+        const [requestRow] = await db.select().from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.jobId, job.id),
+          eq(jobJourneyRecords.id, materialRequestId),
+          eq(jobJourneyRecords.domain, "warehouse"),
+          eq(jobJourneyRecords.recordType, "MATERIAL_REQUEST"),
+        )).limit(1);
+        if (!requestRow) return Response.json({ error: "material_request_not_found" }, { status: 404 });
+        if (requestRow.status !== "APPROVED") return Response.json({ error: "approved_material_request_required" }, { status: 409 });
+        const requestPayload = parseJson(requestRow.payloadJson);
+        if (boundedText(requestPayload.missionId, 120)) return Response.json({ error: "material_request_already_scheduled" }, { status: 409 });
+        const warehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
+        if (!pickup && warehouse) pickup = boundedText(warehouse.locationLabel, 240);
+        materialRequest = requestRow;
+      }
+      if (transportMode === "WAREHOUSE_TO_JOB" && !materialRequestId) {
+        return Response.json({ error: "approved_material_request_required" }, { status: 409 });
+      }
       if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
       if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });
       if (!context.operatingTransportModes.includes(transportMode)) {
@@ -518,6 +544,19 @@ export async function POST(request: Request, routeContext: RouteContext) {
         vehicleId: resources.vehicle.id,
         cargoAssetId: resources.cargoAsset?.id ?? null,
         transportMode,
+        materialRequestId: materialRequest?.id ?? null,
+        materialRequestSnapshot: materialRequest
+          ? (() => {
+            const requestPayload = parseJson(materialRequest.payloadJson);
+            return {
+              id: materialRequest.id,
+              title: materialRequest.title,
+              lines: Array.isArray(requestPayload.lines) ? requestPayload.lines : [],
+              deliveryPoint: boundedText(requestPayload.deliveryPoint, 240),
+              warehouse: isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null,
+            };
+          })()
+          : null,
         resourceSnapshot: {
           driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
           vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },
@@ -568,16 +607,57 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "invalid_material_request_transition" }, { status: 409 });
         }
         const decision = boundedText(input.decision, 16).toUpperCase();
-        if (decision !== "APPROVED" && decision !== "REJECTED") return Response.json({ error: "approval_decision_required" }, { status: 400 });
-        status = decision;
-        payload = { ...payload, reviewedAt: now, reviewedBy: context.actorId, reviewNote: boundedText(input.note, 2_000) };
+        if (decision !== "APPROVED" && decision !== "MODIFIED" && decision !== "REJECTED") return Response.json({ error: "approval_decision_required" }, { status: 400 });
+        status = decision === "MODIFIED" ? "APPROVED" : decision;
+        if (decision === "REJECTED") {
+          payload = {
+            ...payload,
+            reviewedAt: now,
+            reviewedBy: context.actorId,
+            reviewOutcome: "REJECTED",
+            reviewNote: boundedText(input.note, 2_000),
+          };
+        } else {
+          const warehouseId = boundedText(input.warehouseId, 120);
+          if (!warehouseId) return Response.json({ error: "warehouse_required_for_approval" }, { status: 400 });
+          const [warehouse] = await db.select().from(tenantWarehouses).where(and(
+            eq(tenantWarehouses.tenantId, context.tenantId),
+            eq(tenantWarehouses.id, warehouseId),
+            eq(tenantWarehouses.status, "active"),
+          )).limit(1);
+          if (!warehouse) return Response.json({ error: "warehouse_not_found" }, { status: 404 });
+          const originalLines = normalizeLines(payload.requestedLines ?? payload.lines);
+          const reviewedLines = decision === "MODIFIED" ? normalizeLines(input.lines) : normalizeLines(payload.lines);
+          if (!originalLines || !reviewedLines) return Response.json({ error: "valid_material_lines_required", maxLines: 50 }, { status: 400 });
+          if (!(await inventoryLinesExist(context.tenantId, reviewedLines))) {
+            return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
+          }
+          payload = {
+            ...payload,
+            requestedLines: originalLines,
+            lines: reviewedLines,
+            reviewedAt: now,
+            reviewedBy: context.actorId,
+            reviewOutcome: decision,
+            reviewNote: boundedText(input.note, 2_000),
+            warehouseId: warehouse.id,
+            warehouse: {
+              id: warehouse.id,
+              code: warehouse.code,
+              name: warehouse.name,
+              locationLabel: warehouse.locationLabel,
+            },
+          };
+        }
         eventType = `warehouse.material_request.${decision.toLowerCase()}`;
       } else if (action === "material_fulfill") {
         if (domain !== "warehouse" || row.recordType !== "MATERIAL_REQUEST" || row.status !== "APPROVED") {
           return Response.json({ error: "invalid_material_request_transition" }, { status: 409 });
         }
+        const missionId = boundedText(input.missionId, 120) || boundedText(payload.missionId, 120);
+        if (!missionId) return Response.json({ error: "material_request_must_be_scheduled_first" }, { status: 409 });
         status = "FULFILLED";
-        payload = { ...payload, fulfilledAt: now, fulfilledBy: context.actorId, missionId: boundedText(input.missionId, 120) || null };
+        payload = { ...payload, fulfilledAt: now, fulfilledBy: context.actorId, missionId };
         eventType = "warehouse.material_request.fulfilled";
       } else if (action === "mission_dispatch") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "PLANNED") {
@@ -644,7 +724,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const recordId = existing?.id ?? crypto.randomUUID();
     const nextVersion = existing ? existing.version + 1 : 1;
     const eventId = crypto.randomUUID();
-    const eventPayload = JSON.stringify({ action, jobId: job.id, domain, recordType, recordId, status, version: nextVersion });
+    const eventPayload = JSON.stringify({
+      action,
+      jobId: job.id,
+      domain,
+      recordType,
+      recordId,
+      status,
+      version: nextVersion,
+      materialRequestId: materialRequest?.id ?? null,
+    });
     const mutation = existing
       ? db.update(jobJourneyRecords).set({
         status,
@@ -675,7 +764,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         updatedAt: now,
       }).returning();
 
-    const results = await db.batch([
+    const statements = [
       mutation,
       db.insert(s06Events).values({
         eventId,
@@ -710,9 +799,37 @@ export async function POST(request: Request, routeContext: RouteContext) {
         detail: "Passaggio della journey persistito con controllo versione e outbox.",
         createdAt: now, updatedAt: now,
       }),
-    ]);
+    ];
+    if (materialRequest) {
+      const requestPayload = parseJson(materialRequest.payloadJson);
+      statements.push(db.update(jobJourneyRecords).set({
+        payloadJson: JSON.stringify({
+          ...requestPayload,
+          missionId: recordId,
+          missionScheduledAt: now,
+          missionScheduledBy: context.actorId,
+        }),
+        version: materialRequest.version + 1,
+        updatedBy: context.actorId,
+        updatedAt: now,
+      }).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.id, materialRequest.id),
+        eq(jobJourneyRecords.version, materialRequest.version),
+      )) as never);
+    }
+    const results = await db.batch(statements);
     const changed = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
     if (!changed) return Response.json({ error: "version_conflict" }, { status: 409 });
+    if (materialRequest) {
+      const [linkedRequest] = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.id, materialRequest.id),
+      )).limit(1);
+      if (!linkedRequest || boundedText(parseJson(linkedRequest.payloadJson).missionId, 120) !== recordId) {
+        return Response.json({ error: "material_request_link_unavailable" }, { status: 503 });
+      }
+    }
     return Response.json({
       ...(await journeyReadback(context, job)),
       mutation: { action, record: recordForResponse(changed), eventId, idempotent: false },

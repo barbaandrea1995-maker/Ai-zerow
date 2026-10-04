@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LoaderCircle, ShieldCheck } from "lucide-react";
+import type { TransportMode } from "@/lib/tenant-operating-model";
 
 type ResourceOption = {
   id: string;
@@ -34,6 +35,7 @@ type ResourceCatalog = {
 };
 
 type MissionResourceFieldsProps = {
+  transportMode?: TransportMode | "";
   plannedAt: string;
   plannedEndAt: string;
   driverId: string;
@@ -51,6 +53,7 @@ function resourceLabel(resource: ResourceOption) {
 }
 
 export function MissionResourceFields({
+  transportMode = "",
   plannedAt,
   plannedEndAt,
   driverId,
@@ -100,18 +103,18 @@ export function MissionResourceFields({
       <div className="flex items-start gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><ShieldCheck className="size-4" /></span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">REGISTRO RISORSE · DISPONIBILITÀ LIVE</p>
-          <p className="mt-1 text-[10px] leading-4 text-slate-500">Autista e mezzo sono selezionabili solo se registrati nel tenant, operativi e liberi nella finestra della missione. L’asset da consegnare è opzionale.</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">RISORSE DISPONIBILI</p>
+          <p className="mt-1 text-[10px] leading-4 text-slate-500">Autista e mezzo arrivano dal registro aziendale e vengono filtrati sulla finestra scelta. Per un trasferimento asset, seleziona anche l’attrezzatura da consegnare.</p>
         </div>
         <span className="shrink-0 text-[9px] font-mono text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : catalog?.availability ?? "DATA REQUIRED"}</span>
       </div>
     </div>
     <label className="text-xs text-slate-400">Autista reale<select aria-label="Autista reale" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="driverId" onChange={(event) => onDriverChange(event.target.value)} required value={driverId}><option value="">{!hasDate ? "Prima scegli data e ora" : selectableDrivers.length ? "Seleziona autista" : "Nessun autista disponibile"}</option>{selectableDrivers.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</option>)}</select></label>
     <label className="text-xs text-slate-400">Mezzo reale<select aria-label="Mezzo reale" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="vehicleId" onChange={(event) => onVehicleChange(event.target.value)} required value={vehicleId}><option value="">{!hasDate ? "Prima scegli data e ora" : selectableVehicles.length ? "Seleziona mezzo" : "Nessun mezzo disponibile"}</option>{selectableVehicles.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
-    <label className="text-xs text-slate-400 sm:col-span-2">Asset da consegnare <span className="text-slate-600">(opzionale)</span><select aria-label="Asset da consegnare" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="cargoAssetId" onChange={(event) => onCargoAssetChange(event.target.value)} value={cargoAssetId}><option value="">Nessun asset associato</option>{selectableCargo.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
+    {(!transportMode || transportMode === "ASSET_TRANSFER" || transportMode === "RETURN_TO_WAREHOUSE") && <label className="text-xs text-slate-400 sm:col-span-2">Asset o attrezzatura {transportMode === "ASSET_TRANSFER" ? <span className="text-rose-200">(obbligatorio)</span> : <span className="text-slate-600">(opzionale)</span>}<select aria-label="Asset o attrezzatura" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="cargoAssetId" onChange={(event) => onCargoAssetChange(event.target.value)} required={transportMode === "ASSET_TRANSFER"} value={cargoAssetId}><option value="">{transportMode === "ASSET_TRANSFER" ? "Seleziona asset disponibile" : "Nessun asset associato"}</option>{selectableCargo.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>}
     {state === "idle" && <p className="text-[10px] text-slate-600 sm:col-span-2">Inserisci la data pianificata per verificare risorse e conflitti.</p>}
     {state === "error" && <p className="text-[10px] text-amber-200 sm:col-span-2">Registro risorse non disponibile: la missione non può essere confermata.</p>}
     {state === "ready" && catalog?.availability === "NO_RESOURCES" && <p className="text-[10px] text-amber-200 sm:col-span-2">Non ci sono contemporaneamente un autista e un mezzo disponibili in questa finestra.</p>}
-    {state === "ready" && catalog && <p className="text-[10px] text-slate-600 sm:col-span-2">Disponibili: {catalog.totals.availableDrivers} autisti · {catalog.totals.availableVehicles} mezzi · {catalog.totals.availableCargoAssets} asset.</p>}
+    {state === "ready" && catalog && <p className="text-[10px] text-slate-600 sm:col-span-2">Disponibili nella finestra: {catalog.totals.availableDrivers} autisti · {catalog.totals.availableVehicles} mezzi{(!transportMode || transportMode === "ASSET_TRANSFER" || transportMode === "RETURN_TO_WAREHOUSE") ? ` · ${catalog.totals.availableCargoAssets} asset` : ""}.</p>}
   </fieldset>;
 }
