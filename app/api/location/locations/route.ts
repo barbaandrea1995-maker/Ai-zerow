@@ -264,3 +264,162 @@ export async function POST(request: Request) {
     return Response.json({ error: "location_write_unavailable" }, { status: 503 });
   }
 }
+
+export async function PATCH(request: Request) {
+  const context = await getAuthorityContext();
+  if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  if (!hasCapability(context, "location.manage.geofences")) {
+    return Response.json({ error: "forbidden", capability: "location.manage.geofences" }, { status: 403 });
+  }
+
+  let input: JsonObject;
+  try {
+    const parsed = await request.json() as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return Response.json({ error: "invalid_json" }, { status: 400 });
+    input = parsed as JsonObject;
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  const geofenceId = bounded(input.geofenceId, 160);
+  const entityType = bounded(input.entityType, 40).toUpperCase();
+  const entityId = bounded(input.entityId, 160);
+  const radiusMeters = Number(input.radiusMeters);
+  const expectedVersion = input.expectedVersion === undefined ? null : Number(input.expectedVersion);
+  const idempotencyKey = bounded(input.idempotencyKey, 160);
+
+  if (!geofenceId && (!isLocationEntityType(entityType) || !entityId)) {
+    return Response.json({ error: "geofence_target_required" }, { status: 400 });
+  }
+  if (!Number.isInteger(radiusMeters) || radiusMeters < 20 || radiusMeters > 5_000) {
+    return Response.json({ error: "geofence_radius_must_be_20_to_5000_meters" }, { status: 400 });
+  }
+  if (expectedVersion !== null && (!Number.isInteger(expectedVersion) || expectedVersion < 1)) {
+    return Response.json({ error: "geofence_expected_version_invalid" }, { status: 400 });
+  }
+  if (idempotencyKey.length < 4) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
+
+  try {
+    const db = getDb();
+    const [existingFence] = await db.select().from(geofences).where(
+      geofenceId
+        ? and(eq(geofences.tenantId, context.tenantId), eq(geofences.id, geofenceId))
+        : and(eq(geofences.tenantId, context.tenantId), eq(geofences.entityType, entityType), eq(geofences.entityId, entityId), eq(geofences.status, "ACTIVE")),
+    ).limit(1);
+
+    if (!existingFence) return Response.json({ error: "geofence_not_found" }, { status: 404 });
+    if (existingFence.shapeType !== "CIRCLE") return Response.json({ error: "only_circle_geofence_can_change_radius" }, { status: 409 });
+
+    const [existingEvent] = await db.select().from(s06Events).where(and(
+      eq(s06Events.tenantId, context.tenantId),
+      eq(s06Events.idempotencyKey, idempotencyKey),
+    )).limit(1);
+    if (existingEvent) {
+      const [readback] = await db.select().from(geofences).where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.id, existingFence.id))).limit(1);
+      return Response.json({
+        context: publicAuthorityContext(context),
+        geofence: readback ? geofenceForResponse(readback) : null,
+        eventId: existingEvent.eventId,
+        idempotent: true,
+        readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
+      }, { headers: responseHeaders() });
+    }
+    if (expectedVersion !== null && expectedVersion !== existingFence.version) {
+      return Response.json({ error: "geofence_version_conflict", expectedVersion, currentVersion: existingFence.version }, { status: 409 });
+    }
+
+    const now = new Date().toISOString();
+    const nextVersion = existingFence.version + 1;
+    const eventId = crypto.randomUUID();
+    const correlationId = crypto.randomUUID();
+    const eventPayload = JSON.stringify({
+      action: "update_radius",
+      geofenceId: existingFence.id,
+      locationId: existingFence.locationId,
+      entityType: existingFence.entityType,
+      entityId: existingFence.entityId,
+      previousRadiusMeters: existingFence.radiusMeters,
+      radiusMeters,
+      version: nextVersion,
+    });
+
+    const updatedRows = await db.batch([
+      db.update(geofences)
+        .set({ radiusMeters, version: nextVersion, updatedAt: now })
+        .where(and(
+          eq(geofences.id, existingFence.id),
+          eq(geofences.tenantId, context.tenantId),
+          eq(geofences.version, existingFence.version),
+          eq(geofences.status, "ACTIVE"),
+        ))
+        .returning(),
+      db.insert(s06Events).values({
+        eventId,
+        tenantId: context.tenantId,
+        eventType: "location.geofence.updated",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId: context.actorId,
+        source: "sites-location-intelligence",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "geo.geofence",
+        aggregateId: existingFence.id,
+        aggregateVersion: nextVersion,
+        payloadJson: eventPayload,
+        correlationId,
+        causationId: null,
+        idempotencyKey,
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }),
+      db.insert(s06Outbox).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        eventId,
+        topic: "zerow.location.geofence.updated",
+        status: "PENDING_EXTERNAL_CONSUMER",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(),
+        tenantId: context.tenantId,
+        aggregateType: "geo.geofence",
+        aggregateId: existingFence.id,
+        expectedVersion: nextVersion,
+        observedVersion: nextVersion,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Raggio geofence aggiornato con capability location.manage.geofences e rilettura server-side.",
+        createdAt: now,
+        updatedAt: now,
+      }),
+    ]);
+
+    const updated = (updatedRows[0] as (typeof geofences.$inferSelect)[])[0];
+    if (!updated) return Response.json({ error: "geofence_version_conflict", currentVersion: existingFence.version }, { status: 409 });
+
+    await auditLocationAccess({
+      context,
+      capability: "location.manage.geofences",
+      action: "UPDATE_GEOFENCE_RADIUS",
+      resourceType: "GEOFENCE",
+      resourceId: existingFence.id,
+      purpose: "Aggiornamento autorizzato del raggio operativo della sede.",
+      metadata: { entityType: existingFence.entityType, entityId: existingFence.entityId, previousRadiusMeters: existingFence.radiusMeters, radiusMeters, version: nextVersion },
+    });
+
+    return Response.json({
+      context: publicAuthorityContext(context),
+      geofence: geofenceForResponse(updated),
+      eventId,
+      idempotent: false,
+      readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
+    }, { headers: responseHeaders() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/unique|constraint/i.test(message)) return Response.json({ error: "geofence_idempotency_or_version_conflict" }, { status: 409 });
+    return Response.json({ error: "geofence_update_unavailable" }, { status: 503 });
+  }
+}

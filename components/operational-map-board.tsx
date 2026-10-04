@@ -68,6 +68,7 @@ export type OperationalMapLocation = {
 };
 
 export type OperationalMapLivePayload = {
+  context?: { capabilities?: string[] };
   locations: OperationalMapLocation[];
   geofences: Array<{
     id: string;
@@ -76,6 +77,7 @@ export type OperationalMapLivePayload = {
     entityId: string;
     name: string;
     shapeType: string;
+    version: number;
     center: { latitude: number; longitude: number } | null;
     radiusMeters: number | null;
     polygon: unknown;
@@ -271,6 +273,40 @@ function locationStatusLabel(value: string | null | undefined) {
 type MapEntitySelection = { entityType: string; entityId: string; label: string };
 type LiveMapSurfaceProps = { mapFilter: OperationalMapFilter; selectedMarker: string; onSelectMarker: (id: string) => void; onFilterChange: (value: OperationalMapFilter) => void; onOpenEntity?: (selection: MapEntitySelection) => void };
 
+function GeofenceQuickAction({ entityType, entityId, label, currentRadius, version, onUpdated }: { entityType: string; entityId: string; label: string; currentRadius: number; version: number; onUpdated: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const setOneKilometer = async () => {
+    if (!window.confirm(`Impostare il geofence di ${label} a 1 km?`)) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/location/locations", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          entityType,
+          entityId,
+          radiusMeters: 1_000,
+          expectedVersion: version,
+          idempotencyKey: `command-map-geofence:${entityType}:${entityId}:1000:v${version}`,
+        }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "geofence_update_failed");
+      await onUpdated();
+      setNotice("Geofence aggiornato a 1 km e riletto dal server.");
+    } catch {
+      setNotice("Aggiornamento non riuscito: verifica autorizzazione e versione della geofence.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div className="border-t border-cyan-300/15 bg-cyan-300/[.025] px-4 py-3 sm:px-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.15em] text-cyan-200/75">GESTIONE GEOFENCE</p><p className="mt-1 text-[10px] text-slate-400">Raggio attuale: <span className="font-mono text-cyan-100">{currentRadius} m</span></p></div><button className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.07] px-3 py-2 text-[10px] font-semibold text-cyan-100 transition hover:bg-cyan-300/[.14] disabled:cursor-wait disabled:opacity-60" disabled={busy || currentRadius === 1_000} onClick={() => void setOneKilometer()} type="button">{busy ? <RefreshCw className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}{currentRadius === 1_000 ? "Geofence a 1 km" : "Imposta 1 km"}</button></div>{notice && <p className="mt-2 text-[10px] text-cyan-100/80">{notice}</p>}</div>;
+}
+
 function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilterChange, onOpenEntity }: LiveMapSurfaceProps) {
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -389,6 +425,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
   const selectedLocation = liveData?.locations.find((location) => `location:${location.id}` === selectedMarker);
   const selectedVehicle = liveData?.vehicles.find((vehicle) => `vehicle:${vehicle.id}` === selectedMarker);
   const selectedFence = selectedLocation ? liveData?.geofences.find((geofence) => geofence.locationId === selectedLocation.id || (geofence.entityType === selectedLocation.entityType && geofence.entityId === selectedLocation.entityId)) : null;
+  const canManageGeofences = Boolean(liveData?.context?.capabilities?.includes("location.manage.geofences"));
   const visibleSignals = featureData ? featureData.locations.features.length + featureData.vehicles.features.length + featureData.geofences.features.length : 0;
 
   if (useLegacyRenderer) {
@@ -408,6 +445,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
     {selectedVehicle && <div className="absolute bottom-14 left-3 max-w-[min(380px,calc(100%-24px))] rounded-2xl border border-cyan-300/25 bg-[#070b08]/95 p-3 shadow-[0_0_30px_rgba(89,217,255,.12)] backdrop-blur-xl sm:bottom-16 sm:left-4 sm:p-4"><div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><MapPin className="size-4" /></span><div className="min-w-0 flex-1"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">MEZZO · {selectedVehicle.state}</p><p className="mt-1 truncate text-sm font-semibold text-slate-100">{selectedVehicle.label}</p><p className="mt-0.5 truncate text-[10px] text-slate-500">{selectedVehicle.deviceLabel} · ultimo segnale {formatTime(selectedVehicle.recordedAt)}</p></div><button aria-label="Chiudi dettaglio mezzo" className="grid size-7 place-items-center rounded-lg text-slate-500 hover:bg-white/10 hover:text-white" onClick={() => onSelectMarker("")} type="button"><X className="size-4" /></button></div><p className="mt-3 text-[10px] text-cyan-100/80">{selectedVehicle.speedKmh !== null ? `${selectedVehicle.speedKmh} km/h` : "Velocità non disponibile"}{selectedVehicle.accuracyM !== null ? ` · precisione ${selectedVehicle.accuracyM} m` : ""}</p>{onOpenEntity && <button className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-2.5 text-[10px] font-semibold text-cyan-100 transition hover:bg-cyan-300/20" onClick={() => onOpenEntity({ entityType: "ASSET", entityId: selectedVehicle.id, label: selectedVehicle.label })} type="button">Apri asset<ExternalLink className="size-3" /></button>}</div>}
     <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/92 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/92 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
     </div>
+    {selectedLocation && canManageGeofences && ["CANTIERE", "COMMESSA"].includes(selectedLocation.entityType) && selectedFence?.shapeType === "CIRCLE" && selectedFence.radiusMeters !== null && <GeofenceQuickAction entityType={selectedLocation.entityType} entityId={selectedLocation.entityId} label={selectedLocation.label} currentRadius={selectedFence.radiusMeters} version={selectedFence.version} onUpdated={() => loadMapData()} />}
   </div>;
 }
 

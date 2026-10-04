@@ -234,6 +234,7 @@ export async function GET() {
         entityId: fence.entityId,
         name: fence.name,
         shapeType: fence.shapeType,
+        version: fence.version,
         center: fence.centerLatitudeE6 !== null && fence.centerLongitudeE6 !== null
           ? { latitude: roundedCoordinate(fence.centerLatitudeE6), longitude: roundedCoordinate(fence.centerLongitudeE6) }
           : null,
