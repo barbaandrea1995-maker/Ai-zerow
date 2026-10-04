@@ -115,6 +115,35 @@ export async function probeMapboxRuntime(): Promise<{
   };
 }
 
+/**
+ * Live Traccar probe used by the owner/provider status surface. The health
+ * check and webhook signing secret are reported separately because a tracker
+ * API being reachable is not enough to accept signed provider events.
+ */
+export async function probeTraccarRuntime(): Promise<{
+  status: "READY" | "NOT_CONFIGURED" | "UNAVAILABLE";
+  webhookSignature: "READY" | "NOT_CONFIGURED";
+  checkedAt: string;
+}> {
+  const webhookSignature = runtimeSecret("TRACCAR_WEBHOOK_SECRET")
+    ? "READY" as const
+    : "NOT_CONFIGURED" as const;
+  try {
+    const health = await new TraccarAdapter().healthCheck();
+    return {
+      status: health.status,
+      webhookSignature,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch {
+    return {
+      status: "UNAVAILABLE",
+      webhookSignature,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+}
+
 export type TrackingPosition = {
   providerEventId?: string;
   deviceId: string;
@@ -252,8 +281,12 @@ export class TraccarAdapter implements TrackingProvider {
 
   async healthCheck() {
     if (!this.base || !this.token) return { status: "NOT_CONFIGURED" as const, provider: "TRACCAR" };
-    const response = await this.request("/api/server");
-    return { status: response ? "READY" as const : "UNAVAILABLE" as const, provider: "TRACCAR" };
+    try {
+      const response = await this.request("/api/server");
+      return { status: response ? "READY" as const : "UNAVAILABLE" as const, provider: "TRACCAR" };
+    } catch {
+      return { status: "UNAVAILABLE" as const, provider: "TRACCAR" };
+    }
   }
 }
 

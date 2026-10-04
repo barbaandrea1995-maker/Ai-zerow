@@ -1,6 +1,6 @@
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { getLocationPostgisReadback, LocationPostgisReadbackError } from "@/lib/location-intelligence/postgis-readback";
-import { getLocationProviderStatus, probeMapboxRuntime } from "@/lib/location-intelligence/providers";
+import { getLocationProviderStatus, probeMapboxRuntime, probeTraccarRuntime } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +11,14 @@ export async function GET(request: Request) {
     return Response.json({ error: "forbidden", capability: "location.manage.providers" }, { status: 403 });
   }
   const providers = getLocationProviderStatus();
-  const probeRequested = new URL(request.url).searchParams.get("probe") === "mapbox";
-  const mapboxProbe = probeRequested && providers.geocoding.configured
+  const probe = new URL(request.url).searchParams.get("probe");
+  const mapboxProbeRequested = probe === "mapbox";
+  const traccarProbeRequested = probe === "traccar";
+  const mapboxProbe = mapboxProbeRequested && providers.geocoding.configured
     ? await probeMapboxRuntime()
+    : null;
+  const traccarProbe = traccarProbeRequested
+    ? await probeTraccarRuntime()
     : null;
   let postgisReadback: Awaited<ReturnType<typeof getLocationPostgisReadback>> | null = null;
   let postgisError: string | null = null;
@@ -52,10 +57,16 @@ export async function GET(request: Request) {
     runtimeGates: {
       mapProvider: mapboxProbe?.status === "READY"
         ? "LIVE_READY"
-        : probeRequested
+        : mapboxProbeRequested
           ? "LIVE_CHECK_FAILED"
           : "UNKNOWN_UNTIL_MAPBOX_RUNTIME_CHECK",
-      trackingProvider: "UNKNOWN_UNTIL_TRACCAR_RUNTIME_CHECK",
+      trackingProvider: traccarProbe?.status === "READY" && traccarProbe.webhookSignature === "READY"
+        ? "LIVE_READY"
+        : traccarProbe?.status === "READY"
+          ? "LIVE_API_READY_WEBHOOK_SECRET_MISSING"
+          : traccarProbeRequested
+            ? "LIVE_CHECK_FAILED"
+            : "UNKNOWN_UNTIL_TRACCAR_RUNTIME_CHECK",
       postgis: providers.storage.postgis === "CONNECTED_READBACK_VERIFIED"
         ? "CONNECTED_READBACK_VERIFIED"
         : "RUNTIME_READBACK_PENDING",
