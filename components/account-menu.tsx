@@ -101,9 +101,9 @@ export function AccountMenu({ actor }: { actor: AccountActor }) {
           asChild
           className="text-xs text-slate-300 focus:bg-lime-300/10 focus:text-lime-100"
         >
-          <Link href="/tenants">
+          <Link href="/onboarding">
             <ShieldCheck className="size-3.5 text-cyan-200" />
-            Tenant e accessi
+            Configurazione azienda
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem

@@ -14,7 +14,7 @@ export async function requirePageContext(options: PageAccessOptions = {}) {
 
   const context = await getAuthorityContext();
   if (!context) {
-    redirect(identity.status === "authenticated" ? "/tenants?reason=membership_required" : "/login");
+    redirect(identity.status === "authenticated" ? "/onboarding?mode=setup" : "/login");
   }
 
   // Neon is authoritative when a valid Neon session exists. When Neon is
