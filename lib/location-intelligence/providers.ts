@@ -17,7 +17,7 @@ function baseUrl(value: string) {
 export type LocationProviderStatus = {
   geocoding: { provider: "MAPBOX"; configured: boolean; status: "READY" | "NOT_CONFIGURED" };
   tracking: { provider: "TRACCAR"; configured: boolean; status: "READY" | "NOT_CONFIGURED" };
-  storage: { controlPlane: "D1"; postgis: "NOT_CONNECTED" | "CONFIGURED_UNVERIFIED" };
+  storage: { controlPlane: "D1"; postgis: "NOT_CONNECTED" | "CONFIGURED_UNVERIFIED" | "CONNECTED_READBACK_VERIFIED" | "DEGRADED" };
 };
 
 export function getLocationProviderStatus(): LocationProviderStatus {
