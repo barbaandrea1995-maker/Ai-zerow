@@ -130,6 +130,45 @@ body {
   font-feature-settings: "ss01" 1, "cv02" 1;
 }
 
+/* The operational map keeps the geographic context readable while matching the carbon command surface. */
+.zerow-map-surface .leaflet-container {
+  background: #050706;
+  color: var(--zw-text);
+  font-family: var(--font-sans);
+}
+
+.zerow-map-surface .zerow-map-tiles {
+  filter: brightness(0.62) saturate(0.72) contrast(1.12);
+}
+
+.zerow-map-surface .leaflet-control-attribution {
+  border: 1px solid rgba(200, 255, 34, 0.16);
+  border-radius: 8px 0 0;
+  background: rgba(3, 5, 4, 0.82);
+  color: rgba(178, 187, 176, 0.78);
+  font-size: 9px;
+  backdrop-filter: blur(8px);
+}
+
+.zerow-map-surface .leaflet-control-attribution a {
+  color: rgba(200, 255, 34, 0.86);
+}
+
+.zerow-map-surface .zerow-map-marker {
+  transition: filter 160ms ease, stroke-width 160ms ease;
+}
+
+.zerow-map-surface .zerow-map-marker-selected {
+  filter: drop-shadow(0 0 8px rgba(200, 255, 34, 0.72));
+  stroke-width: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zerow-map-surface .zerow-map-marker {
+    transition: none;
+  }
+}
+
 /* Shared Command shell: keep the sidebar fixed while its navigation scrolls internally. */
 aside > nav {
   min-height: 0;

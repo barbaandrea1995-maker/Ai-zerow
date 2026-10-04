@@ -217,7 +217,7 @@ function toLiveFeatures(data: OperationalMapLivePayload, filter: OperationalMapF
       return [{
         type: "Feature",
         id: `geofence:${geofence.id}`,
-        properties: { id: `geofence:${geofence.id}`, label: geofence.name, entityType: geofence.entityType },
+        properties: { id: `geofence:${geofence.id}`, label: geofence.name, entityType: geofence.entityType, entityId: geofence.entityId, locationId: geofence.locationId },
         geometry: { type: "Polygon", coordinates },
       } satisfies MapFeature];
     })
@@ -319,7 +319,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
       const L = module.default;
       leafletRef.current = module;
       const map = L.map(mapContainerRef.current, { zoomControl: false, preferCanvas: true, minZoom: 2, maxZoom: 19 }).setView([41.9028, 12.4964], 5.2);
-      const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, crossOrigin: true, attribution: "© OpenStreetMap contributors" }).addTo(map);
+      const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, crossOrigin: true, className: "zerow-map-tiles", attribution: "© OpenStreetMap contributors" }).addTo(map);
       tiles.on("tileerror", () => setTileError(true));
       const layers = L.layerGroup().addTo(map);
       mapRef.current = map;
@@ -347,11 +347,8 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
     const addPoint = (feature: MapFeature, fillColor: string, radius: number) => {
       if (feature.geometry.type !== "Point") return;
       const [longitude, latitude] = feature.geometry.coordinates;
-      const label = String(feature.properties.label || "Segnale operativo");
       const id = String(feature.properties.id || "");
-      const description = String(feature.properties.detail || "");
-      const tooltip = description && description !== label ? `${label} · ${description}` : label;
-      L.circleMarker([latitude, longitude], { radius, color: "#020403", weight: 2, fillColor, fillOpacity: 0.96 }).bindTooltip(tooltip, { direction: "top", offset: [0, -radius], opacity: 0.94 }).on("click", () => onSelectMarker(id)).addTo(layers);
+      L.circleMarker([latitude, longitude], { radius, color: "#020403", weight: 2, fillColor, fillOpacity: 0.96, className: feature.properties.selected ? "zerow-map-marker zerow-map-marker-selected" : "zerow-map-marker" }).on("click", () => onSelectMarker(id)).addTo(layers);
     };
     for (const feature of featureData.locations.features) {
       const color = feature.properties.entityType === "MAGAZZINO" ? "#59d9ff" : feature.properties.entityType === "CANTIERE" ? "#c8ff22" : "#dfff5c";
@@ -365,7 +362,10 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
       if (feature.geometry.type !== "Polygon") continue;
       const coordinates = feature.geometry.coordinates[0].map(([longitude, latitude]) => [latitude, longitude] as [number, number]);
       if (coordinates.length < 3) continue;
-      L.polygon(coordinates, { color: "#c8ff22", weight: 1.5, dashArray: "5 5", fillColor: "#c8ff22", fillOpacity: 0.08 }).bindTooltip(String(feature.properties.label || "Geofence"), { sticky: true, opacity: 0.9 }).addTo(layers);
+      L.polygon(coordinates, { color: "#c8ff22", weight: 1.5, dashArray: "5 5", fillColor: "#c8ff22", fillOpacity: 0.08, className: "zerow-map-geofence" }).on("click", () => {
+        const locationId = String(feature.properties.locationId || "");
+        if (locationId) onSelectMarker(`location:${locationId}`);
+      }).addTo(layers);
     }
     if (!didFitRef.current) {
       const coordinates = mapCoordinates(liveData!);
@@ -395,7 +395,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
     return <MapboxLiveMapSurface mapFilter={mapFilter} onFilterChange={onFilterChange} onSelectMarker={onSelectMarker} selectedMarker={selectedMarker} />;
   }
 
-  return <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)] sm:min-h-[430px]" ref={mapSurfaceRef}>
+  return <div className="zerow-map-surface relative min-h-[360px] overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)] sm:min-h-[430px]" ref={mapSurfaceRef}>
     <div className="absolute inset-0" ref={mapContainerRef} />
     <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(1,4,2,.04),rgba(1,3,2,.18))]" />
     <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/88 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-200">MAPPA LIVE · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-500 sm:inline">{formatTime(lastRead)}</span>}</div>
