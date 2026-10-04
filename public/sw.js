@@ -1,5 +1,5 @@
 const BUILD_ID = "ai-zerow-commercial-v1-rc2-9-local-r2026-10-02";
-const CACHE_REVISION = "onboarding-2026-10-04";
+const CACHE_REVISION = "map-surface-2026-10-04-01";
 const SHELL_CACHE = `zerow-shell-${BUILD_ID}-${CACHE_REVISION}`;
 const OFFLINE_URL = "/offline";
 const PRECACHE = ["/command", "/", OFFLINE_URL, "/manifest.webmanifest", "/icons/ai-zerow-192.png", "/icons/ai-zerow-512.png"];

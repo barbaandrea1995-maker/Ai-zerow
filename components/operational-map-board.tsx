@@ -246,15 +246,9 @@ function LiveMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilterCha
       if (!dataResponse.ok) throw new Error(payload.error || "map_readback_unavailable");
       setLiveData(payload);
       setLastRead(payload.readback?.checkedAt ?? new Date().toISOString());
-      if (config.configured && config.token) {
-        setMapToken(config.token);
-        setMapStyle(config.style || "mapbox://styles/mapbox/dark-v11");
-        setMapStatus("ready");
-      } else {
-        setMapToken(FALLBACK_TOKEN);
-        setMapStyle(FALLBACK_MAP_STYLE);
-        setMapStatus("fallback");
-      }
+      setMapToken(config.configured && config.token ? config.token : FALLBACK_TOKEN);
+      setMapStyle(FALLBACK_MAP_STYLE);
+      setMapStatus("fallback");
     } catch {
       setMapStatus("unavailable");
     } finally {
@@ -375,7 +369,7 @@ function LiveMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilterCha
   return <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)] sm:min-h-[430px]" ref={mapSurfaceRef}>
     <div className="absolute inset-0" ref={mapContainerRef} />
     <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_44%,rgba(200,255,34,.08),transparent_34%),linear-gradient(180deg,rgba(1,4,2,.14),rgba(1,3,2,.42))]" />
-    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/85 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">{mapStatus === "fallback" ? "MAPPA LIVE · BASE DI SUPPORTO" : "MAPBOX · SERVER READBACK"}</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-600 sm:inline">{formatTime(lastRead)}</span>}</div>
+    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/85 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">MAPPA LIVE · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-600 sm:inline">{formatTime(lastRead)}</span>}</div>
     <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur"><IconButton disabled={refreshing} label="Aggiorna mappa" onClick={() => void loadMapData()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10">{refreshing ? <RefreshCw className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</IconButton><IconButton label="Zoom in" onClick={() => mapRef.current?.zoomIn({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" onClick={() => mapRef.current?.zoomOut({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra vista" onClick={focusAll} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton><IconButton label="Schermo intero" onClick={() => { if (mapSurfaceRef.current?.requestFullscreen) void mapSurfaceRef.current.requestFullscreen(); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><PanelRight className="size-3.5" /></IconButton></div>
     {mapStatus === "loading" && <div className="absolute inset-0 grid place-items-center bg-[#050706]/40 backdrop-blur-[2px]"><div className="rounded-xl border border-lime-300/20 bg-[#070b08]/90 px-4 py-3 text-center text-xs text-lime-100"><RefreshCw className="mx-auto size-4 animate-spin text-lime-300" /><p className="mt-2">Connessione alla mappa operativa…</p></div></div>}
     {mapStatus === "unavailable" && <div className="absolute inset-x-4 top-1/2 mx-auto max-w-sm -translate-y-1/2 rounded-2xl border border-rose-300/20 bg-[#070b08]/92 p-4 text-center backdrop-blur"><MapIcon className="mx-auto size-7 text-rose-200" /><p className="mt-3 text-sm font-semibold text-slate-100">Mappa temporaneamente non disponibile</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Il readback non è stato completato. Usa Aggiorna per riprovare.</p></div>}

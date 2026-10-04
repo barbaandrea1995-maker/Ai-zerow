@@ -5,7 +5,10 @@ import { useEffect } from "react";
 export function PwaRegister() {
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined);
+      void navigator.serviceWorker.register("/sw.js", { scope: "/" }).then((registration) => {
+        void registration.update();
+        registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+      }).catch(() => undefined);
     }
   }, []);
 
