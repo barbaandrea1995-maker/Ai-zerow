@@ -92,7 +92,11 @@ function isEmail(value: string) {
 export function validateCompanyProfile(profile: CompanyProfile) {
   const country = profile.registeredCountry || "IT";
   if (!isCompanyLegalForm(profile.legalForm)) return { field: "legalForm", detail: "Seleziona la forma giuridica." };
-  if (country === "IT" && !isItalianVatNumber(profile.vatNumber)) return { field: "vatNumber", detail: "Inserisci una partita IVA italiana valida di 11 cifre." };
+  // During company registration we validate the legal identifier format. The
+  // checksum is kept available for a later registry/provider verification, but
+  // it must not block onboarding when the tenant is entering an existing VAT
+  // identifier that is still awaiting official verification.
+  if (country === "IT" && !/^\d{11}$/.test(profile.vatNumber)) return { field: "vatNumber", detail: "Inserisci una partita IVA italiana di 11 cifre." };
   if (country !== "IT" && !/^[A-Z0-9][A-Z0-9 .-]{1,30}$/.test(profile.vatNumber)) return { field: "vatNumber", detail: "Inserisci un VAT ID valido." };
   if (country === "IT" && !/^[A-Z0-9]{11,16}$/.test(profile.taxCode)) return { field: "taxCode", detail: "Inserisci un codice fiscale valido." };
   if (profile.registeredAddress.length < 5) return { field: "registeredAddress", detail: "Inserisci la sede legale completa di numero civico." };
