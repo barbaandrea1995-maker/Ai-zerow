@@ -5,6 +5,8 @@ import {
   s06Events,
   s06Outbox,
   s06Reconciliations,
+  geofences,
+  geoLocations,
   tenantWarehouses,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
@@ -90,6 +92,8 @@ export async function POST(request: Request) {
 
   const now = new Date().toISOString();
   const warehouseId = crypto.randomUUID();
+  const geoLocationId = `GEO-WAREHOUSE-${warehouseId}`;
+  const geofenceId = `GEOFENCE-WAREHOUSE-${warehouseId}`;
   const eventId = crypto.randomUUID();
   try {
     const db = getDb();
@@ -125,6 +129,50 @@ export async function POST(request: Request) {
         geofenceRadiusMeters: radius,
         locationSource,
         status: "active",
+        version: 1,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(geoLocations).values({
+        id: geoLocationId,
+        tenantId: context.tenantId,
+        entityType: "MAGAZZINO",
+        entityId: warehouseId,
+        formattedAddress: locationLabel,
+        street: "",
+        streetNumber: "",
+        city: locationLabel,
+        province: "",
+        postalCode: "",
+        country: "IT",
+        latitudeE6: Math.round(latitude * 1_000_000),
+        longitudeE6: Math.round(longitude * 1_000_000),
+        provider: locationSource === "browser_geolocation" ? "NATIVE_DEVICE" : "MANUAL",
+        providerPlaceId: null,
+        geocodeConfidenceMilli: 0,
+        verifiedByUser: 1,
+        verifiedAt: now,
+        status: "ACTIVE",
+        version: 1,
+        idempotencyKey: `warehouse-location:${warehouseId}`,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(geofences).values({
+        id: geofenceId,
+        tenantId: context.tenantId,
+        locationId: geoLocationId,
+        entityType: "MAGAZZINO",
+        entityId: warehouseId,
+        name,
+        shapeType: "CIRCLE",
+        centerLatitudeE6: Math.round(latitude * 1_000_000),
+        centerLongitudeE6: Math.round(longitude * 1_000_000),
+        radiusMeters: radius,
+        polygonJson: "[]",
+        status: "ACTIVE",
         version: 1,
         createdBy: context.actorId,
         createdAt: now,

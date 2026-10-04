@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai-rate-limit";
 import { askCompanyAiWithOpenAi } from "@/lib/company-ai-openai";
 import { searchCompanyAiKnowledge } from "@/lib/company-ai-knowledge";
+import { getLocationContextForCommand } from "@/lib/location-intelligence/company-ai-tools";
 import {
   getS07Context,
   getS07Ledger,
@@ -138,6 +139,15 @@ export async function POST(request: Request) {
       )).orderBy(desc(s04Records.updatedAt)).limit(36)
       : [];
     const knowledgeHints = searchCompanyAiKnowledge(command, { limit: 6 });
+    let locationContext: unknown[] = [];
+    try {
+      const locationReadback = await getLocationContextForCommand(context!, 80);
+      locationContext = locationReadback.events;
+    } catch {
+      // Location Intelligence is an additive provider boundary; a missing or
+      // unavailable provider must not break the governed Company AI fallback.
+      locationContext = [];
+    }
     const aiOutcome = await askCompanyAiWithOpenAi({
       prompt: command,
       actionType,
@@ -153,6 +163,7 @@ export async function POST(request: Request) {
         updatedAt: row.updatedAt,
       })),
       knowledgeContext: knowledgeHints,
+      locationContext,
     });
     const fallbackMessage = approvalRequired
       ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi scrittura."
@@ -176,6 +187,10 @@ export async function POST(request: Request) {
       suggestedActions: aiOutcome.result?.suggestedActions ?? [],
       limitations: aiOutcome.result?.limitations ?? [],
       contextRecordIds: operationalRows.map((row) => row.canonicalCode ?? row.id),
+      locationContextEventIds: locationContext.flatMap((item) => {
+        if (!isRecord(item) || typeof item.id !== "string") return [];
+        return [item.id];
+      }),
       knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
       idempotencyKey,
       requestedPayload,

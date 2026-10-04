@@ -507,3 +507,266 @@ export const operationalDocuments = sqliteTable("operational_documents", {
   tenantIdempotencyUnique: uniqueIndex("operational_documents_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
   tenantJobCreatedIdx: index("operational_documents_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
 }));
+
+/**
+ * Location Intelligence compatibility boundary.
+ *
+ * D1 keeps the Sites read/write contract until the authorized PostGIS
+ * projection is connected. Coordinates are stored as microdegrees here so
+ * the local surface never relies on floating point equality. Raw samples and
+ * derived events remain separate by design; Company AI only reads the latter.
+ */
+export const geoLocations = sqliteTable("geo_locations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  formattedAddress: text("formatted_address").notNull().default(""),
+  street: text("street").notNull().default(""),
+  streetNumber: text("street_number").notNull().default(""),
+  city: text("city").notNull().default(""),
+  province: text("province").notNull().default(""),
+  postalCode: text("postal_code").notNull().default(""),
+  country: text("country").notNull().default("IT"),
+  latitudeE6: integer("latitude_e6").notNull(),
+  longitudeE6: integer("longitude_e6").notNull(),
+  provider: text("provider").notNull().default("MANUAL"),
+  providerPlaceId: text("provider_place_id"),
+  geocodeConfidenceMilli: integer("geocode_confidence_milli").notNull().default(0),
+  verifiedByUser: integer("verified_by_user").notNull().default(0),
+  verifiedAt: text("verified_at"),
+  status: text("status").notNull().default("ACTIVE"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantEntityUnique: uniqueIndex("geo_locations_tenant_entity_uq").on(table.tenantId, table.entityType, table.entityId),
+  tenantStatusIdx: index("geo_locations_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+  tenantIdempotencyUnique: uniqueIndex("geo_locations_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+}));
+
+export const geofences = sqliteTable("geofences", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  locationId: text("location_id").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  name: text("name").notNull(),
+  shapeType: text("shape_type").notNull(),
+  centerLatitudeE6: integer("center_latitude_e6"),
+  centerLongitudeE6: integer("center_longitude_e6"),
+  radiusMeters: integer("radius_meters"),
+  polygonJson: text("polygon_json").notNull().default("[]"),
+  status: text("status").notNull().default("ACTIVE"),
+  version: integer("version").notNull().default(1),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantLocationUnique: uniqueIndex("geofences_tenant_location_uq").on(table.tenantId, table.locationId),
+  tenantEntityIdx: index("geofences_tenant_entity_idx").on(table.tenantId, table.entityType, table.entityId, table.status),
+}));
+
+export const trackingProviders = sqliteTable("tracking_providers", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  providerType: text("provider_type").notNull(),
+  label: text("label").notNull(),
+  status: text("status").notNull().default("NOT_CONFIGURED"),
+  endpointUrl: text("endpoint_url").notNull().default(""),
+  tokenReference: text("token_reference").notNull().default(""),
+  configJson: text("config_json").notNull().default("{}"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantProviderUnique: uniqueIndex("tracking_providers_tenant_type_uq").on(table.tenantId, table.providerType),
+  tenantStatusIdx: index("tracking_providers_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+}));
+
+export const trackingDevices = sqliteTable("tracking_devices", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  providerId: text("provider_id").notNull(),
+  externalDeviceId: text("external_device_id").notNull(),
+  label: text("label").notNull(),
+  deviceType: text("device_type").notNull().default("VEHICLE_GPS"),
+  status: text("status").notNull().default("ACTIVE"),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantProviderDeviceUnique: uniqueIndex("tracking_devices_tenant_provider_external_uq").on(table.tenantId, table.providerId, table.externalDeviceId),
+  tenantStatusIdx: index("tracking_devices_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+}));
+
+export const vehicleDeviceBindings = sqliteTable("vehicle_device_bindings", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  vehicleId: text("vehicle_id").notNull(),
+  deviceId: text("device_id").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  status: text("status").notNull().default("ACTIVE"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantVehicleActiveIdx: index("vehicle_device_bindings_tenant_vehicle_status_idx").on(table.tenantId, table.vehicleId, table.status, table.effectiveFrom),
+  tenantDeviceActiveIdx: index("vehicle_device_bindings_tenant_device_status_idx").on(table.tenantId, table.deviceId, table.status, table.effectiveFrom),
+}));
+
+export const trackingSessions = sqliteTable("tracking_sessions", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  employeeId: text("employee_id").notNull(),
+  vehicleId: text("vehicle_id").notNull(),
+  trackingDeviceId: text("tracking_device_id").notNull(),
+  shiftId: text("shift_id").notNull(),
+  startedAt: text("started_at").notNull(),
+  endedAt: text("ended_at"),
+  trackingSource: text("tracking_source").notNull(),
+  status: text("status").notNull().default("PENDING"),
+  createdBy: text("created_by").notNull(),
+  policySnapshotId: text("policy_snapshot_id").notNull(),
+  engineStateJson: text("engine_state_json").notNull().default("{}"),
+  failureReason: text("failure_reason").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantEmployeeStatusIdx: index("tracking_sessions_tenant_employee_status_idx").on(table.tenantId, table.employeeId, table.status, table.startedAt),
+  tenantVehicleStatusIdx: index("tracking_sessions_tenant_vehicle_status_idx").on(table.tenantId, table.vehicleId, table.status, table.startedAt),
+  tenantShiftIdx: index("tracking_sessions_tenant_shift_idx").on(table.tenantId, table.shiftId, table.startedAt),
+}));
+
+/** Raw telemetry is append-only and is never exposed to Company AI by default. */
+export const locationSamples = sqliteTable("location_samples", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  trackingSessionId: text("tracking_session_id").notNull(),
+  trackingDeviceId: text("tracking_device_id").notNull(),
+  vehicleId: text("vehicle_id").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+  receivedAt: text("received_at").notNull(),
+  latitudeE6: integer("latitude_e6").notNull(),
+  longitudeE6: integer("longitude_e6").notNull(),
+  accuracyM: integer("accuracy_m"),
+  speedKmh: integer("speed_kmh"),
+  heading: integer("heading"),
+  altitude: integer("altitude"),
+  provider: text("provider").notNull(),
+  providerEventId: text("provider_event_id"),
+  dedupeKey: text("dedupe_key").notNull(),
+  rawMetadataJson: text("raw_metadata_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantDedupeUnique: uniqueIndex("location_samples_tenant_dedupe_uq").on(table.tenantId, table.dedupeKey),
+  tenantSessionRecordedIdx: index("location_samples_tenant_session_recorded_idx").on(table.tenantId, table.trackingSessionId, table.recordedAt),
+  tenantVehicleRecordedIdx: index("location_samples_tenant_vehicle_recorded_idx").on(table.tenantId, table.vehicleId, table.recordedAt),
+}));
+
+/** Deterministic business events derived by the server from raw samples. */
+export const locationEvents = sqliteTable("location_events", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  eventType: text("event_type").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  trackingSessionId: text("tracking_session_id").notNull(),
+  employeeId: text("employee_id").notNull(),
+  vehicleId: text("vehicle_id").notNull(),
+  locationId: text("location_id"),
+  geofenceId: text("geofence_id"),
+  source: text("source").notNull(),
+  confidenceMilli: integer("confidence_milli").notNull().default(0),
+  evidenceJson: text("evidence_json").notNull().default("{}"),
+  correlationId: text("correlation_id").notNull(),
+  dedupeKey: text("dedupe_key").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantDedupeUnique: uniqueIndex("location_events_tenant_dedupe_uq").on(table.tenantId, table.dedupeKey),
+  tenantOccurredIdx: index("location_events_tenant_occurred_idx").on(table.tenantId, table.occurredAt),
+  tenantVehicleIdx: index("location_events_tenant_vehicle_occurred_idx").on(table.tenantId, table.vehicleId, table.occurredAt),
+  tenantEmployeeIdx: index("location_events_tenant_employee_occurred_idx").on(table.tenantId, table.employeeId, table.occurredAt),
+  tenantTypeIdx: index("location_events_tenant_type_occurred_idx").on(table.tenantId, table.eventType, table.occurredAt),
+}));
+
+export const routePlans = sqliteTable("route_plans", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  missionId: text("mission_id"),
+  jobId: text("job_id"),
+  driverId: text("driver_id").notNull(),
+  vehicleId: text("vehicle_id").notNull(),
+  status: text("status").notNull().default("PLANNED"),
+  plannedStartAt: text("planned_start_at").notNull(),
+  startedAt: text("started_at"),
+  endedAt: text("ended_at"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantStatusIdx: index("route_plans_tenant_status_start_idx").on(table.tenantId, table.status, table.plannedStartAt),
+  tenantDriverIdx: index("route_plans_tenant_driver_start_idx").on(table.tenantId, table.driverId, table.plannedStartAt),
+  tenantVehicleIdx: index("route_plans_tenant_vehicle_start_idx").on(table.tenantId, table.vehicleId, table.plannedStartAt),
+}));
+
+export const routeStops = sqliteTable("route_stops", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  routePlanId: text("route_plan_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  locationId: text("location_id").notNull(),
+  expectedArrivalAt: text("expected_arrival_at"),
+  expectedDepartureAt: text("expected_departure_at"),
+  status: text("status").notNull().default("PLANNED"),
+  deliveryStatus: text("delivery_status").notNull().default("PLANNED"),
+  arrivedAt: text("arrived_at"),
+  departedAt: text("departed_at"),
+  evidenceJson: text("evidence_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantRouteSequenceUnique: uniqueIndex("route_stops_tenant_route_sequence_uq").on(table.tenantId, table.routePlanId, table.sequence),
+  tenantRouteStatusIdx: index("route_stops_tenant_route_status_idx").on(table.tenantId, table.routePlanId, table.status, table.sequence),
+  tenantLocationIdx: index("route_stops_tenant_location_idx").on(table.tenantId, table.locationId, table.sequence),
+}));
+
+/** Append-only delivery evidence ledger; GPS alone can never confirm delivery. */
+export const deliveryEvents = sqliteTable("delivery_events", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  routeStopId: text("route_stop_id").notNull(),
+  missionId: text("mission_id"),
+  jobId: text("job_id"),
+  eventType: text("event_type").notNull(),
+  evidenceType: text("evidence_type").notNull(),
+  evidenceReference: text("evidence_reference").notNull().default(""),
+  occurredAt: text("occurred_at").notNull(),
+  confirmedBy: text("confirmed_by").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("delivery_events_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantStopOccurredIdx: index("delivery_events_tenant_stop_occurred_idx").on(table.tenantId, table.routeStopId, table.occurredAt),
+}));
+
+/** Every sensitive location read is attributable to a capability and purpose. */
+export const locationAccessAudit = sqliteTable("location_access_audit", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  actorId: text("actor_id").notNull(),
+  capability: text("capability").notNull(),
+  action: text("action").notNull(),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id").notNull().default(""),
+  purpose: text("purpose").notNull(),
+  outcome: text("outcome").notNull(),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantCreatedIdx: index("location_access_audit_tenant_created_idx").on(table.tenantId, table.createdAt),
+  tenantActorIdx: index("location_access_audit_tenant_actor_created_idx").on(table.tenantId, table.actorId, table.createdAt),
+}));
