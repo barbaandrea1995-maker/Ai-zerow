@@ -1,16 +1,20 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import "mapbox-gl/dist/mapbox-gl.css";
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Crosshair,
   LocateFixed,
   Map as MapIcon,
   Navigation,
   PanelRight,
+  RefreshCw,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
 } from "lucide-react";
+import type { GeoJSONSource, Map as MapboxMap } from "mapbox-gl";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export type OperationalMapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "GEOFENCE";
@@ -27,6 +31,52 @@ export type OperationalMapMarker = {
   tone: OperationalMapTone;
 };
 
+export type OperationalMapLivePayload = {
+  locations: Array<{
+    id: string;
+    entityType: string;
+    entityId: string;
+    label: string;
+    address: string;
+    coordinates: { latitude: number; longitude: number };
+    provider: string;
+    verified: boolean;
+    status: string;
+    latestEvent?: { eventType?: string; occurredAt?: string } | null;
+  }>;
+  geofences: Array<{
+    id: string;
+    locationId: string;
+    entityType: string;
+    entityId: string;
+    name: string;
+    shapeType: string;
+    center: { latitude: number; longitude: number } | null;
+    radiusMeters: number | null;
+    polygon: unknown;
+  }>;
+  vehicles: Array<{
+    id: string;
+    label: string;
+    coordinates: { latitude: number; longitude: number };
+    recordedAt: string;
+    state: "LIVE" | "RECENT" | "STALE" | "UNKNOWN";
+    accuracyM: number | null;
+    speedKmh: number | null;
+    heading: number | null;
+    trackingSessionId: string | null;
+    employeeId: string | null;
+    trackingDeviceId: string;
+    deviceLabel: string;
+    provider: string;
+    latestEvent?: { eventType?: string; occurredAt?: string } | null;
+  }>;
+  activeSessions: Array<{ id: string; employeeId: string; vehicleId: string; trackingDeviceId: string; startedAt: string; source: string }>;
+  derivedEvents: Array<{ id: string; eventType: string; occurredAt: string; vehicleId: string; locationId: string | null }>;
+  rawSamples: string;
+  readback?: { checkedAt?: string };
+};
+
 const toneStyles: Record<OperationalMapTone, string> = {
   lime: "text-lime-300",
   amber: "text-amber-300",
@@ -34,27 +84,276 @@ const toneStyles: Record<OperationalMapTone, string> = {
   red: "text-rose-300",
 };
 
-function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick: () => void; className?: string }) {
-  return <button aria-label={label} className={`grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${className}`} onClick={onClick} type="button">{children}</button>;
+type Point = { latitude: number; longitude: number };
+type FeatureProperties = Record<string, string | number | boolean | null>;
+type MapFeature = {
+  type: "Feature";
+  id?: string;
+  properties: FeatureProperties;
+  geometry:
+    | { type: "Point"; coordinates: [number, number] }
+    | { type: "Polygon"; coordinates: Array<Array<[number, number]>> };
+};
+type FeatureCollection = { type: "FeatureCollection"; features: MapFeature[] };
+type LiveMapStatus = "loading" | "ready" | "provider_missing" | "unavailable";
+
+function IconButton({ label, children, onClick, className = "", disabled = false }: { label: string; children: ReactNode; onClick: () => void; className?: string; disabled?: boolean }) {
+  return <button aria-label={label} className={`grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 disabled:cursor-not-allowed disabled:opacity-50 ${className}`} disabled={disabled} onClick={onClick} type="button">{children}</button>;
 }
 
-export function OperationalMapBoard({
-  mapFilter,
-  onFilterChange,
-  selectedMarker,
-  onSelectMarker,
-  markers,
-}: {
-  mapFilter: OperationalMapFilter;
-  onFilterChange: (value: OperationalMapFilter) => void;
-  selectedMarker: string;
-  onSelectMarker: (id: string) => void;
-  markers: OperationalMapMarker[];
-}) {
+function emptyFeatureCollection(): FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function circlePolygon(center: Point, radiusMeters: number) {
+  const points: Array<[number, number]> = [];
+  const latitudeScale = Math.cos((center.latitude * Math.PI) / 180) || 1;
+  for (let index = 0; index <= 64; index += 1) {
+    const angle = (index / 64) * Math.PI * 2;
+    const latitude = center.latitude + (radiusMeters / 111_320) * Math.sin(angle);
+    const longitude = center.longitude + (radiusMeters / (111_320 * latitudeScale)) * Math.cos(angle);
+    points.push([longitude, latitude]);
+  }
+  return points;
+}
+
+function polygonCoordinates(value: unknown): Array<Array<[number, number]>> {
+  if (!Array.isArray(value)) return [];
+  const points = value.flatMap((item): [number, number][] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    const latitude = Number(row.latitude ?? row.lat);
+    const longitude = Number(row.longitude ?? row.lng ?? row.lon);
+    return Number.isFinite(latitude) && Number.isFinite(longitude) ? [[longitude, latitude]] : [];
+  });
+  return points.length >= 3 ? [[...points, points[0]]] : [];
+}
+
+function toLiveFeatures(data: OperationalMapLivePayload, filter: OperationalMapFilter, selectedMarker: string) {
+  const showLocations = filter === "TUTTI" || filter === "LAVORI" || filter === "GEOFENCE";
+  const showVehicles = filter === "TUTTI" || filter === "ASSET" || filter === "TEAM";
+  const locationFeatures: MapFeature[] = showLocations
+    ? data.locations
+      .filter((location) => filter !== "LAVORI" || ["CANTIERE", "COMMESSA"].includes(location.entityType))
+      .map((location) => ({
+        type: "Feature",
+        id: `location:${location.id}`,
+        properties: {
+          id: `location:${location.id}`,
+          label: location.label,
+          entityType: location.entityType,
+          detail: location.address || location.latestEvent?.eventType || "Sede operativa",
+          selected: selectedMarker === `location:${location.id}`,
+        },
+        geometry: { type: "Point", coordinates: [location.coordinates.longitude, location.coordinates.latitude] },
+      }))
+    : [];
+  const vehicleFeatures: MapFeature[] = showVehicles
+    ? data.vehicles
+      .filter((vehicle) => filter !== "TEAM" || Boolean(vehicle.employeeId))
+      .map((vehicle) => ({
+        type: "Feature",
+        id: `vehicle:${vehicle.id}`,
+        properties: {
+          id: `vehicle:${vehicle.id}`,
+          label: vehicle.label,
+          state: vehicle.state,
+          detail: vehicle.state === "LIVE" ? "GPS live" : vehicle.state === "RECENT" ? "GPS recente" : "GPS non aggiornato",
+          selected: selectedMarker === `vehicle:${vehicle.id}`,
+        },
+        geometry: { type: "Point", coordinates: [vehicle.coordinates.longitude, vehicle.coordinates.latitude] },
+      }))
+    : [];
+  const geofenceFeatures: MapFeature[] = (filter === "TUTTI" || filter === "GEOFENCE")
+    ? data.geofences.flatMap((geofence) => {
+      const coordinates = geofence.shapeType === "POLYGON"
+        ? polygonCoordinates(geofence.polygon)
+        : geofence.center && geofence.radiusMeters
+          ? [circlePolygon(geofence.center, geofence.radiusMeters)]
+          : [];
+      if (!coordinates.length) return [];
+      return [{
+        type: "Feature",
+        id: `geofence:${geofence.id}`,
+        properties: { id: `geofence:${geofence.id}`, label: geofence.name, entityType: geofence.entityType },
+        geometry: { type: "Polygon", coordinates },
+      } satisfies MapFeature];
+    })
+    : [];
+  return {
+    locations: { type: "FeatureCollection", features: locationFeatures } satisfies FeatureCollection,
+    vehicles: { type: "FeatureCollection", features: vehicleFeatures } satisfies FeatureCollection,
+    geofences: { type: "FeatureCollection", features: geofenceFeatures } satisfies FeatureCollection,
+  };
+}
+
+function setGeoJsonData(map: MapboxMap, sourceId: string, data: FeatureCollection) {
+  const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+  source?.setData(data as never);
+}
+
+function mapCoordinates(data: OperationalMapLivePayload) {
+  return [...data.locations.map((location) => location.coordinates), ...data.vehicles.map((vehicle) => vehicle.coordinates)]
+    .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
+}
+
+function formatTime(value: string | undefined | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function LiveMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilterChange }: { mapFilter: OperationalMapFilter; selectedMarker: string; onSelectMarker: (id: string) => void; onFilterChange: (value: OperationalMapFilter) => void }) {
+  const mapSurfaceRef = useRef<HTMLDivElement>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
+  const onSelectMarkerRef = useRef(onSelectMarker);
+  const didFitRef = useRef(false);
+  const [mapToken, setMapToken] = useState("");
+  const [mapStyle, setMapStyle] = useState("mapbox://styles/mapbox/dark-v11");
+  const [mapStatus, setMapStatus] = useState<LiveMapStatus>("loading");
+  const [liveData, setLiveData] = useState<OperationalMapLivePayload | null>(null);
+  const [lastRead, setLastRead] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => { onSelectMarkerRef.current = onSelectMarker; }, [onSelectMarker]);
+
+  const loadMapData = async (silent = false) => {
+    if (!silent) setRefreshing(true);
+    try {
+      const [configResponse, dataResponse] = await Promise.all([
+        fetch("/api/location/map-config", { cache: "no-store" }),
+        fetch("/api/command/map", { cache: "no-store" }),
+      ]);
+      const config = await configResponse.json() as { token?: string | null; style?: string; configured?: boolean };
+      const payload = await dataResponse.json() as OperationalMapLivePayload & { error?: string };
+      if (!dataResponse.ok) throw new Error(payload.error || "map_readback_unavailable");
+      setLiveData(payload);
+      setLastRead(payload.readback?.checkedAt ?? new Date().toISOString());
+      if (config.configured && config.token) {
+        setMapToken(config.token);
+        setMapStyle(config.style || "mapbox://styles/mapbox/dark-v11");
+        setMapStatus("ready");
+      } else {
+        setMapStatus("provider_missing");
+      }
+    } catch {
+      setMapStatus("unavailable");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void loadMapData(); }, 0);
+    const interval = window.setInterval(() => { void loadMapData(true); }, 30_000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapToken || !mapContainerRef.current || mapRef.current) return;
+    let cancelled = false;
+    void import("mapbox-gl").then((module) => {
+      if (cancelled || !mapContainerRef.current) return;
+      const mapboxgl = module.default;
+      mapboxgl.accessToken = mapToken;
+      const map = new mapboxgl.Map({ container: mapContainerRef.current, style: mapStyle, center: [12.4964, 41.9028], zoom: 5.2, attributionControl: false, pitchWithRotate: false, dragRotate: false });
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      map.addControl(new mapboxgl.FullscreenControl(), "top-right");
+      map.on("load", () => {
+        map.addSource("zerow-map-locations", { type: "geojson", data: emptyFeatureCollection() as never });
+        map.addSource("zerow-map-vehicles", { type: "geojson", data: emptyFeatureCollection() as never });
+        map.addSource("zerow-map-geofences", { type: "geojson", data: emptyFeatureCollection() as never });
+        map.addLayer({ id: "zerow-map-geofences-fill", type: "fill", source: "zerow-map-geofences", paint: { "fill-color": "#c8ff22", "fill-opacity": 0.07 } });
+        map.addLayer({ id: "zerow-map-geofences-line", type: "line", source: "zerow-map-geofences", paint: { "line-color": "#c8ff22", "line-opacity": 0.46, "line-width": 1.5, "line-dasharray": [2, 2] } });
+        map.addLayer({ id: "zerow-map-locations", type: "circle", source: "zerow-map-locations", paint: { "circle-color": ["match", ["get", "entityType"], "MAGAZZINO", "#59d9ff", "CANTIERE", "#c8ff22", "#dfff5c"], "circle-radius": ["case", ["boolean", ["get", "selected"], false], 9, 6], "circle-stroke-color": "#020403", "circle-stroke-width": 2, "circle-opacity": 0.95 } });
+        map.addLayer({ id: "zerow-map-locations-labels", type: "symbol", source: "zerow-map-locations", layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.45], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#efffc8", "text-halo-color": "#020403", "text-halo-width": 1.5 } });
+        map.addLayer({ id: "zerow-map-vehicles", type: "circle", source: "zerow-map-vehicles", paint: { "circle-color": ["match", ["get", "state"], "LIVE", "#c8ff22", "RECENT", "#59d9ff", "STALE", "#ffb52e", "#ff5538"], "circle-radius": ["case", ["boolean", ["get", "selected"], false], 10, 7], "circle-stroke-color": "#050706", "circle-stroke-width": 3, "circle-opacity": 1 } });
+        map.addLayer({ id: "zerow-map-vehicles-labels", type: "symbol", source: "zerow-map-vehicles", layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.5], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#ffffff", "text-halo-color": "#050706", "text-halo-width": 1.6 } });
+        const selectFeature = (event: { features?: Array<{ properties?: Record<string, unknown> }> }) => {
+          const id = event.features?.[0]?.properties?.id;
+          if (typeof id === "string") onSelectMarkerRef.current(id);
+        };
+        map.on("click", "zerow-map-locations", selectFeature);
+        map.on("click", "zerow-map-vehicles", selectFeature);
+        map.on("mouseenter", "zerow-map-locations", () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", "zerow-map-locations", () => { map.getCanvas().style.cursor = ""; });
+        map.on("mouseenter", "zerow-map-vehicles", () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", "zerow-map-vehicles", () => { map.getCanvas().style.cursor = ""; });
+        mapRef.current = map;
+        setMapReady(true);
+        window.setTimeout(() => map.resize(), 50);
+      });
+    }).catch(() => setMapStatus("unavailable"));
+    return () => {
+      cancelled = true;
+      mapRef.current?.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+  }, [mapToken, mapStyle]);
+
+  const featureData = useMemo(() => liveData ? toLiveFeatures(liveData, mapFilter, selectedMarker) : null, [liveData, mapFilter, selectedMarker]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !featureData || !map.isStyleLoaded()) return;
+    setGeoJsonData(map, "zerow-map-locations", featureData.locations);
+    setGeoJsonData(map, "zerow-map-vehicles", featureData.vehicles);
+    setGeoJsonData(map, "zerow-map-geofences", featureData.geofences);
+    if (!didFitRef.current && liveData) {
+      const coordinates = mapCoordinates(liveData);
+      if (coordinates.length === 1) map.flyTo({ center: [coordinates[0].longitude, coordinates[0].latitude], zoom: 12, duration: 500 });
+      if (coordinates.length > 1) {
+        const longitudes = coordinates.map((point) => point.longitude);
+        const latitudes = coordinates.map((point) => point.latitude);
+        map.fitBounds([[Math.min(...longitudes), Math.min(...latitudes)], [Math.max(...longitudes), Math.max(...latitudes)]], { padding: 64, maxZoom: 13, duration: 700 });
+      }
+      didFitRef.current = true;
+    }
+  }, [featureData, liveData, mapReady]);
+
+  const focusAll = () => {
+    onSelectMarker("");
+    didFitRef.current = false;
+    const map = mapRef.current;
+    if (!map || !liveData) return;
+    const coordinates = mapCoordinates(liveData);
+    if (coordinates.length === 1) map.flyTo({ center: [coordinates[0].longitude, coordinates[0].latitude], zoom: 12, duration: 650 });
+    if (coordinates.length > 1) {
+      const longitudes = coordinates.map((point) => point.longitude);
+      const latitudes = coordinates.map((point) => point.latitude);
+      map.fitBounds([[Math.min(...longitudes), Math.min(...latitudes)], [Math.max(...longitudes), Math.max(...latitudes)]], { padding: 64, maxZoom: 13, duration: 700 });
+    }
+    didFitRef.current = true;
+  };
+
+  const selectedLocation = liveData?.locations.find((location) => `location:${location.id}` === selectedMarker);
+  const selectedVehicle = liveData?.vehicles.find((vehicle) => `vehicle:${vehicle.id}` === selectedMarker);
+  const visibleSignals = featureData ? featureData.locations.features.length + featureData.vehicles.features.length + featureData.geofences.features.length : 0;
+
+  return <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)] sm:min-h-[430px]" ref={mapSurfaceRef}>
+    <div className="absolute inset-0" ref={mapContainerRef} />
+    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_44%,rgba(200,255,34,.08),transparent_34%),linear-gradient(180deg,rgba(1,4,2,.14),rgba(1,3,2,.42))]" />
+    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/85 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">MAPBOX · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-600 sm:inline">{formatTime(lastRead)}</span>}</div>
+    <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur"><IconButton disabled={refreshing} label="Aggiorna mappa" onClick={() => void loadMapData()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10">{refreshing ? <RefreshCw className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</IconButton><IconButton label="Zoom in" onClick={() => mapRef.current?.zoomIn({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" onClick={() => mapRef.current?.zoomOut({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra vista" onClick={focusAll} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton><IconButton label="Schermo intero" onClick={() => { if (mapSurfaceRef.current?.requestFullscreen) void mapSurfaceRef.current.requestFullscreen(); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><PanelRight className="size-3.5" /></IconButton></div>
+    {mapStatus === "loading" && <div className="absolute inset-0 grid place-items-center bg-[#050706]/40 backdrop-blur-[2px]"><div className="rounded-xl border border-lime-300/20 bg-[#070b08]/90 px-4 py-3 text-center text-xs text-lime-100"><RefreshCw className="mx-auto size-4 animate-spin text-lime-300" /><p className="mt-2">Connessione alla mappa operativa…</p></div></div>}
+    {mapStatus === "provider_missing" && <div className="absolute inset-x-4 top-1/2 mx-auto max-w-sm -translate-y-1/2 rounded-2xl border border-amber-300/20 bg-[#070b08]/92 p-4 text-center backdrop-blur"><MapIcon className="mx-auto size-7 text-amber-200" /><p className="mt-3 text-sm font-semibold text-slate-100">Mapbox non è pronto per il browser</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Il server legge già sedi e GPS. Serve un access token pubblico Mapbox <span className="font-mono text-amber-100">pk.</span> per disegnare la mappa.</p></div>}
+    {mapStatus === "unavailable" && <div className="absolute inset-x-4 top-1/2 mx-auto max-w-sm -translate-y-1/2 rounded-2xl border border-rose-300/20 bg-[#070b08]/92 p-4 text-center backdrop-blur"><MapIcon className="mx-auto size-7 text-rose-200" /><p className="mt-3 text-sm font-semibold text-slate-100">Mappa temporaneamente non disponibile</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Il readback non è stato completato. Usa Aggiorna per riprovare.</p></div>}
+    {selectedLocation && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-lime-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(200,255,34,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-lime-300/70">{selectedLocation.entityType}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedLocation.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedLocation.address || "Indirizzo non valorizzato"}</p></div><button aria-label="Chiudi dettaglio sede" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-lime-100/75">{selectedLocation.latestEvent?.eventType ? `${selectedLocation.latestEvent.eventType} · ${formatTime(selectedLocation.latestEvent.occurredAt)}` : selectedLocation.verified ? "Coordinate verificate" : "Coordinate da verificare"}</p></div>}
+    {selectedVehicle && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-cyan-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(89,217,255,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">MEZZO · {selectedVehicle.state}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedVehicle.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedVehicle.deviceLabel} · ultimo segnale {formatTime(selectedVehicle.recordedAt)}</p></div><button aria-label="Chiudi dettaglio mezzo" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-cyan-100/75">{selectedVehicle.speedKmh !== null ? `${selectedVehicle.speedKmh} km/h` : "Velocità non disponibile"}{selectedVehicle.accuracyM !== null ? ` · precisione ${selectedVehicle.accuracyM} m` : ""}</p></div>}
+    <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/90 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
+  </div>;
+}
+
+function SchematicMapSurface({ mapFilter, onFilterChange, selectedMarker, onSelectMarker, markers }: { mapFilter: OperationalMapFilter; onFilterChange: (value: OperationalMapFilter) => void; selectedMarker: string; onSelectMarker: (id: string) => void; markers: OperationalMapMarker[] }) {
   const [mapZoom, setMapZoom] = useState(1);
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const visibleMarkers = markers.filter((marker) => mapFilter === "TUTTI" || mapFilter === "GEOFENCE" || marker.kind === mapFilter);
-
   const toggleFullscreen = async () => {
     if (!mapSurfaceRef.current) return;
     try {
@@ -64,67 +363,9 @@ export function OperationalMapBoard({
       // Fullscreen is an optional browser capability; the map remains usable.
     }
   };
+  return <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-white/10 bg-[#050607] sm:min-h-[430px]" ref={mapSurfaceRef}><div className="absolute inset-0 transition-transform duration-200" style={{ transform: `scale(${mapZoom})`, transformOrigin: "center" }}><div className="map-grid absolute inset-0 opacity-80" /><div className="absolute inset-0 bg-[radial-gradient(circle_at_52%_48%,rgba(190,255,60,0.12),transparent_25%),radial-gradient(circle_at_16%_80%,rgba(65,224,255,0.07),transparent_22%)]" /><svg aria-label="Mappa operativa schematica" className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 900 500"><path d="M0 84C110 132 128 24 226 76S384 152 480 91 643 44 900 103" fill="none" stroke="rgba(104,123,128,0.25)" strokeWidth="2" /><path d="M0 216C95 190 116 288 250 232S410 186 506 262 708 348 900 270" fill="none" stroke="rgba(113,135,138,0.22)" strokeWidth="2" /><path d="M-20 384C112 323 151 428 292 356S472 330 585 398 748 437 930 347" fill="none" stroke="rgba(113,135,138,0.2)" strokeWidth="2" /><path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" stroke="rgba(190,255,60,0.72)" strokeDasharray="5 8" strokeLinecap="round" strokeWidth="2" /><path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" opacity="0.24" stroke="rgba(190,255,60,0.85)" strokeLinecap="round" strokeWidth="10" /></svg>{visibleMarkers.map((marker) => { const Icon = marker.icon; const selected = selectedMarker === marker.id; return <button key={marker.id} className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" onClick={() => onSelectMarker(marker.id)} style={{ left: marker.x, top: marker.y }} type="button"><span className={`absolute -inset-2 rounded-full border border-lime-300/35 ${selected ? "animate-pulse bg-lime-300/15" : "opacity-0"}`} /><span className={`relative flex items-center gap-2 rounded-lg border px-2 py-1.5 backdrop-blur-md transition ${selected ? "border-lime-300/55 bg-[#101604]/95 shadow-[0_0_24px_rgba(190,255,60,0.18)]" : "border-white/15 bg-black/75 hover:border-lime-300/40"}`}><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${toneStyles[marker.tone]}`}><Icon className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{marker.label}</span><span className="block text-[10px] text-lime-200">{marker.detail}</span></span></span></button>; })}</div><div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-amber-300" /><span className="text-[10px] font-medium text-slate-300">VISTA SCHEMATICA · DATI NON DISPONIBILI</span></div><div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur"><IconButton label="Zoom in" onClick={() => setMapZoom((current) => Math.min(1.35, Number((current + 0.1).toFixed(2))))} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" onClick={() => setMapZoom((current) => Math.max(0.8, Number((current - 0.1).toFixed(2))))} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra vista" onClick={() => { setMapZoom(1); onSelectMarker(""); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton><IconButton label="Schermo intero" onClick={() => void toggleFullscreen()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><PanelRight className="size-3.5" /></IconButton></div>{visibleMarkers.length === 0 && <div className="absolute inset-x-0 top-1/2 mx-auto max-w-xs -translate-y-1/2 rounded-xl border border-dashed border-white/15 bg-black/55 px-4 py-3 text-center text-xs leading-5 text-slate-500">Nessun segnale con coordinate nel readback autorizzato.</div>}<div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-black/80 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Asset</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Lavori</TabsTrigger><TabsTrigger className="hidden h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006] sm:inline-flex" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-500"><Crosshair className="size-3 text-amber-300" />{visibleMarkers.length} segnali</span></div></div>;
+}
 
-  return (
-    <section className="carbon-card rounded-2xl p-3 sm:p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-3">
-        <div className="flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200"><MapIcon className="size-4" /></span>
-          <div>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">OPERATIONS / READBACK</p>
-            <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-slate-100">Mappa operativa</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">Vista schematica dal readback D1 · provider mappa/GPS non collegato</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-1.5 rounded-full border border-amber-300/20 bg-amber-300/5 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-100 sm:flex"><span className="size-1.5 rounded-full bg-amber-300" />SCHEMATICA</span>
-          <IconButton label="Schermo intero" onClick={() => void toggleFullscreen()}><PanelRight className="size-4" /></IconButton>
-        </div>
-      </div>
-
-      <div ref={mapSurfaceRef} className="relative min-h-[360px] overflow-hidden rounded-xl border border-white/10 bg-[#050607] sm:min-h-[430px]">
-        <div className="absolute inset-0 transition-transform duration-200" style={{ transform: `scale(${mapZoom})`, transformOrigin: "center" }}>
-          <div className="map-grid absolute inset-0 opacity-80" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_52%_48%,rgba(190,255,60,0.12),transparent_25%),radial-gradient(circle_at_16%_80%,rgba(65,224,255,0.07),transparent_22%)]" />
-          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 900 500" preserveAspectRatio="none" aria-label="Mappa operativa schematica">
-            <path d="M0 84C110 132 128 24 226 76S384 152 480 91 643 44 900 103" fill="none" stroke="rgba(104,123,128,0.25)" strokeWidth="2" />
-            <path d="M0 216C95 190 116 288 250 232S410 186 506 262 708 348 900 270" fill="none" stroke="rgba(113,135,138,0.22)" strokeWidth="2" />
-            <path d="M-20 384C112 323 151 428 292 356S472 330 585 398 748 437 930 347" fill="none" stroke="rgba(113,135,138,0.2)" strokeWidth="2" />
-            <path d="M112 -10C158 86 121 152 196 224S255 350 212 530M333 -10C305 104 358 168 321 274S328 401 380 530M588 -10C554 98 622 184 565 280S580 423 631 530M776 -10C713 111 784 196 735 296S771 431 731 530" fill="none" stroke="rgba(99,116,120,0.16)" strokeWidth="1.5" />
-            <path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" stroke="rgba(190,255,60,0.72)" strokeDasharray="5 8" strokeLinecap="round" strokeWidth="2" />
-            <path d="M90 402L195 294L322 343L390 189L524 247L620 130L766 177L849 82" fill="none" opacity="0.24" stroke="rgba(190,255,60,0.85)" strokeLinecap="round" strokeWidth="10" />
-            <circle cx="390" cy="189" r="4" fill="#d6ff4c" />
-            <circle cx="620" cy="130" r="4" fill="#d6ff4c" />
-            <circle cx="195" cy="294" r="4" fill="#d6ff4c" />
-          </svg>
-          {visibleMarkers.map((marker) => {
-            const Icon = marker.icon;
-            const selected = selectedMarker === marker.id;
-            return <button key={marker.id} className="absolute -translate-x-1/2 -translate-y-1/2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300" style={{ left: marker.x, top: marker.y }} onClick={() => onSelectMarker(marker.id)} type="button"><span className={`absolute -inset-2 rounded-full border border-lime-300/35 ${selected ? "animate-pulse bg-lime-300/15" : "opacity-0"}`} /><span className={`relative flex items-center gap-2 rounded-lg border px-2 py-1.5 backdrop-blur-md transition ${selected ? "border-lime-300/55 bg-[#101604]/95 shadow-[0_0_24px_rgba(190,255,60,0.18)]" : "border-white/15 bg-black/75 hover:border-lime-300/40"}`}><span className={`grid size-6 place-items-center rounded-md border border-current/20 bg-current/10 ${toneStyles[marker.tone]}`}><Icon className="size-3.5" /></span><span><span className="block text-[11px] font-semibold text-slate-100">{marker.label}</span><span className="block text-[10px] text-lime-200">{marker.detail}</span></span></span></button>;
-          })}
-        </div>
-
-        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-amber-300" /><span className="text-[10px] font-medium text-slate-300">VISTA SCHEMATICA · D1 readback</span></div>
-        <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur">
-          <IconButton label="Zoom in" onClick={() => setMapZoom((current) => Math.min(1.35, Number((current + 0.1).toFixed(2))))} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton>
-          <IconButton label="Zoom out" onClick={() => setMapZoom((current) => Math.max(0.8, Number((current - 0.1).toFixed(2))))} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton>
-          <div className="mx-1 h-px bg-white/10" />
-          <IconButton label="Centra vista" onClick={() => { setMapZoom(1); onSelectMarker(""); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton>
-        </div>
-        {visibleMarkers.length === 0 && <div className="absolute inset-x-0 top-1/2 mx-auto max-w-xs -translate-y-1/2 rounded-xl border border-dashed border-white/15 bg-black/55 px-4 py-3 text-center text-xs leading-5 text-slate-500">Nessun segnale con coordinate nel readback D1. GPS/provider non collegato.</div>}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2">
-          <Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}>
-            <TabsList className="h-9 rounded-lg border border-white/10 bg-black/80 p-1 backdrop-blur" aria-label="Filtri mappa">
-              <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger>
-              <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Asset</TabsTrigger>
-              <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger>
-              <TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Lavori</TabsTrigger>
-              <TabsTrigger className="hidden h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006] sm:inline-flex" value="GEOFENCE">Geofence</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/75 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-500"><Crosshair className="size-3 text-amber-300" />{visibleMarkers.length} segnali</span>
-        </div>
-      </div>
-    </section>
-  );
+export function OperationalMapBoard({ mapFilter, onFilterChange, selectedMarker, onSelectMarker, markers, live = false }: { mapFilter: OperationalMapFilter; onFilterChange: (value: OperationalMapFilter) => void; selectedMarker: string; onSelectMarker: (id: string) => void; markers: OperationalMapMarker[]; live?: boolean }) {
+  return <section className="carbon-card rounded-2xl p-3 sm:p-4"><div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-3"><div className="flex items-center gap-3"><span className="grid size-8 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200"><MapIcon className="size-4" /></span><div><p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">{live ? "CONTROL / LIVE OPERATIONS" : "OPERATIONS / READBACK"}</p><h2 className="text-[15px] font-semibold tracking-[-0.01em] text-slate-100">Mappa operativa</h2><p className="mt-0.5 text-[11px] text-slate-500">{live ? "Cantieri, magazzini, geofence e mezzi autorizzati." : "Vista schematica dal readback autorizzato."}</p></div></div></div>{live ? <LiveMapSurface mapFilter={mapFilter} onFilterChange={onFilterChange} onSelectMarker={onSelectMarker} selectedMarker={selectedMarker} /> : <SchematicMapSurface mapFilter={mapFilter} markers={markers} onFilterChange={onFilterChange} onSelectMarker={onSelectMarker} selectedMarker={selectedMarker} />}</section>;
 }

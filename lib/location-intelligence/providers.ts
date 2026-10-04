@@ -10,6 +10,16 @@ function runtimeSecret(name: string) {
   return typeof local === "string" ? local.trim() : "";
 }
 
+/**
+ * Mapbox client tokens are public by design, but only a public `pk.` token is
+ * safe to hand to the browser. Secret tokens stay server-side and keep the
+ * map surface explicitly unavailable until a client token is configured.
+ */
+export function getMapboxClientToken() {
+  const token = runtimeSecret("MAPBOX_ACCESS_TOKEN");
+  return token.startsWith("pk.") ? token : "";
+}
+
 function baseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }

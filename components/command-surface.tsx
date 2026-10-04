@@ -667,7 +667,7 @@ export default function CommandSurface({
     }
 
     if (item.id === "operational-map") {
-      return <div className="h-full" id="operational-map"><OperationalMapBoard mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
+      return <div className="h-full" id="operational-map"><OperationalMapBoard live mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
     }
     if (item.id === "company-ai") {
       return <div className="h-full" id="company-ai"><CompanyAiPanel onOpenLedger={() => setLedgerOpen(true)} onQueryChange={setAssistantQuery} onQuickPrompt={(prompt) => { setAssistantQuery(prompt); setAssistantResponse(`Pronto a preparare: “${prompt}”. Conferma e policy restano necessarie prima di qualsiasi scrittura.`); }} onSubmit={submitAssistant} query={assistantQuery} response={assistantPanelResponse} runtimeStatus={aiRuntimeStatus} /></div>;
