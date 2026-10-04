@@ -1,16 +1,20 @@
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { getLocationPostgisReadback, LocationPostgisReadbackError } from "@/lib/location-intelligence/postgis-readback";
-import { getLocationProviderStatus } from "@/lib/location-intelligence/providers";
+import { getLocationProviderStatus, probeMapboxRuntime } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   if (!hasCapability(context, "location.manage.providers") && !hasCapability(context, "external_adapters.read")) {
     return Response.json({ error: "forbidden", capability: "location.manage.providers" }, { status: 403 });
   }
   const providers = getLocationProviderStatus();
+  const probeRequested = new URL(request.url).searchParams.get("probe") === "mapbox";
+  const mapboxProbe = probeRequested && providers.geocoding.configured
+    ? await probeMapboxRuntime()
+    : null;
   let postgisReadback: Awaited<ReturnType<typeof getLocationPostgisReadback>> | null = null;
   let postgisError: string | null = null;
   if (providers.storage.postgis === "CONFIGURED_UNVERIFIED") {
@@ -35,6 +39,7 @@ export async function GET() {
     version: "1.0.0",
     status: "IMPLEMENTATION_SPEC",
     providers,
+    mapboxProbe,
     postgisReadback: postgisReadback ?? (postgisError ? { status: "DEGRADED", error: postgisError } : null),
     contracts: {
       rawGpsIsNotBusinessTruth: true,
@@ -45,7 +50,11 @@ export async function GET() {
       audit: "LOCATION_READS_APPEND_ONLY",
     },
     runtimeGates: {
-      mapProvider: "UNKNOWN_UNTIL_MAPBOX_RUNTIME_CHECK",
+      mapProvider: mapboxProbe?.status === "READY"
+        ? "LIVE_READY"
+        : probeRequested
+          ? "LIVE_CHECK_FAILED"
+          : "UNKNOWN_UNTIL_MAPBOX_RUNTIME_CHECK",
       trackingProvider: "UNKNOWN_UNTIL_TRACCAR_RUNTIME_CHECK",
       postgis: providers.storage.postgis === "CONNECTED_READBACK_VERIFIED"
         ? "CONNECTED_READBACK_VERIFIED"

@@ -93,6 +93,28 @@ export async function geocodeWithMapbox(address: string): Promise<{
   }
 }
 
+/**
+ * Live provider probe used only by the owner/provider status surface. The
+ * probe deliberately uses a neutral public address and returns no coordinates
+ * or provider payload to the caller.
+ */
+export async function probeMapboxRuntime(): Promise<{
+  status: "READY" | "NOT_CONFIGURED" | "UNAVAILABLE";
+  candidateCount: number;
+  checkedAt: string;
+}> {
+  const result = await geocodeWithMapbox("Roma, Italia");
+  return {
+    status: result.status === "not_configured"
+      ? "NOT_CONFIGURED"
+      : result.status === "used" && result.candidates.length > 0
+        ? "READY"
+        : "UNAVAILABLE",
+    candidateCount: result.candidates.length,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 export type TrackingPosition = {
   providerEventId?: string;
   deviceId: string;
