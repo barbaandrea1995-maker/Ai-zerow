@@ -3,6 +3,19 @@ import { getMapboxClientToken } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
+const browserMapStyle = {
+  version: 8,
+  sources: {
+    "zerow-open-map": {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "© OpenStreetMap contributors",
+    },
+  },
+  layers: [{ id: "zerow-open-map", type: "raster", source: "zerow-open-map", paint: { "raster-opacity": 0.78 } }],
+} as const;
+
 export async function GET() {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -23,7 +36,8 @@ export async function GET() {
     configured: Boolean(token),
     status: token ? "READY" : "CLIENT_TOKEN_REQUIRED",
     token: token || null,
-    style: "mapbox://styles/mapbox/dark-v11",
+    style: browserMapStyle,
+    baseMap: "OPEN_STREET_MAP",
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   }, { headers: { "cache-control": "private, no-store" } });
 }
