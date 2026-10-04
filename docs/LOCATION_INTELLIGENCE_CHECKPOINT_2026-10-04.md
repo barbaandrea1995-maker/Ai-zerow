@@ -1,7 +1,7 @@
 # AI-ZEROW COMMAND — Location Intelligence checkpoint
 
 Recorded: 2026-10-04 UTC  
-Status: `POSTGIS PRODUCTION APPLIED · LEAST-PRIVILEGE RUNTIME CONFIGURED · READBACK DEPLOY PENDING`
+Status: `POSTGIS PRODUCTION APPLIED · LEAST-PRIVILEGE RUNTIME CONFIGURED · DEPLOYED`
 
 Runtime configuration: Sites revision `7` contiene `DATABASE_URL` e
 `LOCATION_DATABASE_URL` come secret server-side. `LOCATION_DATABASE_URL` usa
@@ -72,9 +72,9 @@ stato/contatori e verifica che il ruolo non disponga di permessi di scrittura.
 - Neon production readback — PASS: PostGIS 3.6.4, schema, RLS e query spaziale
 - ruolo `zerow_runtime` — PASS statico su grant, `NOINHERIT` e `NOBYPASSRLS`
 
-Il codice del readback runtime è pronto e l’ambiente Sites è alla revisione 7;
-serve un nuovo deploy privato per renderlo attivo. Il readback S10 autenticato
-resta da eseguire con una sessione owner reale.
+Il codice del readback runtime è attivo nella versione privata pubblicata con
+revisione ambiente Sites 7. Il readback S10 autenticato e il readback
+`/api/location/status` con sessione owner reale restano da eseguire.
 
 ## Prossimo checkpoint obbligatorio
 
