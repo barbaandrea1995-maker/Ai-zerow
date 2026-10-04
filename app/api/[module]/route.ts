@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { qrCodes, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import {
   adapterError,
   assertS04Tenant,
@@ -13,6 +13,7 @@ import {
   type S04Module,
 } from "@/lib/s04-adapter";
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
+import { canonicalPayload } from "@/lib/qr-adapter";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +161,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const id = `${moduleKey.toUpperCase()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const eventId = crypto.randomUUID();
     const aggregateType = `s04.${moduleKey}`;
+    const qrEntityId = naming?.canonicalCode ?? id;
+    const qrPayload = moduleKey === "assets" ? canonicalPayload("asset", qrEntityId) : null;
+    const qrIdentity = qrPayload
+      ? {
+        format: "QR",
+        entityType: "asset",
+        entityId: qrEntityId,
+        payload: qrPayload,
+        registry: "qr_codes",
+        source: "server-registration",
+      }
+      : undefined;
     const serializedPayload = JSON.stringify({
       ...payload,
       title,
@@ -167,6 +180,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       barcode: barcode || undefined,
       idempotencyKey,
       naming,
+      ...(qrIdentity ? { qr: qrIdentity } : {}),
       source: "sites-s04-adapter",
       createdAt: now,
     });
@@ -232,6 +246,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         createdAt: now,
         updatedAt: now,
       }),
+      ...(qrPayload ? [db.insert(qrCodes).values({
+        id: `${moduleKey.toUpperCase()}-QR-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+        tenantId: context!.tenantId,
+        format: "QR",
+        entityType: "asset",
+        entityId: qrEntityId,
+        label: title.slice(0, 120),
+        payload: qrPayload,
+        createdBy: context!.actorId,
+        createdAt: now,
+        updatedAt: now,
+      })] : []),
     ]);
 
     const [row] = await db.select().from(s04Records).where(and(

@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { qrCodes } from "@/db/schema";
+import { qrCodes, s04Records } from "@/db/schema";
 import {
   canonicalPayload,
   directoryMatch,
@@ -49,14 +49,23 @@ export async function GET(request: Request) {
 
     const canonical = canonicalPayload(match.entityType, match.entityId);
     const stored = storedDirect ?? await getQrByPayload(context!.tenantId, canonical);
+    const [asset] = match.entityType === "asset"
+      ? await getDb().select().from(s04Records).where(and(
+        eq(s04Records.tenantId, context!.tenantId),
+        eq(s04Records.module, "assets"),
+        eq(s04Records.canonicalCode, match.entityId),
+      )).limit(1)
+      : [];
     return Response.json({
       ...qrEnvelope(context!, stored ? [qrRecordForResponse(stored)] : []),
       resolved: {
         ...match,
+        ...(asset ? { title: asset.title, detail: asset.detail } : {}),
         canonicalPayload: canonical,
-        source: stored ? "sites-d1-registry" : "sites-directory-fallback",
+        source: stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : "sites-directory-fallback",
       },
       record: stored ? qrRecordForResponse(stored) : null,
+      asset: asset ? { id: asset.id, canonicalCode: asset.canonicalCode, title: asset.title, detail: asset.detail } : null,
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return Response.json({ error: qrAdapterError(error), module: "qr-barcode" }, { status: 503 });

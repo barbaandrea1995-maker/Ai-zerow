@@ -14,12 +14,19 @@ type ServerNamingDialogProps = {
   module: CreateModule;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
+  onCreated: (created?: CreatedAsset) => void;
   onNotice: (message: string) => void;
 };
 
+type CreatedAsset = {
+  id?: string;
+  canonicalCode?: string;
+  title?: string;
+  payload?: Record<string, unknown>;
+};
+
 type CreateResponse = {
-  created?: { canonicalCode?: string; id?: string };
+  created?: CreatedAsset;
   error?: string;
 };
 
@@ -83,7 +90,7 @@ export function ServerNamingDialog({ module, open, onOpenChange, onCreated, onNo
       if (!response.ok) throw new Error(payload.error ?? "server_naming_failed");
 
       const code = payload.created?.canonicalCode ?? payload.created?.id ?? "assegnato";
-      onCreated();
+      onCreated(payload.created);
       onOpenChange(false);
       onNotice(`Codice server assegnato: ${code}`);
       setDescription("");

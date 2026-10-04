@@ -10,9 +10,12 @@ export type MissionResource = {
   code: string | null;
   label: string;
   kind: MissionResourceKind;
+  actorId: string | null;
+  membershipId: string | null;
   status: string;
   available: boolean;
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
+  custody: { assignmentId: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
   qualifications: string[];
   updatedAt: string;
 };
@@ -29,6 +32,7 @@ export class MissionResourceError extends Error {
       | "vehicle_unavailable"
       | "cargo_asset_unavailable"
       | "mission_resource_conflict"
+      | "vehicle_assigned_to_other_driver"
       | "mission_window_invalid",
     public readonly details?: Record<string, unknown>,
   ) {
@@ -88,9 +92,12 @@ function resourceFromRow(row: typeof s04Records.$inferSelect, kind: MissionResou
     code: row.canonicalCode,
     label: row.title,
     kind,
+    actorId: stringValue(payload.actorId) || null,
+    membershipId: stringValue(payload.authorityMembershipId || payload.membershipId) || null,
     status,
     available: lifecycleAvailable(status),
     conflict: null,
+    custody: null,
     qualifications: qualifications(payload),
     updatedAt: row.updatedAt,
   };
@@ -157,6 +164,31 @@ async function activeAssignments(tenantId: string, excludeRecordId?: string) {
   });
 }
 
+async function activeAssetCustody(tenantId: string) {
+  const rows = await getDb().select().from(jobJourneyRecords).where(and(
+    eq(jobJourneyRecords.tenantId, tenantId),
+    eq(jobJourneyRecords.domain, "assets"),
+    eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+    inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
+  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1000);
+  return rows.flatMap((row) => {
+    const payload = parseJson(row.payloadJson);
+    const assetId = stringValue(payload.assetId, row.jobId);
+    const startsAt = stringValue(payload.startsAt);
+    const endsAt = stringValue(payload.endsAt) || null;
+    if (!assetId || !validDate(startsAt)) return [];
+    return [{
+      assignmentId: row.id,
+      assetId,
+      assigneeName: stringValue(payload.assigneeName, "Persona assegnata"),
+      assigneeActorId: stringValue(payload.assigneeActorId),
+      assigneeMembershipId: stringValue(payload.assigneeMembershipId),
+      startsAt: new Date(Date.parse(startsAt)).toISOString(),
+      endsAt: endsAt && validDate(endsAt) ? new Date(Date.parse(endsAt)).toISOString() : null,
+    }];
+  });
+}
+
 export async function getMissionResourceCatalog(args: {
   tenantId: string;
   plannedAt?: string;
@@ -169,7 +201,9 @@ export async function getMissionResourceCatalog(args: {
     return kind ? [resourceFromRow(row, kind)] : [];
   });
   const window = args.plannedAt ? normalizedMissionWindow(args.plannedAt, args.plannedEndAt) : null;
-  const assignments = window ? await activeAssignments(args.tenantId, args.excludeRecordId) : [];
+  const [assignments, custodyRows] = window
+    ? await Promise.all([activeAssignments(args.tenantId, args.excludeRecordId), activeAssetCustody(args.tenantId)])
+    : [[], []];
   const withAvailability = resources.map((resource) => {
     const conflict = window
       ? assignments.find((assignment) => assignment.references.includes(resource.id) && overlaps(
@@ -178,13 +212,25 @@ export async function getMissionResourceCatalog(args: {
         Date.parse(assignment.startsAt),
         Date.parse(assignment.endsAt),
       ))
+        : undefined;
+    const custody = window && resource.kind !== "driver"
+      ? custodyRows.find((assignment) => assignment.assetId === resource.id && overlaps(
+        Date.parse(window.startsAt),
+        Date.parse(window.endsAt),
+        Date.parse(assignment.startsAt),
+        assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY,
+      ))
       : undefined;
+    const cargoCustodyConflict = resource.kind === "cargo" && custody
+      ? { recordId: custody.assignmentId, title: `Assegnata a ${custody.assigneeName}`, startsAt: custody.startsAt, endsAt: custody.endsAt ?? window?.endsAt ?? custody.startsAt }
+      : null;
     return {
       ...resource,
-      available: resource.available && !conflict,
+      available: resource.available && !conflict && !cargoCustodyConflict,
       conflict: conflict
         ? { recordId: conflict.recordId, title: conflict.title, startsAt: conflict.startsAt, endsAt: conflict.endsAt }
-        : null,
+        : cargoCustodyConflict,
+      custody: custody ?? null,
     } satisfies MissionResource;
   });
 
@@ -233,6 +279,13 @@ export async function assertMissionResourceSelection(args: {
   if (!vehicle) throw new MissionResourceError("vehicle_not_found");
   if (args.cargoAssetId && !cargoAsset) throw new MissionResourceError("cargo_asset_not_found");
   if (!driver.available) throw new MissionResourceError(driver.conflict ? "mission_resource_conflict" : "driver_unavailable", { resourceId: driver.id, conflict: driver.conflict });
+  if (vehicle.custody && vehicle.custody.assigneeActorId !== driver.actorId && vehicle.custody.assigneeMembershipId !== driver.membershipId) {
+    throw new MissionResourceError("vehicle_assigned_to_other_driver", {
+      resourceId: vehicle.id,
+      assignedTo: vehicle.custody.assigneeName,
+      assignmentId: vehicle.custody.assignmentId,
+    });
+  }
   if (!vehicle.available) throw new MissionResourceError(vehicle.conflict ? "mission_resource_conflict" : "vehicle_unavailable", { resourceId: vehicle.id, conflict: vehicle.conflict });
   if (cargoAsset && !cargoAsset.available) throw new MissionResourceError(cargoAsset.conflict ? "mission_resource_conflict" : "cargo_asset_unavailable", { resourceId: cargoAsset.id, conflict: cargoAsset.conflict });
 

@@ -8,9 +8,12 @@ type ResourceOption = {
   code: string | null;
   label: string;
   kind: "driver" | "vehicle" | "cargo";
+  actorId: string | null;
+  membershipId: string | null;
   status: string;
   available: boolean;
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
+  custody: { assignmentId: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
   qualifications: string[];
   updatedAt: string;
 };
@@ -85,8 +88,9 @@ export function MissionResourceFields({
     return () => window.clearTimeout(timer);
   }, [plannedAt, plannedEndAt]);
 
+  const selectedDriver = useMemo(() => catalog?.drivers.find((resource) => resource.id === driverId) ?? null, [catalog, driverId]);
   const selectableDrivers = useMemo(() => catalog?.drivers.filter((resource) => resource.available) ?? [], [catalog]);
-  const selectableVehicles = useMemo(() => catalog?.vehicles.filter((resource) => resource.available) ?? [], [catalog]);
+  const selectableVehicles = useMemo(() => catalog?.vehicles.filter((resource) => resource.available && (!resource.custody || !selectedDriver || resource.custody.assigneeActorId === selectedDriver.actorId || resource.custody.assigneeMembershipId === selectedDriver.membershipId)) ?? [], [catalog, selectedDriver]);
   const selectableCargo = useMemo(() => catalog?.cargoAssets.filter((resource) => resource.available) ?? [], [catalog]);
   const hasDate = Boolean(plannedAt);
   const disabled = !hasDate || state === "loading" || state === "error";
