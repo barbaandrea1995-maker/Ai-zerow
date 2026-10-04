@@ -1,13 +1,13 @@
 # AI-ZEROW COMMAND — Location Intelligence checkpoint
 
 Recorded: 2026-10-04 UTC  
-Status: `POSTGIS PRODUCTION APPLIED · APP NOT DEPLOYED`
+Status: `POSTGIS PRODUCTION APPLIED · RUNTIME CONFIGURED · DEPLOYED`
 
 Runtime configuration: Sites revision `6` contiene `DATABASE_URL` e
 `LOCATION_DATABASE_URL` come secret server-side, entrambi puntati al branch
 Neon `production` tramite endpoint pooled. I valori non sono presenti nel
-repository e non vengono esposti nei readback. La revisione diventerà attiva
-nel Worker al prossimo deploy autorizzato.
+repository e non vengono esposti nei readback. La revisione è stata applicata
+al Worker con il deploy privato della versione Location Intelligence.
 
 ## Decision boundary
 
@@ -68,12 +68,12 @@ separati: Company AI non riceve campioni o coordinate grezze.
 - `pnpm audit:e2e` — PASS_WITH_AUTHENTICATED_GATE; E2E autenticato non eseguito
 - Neon production readback — PASS: PostGIS 3.6.4, schema, RLS e query spaziale
 
-Nessun deploy è stato eseguito in questa tranche.
+Deploy privato eseguito con successo dopo build e controlli statici. Il
+readback S10 autenticato resta da eseguire con una sessione owner reale.
 
 ## Prossimo checkpoint obbligatorio
 
-1. attivare la revisione runtime Sites con un deploy autorizzato e verificare
-   il readback S10 senza esporre la connection string;
+1. verificare il readback S10 autenticato senza esporre la connection string;
 2. configurare Mapbox e Traccar esclusivamente come secret server-side;
 3. collegare `Presenze.check_in/check_out` alla apertura/chiusura sessione con
    policy tenant e informativa lavoratori;
