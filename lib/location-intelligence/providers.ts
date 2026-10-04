@@ -168,6 +168,7 @@ export type RemoteTrackingDevice = {
 export interface TrackingProvider {
   readonly providerType: "TRACCAR" | "NATIVE_DEVICE";
   listDevices(): Promise<RemoteTrackingDevice[] | null>;
+  createDevice(name: string, uniqueId: string): Promise<RemoteTrackingDevice | null>;
   getDevice(deviceId: string): Promise<unknown>;
   getVehicleCurrentPosition(deviceId: string): Promise<TrackingPosition | null>;
   getVehiclePositionHistory(deviceId: string, from: string, to: string): Promise<TrackingPosition[]>;
@@ -261,6 +262,15 @@ export class TraccarAdapter implements TrackingProvider {
     });
   }
 
+  async createDevice(name: string, uniqueId: string) {
+    const result = await this.request("/api/devices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name.slice(0, 160), uniqueId: uniqueId.slice(0, 160) }),
+    });
+    return remoteDeviceFromRecord(result);
+  }
+
   async getDevice(deviceId: string) {
     return this.request(`/api/devices/${encodeURIComponent(deviceId)}`);
   }
@@ -326,6 +336,7 @@ export class NativeDeviceAdapter implements TrackingProvider {
   readonly providerType = "NATIVE_DEVICE" as const;
 
   async listDevices() { return []; }
+  async createDevice() { return null; }
   async getDevice(deviceId: string) { return { id: deviceId, source: "NATIVE_DEVICE" }; }
   async getVehicleCurrentPosition() { return null; }
   async getVehiclePositionHistory() { return []; }

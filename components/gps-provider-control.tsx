@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, CloudDownload, Crosshair, Radio, RefreshCw, Satellite, Truck } from "lucide-react";
+import { CheckCircle2, CloudDownload, Crosshair, Radio, RefreshCw, Satellite, Smartphone, Truck } from "lucide-react";
 
 type RemoteDevice = {
   id: string;
@@ -38,10 +38,12 @@ export default function GpsProviderControl() {
   const [busy, setBusy] = useState<"refresh" | "sync" | string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [deviceName, setDeviceName] = useState("iPhone GPS");
+  const [deviceIdentifier, setDeviceIdentifier] = useState("");
 
-  async function load() {
+  async function load(options?: { preserveMessage?: boolean }) {
     setBusy("refresh");
-    setMessage(null);
+    if (!options?.preserveMessage) setMessage(null);
     setError(false);
     try {
       const [statusResponse, registryResponse] = await Promise.all([
@@ -63,6 +65,35 @@ export default function GpsProviderControl() {
     }
   }
 
+  async function provisionDevice() {
+    if (!deviceName.trim() || !deviceIdentifier.trim()) {
+      setError(true);
+      setMessage("Inserisci nome e Device Identifier mostrato dall’app iOS.");
+      return;
+    }
+    setBusy("provision");
+    setMessage(null);
+    setError(false);
+    try {
+      const response = await fetch("/api/location/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "provision", name: deviceName, uniqueId: deviceIdentifier }),
+      });
+      const payload = await response.json() as { error?: string; remote?: { name?: string } };
+      if (!response.ok) throw new Error(payload.error ?? "gps_provision_failed");
+      setMessage(`Dispositivo ${payload.remote?.name ?? deviceName} collegato al registro ZEROW.`);
+      setDeviceIdentifier("");
+      await load({ preserveMessage: true });
+    } catch (reason) {
+      setError(true);
+      setMessage(reason instanceof Error && reason.message === "traccar_device_provisioning_failed"
+        ? "Il provider non ha accettato il dispositivo. Verifica il Device Identifier."
+        : "Impossibile collegare il dispositivo. Riprova.");
+      setBusy(null);
+    }
+  }
+
   async function syncDevices() {
     setBusy("sync");
     setMessage(null);
@@ -76,7 +107,7 @@ export default function GpsProviderControl() {
       const payload = await response.json() as { importedCount?: number; remoteCount?: number; error?: string };
       if (!response.ok) throw new Error(payload.error ?? "gps_sync_failed");
       setMessage(`${payload.importedCount ?? 0} dispositivi importati nel registro ZEROW su ${payload.remoteCount ?? 0} rilevati.`);
-      await load();
+      await load({ preserveMessage: true });
     } catch (reason) {
       setError(true);
       setMessage(reason instanceof Error && reason.message === "traccar_runtime_not_configured"
@@ -145,6 +176,18 @@ export default function GpsProviderControl() {
         <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Server</p><p className="mt-2 truncate text-xs text-slate-200">demo.traccar.org</p></div>
         <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Catalogo remoto</p><p className="mt-2 text-xs text-lime-200">{remoteDevices.length} dispositivi</p></div>
         <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Registro ZEROW</p><p className="mt-2 text-xs text-lime-200">{localDevices.length} importati</p></div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.035] p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-200"><Smartphone className="size-4" /></span>
+          <div className="min-w-0 flex-1"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/80">Pairing iPhone</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Copia il Device Identifier dall’app Traccar Client. ZEROW creerà il dispositivo tecnico e lo importerà senza registrare un nuovo autista.</p></div>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-[0.8fr_1fr_auto]">
+          <input aria-label="Nome dispositivo GPS" className="h-10 rounded-lg border border-white/10 bg-black/25 px-3 text-xs text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-300/40" onChange={(event) => setDeviceName(event.target.value)} placeholder="Nome dispositivo" value={deviceName} />
+          <input aria-label="Device Identifier" className="h-10 rounded-lg border border-white/10 bg-black/25 px-3 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-600 focus:border-cyan-300/40" onChange={(event) => setDeviceIdentifier(event.target.value)} placeholder="Device Identifier iOS" value={deviceIdentifier} />
+          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 text-xs font-semibold text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-300/15 disabled:cursor-wait disabled:opacity-50" disabled={busy !== null || !apiReady} onClick={() => void provisionDevice()} type="button"><Smartphone className="size-3.5" />{busy === "provision" ? "Collegamento…" : "Collega iPhone"}</button>
+        </div>
       </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[0.045] p-4">

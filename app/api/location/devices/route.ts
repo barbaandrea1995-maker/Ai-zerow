@@ -127,6 +127,35 @@ export async function POST(request: Request) {
       return Response.json({ provider: { id: provider.id, label: provider.label, status: provider.status }, remoteCount: remoteDevices.length, importedCount: imported.length, imported, readback: "verified" }, { headers: responseHeaders() });
     }
 
+    if (action === "provision") {
+      const name = bounded(input.name, 160);
+      const uniqueId = bounded(input.uniqueId, 160);
+      if (!name || !uniqueId) return Response.json({ error: "device_name_and_identifier_required" }, { status: 400 });
+      const runtime = getLocationProviderStatus();
+      if (!runtime.tracking.configured) return Response.json({ error: "traccar_runtime_not_configured" }, { status: 409 });
+      const providerAdapter = trackingProviderFor("TRACCAR");
+      const remoteDevices = await providerAdapter.listDevices();
+      if (remoteDevices === null) return Response.json({ error: "traccar_devices_unavailable" }, { status: 502 });
+      let remote = remoteDevices.find((device) => device.uniqueId === uniqueId) ?? null;
+      if (!remote) remote = await providerAdapter.createDevice(name, uniqueId);
+      if (!remote) return Response.json({ error: "traccar_device_provisioning_failed" }, { status: 502 });
+      let [provider] = await db.select().from(trackingProviders).where(and(eq(trackingProviders.tenantId, context.tenantId), eq(trackingProviders.providerType, "TRACCAR"))).limit(1);
+      if (!provider) {
+        const providerId = `TRACKING-PROVIDER-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        await db.insert(trackingProviders).values({ id: providerId, tenantId: context.tenantId, providerType: "TRACCAR", label: "Traccar GPS", status: "READY", endpointUrl: "", tokenReference: "SERVER_RUNTIME_SECRET", configJson: JSON.stringify({ source: "zerow_provision", configured: true }), createdBy: context.actorId, createdAt: now, updatedAt: now });
+        [provider] = await db.select().from(trackingProviders).where(eq(trackingProviders.id, providerId)).limit(1);
+      }
+      if (!provider) return Response.json({ error: "tracking_provider_readback_unavailable" }, { status: 503 });
+      let [device] = await db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), eq(trackingDevices.providerId, provider.id), eq(trackingDevices.externalDeviceId, remote.id))).limit(1);
+      if (!device) {
+        const id = `TRACKING-DEVICE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        await db.insert(trackingDevices).values({ id, tenantId: context.tenantId, providerId: provider.id, externalDeviceId: remote.id, label: remote.name || name, deviceType: "MOBILE_GPS", status: "ACTIVE", metadataJson: JSON.stringify({ source: "TRACCAR", uniqueId: remote.uniqueId, remoteStatus: remote.status, lastUpdate: remote.lastUpdate }), createdBy: context.actorId, createdAt: now, updatedAt: now });
+        [device] = await db.select().from(trackingDevices).where(eq(trackingDevices.id, id)).limit(1);
+      }
+      await auditLocationAccess({ context, capability: "location.manage.tracking.devices", action: "PROVISION", resourceType: "TRACCAR_DEVICE", purpose: "Pairing del dispositivo mobile GPS dal pannello ZEROW.", metadata: { externalDeviceId: remote.id, uniqueId } });
+      return Response.json({ remote, device: device ?? null, provider: { id: provider.id, label: provider.label, status: provider.status }, readback: "verified" }, { status: 201, headers: responseHeaders() });
+    }
+
     if (action === "poll") {
       const deviceId = bounded(input.deviceId, 160);
       if (!deviceId) return Response.json({ error: "device_id_required" }, { status: 400 });
