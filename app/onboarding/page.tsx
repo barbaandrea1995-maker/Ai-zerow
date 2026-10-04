@@ -1936,6 +1936,7 @@ export default function OnboardingPage() {
             <AuthorityMembershipControl
               canManage={canManageAuthority}
               currentActorId={authorityContext?.actorId ?? null}
+              currentActorRoles={authorityContext?.roles ?? []}
               invitations={invitations}
               memberships={memberships}
               onDirectoryChange={(payload) => {

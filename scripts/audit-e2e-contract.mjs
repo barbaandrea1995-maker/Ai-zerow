@@ -85,6 +85,8 @@ requireContract(authorityContext, /roles.flatMap/, "multi-role capability union"
 requireContract(authorityCatalog, /warehouse\.register/, "warehouse registration capability");
 requireContract(membershipRoute, /rolesJson: authorityRolesJson/, "multi-role membership persistence");
 requireContract(membershipRoute, /action === "set_role" \|\| action === "set_roles"/, "multi-role membership update");
+requireContract(membershipRoute, /target\.actorId === context\.actorId/ , "self-role change boundary");
+requireContract(membershipRoute, /requestedRoles\.includes\("owner"\)/, "owner authority preservation");
 requireContract(warehouseRoute, /operation === "manage" \? "tenant\.manage"/, "warehouse owner onboarding gate");
 requireContract(warehouseRoute, /latitudeE6: Math\.round/, "server coordinate normalization");
 requireContract(warehouseRoute, /geofenceRadiusMeters/, "warehouse geofence persistence");

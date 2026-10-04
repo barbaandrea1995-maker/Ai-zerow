@@ -79,7 +79,8 @@ function lifecycleError(error: string | undefined) {
   if (error === "pending_invitation_exists") return "Esiste già un invito attivo per questa email.";
   if (error === "only_owner_can_assign_owner") return "Solo un Owner può assegnare il ruolo Owner.";
   if (error === "last_active_owner_required") return "Il tenant deve conservare almeno un Owner attivo.";
-  if (error === "self_suspend_not_allowed" || error === "self_remove_not_allowed" || error === "self_role_change_not_allowed") return "Non puoi revocare o cambiare il tuo accesso dalla sessione corrente.";
+  if (error === "self_suspend_not_allowed" || error === "self_remove_not_allowed") return "Non puoi sospendere o rimuovere la sessione con cui sei collegato.";
+  if (error === "self_role_change_not_allowed") return "L’Owner resta obbligatorio sul tuo profilo; le altre mansioni vanno assegnate da Authority.";
   if (error === "version_conflict") return "La membership è cambiata: rileggi i dati e riprova.";
   if (error === "invitation_not_pending") return "L’invito non è più attivo.";
   return "Operazione Authority non completata.";
@@ -93,6 +94,7 @@ function initials(name: string, email: string) {
 export default function AuthorityMembershipControl({
   canManage,
   currentActorId,
+  currentActorRoles,
   invitations,
   memberships,
   onDirectoryChange,
@@ -101,6 +103,7 @@ export default function AuthorityMembershipControl({
 }: {
   canManage: boolean;
   currentActorId: string | null;
+  currentActorRoles?: readonly string[];
   invitations: AuthorityInvitationView[];
   memberships: AuthorityMembershipView[];
   onDirectoryChange: (payload: DirectoryPayload) => void;
@@ -118,6 +121,7 @@ export default function AuthorityMembershipControl({
 
   const activeMembers = useMemo(() => memberships.filter((membership) => membership.status === "active"), [memberships]);
   const pendingInvitations = useMemo(() => invitations.filter((invitation) => invitation.status === "pending"), [invitations]);
+  const currentActorIsOwner = currentActorRoles?.includes("owner") ?? false;
 
   async function copy(value: string) {
     try {
@@ -200,7 +204,13 @@ export default function AuthorityMembershipControl({
         return;
       }
       onDirectoryChange(payload);
+      setRoleDrafts((current) => {
+        const next = { ...current };
+        delete next[targetId];
+        return next;
+      });
       setRemoveTarget(null);
+      await onRefresh().catch(() => undefined);
       onNotify(action === "set_role" || action === "set_roles" ? "Mansioni aggiornate e rilette" : action === "revoke" ? "Invito revocato" : "Stato membership aggiornato");
     } catch {
       onNotify("Aggiornamento Authority non raggiungibile");
@@ -214,7 +224,7 @@ export default function AuthorityMembershipControl({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Users className="size-4" /></span>
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1. Il ruolo Autista abilita la risorsa missione dopo l’accettazione.</p></div>
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1. Il ruolo Autista abilita la risorsa missione dopo l’accettazione.</p>{currentActorIsOwner ? <p className="mt-2 text-[10px] text-lime-200/75">Puoi aggiungere Operatore e Autista al tuo profilo: Owner resta sempre attivo.</p> : null}</div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button className="h-9 border border-white/10 bg-black/25 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/[0.06]" onClick={() => void onRefresh()} type="button" variant="outline"><RefreshCw className="size-3.5" />Rileggi</Button>
@@ -240,7 +250,7 @@ export default function AuthorityMembershipControl({
               const isBusy = busyTarget === membership.id;
               return <article className="grid gap-3 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_130px_100px] sm:items-center" key={membership.id}>
                 <div className="flex min-w-0 items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-full border text-[10px] font-bold ${membership.status === "active" ? "border-lime-300/25 bg-lime-300/10 text-lime-100" : membership.status === "suspended" ? "border-amber-300/25 bg-amber-300/10 text-amber-100" : "border-white/10 bg-white/[0.04] text-slate-500"}`}>{initials(membership.displayName, membership.actorEmail)}</span><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{membership.displayName}{isSelf ? " · tu" : ""}</p><p className="mt-1 truncate text-[10px] text-slate-500">{membership.actorEmail}</p><p className="mt-1 font-mono text-[9px] uppercase text-slate-700">{membership.identityProvider} · v{membership.version}</p></div></div>
-                <div className="min-w-0"><div className="grid grid-cols-2 gap-1">{AUTHORITY_ROLES.map((role) => { const selected = roleValue.includes(role); return <button aria-pressed={selected} aria-label={`${selected ? "Rimuovi" : "Aggiungi"} mansione ${ROLE_METADATA[role].label}`} className={`rounded-md border px-1.5 py-1 text-left text-[9px] transition ${selected ? "border-lime-300/30 bg-lime-300/10 text-lime-100" : "border-white/[.08] text-slate-600 hover:border-lime-300/20 hover:text-slate-300"}`} disabled={!canManage || isBusy || isSelf} key={role} onClick={() => setRoleDrafts((current) => ({ ...current, [membership.id]: selected ? roleValue.filter((item) => item !== role) : [...roleValue, role] }))} type="button">{ROLE_METADATA[role].label}</button>; })}</div>{JSON.stringify(roleValue) !== JSON.stringify(membership.roles?.length ? membership.roles : [membership.role]) && <button aria-label="Applica mansioni" className="mt-1 grid h-7 w-full place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200" disabled={isBusy || roleValue.length === 0} onClick={() => void mutateTarget({ targetId: membership.id, expectedVersion: membership.version, action: "set_roles", roles: roleValue })} type="button"><Check className="size-3.5" /></button>}</div>
+                <div className="min-w-0"><div className="grid grid-cols-2 gap-1">{AUTHORITY_ROLES.map((role) => { const selected = roleValue.includes(role); const canEditMembership = canManage && (!isSelf || currentActorIsOwner); const canToggleRole = canEditMembership && !isBusy && !(isSelf && role === "owner" && selected); return <button aria-pressed={selected} aria-label={`${selected ? "Rimuovi" : "Aggiungi"} mansione ${ROLE_METADATA[role].label}`} className={`rounded-md border px-1.5 py-1 text-left text-[9px] transition ${selected ? "border-lime-300/30 bg-lime-300/10 text-lime-100" : "border-white/[.08] text-slate-600 hover:border-lime-300/20 hover:text-slate-300"}`} disabled={!canToggleRole} key={role} onClick={() => setRoleDrafts((current) => ({ ...current, [membership.id]: selected ? roleValue.filter((item) => item !== role) : [...roleValue, role] }))} type="button">{ROLE_METADATA[role].label}</button>; })}</div>{JSON.stringify(roleValue) !== JSON.stringify(membership.roles?.length ? membership.roles : [membership.role]) && <button aria-label="Applica mansioni" className="mt-1 grid h-7 w-full place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10 text-lime-200" disabled={!canManage || (isSelf && !currentActorIsOwner) || isBusy || roleValue.length === 0} onClick={() => void mutateTarget({ targetId: membership.id, expectedVersion: membership.version, action: "set_roles", roles: roleValue })} type="button"><Check className="size-3.5" /></button>}</div>
                 <div className="flex items-center justify-between gap-2 sm:justify-end"><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold uppercase ${membership.status === "active" ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-200" : membership.status === "suspended" ? "border-amber-300/20 bg-amber-300/[0.06] text-amber-200" : "border-white/10 text-slate-500"}`}>{membership.status}</span>{canManage && !isSelf && membership.status !== "removed" && <div className="flex items-center gap-1">{membership.status === "active" ? <button aria-label="Sospendi" className="grid size-8 place-items-center rounded-lg border border-amber-300/20 text-amber-200 hover:bg-amber-300/10" disabled={isBusy} onClick={() => void mutateTarget({ targetId: membership.id, expectedVersion: membership.version, action: "suspend" })} type="button"><PauseCircle className="size-3.5" /></button> : <button aria-label="Riattiva" className="grid size-8 place-items-center rounded-lg border border-lime-300/20 text-lime-200 hover:bg-lime-300/10" disabled={isBusy} onClick={() => void mutateTarget({ targetId: membership.id, expectedVersion: membership.version, action: "reactivate" })} type="button"><PlayCircle className="size-3.5" /></button>}<button aria-label="Rimuovi" className="grid size-8 place-items-center rounded-lg border border-rose-300/20 text-rose-200 hover:bg-rose-300/10" disabled={isBusy} onClick={() => setRemoveTarget(membership)} type="button"><Trash2 className="size-3.5" /></button></div>}{isBusy && <LoaderCircle className="size-3.5 animate-spin text-lime-300" />}</div>
               </article>;
             })}

@@ -364,7 +364,13 @@ export async function PATCH(request: Request) {
         return Response.json({ error: "only_owner_can_assign_owner" }, { status: 403 });
       }
       if (target.actorId === context.actorId && !sameRoles(requestedRoles, targetRoles)) {
-        return Response.json({ error: "self_role_change_not_allowed" }, { status: 409 });
+        // An Owner may add operational roles to their own membership for
+        // field/driver work and testing, but can never remove the Owner
+        // authority from the current session. Non-owners still require an
+        // Authority manager to change their own roles.
+        if (!context.roles.includes("owner") || !requestedRoles.includes("owner")) {
+          return Response.json({ error: "self_role_change_not_allowed" }, { status: 409 });
+        }
       }
       nextRole = requestedRole;
       nextRoles = requestedRoles;

@@ -307,6 +307,7 @@ assert(aiRateLimit.includes('"release-check"') && aiRateLimit.includes("fallback
 const membershipRoute = await readFile(join(root, "app", "api", "authority", "memberships", "route.ts"), "utf8");
 assert(membershipRoute.includes("createInvitationToken"), "Authority management must issue cryptographic invitations");
 assert(membershipRoute.includes("last_active_owner"), "Authority management must protect the last active owner");
+assert(membershipRoute.includes('target.actorId === context.actorId') && membershipRoute.includes('context.roles.includes("owner")') && membershipRoute.includes('requestedRoles.includes("owner")'), "Owner self-assignment must allow operational roles while preserving Owner authority");
 
 const invitationRoute = await readFile(join(root, "app", "api", "authority", "invitations", "accept", "route.ts"), "utf8");
 assert(invitationRoute.includes("hashInvitationToken"), "Invitation acceptance must compare token digests");
