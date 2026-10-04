@@ -45,6 +45,7 @@ export async function GET(request: Request) {
     status: "IMPLEMENTATION_SPEC",
     providers,
     mapboxProbe,
+    traccarProbe,
     postgisReadback: postgisReadback ?? (postgisError ? { status: "DEGRADED", error: postgisError } : null),
     contracts: {
       rawGpsIsNotBusinessTruth: true,
@@ -64,6 +65,8 @@ export async function GET(request: Request) {
         ? "LIVE_READY"
         : traccarProbe?.status === "READY"
           ? "LIVE_API_READY_WEBHOOK_SECRET_MISSING"
+          : traccarProbe?.status === "NOT_CONFIGURED"
+            ? "NOT_CONFIGURED"
           : traccarProbeRequested
             ? "LIVE_CHECK_FAILED"
             : "UNKNOWN_UNTIL_TRACCAR_RUNTIME_CHECK",
