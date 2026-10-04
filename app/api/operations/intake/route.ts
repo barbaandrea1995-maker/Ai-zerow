@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { MAX_OPERATIONAL_DOCUMENT_BYTES, safeDocumentFileName } from "@/lib/document-contract";
 import {
   companyAiRateLimit,
   companyAiRateLimitResponse,
@@ -16,6 +17,7 @@ import {
   s07AccessDenied,
 } from "@/lib/s07-adapter";
 import { analyzeCompanyAiWithOpenAi, resolveOpenAiScope } from "@/lib/company-ai-openai";
+import { extractCompanyAiSpreadsheetText } from "@/lib/company-ai-spreadsheet";
 import {
   DEFAULT_INTAKE_DRAFT,
   INTAKE_FIELD_LABELS,
@@ -29,6 +31,7 @@ import { inferCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiSco
 export const dynamic = "force-dynamic";
 
 const MAX_INTAKE_SOURCE_CHARS = 60_000;
+const MAX_MULTIPART_OVERHEAD_BYTES = 1_048_576;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -530,29 +533,62 @@ export async function POST(request: Request) {
   const denied = s07AccessDenied(context, "write");
   if (denied) return denied;
 
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  const isMultipart = contentType.includes("multipart/form-data");
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declaredLength) && declaredLength > 131_072) {
+  const maxRequestBytes = isMultipart
+    ? MAX_OPERATIONAL_DOCUMENT_BYTES + MAX_MULTIPART_OVERHEAD_BYTES
+    : 131_072;
+  if (Number.isFinite(declaredLength) && declaredLength > maxRequestBytes) {
     return Response.json({ error: "payload_too_large" }, { status: 413 });
   }
 
-  let input: Record<string, unknown>;
-  try {
-    const parsed = await request.json() as unknown;
-    if (!isRecord(parsed)) return Response.json({ error: "invalid_json" }, { status: 400 });
-    input = parsed;
-  } catch {
-    return Response.json({ error: "invalid_json" }, { status: 400 });
+  let sourceText = "";
+  let sourceName = "";
+  let requestedIdempotencyKey = "";
+  let rawIdempotencyKey: unknown;
+  if (isMultipart) {
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return Response.json({ error: "invalid_multipart" }, { status: 400 });
+    }
+    const file = formData.get("file");
+    if (!file || typeof file !== "object" || typeof (file as { arrayBuffer?: unknown }).arrayBuffer !== "function") {
+      return Response.json({ error: "spreadsheet_file_required" }, { status: 400 });
+    }
+    sourceName = safeDocumentFileName(bounded(formData.get("sourceName"), 160) || (file as File).name);
+    rawIdempotencyKey = formData.get("idempotencyKey");
+    requestedIdempotencyKey = bounded(rawIdempotencyKey, 160);
+    try {
+      sourceText = (await extractCompanyAiSpreadsheetText(file, MAX_INTAKE_SOURCE_CHARS)).text;
+    } catch (caught) {
+      const error = caught instanceof Error ? caught.message : "spreadsheet_not_readable";
+      const status = error === "spreadsheet_file_too_large" ? 413 : 400;
+      return Response.json({ error }, { status });
+    }
+  } else {
+    let input: Record<string, unknown>;
+    try {
+      const parsed = await request.json() as unknown;
+      if (!isRecord(parsed)) return Response.json({ error: "invalid_json" }, { status: 400 });
+      input = parsed;
+    } catch {
+      return Response.json({ error: "invalid_json" }, { status: 400 });
+    }
+
+    if (JSON.stringify(input).length > 131_072) {
+      return Response.json({ error: "payload_too_large" }, { status: 413 });
+    }
+    sourceText = bounded(input.sourceText, MAX_INTAKE_SOURCE_CHARS);
+    sourceName = bounded(input.sourceName, 160);
+    rawIdempotencyKey = input.idempotencyKey;
+    requestedIdempotencyKey = bounded(rawIdempotencyKey, 160);
   }
 
-  if (JSON.stringify(input).length > 131_072) {
-    return Response.json({ error: "payload_too_large" }, { status: 413 });
-  }
-
-  const sourceText = bounded(input.sourceText, MAX_INTAKE_SOURCE_CHARS);
-  const sourceName = bounded(input.sourceName, 160);
-  const requestedIdempotencyKey = bounded(input.idempotencyKey, 160);
   if (sourceText.length < 2) return Response.json({ error: "source_text_required" }, { status: 400 });
-  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
+  if (typeof rawIdempotencyKey === "string" && rawIdempotencyKey.trim().length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
   }
 

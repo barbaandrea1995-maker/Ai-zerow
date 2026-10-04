@@ -67,6 +67,12 @@ function isDocxFile(file: File) {
   return file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(file.name);
 }
 
+function isSpreadsheetFile(file: File) {
+  return file.type === "application/vnd.ms-excel"
+    || file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    || /\.(xls|xlsx)$/i.test(file.name);
+}
+
 function displaySuggestionSource(value: string) {
   const normalized = value.toLocaleLowerCase("it-IT");
   if (normalized.includes("openai") || normalized.includes("company ai")) return "Company AI";
@@ -475,6 +481,7 @@ export function IntakeFields({
 type CompanyAiPanelProps = {
   sourceText: string;
   sourceFileName: string;
+  hasSourceFile: boolean;
   preview: IntakePreview | null;
   busy: boolean;
   notice: string;
@@ -483,7 +490,7 @@ type CompanyAiPanelProps = {
   onAnalyze: () => void;
 };
 
-function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onSourceTextChange, onFile, onAnalyze }: CompanyAiPanelProps) {
+function CompanyAiPanel({ sourceText, sourceFileName, hasSourceFile, preview, busy, notice, onSourceTextChange, onFile, onAnalyze }: CompanyAiPanelProps) {
   return (
     <section className="relative mx-4 mt-4 overflow-hidden rounded-[24px] border border-cyan-300/20 bg-[linear-gradient(135deg,rgba(34,211,238,0.1),rgba(8,15,16,0.88)_48%,rgba(190,255,60,0.06))] p-4 shadow-[0_24px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:mx-8 sm:mt-7 sm:p-6">
       <div className="pointer-events-none absolute -right-20 -top-24 size-64 rounded-full bg-cyan-300/[0.08] blur-3xl" /><div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent" />
@@ -504,10 +511,10 @@ function CompanyAiPanel({ sourceText, sourceFileName, preview, busy, notice, onS
           <label className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100/80" htmlFor="commessa-source-text">Testo sorgente del preventivo</label>
           <Textarea className={`${textareaClass} min-h-[126px] rounded-[18px] border-cyan-300/20 bg-[linear-gradient(145deg,rgba(5,20,22,0.72),rgba(3,10,11,0.82))] focus-visible:border-cyan-200/70 focus-visible:ring-cyan-300/15 focus-visible:shadow-[0_0_28px_rgba(34,211,238,0.1)]`} id="commessa-source-text" onChange={(event) => onSourceTextChange(event.target.value)} placeholder="Incolla qui cliente, oggetto, indirizzo, lavorazioni, riferimenti e note del preventivo…" value={sourceText} />
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-xl border border-white/[0.11] bg-black/25 px-3 py-2.5 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.06] hover:text-cyan-100"><Upload className="size-3.5 shrink-0 text-cyan-200" /><span className="truncate">{sourceFileName || "Carica originale · max 20 MB"}</span><input accept=".docx,.txt,.md,.csv,.json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf,image/*" className="sr-only" onChange={onFile} type="file" /></label>
-            <Button aria-busy={busy} className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 font-semibold text-[#061012] shadow-[0_0_24px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_30px_rgba(190,255,60,0.28)] disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || sourceText.trim().length < 2} onClick={onAnalyze} type="button">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Analizza con Company AI</Button>
+            <label className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-xl border border-white/[0.11] bg-black/25 px-3 py-2.5 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.06] hover:text-cyan-100"><Upload className="size-3.5 shrink-0 text-cyan-200" /><span className="truncate">{sourceFileName || "Carica originale · max 20 MB"}</span><input accept=".docx,.txt,.md,.csv,.json,.xls,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,image/*" className="sr-only" onChange={onFile} type="file" /></label>
+            <Button aria-busy={busy} className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 font-semibold text-[#061012] shadow-[0_0_24px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_30px_rgba(190,255,60,0.28)] disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || (sourceText.trim().length < 2 && !hasSourceFile)} onClick={onAnalyze} type="button">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Analizza con Company AI</Button>
           </div>
-          <p className="mt-3 text-[10px] leading-4 text-slate-600">Formati supportati: DOCX, TXT, MD, CSV e JSON · dimensione massima 20 MB. PDF e immagini restano allegabili, ma richiedono testo incollato per l’analisi.</p>
+          <p className="mt-3 text-[10px] leading-4 text-slate-600">Formati supportati: DOCX, XLS/XLSX, TXT, MD, CSV e JSON · massimo 20 MB. Excel viene letto server-side per fogli e righe prima dell’analisi Company AI.</p>
           {notice && <p className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.04] px-3 py-2.5 text-[11px] leading-5 text-cyan-100/75">{notice}</p>}
         </div>
 
@@ -601,6 +608,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const [draft, setDraft] = useState<IntakeDraft>(DEFAULT_INTAKE_DRAFT);
   const [sourceText, setSourceText] = useState("");
   const [sourceFileName, setSourceFileName] = useState("");
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<IntakePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -615,6 +623,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setDraft(DEFAULT_INTAKE_DRAFT);
     setSourceText("");
     setSourceFileName("");
+    setSourceFile(null);
     setPreview(null);
     setBusy(false);
     setError("");
@@ -705,6 +714,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     if (!file) return;
     setError("");
     setPreview(null);
+    setSourceFile(null);
     if (file.size > MAX_SOURCE_FILE_BYTES) {
       setSourceFileName("");
       setSourceText("");
@@ -718,7 +728,11 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setBusy(true);
     setNotice(`Lettura di ${file.name} in corso…`);
     try {
-      if (isDocxFile(file)) {
+      if (isSpreadsheetFile(file)) {
+        setSourceFile(file);
+        setSourceText("");
+        setNotice("Excel acquisito. Il server leggerà fogli e righe quando avvii Analizza con Company AI.");
+      } else if (isDocxFile(file)) {
         const extractedText = await extractDocxText(file);
         if (extractedText.length < 2) throw new Error("Nel documento Word non è stato trovato testo analizzabile.");
         setSourceText(extractedText);
@@ -739,6 +753,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     } catch (caught) {
       setSourceFileName("");
       setSourceText("");
+      setSourceFile(null);
       setNotice("");
       setError(caught instanceof Error ? caught.message : "Il documento non è stato letto.");
     } finally {
@@ -748,7 +763,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   };
 
   const analyzeWithCompanyAi = async () => {
-    if (sourceText.trim().length < 2) {
+    if (sourceText.trim().length < 2 && !sourceFile) {
       setError("Inserisci o incolla il contenuto del preventivo prima di avviare Company AI.");
       return;
     }
@@ -756,7 +771,16 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setError("");
     setNotice("Company AI sta leggendo il preventivo e preparando una proposta controllabile…");
     try {
-      const response = await fetch("/api/operations/intake", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceText, sourceName: sourceFileName, idempotencyKey: `company-ai-intake-${crypto.randomUUID()}` }) });
+      const idempotencyKey = `company-ai-intake-${crypto.randomUUID()}`;
+      const response = sourceFile
+        ? await fetch("/api/operations/intake", (() => {
+          const formData = new FormData();
+          formData.append("file", sourceFile, sourceFile.name);
+          formData.append("sourceName", sourceFileName);
+          formData.append("idempotencyKey", idempotencyKey);
+          return { method: "POST", body: formData };
+        })())
+        : await fetch("/api/operations/intake", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceText, sourceName: sourceFileName, idempotencyKey }) });
       const data = await response.json() as IntakePreview & { error?: string };
       if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
       setPreview(data);
@@ -857,7 +881,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
           ) : (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={createJob}>
               <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                {mode === "company-ai" && <CompanyAiPanel busy={busy} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
+                {mode === "company-ai" && <CompanyAiPanel busy={busy} hasSourceFile={Boolean(sourceFile)} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceFile(null); setSourceFileName(""); setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
                 <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields draft={draft} onChange={updateField} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
                 {error && <div className="relative z-10 mx-4 mb-5 flex items-start gap-3 rounded-2xl border border-rose-300/25 bg-[linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.035))] px-4 py-3.5 text-xs leading-5 text-rose-100 shadow-[0_14px_30px_rgba(0,0,0,0.16)] sm:mx-7"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.8)]" />{error}</div>}
               </div>

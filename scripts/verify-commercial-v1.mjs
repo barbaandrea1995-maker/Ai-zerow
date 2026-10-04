@@ -423,6 +423,11 @@ const documentRoute = await readFile(join(root, "app", "api", "operations", "job
 assert(documentRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Document upload must enforce the 20 MB contract");
 assert(documentRoute.includes("matchesOperationalDocumentSignature"), "Document upload must validate file signatures");
 assert(documentRoute.includes('scanStatus: "NOT_RUN"'), "Document upload must not claim an unavailable malware scan");
+const commessaIntakeRoute = await readFile(join(root, "app", "api", "operations", "intake", "route.ts"), "utf8");
+const commessaIntakeSurface = await readFile(join(root, "components", "operations-commessa-intake.tsx"), "utf8");
+assert(commessaIntakeRoute.includes("multipart/form-data") && commessaIntakeRoute.includes("extractCompanyAiSpreadsheetText"), "Commessa intake must accept server-parsed Excel files");
+assert(commessaIntakeRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Commessa intake Excel upload must enforce the 20 MB contract");
+assert(commessaIntakeSurface.includes(".xls,.xlsx") && commessaIntakeSurface.includes("hasSourceFile"), "Commessa intake UI must expose XLS/XLSX Company AI analysis");
 const documentSecurity = await readFile(join(root, "app", "api", "documents", "[documentId]", "security", "route.ts"), "utf8");
 assert(documentSecurity.includes("malware_scan_provider_not_configured"), "Document security must remain explicit when no provider is configured");
 assert(documentSecurity.includes("provider_result"), "Document security must expose provider result readback");
