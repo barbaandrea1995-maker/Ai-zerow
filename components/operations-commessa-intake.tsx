@@ -34,6 +34,7 @@ import {
   type IntakePreview,
 } from "@/lib/operations-intake";
 import { COMPANY_AI_SCOPE_TAXONOMY, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 export type IntakeAdapterRecord = {
   id: string;
@@ -229,16 +230,107 @@ function ScopeSelectFields({
   </>;
 }
 
+function WorksiteLocationField({
+  value,
+  selected,
+  candidates,
+  busy,
+  notice,
+  onChange,
+  onVerify,
+  onSelect,
+}: {
+  value: string;
+  selected: GeocodeCandidate | null;
+  candidates: GeocodeCandidate[];
+  busy: boolean;
+  notice: string;
+  onChange: (value: string) => void;
+  onVerify: () => void;
+  onSelect: (candidate: GeocodeCandidate) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          aria-label="Indirizzo del cantiere"
+          className={`${inputClass} min-w-0 flex-1`}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Via, numero, CAP, comune…"
+          value={value}
+        />
+        <Button
+          aria-busy={busy}
+          className="h-12 shrink-0 rounded-xl border border-lime-300/25 bg-lime-300/[0.08] px-4 text-lime-100 shadow-[0_0_18px_rgba(190,255,60,0.07)] transition hover:border-lime-200/55 hover:bg-lime-300/[0.14] hover:text-lime-50 disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={busy || value.trim().length < 5}
+          onClick={onVerify}
+          type="button"
+        >
+          {busy ? <LoaderCircle className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+          <span>{busy ? "Verifica…" : "Verifica indirizzo"}</span>
+        </Button>
+      </div>
+
+      {selected ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-lime-300/25 bg-lime-300/[0.07] p-3.5 shadow-[0_0_24px_rgba(190,255,60,0.08)]">
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><CircleCheck className="size-4" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200">Indirizzo riconosciuto dal server</p>
+            <p className="mt-1 text-xs leading-5 text-lime-50/90">{selected.formattedAddress}</p>
+            <p className="mt-1 text-[10px] text-lime-100/55">Coordinate e geofence verranno associate alla commessa al salvataggio.</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-lime-300/20 bg-black/20 px-2 py-1 font-mono text-[9px] text-lime-200/80">MAPBOX</span>
+        </div>
+      ) : candidates.length ? (
+        <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.045] p-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100/80">Scegli l’ubicazione corretta</p>
+            <span className="font-mono text-[10px] text-cyan-200/70">{candidates.length} risultati</span>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {candidates.map((candidate) => (
+              <button
+                aria-label={`Seleziona ${candidate.formattedAddress}`}
+                className="flex w-full items-start gap-3 rounded-xl border border-white/[0.08] bg-black/20 p-3 text-left transition hover:border-cyan-200/45 hover:bg-cyan-300/[0.06]"
+                key={candidate.providerPlaceId}
+                onClick={() => onSelect(candidate)}
+                type="button"
+              >
+                <MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" />
+                <span className="min-w-0 flex-1"><span className="block text-xs leading-5 text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[10px] text-slate-500">Precisione del risultato: {Math.round(candidate.confidence * 100)}%</span></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {notice && <p className="rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px] leading-4 text-slate-500">{notice}</p>}
+    </div>
+  );
+}
+
 export function IntakeFields({
   draft,
   onChange,
   proposedKeys,
   statusReadOnly = false,
+  worksiteLocation,
+  worksiteCandidates,
+  worksiteGeocodeBusy,
+  worksiteGeocodeNotice,
+  onVerifyWorksite,
+  onSelectWorksite,
 }: {
   draft: IntakeDraft;
   onChange: (key: keyof IntakeDraft, value: string) => void;
   proposedKeys: Set<keyof IntakeDraft>;
   statusReadOnly?: boolean;
+  worksiteLocation: GeocodeCandidate | null;
+  worksiteCandidates: GeocodeCandidate[];
+  worksiteGeocodeBusy: boolean;
+  worksiteGeocodeNotice: string;
+  onVerifyWorksite: () => void;
+  onSelectWorksite: (candidate: GeocodeCandidate) => void;
 }) {
   const proposed = (key: keyof IntakeDraft) => proposedKeys.has(key);
 
@@ -300,8 +392,8 @@ export function IntakeFields({
       </FormSection>
 
       <FormSection
-        badge={<span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">Facoltativi</span>}
-        description="Puoi compilarli ora o completarli dopo. Non viene creata automaticamente un’anagrafica cliente."
+        badge={<span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200/80">Cantiere richiesto</span>}
+        description="Il cliente resta facoltativo. L’ubicazione del cantiere viene riconosciuta dal server e diventa il riferimento per geofence, presenze e missioni."
         eyebrow="04 / anagrafiche"
         icon={UserRound}
         title="Cliente e cantiere"
@@ -328,8 +420,17 @@ export function IntakeFields({
           <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.clientAddress} proposed={proposed("clientAddress")}>
             <Input className={inputClass} onChange={(event) => onChange("clientAddress", event.target.value)} placeholder="Indirizzo amministrativo o sede" value={draft.clientAddress} />
           </Field>
-          <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.worksite} proposed={proposed("worksite")}>
-            <Input className={inputClass} onChange={(event) => onChange("worksite", event.target.value)} placeholder="Indirizzo del cantiere o del sopralluogo" value={draft.worksite} />
+          <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.worksite} proposed={proposed("worksite")} required>
+            <WorksiteLocationField
+              busy={worksiteGeocodeBusy}
+              candidates={worksiteCandidates}
+              notice={worksiteGeocodeNotice}
+              onChange={(value) => onChange("worksite", value)}
+              onSelect={onSelectWorksite}
+              onVerify={onVerifyWorksite}
+              selected={worksiteLocation}
+              value={draft.worksite}
+            />
           </Field>
           <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.accessNotes} proposed={proposed("accessNotes")}>
             <Textarea className={`${textareaClass} min-h-[88px]`} onChange={(event) => onChange("accessNotes", event.target.value)} placeholder="Orari, referente in loco, chiavi, vincoli di accesso…" value={draft.accessNotes} />
@@ -457,7 +558,7 @@ function CheckRow({ label, detail, complete }: { label: string; detail: string; 
   );
 }
 
-function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: IntakeMode; preview: IntakePreview | null }) {
+function SummaryRail({ draft, mode, preview, worksiteLocation }: { draft: IntakeDraft; mode: IntakeMode; preview: IntakePreview | null; worksiteLocation: GeocodeCandidate | null }) {
   const selectedSection = COMPANY_AI_SCOPE_TAXONOMY.find((item) => item.id === draft.scopeSectionId);
   const selectedGroup = selectedSection?.groups.find((item) => item.id === draft.scopeGroupId);
   const selectedSubgroup = selectedGroup?.subgroups.find((item) => item.id === draft.scopeSubgroupId);
@@ -466,7 +567,7 @@ function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: Intak
     { label: "Tipo commessa", value: draft.openingType, fallback: "Da scegliere" },
     { label: "Scope", value: selectedSubgroup ? `${selectedSection?.title} / ${selectedGroup?.title} / ${selectedSubgroup.title}` : "", fallback: "Da definire fino al sottogruppo" },
     { label: "Cliente", value: draft.clientName.trim(), fallback: "Non ancora indicato" },
-    { label: "Luogo intervento", value: draft.worksite.trim(), fallback: "Non ancora indicato" },
+    { label: "Luogo intervento", value: worksiteLocation?.formattedAddress || draft.worksite.trim(), fallback: "Da riconoscere" },
     { label: "Scadenza", value: draft.dueDate.trim(), fallback: "Da pianificare" },
   ];
   const filledCount = keyFields.filter((field) => Boolean(field.value)).length;
@@ -482,7 +583,7 @@ function SummaryRail({ draft, mode, preview }: { draft: IntakeDraft; mode: Intak
         <div className="relative flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/80">Live summary</p><h2 className="mt-1 text-[15px] font-semibold tracking-[-0.015em] text-lime-100">Commessa in preparazione</h2></div><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-[linear-gradient(145deg,rgba(190,255,60,0.16),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_22px_rgba(190,255,60,0.08)]"><ClipboardCheck className="size-4" /></span></div>
         <div className="relative mt-5 rounded-2xl border border-lime-300/15 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(0,0,0,0.2))] p-3.5"><div className="flex items-center justify-between gap-3"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-100/65">Dati chiave</span><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.07] px-2 py-0.5 font-mono text-[10px] text-lime-200">{filledCount}/{keyFields.length}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><span className="block h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300 shadow-[0_0_12px_rgba(190,255,60,0.32)] transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-[10px] leading-4 text-slate-500">La classificazione si completa selezionando il sottogruppo.</p></div>
         <div className="relative mt-5 space-y-3 rounded-2xl border border-white/[0.07] bg-black/15 p-3.5">{keyFields.map((field) => <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-3 last:border-0 last:pb-0" key={field.label}><span className="text-[10px] text-slate-600">{field.label}</span><span className={`max-w-[58%] truncate text-right text-[11px] ${field.value ? "text-lime-100/85" : "text-slate-600"}`}>{field.value || field.fallback}</span></div>)}</div>
-        <div className="relative mt-5 rounded-2xl border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(34,211,238,0.055),rgba(0,0,0,0.2))] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100/70">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete={Boolean(selectedSubgroup)} label="Scope fino al sottogruppo" detail={selectedSubgroup ? "Classificazione pronta" : "Seleziona sezione, raggruppamento e sottogruppo"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
+        <div className="relative mt-5 rounded-2xl border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(34,211,238,0.055),rgba(0,0,0,0.2))] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100/70">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete={Boolean(selectedSubgroup)} label="Scope fino al sottogruppo" detail={selectedSubgroup ? "Classificazione pronta" : "Seleziona sezione, raggruppamento e sottogruppo"} /><CheckRow complete={Boolean(worksiteLocation)} label="Ubicazione riconosciuta" detail={worksiteLocation ? "Coordinate e geofence pronti al salvataggio" : "Verifica e seleziona l’indirizzo del cantiere"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
         <div className="relative mt-4 flex items-start gap-2 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3 text-[10px] leading-4 text-cyan-100/70"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-cyan-200" /><span>Il codice commessa viene assegnato dal sistema al salvataggio.</span></div>
       </div>
     </aside>
@@ -504,6 +605,10 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [worksiteLocation, setWorksiteLocation] = useState<GeocodeCandidate | null>(null);
+  const [worksiteCandidates, setWorksiteCandidates] = useState<GeocodeCandidate[]>([]);
+  const [worksiteGeocodeBusy, setWorksiteGeocodeBusy] = useState(false);
+  const [worksiteGeocodeNotice, setWorksiteGeocodeNotice] = useState("");
 
   const reset = useCallback(() => {
     setMode("chooser");
@@ -514,6 +619,10 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setBusy(false);
     setError("");
     setNotice("");
+    setWorksiteLocation(null);
+    setWorksiteCandidates([]);
+    setWorksiteGeocodeBusy(false);
+    setWorksiteGeocodeNotice("");
   }, []);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
@@ -539,6 +648,55 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
 
   const updateField = (key: keyof IntakeDraft, value: string) => {
     setDraft((current) => ({ ...current, [key]: value } as IntakeDraft));
+    if (key === "worksite") {
+      setWorksiteLocation(null);
+      setWorksiteCandidates([]);
+      setWorksiteGeocodeNotice("");
+    }
+    setError("");
+  };
+
+  const verifyWorksite = async () => {
+    const address = draft.worksite.trim();
+    if (address.length < 5) {
+      setError("Inserisci l’indirizzo del cantiere prima di avviare la verifica.");
+      return;
+    }
+    setWorksiteGeocodeBusy(true);
+    setWorksiteLocation(null);
+    setWorksiteCandidates([]);
+    setWorksiteGeocodeNotice("Il server sta riconoscendo l’indirizzo…");
+    setError("");
+    try {
+      const response = await fetch("/api/location/geocode", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address }),
+      });
+      const data = await response.json() as { candidates?: GeocodeCandidate[]; error?: string };
+      if (!response.ok) {
+        const message = data.error === "geocoder_not_configured"
+          ? "Il riconoscimento indirizzi non è configurato dal server."
+          : data.error === "geocoder_unavailable"
+            ? "Il servizio di riconoscimento indirizzi non risponde. Riprova tra poco."
+            : "Non è stato possibile riconoscere l’indirizzo.";
+        throw new Error(message);
+      }
+      const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      setWorksiteCandidates(candidates);
+      setWorksiteGeocodeNotice(candidates.length ? "Seleziona il risultato corretto per confermare il cantiere." : "Nessun risultato trovato. Completa l’indirizzo e riprova.");
+    } catch (caught) {
+      setWorksiteGeocodeNotice("");
+      setError(caught instanceof Error && caught.message !== "Failed to fetch" ? caught.message : "Il servizio di riconoscimento indirizzi non è raggiungibile. Riprova tra poco.");
+    } finally {
+      setWorksiteGeocodeBusy(false);
+    }
+  };
+
+  const selectWorksite = (candidate: GeocodeCandidate) => {
+    setDraft((current) => ({ ...current, worksite: candidate.formattedAddress }));
+    setWorksiteLocation(candidate);
+    setWorksiteGeocodeNotice("Indirizzo confermato. Il server lo verificherà nuovamente durante il salvataggio.");
     setError("");
   };
 
@@ -603,6 +761,9 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
       setPreview(data);
       setDraft((current) => ({ ...current, ...data.draft, workItems: data.draft.workItems ?? data.workItems ?? current.workItems, statusCode: "DRAFT" } as IntakeDraft));
+      setWorksiteLocation(null);
+      setWorksiteCandidates([]);
+      setWorksiteGeocodeNotice("");
       setNotice(`Company AI ha proposto ${data.suggestions?.length ?? 0} campi e ${data.workItems?.length ?? data.draft.workItems?.length ?? 0} lavorazioni separate. Verifica e modifica liberamente prima della conferma.`);
     } catch (caught) {
       setNotice("");
@@ -618,6 +779,14 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       setError("Inserisci il nome della commessa.");
       return;
     }
+    if (draft.worksite.trim().length < 5) {
+      setError("Inserisci l’indirizzo del cantiere.");
+      return;
+    }
+    if (!worksiteLocation) {
+      setError("Verifica e seleziona l’indirizzo del cantiere prima di salvare la commessa.");
+      return;
+    }
     const scopeSelection = resolveCompanyAiScopeSelection({
       sectionId: draft.scopeSectionId,
       groupId: draft.scopeGroupId,
@@ -630,13 +799,22 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, category: scopeSelection.sectionTitle, jobType: scopeSelection.groupTitle, specialization: scopeSelection.subgroupTitle, scope: scopeSelection, sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: preview?.previewId, idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
+      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: scopeSelection.sectionTitle, jobType: scopeSelection.groupTitle, specialization: scopeSelection.subgroupTitle, scope: scopeSelection, sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: preview?.previewId, idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
       const data = await response.json() as IntakeCreateResponse & { error?: string };
-      if (!response.ok) throw new Error("save_failed");
+      if (!response.ok) {
+        const message = data.error === "worksite_location_confirmation_required"
+          ? "Conferma l’indirizzo del cantiere prima di salvare."
+          : data.error === "worksite_location_candidate_mismatch"
+            ? "L’indirizzo è cambiato: esegui di nuovo la verifica e seleziona un risultato."
+            : data.error === "worksite_geocoder_unavailable" || data.error === "worksite_geocoder_not_configured"
+              ? "Il server non riesce a riconoscere l’indirizzo in questo momento."
+              : "La commessa non è stata salvata.";
+        throw new Error(message);
+      }
       onCreated(data);
       handleOpenChange(false);
-    } catch {
-      setError("La commessa non è stata salvata. Controlla i dati e riprova.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "La commessa non è stata salvata. Controlla i dati e riprova.");
     } finally {
       setBusy(false);
     }
@@ -680,7 +858,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={createJob}>
               <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {mode === "company-ai" && <CompanyAiPanel busy={busy} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
-                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields draft={draft} onChange={updateField} proposedKeys={proposedKeys} /></div><SummaryRail draft={draft} mode={mode} preview={preview} /></div>
+                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields draft={draft} onChange={updateField} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
                 {error && <div className="relative z-10 mx-4 mb-5 flex items-start gap-3 rounded-2xl border border-rose-300/25 bg-[linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.035))] px-4 py-3.5 text-xs leading-5 text-rose-100 shadow-[0_14px_30px_rgba(0,0,0,0.16)] sm:mx-7"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.8)]" />{error}</div>}
               </div>
               <div className="relative z-10 flex shrink-0 flex-col gap-4 border-t border-lime-300/10 bg-[linear-gradient(180deg,rgba(16,27,24,0.94),rgba(6,11,12,0.98))] px-4 py-4 shadow-[0_-18px_45px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.08] text-lime-200 shadow-[0_0_18px_rgba(190,255,60,0.07)]"><ShieldCheck className="size-3.5" /></span><div><p className="text-[11px] font-semibold text-lime-100/90">Conferma controllata</p><p className="mt-0.5 text-[10px] text-slate-600">{mode === "company-ai" ? "Proposte verificabili · conferma umana richiesta" : "Inserimento manuale · conferma umana richiesta"}</p></div></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="h-11 rounded-xl border-white/10 bg-transparent px-4 text-slate-400 hover:border-lime-300/25 hover:bg-lime-300/[0.06] hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button" variant="outline">Annulla</Button><Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-5 font-semibold text-[#060806] shadow-[0_0_26px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_34px_rgba(190,255,60,0.28)]" disabled={busy} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : mode === "company-ai" ? <Check className="size-3.5" /> : <Save className="size-3.5" />}{mode === "company-ai" ? "Conferma dati e crea commessa" : "Salva commessa in bozza"}</Button></div></div>

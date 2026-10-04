@@ -10,9 +10,12 @@ function bounded(value: unknown, max: number) {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "location.manage.geofences")) {
-    return Response.json({ error: "forbidden", capability: "location.manage.geofences" }, { status: 403 });
-  }
+  const capability = hasCapability(context, "location.manage.geofences")
+    ? "location.manage.geofences"
+    : hasCapability(context, "operations.write")
+      ? "operations.write"
+      : null;
+  if (!capability) return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
 
   let payload: Record<string, unknown>;
   try {

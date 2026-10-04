@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { companyAiJobScopes, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { companyAiJobScopes, geofences, geoLocations, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   assertTenantScope,
   getAuthorityContext,
@@ -21,6 +21,8 @@ import {
 } from "@/lib/operations-contract";
 import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledge, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { defaultGeofenceRadius, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,18 @@ function validPriority(value: unknown): JobPayload["priority"] {
 
 function boundedText(value: unknown, max: number, fallback = "") {
   return safeText(value, fallback).slice(0, max);
+}
+
+function requestedGeocodeCandidate(value: unknown) {
+  if (!isRecord(value)) return null;
+  const coordinates = isRecord(value.coordinates) ? value.coordinates : value;
+  const provider = boundedText(value.provider, 24).toUpperCase();
+  const providerPlaceId = boundedText(value.providerPlaceId, 160);
+  const latitude = Number(coordinates.latitude);
+  const longitude = Number(coordinates.longitude);
+  if (provider !== "MAPBOX" || !providerPlaceId || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { provider: "MAPBOX" as const, providerPlaceId, latitude, longitude };
 }
 
 function normalizeWorkItems(value: unknown): JobWorkItem[] {
@@ -137,7 +151,7 @@ export async function POST(request: Request) {
   const title = boundedText(input.title, 120);
   const description = boundedText(input.description ?? input.detail, 2_000);
   const client = boundedText(input.client, 160);
-  const location = boundedText(input.location ?? input.detail, 240, "Ubicazione da definire");
+  const location = boundedText(input.location ?? input.worksite ?? input.detail, 240, "Ubicazione da definire");
   const requestedCategory = boundedText(input.category, 80, "Operations");
   const dueDate = boundedText(input.dueDate ?? input.meta, 40, "Da pianificare");
   const priority = validPriority(input.priority);
@@ -161,7 +175,8 @@ export async function POST(request: Request) {
   const clientEmail = boundedText(input.clientEmail, 160);
   const clientReference = boundedText(input.clientReference, 160);
   const clientAddress = boundedText(input.clientAddress, 240);
-  const worksite = boundedText(input.worksite ?? input.location ?? input.detail, 240, location);
+  const worksite = boundedText(input.worksite ?? input.location, 240);
+  const requestedWorksiteLocation = requestedGeocodeCandidate(input.worksiteLocation);
   const accessNotes = boundedText(input.accessNotes, 2_000);
   const cig = boundedText(input.cig, 80);
   const cup = boundedText(input.cup, 80);
@@ -175,7 +190,9 @@ export async function POST(request: Request) {
   if (statusCode === "COMPLETED" || statusCode === "CLOSED") {
     return Response.json({ error: "new_job_must_start_before_completion" }, { status: 400 });
   }
-  if (description.length > 2_000 || client.length > 160 || location.length > 240 || category.length > 80 || dueDate.length > 40 || openingType.length > 80 || jobType.length > 120 || specialization.length > 120 || accessNotes.length > 2_000) {
+  if (worksite.length < 5) return Response.json({ error: "worksite_address_required" }, { status: 400 });
+  if (!requestedWorksiteLocation) return Response.json({ error: "worksite_location_confirmation_required" }, { status: 409 });
+  if (description.length > 2_000 || client.length > 160 || location.length > 240 || worksite.length > 240 || category.length > 80 || dueDate.length > 40 || openingType.length > 80 || jobType.length > 120 || specialization.length > 120 || accessNotes.length > 2_000) {
     return Response.json({ error: "field_length_exceeded" }, { status: 400 });
   }
   if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
@@ -213,6 +230,18 @@ export async function POST(request: Request) {
       });
     }
 
+    const geocode = await geocodeWithMapbox(worksite);
+    if (geocode.status === "not_configured") {
+      return Response.json({ error: "worksite_geocoder_not_configured", provider: "MAPBOX" }, { status: 503 });
+    }
+    if (geocode.status === "unavailable") {
+      return Response.json({ error: "worksite_geocoder_unavailable", provider: "MAPBOX" }, { status: 503 });
+    }
+    const serverWorksiteLocation = geocode.candidates.find((candidate) => candidate.providerPlaceId === requestedWorksiteLocation.providerPlaceId);
+    if (!serverWorksiteLocation) {
+      return Response.json({ error: "worksite_location_candidate_mismatch", provider: "MAPBOX" }, { status: 409 });
+    }
+
     assertTenantScope(context, context.tenantId);
     const naming = await allocateServerName({
       tenantId: context.tenantId,
@@ -225,9 +254,35 @@ export async function POST(request: Request) {
     const eventId = crypto.randomUUID();
     const scopeId = `COMPANY-AI-SCOPE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const scopeEventId = crypto.randomUUID();
+    const geoLocationId = `GEO-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+    const geofenceId = `GEOFENCE-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+    const geofenceRadius = defaultGeofenceRadius("CANTIERE");
     const scopeIdempotencyKey = `company-ai-scope:create:${idempotencyKey}`.slice(0, 160);
     const knowledgePack = getCompanyAiKnowledgePackSummary();
     const knowledgeContext = knowledgeContextForScope(scopeSelection, workItems);
+    const persistedWorksiteLocation = {
+      provider: serverWorksiteLocation.provider,
+      providerPlaceId: serverWorksiteLocation.providerPlaceId,
+      formattedAddress: serverWorksiteLocation.formattedAddress,
+      address: {
+        street: serverWorksiteLocation.street,
+        streetNumber: serverWorksiteLocation.streetNumber,
+        city: serverWorksiteLocation.city,
+        province: serverWorksiteLocation.province,
+        postalCode: serverWorksiteLocation.postalCode,
+        country: serverWorksiteLocation.country,
+      },
+      coordinates: {
+        latitude: serverWorksiteLocation.latitude,
+        longitude: serverWorksiteLocation.longitude,
+      },
+      confidence: serverWorksiteLocation.confidence,
+      status: "SERVER_VERIFIED",
+      geoLocationId,
+      geofenceId,
+      geofence: { shapeType: "CIRCLE", radiusMeters: geofenceRadius },
+      verifiedAt: now,
+    };
     const payload: JobPayload = {
       title,
       description,
@@ -239,8 +294,12 @@ export async function POST(request: Request) {
       clientEmail,
       clientReference,
       clientAddress,
-      location,
-      worksite,
+      location: serverWorksiteLocation.formattedAddress,
+      worksite: serverWorksiteLocation.formattedAddress,
+      worksiteLocation: persistedWorksiteLocation,
+      worksiteGeoLocationId: geoLocationId,
+      worksiteGeofenceId: geofenceId,
+      worksiteGeocodeStatus: "CONFIRMED",
       accessNotes,
       cig,
       cup,
@@ -279,6 +338,14 @@ export async function POST(request: Request) {
       statusCode,
       sourceMode,
       scope: { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId },
+      worksiteLocation: {
+        status: "SERVER_VERIFIED",
+        provider: serverWorksiteLocation.provider,
+        providerPlaceId: serverWorksiteLocation.providerPlaceId,
+        geoLocationId,
+        geofenceId,
+        geofenceRadiusMeters: geofenceRadius,
+      },
       workItemCount: workItems.length,
       version: 1,
       source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
@@ -292,12 +359,56 @@ export async function POST(request: Request) {
         canonicalCode: naming.canonicalCode,
         recordType: "job",
         title: naming.canonicalCode,
-        detail: worksite,
+        detail: serverWorksiteLocation.formattedAddress,
         meta: dueDate,
         status: jobStatusLabel(statusCode),
         tone,
         progress: 0,
         payloadJson: serializedPayload,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(geoLocations).values({
+        id: geoLocationId,
+        tenantId: context.tenantId,
+        entityType: "CANTIERE",
+        entityId: id,
+        formattedAddress: serverWorksiteLocation.formattedAddress,
+        street: serverWorksiteLocation.street,
+        streetNumber: serverWorksiteLocation.streetNumber,
+        city: serverWorksiteLocation.city,
+        province: serverWorksiteLocation.province,
+        postalCode: serverWorksiteLocation.postalCode,
+        country: serverWorksiteLocation.country,
+        latitudeE6: Math.round(serverWorksiteLocation.latitude * 1_000_000),
+        longitudeE6: Math.round(serverWorksiteLocation.longitude * 1_000_000),
+        provider: serverWorksiteLocation.provider,
+        providerPlaceId: serverWorksiteLocation.providerPlaceId,
+        geocodeConfidenceMilli: Math.round(Math.min(1, Math.max(0, serverWorksiteLocation.confidence)) * 1_000),
+        verifiedByUser: 1,
+        verifiedAt: now,
+        status: "ACTIVE",
+        version: 1,
+        idempotencyKey: `operations-worksite-location:${context.tenantId}:${id}`.slice(0, 160),
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(geofences).values({
+        id: geofenceId,
+        tenantId: context.tenantId,
+        locationId: geoLocationId,
+        entityType: "CANTIERE",
+        entityId: id,
+        name: `${naming.canonicalCode} · Cantiere`,
+        shapeType: "CIRCLE",
+        centerLatitudeE6: Math.round(serverWorksiteLocation.latitude * 1_000_000),
+        centerLongitudeE6: Math.round(serverWorksiteLocation.longitude * 1_000_000),
+        radiusMeters: geofenceRadius,
+        polygonJson: "[]",
+        status: "ACTIVE",
+        version: 1,
         createdBy: context.actorId,
         createdAt: now,
         updatedAt: now,
@@ -340,7 +451,7 @@ export async function POST(request: Request) {
         expectedVersion: 1,
         observedVersion: 1,
         status: "SITES_READBACK_VERIFIED",
-        detail: "Creazione commessa persistita su D1; consumer canonico esterno ancora differito.",
+        detail: "Creazione commessa, ubicazione riconosciuta e geofence persistite su D1; consumer canonico esterno ancora differito.",
         createdAt: now,
         updatedAt: now,
       }),
@@ -431,9 +542,17 @@ export async function POST(request: Request) {
       .orderBy(desc(s04Records.updatedAt));
     const created = rows.find((row) => row.id === id);
     if (!created) return Response.json({ error: "operations_readback_unavailable" }, { status: 503 });
+    const [locationReadback] = await db.select().from(geoLocations)
+      .where(and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.id, geoLocationId)))
+      .limit(1);
+    const [geofenceReadback] = await db.select().from(geofences)
+      .where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.id, geofenceId)))
+      .limit(1);
     return Response.json({
       ...operationEnvelope(context, rows.map(recordForResponse)),
       created: recordForResponse(created),
+      location: locationReadback ? locationForResponse(locationReadback) : null,
+      geofence: geofenceReadback ? geofenceForResponse(geofenceReadback) : null,
       event: { eventId, aggregateId: naming.canonicalCode, aggregateVersion: 1, readback: "verified" },
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });
