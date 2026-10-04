@@ -399,6 +399,10 @@ export async function POST(request: Request) {
       db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.mission", aggregateId: missionId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Missione autonoma persistita con risorse reali, finestra temporale e readback D1.", createdAt: now, updatedAt: now }),
     ] as unknown as never[];
     if (routeProjection) {
+      for (const temporary of routeProjection.temporaryLocations) {
+        statements.push(db.insert(geoLocations).values(temporary.location) as never);
+        statements.push(db.insert(geofences).values(temporary.geofence) as never);
+      }
       statements.push(db.insert(routePlans).values(routeProjection.plan) as never);
       for (const stop of routeProjection.stops) statements.push(db.insert(routeStops).values(stop) as never);
     }

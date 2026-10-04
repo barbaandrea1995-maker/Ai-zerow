@@ -1,6 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  geofences,
+  geoLocations,
   inventoryItems,
   inventoryMovements,
   jobJourneyRecords,
@@ -848,6 +850,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
       }),
     ] as unknown as never[];
     if (routeProjection) {
+      for (const temporary of routeProjection.temporaryLocations) {
+        statements.push(db.insert(geoLocations).values(temporary.location) as never);
+        statements.push(db.insert(geofences).values(temporary.geofence) as never);
+      }
       statements.push(db.insert(routePlans).values(routeProjection.plan) as never);
       for (const stop of routeProjection.stops) statements.push(db.insert(routeStops).values(stop) as never);
     }
@@ -856,6 +862,34 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const routePlanId = boundedText(route.routePlanId, 160);
       if (routePlanId) {
         statements.push(db.update(routePlans).set({ status: "DISPATCHED", updatedAt: now }).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, routePlanId))) as never);
+      }
+    }
+    if (existing && action === "mission_close") {
+      const route = isRecord(payload.route) ? payload.route : {};
+      const routeSummaryStops = Array.isArray(route.stops) ? route.stops : [];
+      const temporaryLocationIds = routeSummaryStops.flatMap((stop) => {
+        if (!isRecord(stop) || stop.temporary !== true) return [];
+        const id = boundedText(stop.locationId, 160);
+        return id ? [id] : [];
+      });
+      const temporaryGeofenceIds = routeSummaryStops.flatMap((stop) => {
+        if (!isRecord(stop) || stop.temporary !== true) return [];
+        const id = boundedText(stop.geofenceId, 160);
+        return id ? [id] : [];
+      });
+      if (temporaryLocationIds.length) {
+        statements.push(db.update(geoLocations).set({ status: "EXPIRED", updatedAt: now }).where(and(
+          eq(geoLocations.tenantId, context.tenantId),
+          inArray(geoLocations.id, temporaryLocationIds),
+          eq(geoLocations.status, "TEMPORARY"),
+        )) as never);
+      }
+      if (temporaryGeofenceIds.length) {
+        statements.push(db.update(geofences).set({ status: "EXPIRED", updatedAt: now }).where(and(
+          eq(geofences.tenantId, context.tenantId),
+          inArray(geofences.id, temporaryGeofenceIds),
+          eq(geofences.status, "TEMPORARY"),
+        )) as never);
       }
     }
     if (materialRequest) {

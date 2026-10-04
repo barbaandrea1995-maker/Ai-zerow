@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geofences, locationEvents, locationSamples, routePlans, routeStops, trackingSessions } from "@/db/schema";
 import { evaluateGeofenceSample, normalizeCoordinate } from "@/lib/location-intelligence/geometry";
@@ -49,7 +49,6 @@ export async function ingestLocationPosition({
     return { session, sample: existing, events, idempotent: true };
   }
 
-  const activeGeofences = await db.select().from(geofences).where(and(eq(geofences.tenantId, tenantId), eq(geofences.status, "ACTIVE"))).limit(500);
   const rawEngineState = parseJsonObject(session.engineStateJson);
   const operationalContext = rawEngineState.__operationalContext && typeof rawEngineState.__operationalContext === "object" && !Array.isArray(rawEngineState.__operationalContext)
     ? rawEngineState.__operationalContext as Record<string, unknown>
@@ -73,6 +72,11 @@ export async function ingestLocationPosition({
     const metadata = parseJsonObject(stop.evidenceJson);
     if (typeof metadata.geofenceId === "string") expectedGeofenceIds.add(metadata.geofenceId);
   }
+  const geofenceRows = await db.select().from(geofences).where(and(
+    eq(geofences.tenantId, tenantId),
+    inArray(geofences.status, ["ACTIVE", "TEMPORARY"]),
+  )).limit(500);
+  const activeGeofences = geofenceRows.filter((row) => row.status === "ACTIVE" || expectedGeofenceIds.has(row.id));
   const engineState = parseEngineState(session.engineStateJson);
   const activeRouteStop = routeStopRows.find((stop) => !["DEPARTED", "COMPLETED"].includes(stop.status)) ?? null;
   const sampleId = `LOCATION-SAMPLE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;

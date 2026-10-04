@@ -51,6 +51,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import { TRANSPORT_MODE_CATALOG, type TransportMode } from "@/lib/tenant-operating-model";
+import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type MissionStatus = "PLANNED" | "DISPATCHED" | "DELIVERED" | "POD_VERIFIED" | "RECONCILED" | "CLOSED" | string;
@@ -90,6 +91,8 @@ type MissionLocation = {
 type RouteStopDraft = {
   kind: "PICKUP" | "DELIVERY" | "TRANSFER" | "RETURN";
   locationId: string;
+  temporaryAddress?: string;
+  temporaryLocation?: GeocodeCandidate | null;
 };
 
 type MaterialRequest = {
@@ -305,13 +308,105 @@ function MissionCard({ mission, selected, canWrite, onSelect, onDispatch, onDeli
   return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_28px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Truck className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{mission.title}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{mission.jobCode ?? "Missione autonoma"}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={statusLabel(mission.status)} tone={tone} /><span className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] text-slate-500">{modeLabel(mission.payload.transportMode)}</span></div><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="rounded-xl border border-white/[.07] bg-black/25 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Partenza</p><p className="mt-1 truncate text-[11px] text-slate-300"><MapPin className="mr-1 inline size-3 text-cyan-200" />{text(mission.payload.pickup)}</p></div><div className="rounded-xl border border-white/[.07] bg-black/25 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Destinazione</p><p className="mt-1 truncate text-[11px] text-slate-300"><MapPin className="mr-1 inline size-3 text-lime-200" />{text(mission.payload.dropoff)}</p></div></div>{stops.length > 0 && <div className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[.03] px-3 py-2"><p className="text-[9px] uppercase tracking-[.14em] text-cyan-200/70">SEQUENZA TAPPE</p><p className="mt-1 line-clamp-2 text-[10px] text-slate-400">{stops.join("  ›  ")}</p></div>}<div className="mt-4 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-600"><span>{formatDate(mission.payload.plannedAt)}</span><span>{snapshotLabel(mission.payload, "driver")}</span><span>{snapshotLabel(mission.payload, "vehicle")}</span></div></button><div className="mt-4 flex flex-wrap gap-2">{mission.jobModule === "operations" && <Link className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[10px] text-slate-400 hover:border-lime-300/25 hover:text-lime-100" href={"/operations/" + encodeURIComponent(mission.jobId)} onClick={(event) => event.stopPropagation()}>Commessa <ArrowRight className="size-3" /></Link>}{canWrite && mission.status === "PLANNED" && <Button variant="outline" className="h-9 border-cyan-300/20 bg-cyan-300/[.05] text-[10px] text-cyan-100" onClick={onDispatch}><Send className="size-3.5" />Partenza</Button>}{canWrite && mission.status === "DISPATCHED" && <Button variant="outline" className="h-9 border-lime-300/20 bg-lime-300/[.05] text-[10px] text-lime-100" onClick={onDeliver}><BadgeCheck className="size-3.5" />Consegna / POD</Button>}</div></article>;
 }
 
-function RouteStopsEditor({ locations, stops, onChange }: { locations: MissionLocation[]; stops: RouteStopDraft[]; onChange: (next: RouteStopDraft[]) => void }) {
+type RouteStopsEditorProps = {
+  locations: MissionLocation[];
+  stops: RouteStopDraft[];
+  onChange: (next: RouteStopDraft[]) => void;
+};
+
+function RouteStopsEditor({
+  locations,
+  stops,
+  onChange,
+}: RouteStopsEditorProps) {
+  const [temporaryCandidates, setTemporaryCandidates] = useState<Record<number, GeocodeCandidate[]>>({});
+  const [temporaryBusyIndex, setTemporaryBusyIndex] = useState<number | null>(null);
   const eligibleLocations = locations.filter((location) => location.geofence?.status === "ACTIVE");
   const labelFor = (locationId: string) => {
     const location = eligibleLocations.find((candidate) => candidate.id === locationId);
     return location ? `${location.entityType} · ${location.formattedAddress}` : "Tappa da selezionare";
   };
-  return <section className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.03] p-4 sm:col-span-2"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">ROTA SERVER-SIDE</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Tappe e agganci operativi</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">Ogni tappa deve avere una location e una geofence canonica. Il GPS può rilevare arrivo/partenza; carico e scarico restano conferme operative.</p></div><button className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.05] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.1]" onClick={() => onChange([...stops, { kind: "TRANSFER", locationId: "" }])} type="button">+ Aggiungi tappa</button></div><div className="mt-4 space-y-2">{stops.map((stop, index) => <div className="grid gap-2 rounded-xl border border-white/[.08] bg-black/25 p-3 sm:grid-cols-[92px_minmax(0,1fr)_auto]" key={`${index}-${stop.locationId}`}><label className="text-[10px] text-slate-500">Tipo<select aria-label={`Tipo tappa ${index + 1}`} className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-200 outline-none focus:border-cyan-300/40" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, kind: event.target.value as RouteStopDraft["kind"] } : candidate))} value={stop.kind}><option value="PICKUP">Carico</option><option value="DELIVERY">Consegna</option><option value="TRANSFER">Trasferimento</option><option value="RETURN">Rientro</option></select></label><label className="min-w-0 text-[10px] text-slate-500">Location con geofence<select aria-label={`Location tappa ${index + 1}`} className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-200 outline-none focus:border-cyan-300/40" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, locationId: event.target.value } : candidate))} value={stop.locationId}><option value="">Seleziona location server-side</option>{eligibleLocations.map((location) => <option key={location.id} value={location.id}>{labelFor(location.id)}</option>)}</select></label><button aria-label={`Rimuovi tappa ${index + 1}`} className="mt-5 grid size-9 place-items-center rounded-lg border border-white/10 text-slate-600 hover:border-rose-300/25 hover:text-rose-200" disabled={stops.length <= 2} onClick={() => onChange(stops.filter((_, candidateIndex) => candidateIndex !== index))} type="button"><X className="size-3.5" /></button></div>)}{stops.length === 0 && <p className="rounded-xl border border-dashed border-cyan-300/15 p-4 text-center text-[10px] text-slate-600">Aggiungi almeno una tappa di carico e una di consegna.</p>}</div>{eligibleLocations.length === 0 && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.03] p-3 text-[10px] text-amber-100">Non ci sono location con geofence disponibili. Configura prima il magazzino o il cantiere.</p>}</section>;
+  const clearTemporaryCandidates = (index: number) => setTemporaryCandidates((current) => {
+    const next = { ...current };
+    delete next[index];
+    return next;
+  });
+  const onSourceChange = (index: number, _source: "CANONICAL" | "TEMPORARY") => {
+    onChange(stops.map((stop, stopIndex) => stopIndex === index ? {
+      ...stop,
+      locationId: "",
+      temporaryAddress: _source === "TEMPORARY" ? "" : undefined,
+      temporaryLocation: null,
+    } : stop));
+    clearTemporaryCandidates(index);
+  };
+  const onTemporaryAddressChange = (index: number, value: string) => {
+    onChange(stops.map((stop, stopIndex) => stopIndex === index ? { ...stop, locationId: "", temporaryAddress: value, temporaryLocation: null } : stop));
+    clearTemporaryCandidates(index);
+  };
+  const onVerifyTemporary = async (index: number) => {
+    const address = stops[index]?.temporaryAddress?.trim() ?? "";
+    if (address.length < 5) return;
+    setTemporaryBusyIndex(index);
+    clearTemporaryCandidates(index);
+    try {
+      const response = await fetch("/api/location/geocode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address }) });
+      const result = await response.json() as { candidates?: unknown };
+      const candidates = response.ok && Array.isArray(result.candidates) ? result.candidates as GeocodeCandidate[] : [];
+      setTemporaryCandidates((current) => ({ ...current, [index]: candidates }));
+    } catch {
+      setTemporaryCandidates((current) => ({ ...current, [index]: [] }));
+    } finally {
+      setTemporaryBusyIndex(null);
+    }
+  };
+  const onSelectTemporary = (index: number, candidate: GeocodeCandidate) => {
+    onChange(stops.map((stop, stopIndex) => stopIndex === index ? { ...stop, locationId: "", temporaryAddress: candidate.formattedAddress, temporaryLocation: candidate } : stop));
+    clearTemporaryCandidates(index);
+  };
+  return <section className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.03] p-4 sm:col-span-2">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">ROTA OPERATIVA</p>
+        <h3 className="mt-1 text-sm font-semibold text-slate-100">Tappe e agganci operativi</h3>
+        <p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Ogni tappa può usare una location aziendale oppure un indirizzo temporaneo. Il server verifica l’indirizzo, crea una geofence solo per questa missione e non lo aggiunge alla rubrica canonica.</p>
+      </div>
+      <button className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.05] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.1]" onClick={() => onChange([...stops, { kind: "TRANSFER", locationId: "" }])} type="button">+ Aggiungi tappa</button>
+    </div>
+    <div className="mt-4 space-y-2">
+      {stops.map((stop, index) => {
+        const source = stop.temporaryLocation || stop.temporaryAddress ? "TEMPORARY" : "CANONICAL";
+        const candidates = temporaryCandidates[index] ?? [];
+        return <div className="rounded-xl border border-white/[.08] bg-black/25 p-3" key={`${index}-${stop.locationId}-${stop.temporaryAddress ?? ""}`}>
+          <div className="grid gap-3 sm:grid-cols-[108px_minmax(0,1fr)_auto]">
+            <label className="text-[10px] text-slate-500">Tipo
+              <select aria-label={`Tipo tappa ${index + 1}`} className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-200 outline-none focus:border-cyan-300/40" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, kind: event.target.value as RouteStopDraft["kind"] } : candidate))} value={stop.kind}>
+                <option value="PICKUP">Carico</option><option value="DELIVERY">Consegna</option><option value="TRANSFER">Trasferimento</option><option value="RETURN">Rientro</option>
+              </select>
+            </label>
+            <label className="min-w-0 text-[10px] text-slate-500">Sorgente destinazione
+              <select aria-label={`Sorgente tappa ${index + 1}`} className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-200 outline-none focus:border-cyan-300/40" onChange={(event) => onSourceChange(index, event.target.value as "CANONICAL" | "TEMPORARY")} value={source}>
+                <option value="CANONICAL">Location aziendale</option><option value="TEMPORARY">Indirizzo temporaneo</option>
+              </select>
+            </label>
+            <button aria-label={`Rimuovi tappa ${index + 1}`} className="mt-5 grid size-9 place-items-center rounded-lg border border-white/10 text-slate-600 hover:border-rose-300/25 hover:text-rose-200" disabled={stops.length <= 2} onClick={() => onChange(stops.filter((_, candidateIndex) => candidateIndex !== index))} type="button"><X className="size-3.5" /></button>
+          </div>
+          {source === "CANONICAL" ? <label className="mt-3 block min-w-0 text-[10px] text-slate-500">Location con geofence server-side
+            <select aria-label={`Location canonica tappa ${index + 1}`} className="mt-1 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-200 outline-none focus:border-cyan-300/40" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, locationId: event.target.value } : candidate))} value={stop.locationId}>
+              <option value="">Seleziona location registrata</option>{eligibleLocations.map((location) => <option key={location.id} value={location.id}>{labelFor(location.id)}</option>)}
+            </select>
+          </label> : <div className="mt-3 space-y-2">
+            <label className="block text-[10px] text-slate-500">Indirizzo temporaneo
+              <div className="mt-1 flex gap-2"><input aria-label={`Indirizzo temporaneo tappa ${index + 1}`} className="h-10 min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-300/40" onChange={(event) => onTemporaryAddressChange(index, event.target.value)} placeholder="Via, numero civico, città" value={stop.temporaryAddress ?? ""} /><button className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-cyan-300/25 bg-cyan-300/[.06] px-3 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.12]" disabled={temporaryBusyIndex === index || (stop.temporaryAddress ?? "").trim().length < 5} onClick={() => onVerifyTemporary(index)} type="button">{temporaryBusyIndex === index ? <LoaderCircle className="size-3.5 animate-spin" /> : <MapPin className="size-3.5" />}Verifica</button></div>
+            </label>
+            {stop.temporaryLocation ? <div className="flex items-start gap-2 rounded-lg border border-lime-300/20 bg-lime-300/[.05] p-3"><CheckCircle2 className="mt-0.5 size-4 shrink-0 text-lime-200" /><div className="min-w-0"><p className="text-[10px] font-semibold text-lime-100">Indirizzo verificato dal server</p><p className="mt-1 text-[11px] text-slate-300">{stop.temporaryLocation.formattedAddress}</p><p className="mt-1 text-[9px] uppercase tracking-[.12em] text-lime-200/60">MAPBOX · GEOFENCE TEMPORANEA · {stop.kind === "DELIVERY" ? "60" : "80"} M</p></div></div> : candidates.length > 0 ? <div className="space-y-1.5 rounded-lg border border-cyan-300/15 bg-cyan-300/[.03] p-2"><p className="px-1 text-[9px] uppercase tracking-[.14em] text-cyan-200/70">Scegli il risultato riconosciuto</p>{candidates.map((candidate) => <button className="flex w-full items-start gap-2 rounded-lg border border-white/[.06] px-2 py-2 text-left hover:border-cyan-300/30 hover:bg-cyan-300/[.06]" key={candidate.providerPlaceId} onClick={() => onSelectTemporary(index, candidate)} type="button"><MapPin className="mt-0.5 size-3.5 shrink-0 text-cyan-200" /><span className="min-w-0"><span className="block truncate text-[10px] text-slate-200">{candidate.formattedAddress}</span><span className="mt-0.5 block text-[9px] text-slate-600">{candidate.city}{candidate.province ? ` · ${candidate.province}` : ""}</span></span></button>)}</div> : <p className="rounded-lg border border-dashed border-cyan-300/15 px-3 py-2 text-[10px] text-slate-600">Verifica l’indirizzo e seleziona il risultato server-side prima di salvare.</p>}
+          </div>}
+        </div>;
+      })}
+      {stops.length === 0 && <p className="rounded-xl border border-dashed border-cyan-300/15 p-4 text-center text-[10px] text-slate-600">Aggiungi almeno una tappa di carico e una di consegna.</p>}
+    </div>
+    {eligibleLocations.length === 0 && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.03] p-3 text-[10px] text-amber-100">Non ci sono location canoniche con geofence disponibili. Puoi comunque usare indirizzi temporanei verificati dal server.</p>}
+  </section>;
 }
 
 export default function MissionCommandDeck() {
@@ -424,6 +519,17 @@ export default function MissionCommandDeck() {
     else router.push("/command");
   }
 
+  function handleJobSelection(jobId: string) {
+    setSelectedRequestId("");
+    if (!jobId || jobId === "__standalone__") {
+      setRouteStops([{ kind: "PICKUP", locationId: "" }, { kind: "DELIVERY", locationId: "" }]);
+      if (transportMode === "WAREHOUSE_TO_JOB") setTransportMode(enabledTransportModes.includes("ASSET_TRANSFER") ? "ASSET_TRANSFER" : enabledTransportModes[0] ?? "");
+      return;
+    }
+    const jobLocationId = locations.find((location) => location.entityId === jobId && ["CANTIERE", "COMMESSA"].includes(location.entityType))?.id ?? "";
+    setRouteStops([{ kind: "PICKUP", locationId: "" }, { kind: "DELIVERY", locationId: jobLocationId }]);
+  }
+
   function openCreate(request: MaterialRequest | null = null) {
     setPlannedAt("");
     setPlannedEndAt("");
@@ -522,11 +628,21 @@ export default function MissionCommandDeck() {
       const requestPickup = requestWarehouse && typeof requestWarehouse === "object" && !Array.isArray(requestWarehouse)
         ? text((requestWarehouse as Record<string, unknown>).locationLabel, "")
         : "";
-      const pickup = field(form, "pickup") || requestPickup;
-      const dropoff = field(form, "dropoff") || text(selectedRequest?.payload.deliveryPoint, "");
+      const routeStopLabel = (stop: RouteStopDraft | undefined) => stop?.temporaryLocation?.formattedAddress ?? locations.find((location) => location.id === stop?.locationId)?.formattedAddress ?? "";
+      const pickup = field(form, "pickup") || routeStopLabel(routeStops[0]) || requestPickup;
+      const dropoff = field(form, "dropoff") || routeStopLabel(routeStops.at(-1)) || text(selectedRequest?.payload.deliveryPoint, "");
       const selectedRouteStops = routeStops.map((stop) => {
         const location = locations.find((candidate) => candidate.id === stop.locationId);
-        return { kind: stop.kind, locationId: stop.locationId, label: location?.formattedAddress ?? "", entityType: location?.entityType ?? "", entityId: location?.entityId ?? "", cargoActions: [{ action: stop.kind === "DELIVERY" ? "UNLOAD" : "LOAD", assetId: selectedCargo || null, materialRequestId: materialRequestId || null }] };
+        const temporary = stop.temporaryLocation;
+        return {
+          kind: stop.kind,
+          locationId: temporary ? "" : stop.locationId,
+          label: temporary?.formattedAddress ?? location?.formattedAddress ?? "",
+          entityType: temporary ? "CUSTOM_LOCATION" : location?.entityType ?? "",
+          entityId: temporary ? "" : location?.entityId ?? "",
+          ...(temporary ? { temporaryAddress: stop.temporaryAddress || temporary.formattedAddress, temporaryLocation: temporary } : {}),
+          cargoActions: [{ action: stop.kind === "DELIVERY" ? "UNLOAD" : "LOAD", assetId: selectedCargo || null, materialRequestId: materialRequestId || null }],
+        };
       });
       if (!jobId || !field(form, "driverId") || !field(form, "vehicleId")) {
         notify("Seleziona il collegamento, un autista e un mezzo dal registro disponibile.");
@@ -544,8 +660,8 @@ export default function MissionCommandDeck() {
         notify("Seleziona una richiesta materiali approvata prima di programmare la consegna.");
         return;
       }
-      if (selectedRouteStops.length < 2 || selectedRouteStops.some((stop) => !stop.locationId)) {
-        notify("Completa tutte le tappe con location e geofence server-side.");
+      if (selectedRouteStops.length < 2 || selectedRouteStops.some((stop) => !stop.locationId && !stop.temporaryLocation)) {
+        notify("Completa tutte le tappe con una location aziendale oppure un indirizzo temporaneo verificato.");
         return;
       }
       await createMission(jobId, {
@@ -618,7 +734,7 @@ export default function MissionCommandDeck() {
     </section>
   </div><CommandMobileNav active="mission" allowedNavigation={allowedNavigation} role={context?.role} />
 
-    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "create" ? "Nuova missione" : modal === "delivery" ? "Consegna e POD" : modal === "pod" ? "Verifica prova di consegna" : "Riconcilia e chiudi la missione"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "create" ? "Il percorso può collegarsi a una commessa reale o, per un tenant trasporti, nascere autonomo. Autista, mezzo e asset arrivano esclusivamente dal registro disponibile." : modal === "delivery" ? "Registra il ricevente e il momento di consegna. Il record resterà DELIVERED finché la POD non sarà verificata." : modal === "pod" ? "Verifica il readback della prova di consegna prima di passare alla riconciliazione." : "La riconciliazione richiede una nota operativa e chiude il passaggio tra consegnato, documento e quantità."}</DialogDescription></DialogHeader>{modal === "create" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Commessa o trasporto autonomo<select aria-label="Commessa o trasporto autonomo" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="jobId" required><option value="">Seleziona collegamento</option>{<option value="__standalone__">Missione autonoma · nessuna commessa</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Titolo missione<Input autoFocus className="mt-2 border-white/10 bg-black/30" defaultValue="Missione di trasporto" name="title" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{enabledTransportModes.map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode]?.label ?? mode}</option>)}</select></label><RouteStopsEditor locations={locations} onChange={setRouteStops} stops={routeStops} /><input name="pickup" type="hidden" value={locations.find((location) => location.id === routeStops[0]?.locationId)?.formattedAddress ?? ""} readOnly /><input name="dropoff" type="hidden" value={locations.find((location) => location.id === routeStops.at(-1)?.locationId)?.formattedAddress ?? ""} readOnly /><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" onChange={(event) => setPlannedAt(event.target.value)} required type="datetime-local" value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" onChange={(event) => setPlannedEndAt(event.target.value)} type="datetime-local" value={plannedEndAt} /></label><MissionResourceFields cargoAssetId={cargoAssetId} driverId={driverId} onCargoAssetChange={setCargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} plannedAt={plannedAt} plannedEndAt={plannedEndAt} vehicleId={vehicleId} /><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" placeholder="Vincoli, riferimento o consegna particolare…" /></label></div> : modal === "delivery" ? <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">MISSIONE SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-600">{selected ? text(selected.payload.pickup) + " → " + text(selected.payload.dropoff) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Ricevente / referente<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="recipient" placeholder="Nome o organizzazione" required /></label><label className="text-xs text-slate-400">Data e ora consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveredAt" onChange={(event) => setDeliveredAt(event.target.value)} required type="datetime-local" value={deliveredAt} /></label><label className="text-xs text-slate-400">Documento POD <span className="text-slate-600">(ID opzionale)</span><Input className="mt-2 border-white/10 bg-black/30 font-mono" name="documentId" placeholder="Collega dopo upload verificato" /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota consegna<Textarea className="mt-2 border-white/10 bg-black/30" name="note" placeholder="Quantità, riserva o anomalia…" /></label></div> : modal === "pod" ? <div className="grid gap-4"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-lime-300/70">READBACK POD</p><p className="mt-2 text-sm text-slate-200">Ricevente: {text((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.recipient)}</p><p className="mt-1 text-[10px] text-slate-500">Consegna: {formatDate((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.deliveredAt)}</p></div><label className="text-xs text-slate-400">Documento evidenza <span className="text-slate-600">(ID opzionale)</span><Input className="mt-2 border-white/10 bg-black/30 font-mono" name="documentId" placeholder="ID documento già verificato" /></label></div> : <div className="grid gap-4"><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-amber-200/70">RICONCILIAZIONE</p><p className="mt-2 text-sm text-slate-200">La chiusura richiede una nota tracciabile.</p><p className="mt-1 text-[10px] text-slate-500">Dopo questo passaggio la journey potrà essere chiusa con un secondo readback.</p></div><label className="text-xs text-slate-400">Nota di riconciliazione<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30" name="note" placeholder="Confronto quantità, POD e riferimenti di commessa…" required /></label></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !canWrite} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "create" ? "Crea e rileggi" : modal === "delivery" ? "Registra consegna" : modal === "pod" ? "Verifica POD" : "Riconcilia"}</Button></DialogFooter></form></DialogContent></Dialog>
+    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "create" ? "Nuova missione" : modal === "delivery" ? "Consegna e POD" : modal === "pod" ? "Verifica prova di consegna" : "Riconcilia e chiudi la missione"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "create" ? "Il percorso può collegarsi a una commessa reale o nascere autonomo. Ogni tappa usa una location canonica oppure un indirizzo temporaneo verificato dal server; autista, mezzo e asset arrivano esclusivamente dal registro disponibile." : modal === "delivery" ? "Registra il ricevente e il momento di consegna. Il record resterà DELIVERED finché la POD non sarà verificata." : modal === "pod" ? "Verifica il readback della prova di consegna prima di passare alla riconciliazione." : "La riconciliazione richiede una nota operativa e chiude il passaggio tra consegnato, documento e quantità."}</DialogDescription></DialogHeader>{modal === "create" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Commessa o trasporto autonomo<select aria-label="Commessa o trasporto autonomo" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="jobId" onChange={(event) => handleJobSelection(event.target.value)} required><option value="">Seleziona collegamento</option>{<option value="__standalone__">Missione autonoma · nessuna commessa</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Titolo missione<Input autoFocus className="mt-2 border-white/10 bg-black/30" defaultValue="Missione di trasporto" name="title" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{enabledTransportModes.map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode]?.label ?? mode}</option>)}</select></label><RouteStopsEditor locations={locations} onChange={setRouteStops} stops={routeStops} /><input name="pickup" type="hidden" value={locations.find((location) => location.id === routeStops[0]?.locationId)?.formattedAddress ?? ""} readOnly /><input name="dropoff" type="hidden" value={locations.find((location) => location.id === routeStops.at(-1)?.locationId)?.formattedAddress ?? ""} readOnly /><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" onChange={(event) => setPlannedAt(event.target.value)} required type="datetime-local" value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" onChange={(event) => setPlannedEndAt(event.target.value)} type="datetime-local" value={plannedEndAt} /></label><MissionResourceFields cargoAssetId={cargoAssetId} driverId={driverId} onCargoAssetChange={setCargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} plannedAt={plannedAt} plannedEndAt={plannedEndAt} vehicleId={vehicleId} /><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" placeholder="Vincoli, riferimento o consegna particolare…" /></label></div> : modal === "delivery" ? <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">MISSIONE SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-600">{selected ? text(selected.payload.pickup) + " → " + text(selected.payload.dropoff) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Ricevente / referente<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="recipient" placeholder="Nome o organizzazione" required /></label><label className="text-xs text-slate-400">Data e ora consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveredAt" onChange={(event) => setDeliveredAt(event.target.value)} required type="datetime-local" value={deliveredAt} /></label><label className="text-xs text-slate-400">Documento POD <span className="text-slate-600">(ID opzionale)</span><Input className="mt-2 border-white/10 bg-black/30 font-mono" name="documentId" placeholder="Collega dopo upload verificato" /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota consegna<Textarea className="mt-2 border-white/10 bg-black/30" name="note" placeholder="Quantità, riserva o anomalia…" /></label></div> : modal === "pod" ? <div className="grid gap-4"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-lime-300/70">READBACK POD</p><p className="mt-2 text-sm text-slate-200">Ricevente: {text((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.recipient)}</p><p className="mt-1 text-[10px] text-slate-500">Consegna: {formatDate((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.deliveredAt)}</p></div><label className="text-xs text-slate-400">Documento evidenza <span className="text-slate-600">(ID opzionale)</span><Input className="mt-2 border-white/10 bg-black/30 font-mono" name="documentId" placeholder="ID documento già verificato" /></label></div> : <div className="grid gap-4"><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-amber-200/70">RICONCILIAZIONE</p><p className="mt-2 text-sm text-slate-200">La chiusura richiede una nota tracciabile.</p><p className="mt-1 text-[10px] text-slate-500">Dopo questo passaggio la journey potrà essere chiusa con un secondo readback.</p></div><label className="text-xs text-slate-400">Nota di riconciliazione<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30" name="note" placeholder="Confronto quantità, POD e riferimenti di commessa…" required /></label></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !canWrite} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "create" ? "Crea e rileggi" : modal === "delivery" ? "Registra consegna" : modal === "pod" ? "Verifica POD" : "Riconcilia"}</Button></DialogFooter></form></DialogContent></Dialog>
     {notice && <button aria-label="Chiudi messaggio" className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_34px_rgba(200,255,34,.16)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CheckCircle2 className="size-4 shrink-0 text-lime-300" />{notice}</button>}
   </main>;
 }

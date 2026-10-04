@@ -1,7 +1,8 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geoLocations, geofences, routePlans, routeStops } from "@/db/schema";
-import { geofenceForEngine, parseJsonObject } from "@/lib/location-intelligence/repository";
+import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { defaultGeofenceRadius, geofenceForEngine, parseJsonObject } from "@/lib/location-intelligence/repository";
 
 export type MissionStopKind = "PICKUP" | "DELIVERY" | "TRANSFER" | "RETURN";
 
@@ -11,6 +12,8 @@ export type MissionStopInput = {
   locationId?: unknown;
   entityType?: unknown;
   entityId?: unknown;
+  temporaryAddress?: unknown;
+  temporaryLocation?: unknown;
   expectedArrivalAt?: unknown;
   expectedDepartureAt?: unknown;
   cargoActions?: unknown;
@@ -20,6 +23,10 @@ export type MissionStopInput = {
 export type MissionRouteProjection = {
   plan: typeof routePlans.$inferInsert;
   stops: Array<typeof routeStops.$inferInsert>;
+  temporaryLocations: Array<{
+    location: typeof geoLocations.$inferInsert;
+    geofence: typeof geofences.$inferInsert;
+  }>;
   summary: Array<{
     id: string;
     sequence: number;
@@ -29,6 +36,7 @@ export type MissionRouteProjection = {
     entityType: string;
     entityId: string;
     geofenceId: string;
+    temporary: boolean;
     cargoActions: Array<Record<string, unknown>>;
     deliveryEvidenceRequired: boolean;
   }>;
@@ -89,11 +97,33 @@ function routeStopMetadata(summary: MissionRouteProjection["summary"][number]) {
     entityType: summary.entityType,
     entityId: summary.entityId,
     geofenceId: summary.geofenceId,
+    temporary: summary.temporary,
     cargoActions: summary.cargoActions,
     deliveryEvidenceRequired: summary.deliveryEvidenceRequired,
     attachment: "PENDING",
     gpsIsOperationalEvidenceOnly: true,
   });
+}
+
+async function resolveTemporaryLocation(input: MissionStopInput, sequence: number) {
+  const candidate = isRecord(input.temporaryLocation) ? input.temporaryLocation : null;
+  const address = text(input.temporaryAddress ?? candidate?.formattedAddress, 320);
+  const provider = text(candidate?.provider, 24).toUpperCase();
+  const providerPlaceId = text(candidate?.providerPlaceId, 160);
+  if (!address) throw new MissionRouteError("mission_route_temporary_address_required", { sequence });
+  if (provider !== "MAPBOX" || !providerPlaceId) {
+    throw new MissionRouteError("mission_route_temporary_confirmation_required", { sequence });
+  }
+  const result = await geocodeWithMapbox(address);
+  if (result.status === "not_configured") {
+    throw new MissionRouteError("mission_route_geocoder_not_configured", { sequence, provider: "MAPBOX" });
+  }
+  if (result.status === "unavailable") {
+    throw new MissionRouteError("mission_route_geocoder_unavailable", { sequence, provider: "MAPBOX" });
+  }
+  const matched = result.candidates.find((item) => item.provider === "MAPBOX" && item.providerPlaceId === providerPlaceId);
+  if (!matched) throw new MissionRouteError("mission_route_temporary_confirmation_mismatch", { sequence });
+  return matched;
 }
 
 async function findLocation(tenantId: string, input: MissionStopInput) {
@@ -162,17 +192,72 @@ export async function buildMissionRouteProjection({
   const normalizedMaterialRequestId = text(materialRequestId, 160);
 
   const summary: MissionRouteProjection["summary"] = [];
+  const temporaryLocations: MissionRouteProjection["temporaryLocations"] = [];
   for (let index = 0; index < rawStops.length; index += 1) {
     const input = isRecord(rawStops[index]) ? rawStops[index] as MissionStopInput : {};
-    const location = await findLocation(tenantId, input);
+    let location = await findLocation(tenantId, input);
+    let geofence = location ? await findGeofence(tenantId, location.id) : null;
+    const kind = stopKind(input.kind, index, rawStops.length);
+    if (!location) {
+      const candidate = await resolveTemporaryLocation(input, index + 1);
+      const temporaryEntityId = `${missionId}:STOP:${String(index + 1).padStart(2, "0")}`;
+      const temporaryLocationId = `MISSION-TEMP-LOCATION-${missionId}-${String(index + 1).padStart(2, "0")}`;
+      const temporaryGeofenceId = `MISSION-TEMP-GEOFENCE-${missionId}-${String(index + 1).padStart(2, "0")}`;
+      const now = new Date().toISOString();
+      const locationRow = {
+        id: temporaryLocationId,
+        tenantId,
+        entityType: "CUSTOM_LOCATION",
+        entityId: temporaryEntityId,
+        formattedAddress: candidate.formattedAddress,
+        street: candidate.street,
+        streetNumber: candidate.streetNumber,
+        city: candidate.city,
+        province: candidate.province,
+        postalCode: candidate.postalCode,
+        country: candidate.country,
+        latitudeE6: Math.round(candidate.latitude * 1_000_000),
+        longitudeE6: Math.round(candidate.longitude * 1_000_000),
+        provider: candidate.provider,
+        providerPlaceId: candidate.providerPlaceId,
+        geocodeConfidenceMilli: Math.round(candidate.confidence * 1_000),
+        verifiedByUser: 1,
+        verifiedAt: now,
+        status: "TEMPORARY",
+        version: 1,
+        idempotencyKey: `mission-temp-location:${tenantId}:${missionId}:${index + 1}`.slice(0, 160),
+        createdBy,
+        createdAt: now,
+        updatedAt: now,
+      } as typeof geoLocations.$inferSelect;
+      const geofenceRow = {
+        id: temporaryGeofenceId,
+        tenantId,
+        locationId: temporaryLocationId,
+        entityType: "CUSTOM_LOCATION",
+        entityId: temporaryEntityId,
+        name: `Missione ${missionId} · Tappa ${index + 1}`,
+        shapeType: "CIRCLE",
+        centerLatitudeE6: locationRow.latitudeE6,
+        centerLongitudeE6: locationRow.longitudeE6,
+        radiusMeters: defaultGeofenceRadius(kind === "DELIVERY" ? "DESTINATARIO" : "CUSTOM_LOCATION"),
+        polygonJson: "[]",
+        status: "TEMPORARY",
+        version: 1,
+        createdBy,
+        createdAt: now,
+        updatedAt: now,
+      } as typeof geofences.$inferSelect;
+      temporaryLocations.push({ location: locationRow, geofence: geofenceRow });
+      location = locationRow;
+      geofence = geofenceForEngine(geofenceRow);
+    }
     if (!location) {
       throw new MissionRouteError("mission_route_location_required", { sequence: index + 1 });
     }
-    const geofence = await findGeofence(tenantId, location.id);
     if (!geofence) {
       throw new MissionRouteError("mission_route_geofence_required", { sequence: index + 1, locationId: location.id });
     }
-    const kind = stopKind(input.kind, index, rawStops.length);
     const label = text(input.label, 240) || location.formattedAddress || `${location.entityType} ${location.entityId}`;
     const normalizedActions = actions(input.cargoActions);
     summary.push({
@@ -184,6 +269,7 @@ export async function buildMissionRouteProjection({
       entityType: location.entityType,
       entityId: location.entityId,
       geofenceId: geofence.id,
+      temporary: location.status === "TEMPORARY",
       cargoActions: normalizedActions.length ? normalizedActions : defaultActions(kind, normalizedCargoAssetId, normalizedMaterialRequestId),
       deliveryEvidenceRequired: input.deliveryEvidenceRequired !== false && kind === "DELIVERY",
     });
@@ -223,6 +309,7 @@ export async function buildMissionRouteProjection({
       createdAt: now,
       updatedAt: now,
     })),
+    temporaryLocations,
     summary,
   };
 }
@@ -241,6 +328,7 @@ export function routeSummaryForPayload(projection: MissionRouteProjection | null
       entityType: stop.entityType,
       entityId: stop.entityId,
       geofenceId: stop.geofenceId,
+      temporary: stop.temporary,
       cargoActions: stop.cargoActions,
       deliveryEvidenceRequired: stop.deliveryEvidenceRequired,
       status: "PLANNED",

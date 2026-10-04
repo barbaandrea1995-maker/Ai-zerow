@@ -14,8 +14,10 @@ export async function POST(request: Request) {
     ? "location.manage.geofences"
     : hasCapability(context, "operations.write")
       ? "operations.write"
-      : null;
-  if (!capability) return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
+      : hasCapability(context, "mission.write")
+        ? "mission.write"
+        : null;
+  if (!capability) return Response.json({ error: "forbidden", capability: "mission.write" }, { status: 403 });
 
   let payload: Record<string, unknown>;
   try {
