@@ -206,7 +206,7 @@ export default function PrimaryOnboarding() {
       const response = await fetch("/api/tenants/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ operatingProfile: profile, transportModes: selectedProfile.transportModes, companyProfile }),
+        body: JSON.stringify({ operatingProfile: profile, companyProfile }),
       });
       const payload = await response.json() as { error?: string; detail?: string; operatingProfile?: OperatingProfileId; operatingDomains?: string[]; transportModes?: string[] };
       if (!response.ok) throw new Error(payload.detail ?? payload.error ?? "tenant_profile_update_failed");

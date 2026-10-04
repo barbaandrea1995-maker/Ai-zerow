@@ -121,6 +121,19 @@ export function normalizeTransportModes(value: unknown): TransportMode[] {
   return [...new Set(values)];
 }
 
+/**
+ * The operating profile is the server-owned source of truth. Browsers can
+ * keep a previous profile's mode list in a PWA cache, so incompatible values
+ * are reconciled instead of blocking onboarding or profile changes.
+ */
+export function resolveTransportModesForProfile(value: unknown, profile: unknown): TransportMode[] {
+  const allowed = transportModesForProfile(profile);
+  const requested = normalizeTransportModes(value);
+  if (!requested.length) return allowed;
+  const compatible = requested.filter((mode) => allowed.includes(mode));
+  return compatible.length || !allowed.length ? compatible : allowed;
+}
+
 export function parseTransportModes(value: unknown, profile: unknown = DEFAULT_OPERATING_PROFILE): TransportMode[] {
   if (typeof value !== "string") return transportModesForProfile(profile);
   try {

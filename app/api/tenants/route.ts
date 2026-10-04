@@ -14,10 +14,9 @@ import {
   DEFAULT_OPERATING_PROFILE,
   domainsForProfile,
   isOperatingProfileId,
-  normalizeTransportModes,
+  resolveTransportModesForProfile,
   OPERATING_PROFILE_CATALOG,
   profileForDomains,
-  transportModesForProfile,
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
@@ -233,13 +232,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid_operating_profile", profiles: Object.keys(OPERATING_PROFILE_CATALOG) }, { status: 400 });
   }
   const operatingDomains = domainsForProfile(operatingProfile);
-  const requestedTransportModes = normalizeTransportModes(payload.transportModes);
-  const operatingTransportModes = requestedTransportModes.length
-    ? requestedTransportModes.filter((mode) => transportModesForProfile(operatingProfile).includes(mode))
-    : transportModesForProfile(operatingProfile);
-  if (requestedTransportModes.length !== operatingTransportModes.length) {
-    return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(operatingProfile) }, { status: 400 });
-  }
+  const operatingTransportModes = resolveTransportModesForProfile(payload.transportModes, operatingProfile);
   const companyProfile = normalizeCompanyProfile(payload.companyProfile);
   const companyProfileError = validateCompanyProfile(companyProfile);
   if (companyProfileError) {

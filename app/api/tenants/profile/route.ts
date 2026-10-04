@@ -8,7 +8,7 @@ import {
   DEFAULT_OPERATING_PROFILE,
   domainsForProfile,
   isOperatingProfileId,
-  normalizeTransportModes,
+  resolveTransportModesForProfile,
   OPERATING_PROFILE_CATALOG,
   parseOperatingDomains,
   parseTransportModes,
@@ -79,13 +79,7 @@ export async function PATCH(request: Request) {
     profile = profileForDomains(requestedDomains);
   }
   const domains = domainsForProfile(profile);
-  const requestedTransportModes = normalizeTransportModes(input.transportModes);
-  const transportModes = requestedTransportModes.length
-    ? requestedTransportModes.filter((mode) => transportModesForProfile(profile).includes(mode))
-    : transportModesForProfile(profile);
-  if (requestedTransportModes.length !== transportModes.length) {
-    return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(profile) }, { status: 400 });
-  }
+  const transportModes = resolveTransportModesForProfile(input.transportModes, profile);
   const companyProfile = input.companyProfile === undefined ? null : normalizeCompanyProfile(input.companyProfile);
   const companyProfileError = companyProfile ? validateCompanyProfile(companyProfile) : null;
   if (companyProfileError) {
