@@ -760,6 +760,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
           createdBy: context.actorId,
           stops: routeInputStops,
           fallbackStops: routeFallbackStops,
+          cargoAssetId: boundedText(payload.cargoAssetId, 120) || null,
+          materialRequestId: materialRequest?.id ?? null,
         });
       } catch (error) {
         if (error instanceof MissionRouteError) return Response.json({ error: error.code, details: error.details }, { status: 409 });

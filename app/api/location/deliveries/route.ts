@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { deliveryEvents, locationEvents, routePlans, routeStops, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
@@ -11,6 +11,15 @@ type JsonObject = Record<string, unknown>;
 
 function bounded(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function parseJsonObject(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
 }
 
 export async function GET() {
@@ -54,12 +63,21 @@ export async function POST(request: Request) {
     if (!stop) return Response.json({ error: "route_stop_not_found" }, { status: 404 });
     const [plan] = await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, stop.routePlanId))).limit(1);
     if (!plan) return Response.json({ error: "route_plan_not_found" }, { status: 404 });
+    const metadata = parseJsonObject(stop.evidenceJson);
+    if (metadata.kind !== "DELIVERY") return Response.json({ error: "route_stop_not_delivery" }, { status: 409 });
+    if (!["ARRIVED", "DEPARTED", "COMPLETED"].includes(stop.status) || !stop.arrivedAt) {
+      return Response.json({ error: "confirmed_geofence_arrival_required", message: "La tappa non è ancora stata raggiunta dal mezzo con una geofence confermata." }, { status: 409 });
+    }
+    const routeRows = await db.select().from(routeStops).where(and(eq(routeStops.tenantId, context.tenantId), eq(routeStops.routePlanId, plan.id))).orderBy(asc(routeStops.sequence)).limit(100);
+    const previousOpenStop = routeRows.find((candidate) => candidate.sequence < stop.sequence && !["DEPARTED", "COMPLETED"].includes(candidate.status));
+    if (previousOpenStop) return Response.json({ error: "previous_route_stop_not_closed", previousRouteStopId: previousOpenStop.id, previousSequence: previousOpenStop.sequence }, { status: 409 });
     const canConfirmForOthers = hasCapability(context, "workforce.manage") || hasCapability(context, "authority.manage");
     if (!canConfirmForOthers && plan.driverId !== context.actorId) return Response.json({ error: "delivery_scope_forbidden" }, { status: 403 });
     const arrivals = await db.select().from(locationEvents).where(and(
       eq(locationEvents.tenantId, context.tenantId),
       eq(locationEvents.locationId, stop.locationId),
       eq(locationEvents.vehicleId, plan.vehicleId),
+      gte(locationEvents.occurredAt, stop.arrivedAt ?? plan.createdAt),
       inArray(locationEvents.eventType, ["SITE_ARRIVAL", "CUSTOMER_ARRIVAL", "WAREHOUSE_ARRIVAL", "SUPPLIER_ARRIVAL", "GEOFENCE_ENTER_CONFIRMED"]),
     )).orderBy(desc(locationEvents.occurredAt)).limit(1);
     if (!arrivals[0]) return Response.json({ error: "confirmed_geofence_arrival_required", message: "La presenza GPS non conferma da sola la consegna: prima serve un arrivo geofence confermato sul mezzo pianificato." }, { status: 409 });

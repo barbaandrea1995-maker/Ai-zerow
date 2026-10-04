@@ -220,6 +220,7 @@ export async function POST(request: Request) {
   const driverId = boundedText(input.driverId, 120);
   const vehicleId = boundedText(input.vehicleId, 120);
   const cargoAssetId = boundedText(input.cargoAssetId, 120);
+  const materialRequestId = boundedText(input.materialRequestId, 120);
   const routeInputStops = input.routeStops ?? input.stops;
   const requestedTransportMode = boundedText(input.transportMode, 48);
   const transportMode: TransportMode = isTransportMode(requestedTransportMode)
@@ -294,6 +295,8 @@ export async function POST(request: Request) {
         createdBy: context.actorId,
         stops: routeInputStops,
         fallbackStops: routeFallbackStops,
+        cargoAssetId: resources.cargoAsset?.id ?? null,
+        materialRequestId: materialRequestId || null,
       });
     } catch (error) {
       if (error instanceof MissionRouteError) return Response.json({ error: error.code, details: error.details }, { status: 409 });

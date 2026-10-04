@@ -226,12 +226,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (action === "check_in" && operational.mode === "DRIVER" && operational.trackingError) {
       return Response.json({ error: operational.trackingError, reason: "driver_check_in_requires_an_active_vehicle_tracking_binding", missionId: operational.mission?.id ?? null, vehicleId: operational.vehicleId }, { status: 409 });
     }
-    if (action === "check_in" && operational.mode === "DRIVER" && operational.origin && !operational.checkInGeofence) {
-      return Response.json({ error: "driver_origin_geofence_required", reason: "the_assigned_origin_must_have_a_confirmed_geofence", missionId: operational.mission?.id ?? null, origin: operational.origin.entityId }, { status: 409 });
-    }
-    if (action === "check_in" && operational.mode === "DRIVER" && operational.checkInGeofence && attendanceGeofence.status !== "INSIDE") {
-      return Response.json({ error: "driver_origin_geofence_required", reason: "driver_check_in_must_start_inside_the_assigned_origin_geofence", geofence: attendanceGeofence }, { status: 409 });
-    }
     const locationWithGeofence = location ? { ...location, geofence: attendanceGeofence } : null;
 
     const currentPayload = latest ? parseJson(latest.payloadJson) : {};

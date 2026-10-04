@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geoLocations, geofences, routePlans, routeStops } from "@/db/schema";
 import { geofenceForEngine, parseJsonObject } from "@/lib/location-intelligence/repository";
@@ -70,6 +70,17 @@ function actions(value: unknown) {
   });
 }
 
+function defaultActions(kind: MissionStopKind, cargoAssetId: string, materialRequestId: string) {
+  const action = kind === "PICKUP" ? "LOAD" : kind === "DELIVERY" ? "UNLOAD" : kind === "RETURN" ? "RETURN" : "TRANSFER";
+  return [{
+    action,
+    assetId: cargoAssetId || null,
+    itemId: null,
+    materialRequestId: materialRequestId || null,
+    quantity: null,
+  }];
+}
+
 function routeStopMetadata(summary: MissionRouteProjection["summary"][number]) {
   return JSON.stringify({
     routeStopVersion: 1,
@@ -113,7 +124,7 @@ async function findGeofence(tenantId: string, locationId: string) {
     eq(geofences.tenantId, tenantId),
     eq(geofences.locationId, locationId),
     eq(geofences.status, "ACTIVE"),
-  )).orderBy(asc(geofences.updatedAt)).limit(1);
+  )).orderBy(desc(geofences.updatedAt)).limit(1);
   return row ? geofenceForEngine(row) : null;
 }
 
@@ -127,6 +138,8 @@ export async function buildMissionRouteProjection({
   createdBy,
   stops,
   fallbackStops,
+  cargoAssetId,
+  materialRequestId,
 }: {
   tenantId: string;
   missionId: string;
@@ -137,10 +150,16 @@ export async function buildMissionRouteProjection({
   createdBy: string;
   stops: unknown;
   fallbackStops: MissionStopInput[];
+  cargoAssetId?: string | null;
+  materialRequestId?: string | null;
 }): Promise<MissionRouteProjection | null> {
   const rawStops = Array.isArray(stops) && stops.length ? stops : fallbackStops;
   if (!rawStops.length) return null;
+  if (rawStops.length < 2) throw new MissionRouteError("mission_route_min_stops", { minStops: 2 });
   if (rawStops.length > 12) throw new MissionRouteError("mission_route_stop_limit", { maxStops: 12 });
+
+  const normalizedCargoAssetId = text(cargoAssetId, 160);
+  const normalizedMaterialRequestId = text(materialRequestId, 160);
 
   const summary: MissionRouteProjection["summary"] = [];
   for (let index = 0; index < rawStops.length; index += 1) {
@@ -155,6 +174,7 @@ export async function buildMissionRouteProjection({
     }
     const kind = stopKind(input.kind, index, rawStops.length);
     const label = text(input.label, 240) || location.formattedAddress || `${location.entityType} ${location.entityId}`;
+    const normalizedActions = actions(input.cargoActions);
     summary.push({
       id: `ROUTE-STOP-${missionId}-${String(index + 1).padStart(2, "0")}`,
       sequence: index + 1,
@@ -164,7 +184,7 @@ export async function buildMissionRouteProjection({
       entityType: location.entityType,
       entityId: location.entityId,
       geofenceId: geofence.id,
-      cargoActions: actions(input.cargoActions),
+      cargoActions: normalizedActions.length ? normalizedActions : defaultActions(kind, normalizedCargoAssetId, normalizedMaterialRequestId),
       deliveryEvidenceRequired: input.deliveryEvidenceRequired !== false && kind === "DELIVERY",
     });
   }
