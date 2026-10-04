@@ -1,9 +1,10 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { tenantMemberships, tenants } from "@/db/schema";
 import {
   type IdentityProvider,
+  getAuthenticatedIdentity,
   getAuthorityContext,
   hasCapability,
   publicAuthorityContext,
@@ -66,7 +67,7 @@ function tenantRows(identityProvider: IdentityProvider, actorId: string) {
         eq(tenantMemberships.identityProvider, identityProvider),
         eq(tenantMemberships.actorId, actorId),
         eq(tenantMemberships.status, "active"),
-        eq(tenants.status, "active"),
+        or(eq(tenants.status, "active"), eq(tenants.status, "onboarding")),
       ),
     )
     .orderBy(asc(tenants.createdAt));
@@ -105,34 +106,64 @@ function toTenantView(row: Awaited<ReturnType<typeof tenantRows>>[number]) {
   };
 }
 
-function requireOwner() {
-  return getAuthorityContext().then((context) => {
-    if (!context) {
-      return {
-        context: null,
-        response: Response.json({ error: "unauthenticated" }, { status: 401 }),
-      };
+async function requireOwner() {
+  const context = await getAuthorityContext();
+  if (context && hasCapability(context, "tenant.manage")) {
+    return { context, identity: null, initialSetup: false, response: null };
+  }
+
+  // A freshly registered Neon account has no membership yet. This is the
+  // only state in which the browser may start primary onboarding without an
+  // existing tenant owner context.
+  const identity = await getAuthenticatedIdentity();
+  if (identity) {
+    const rows = await tenantRows(identity.identityProvider, identity.actorId);
+    if (rows.length === 0) {
+      return { context: null, identity, initialSetup: true, response: null };
     }
-    if (!hasCapability(context, "tenant.manage")) {
-      return {
-        context: null,
-        response: Response.json({ error: "forbidden" }, { status: 403 }),
-      };
-    }
-    return { context, response: null };
-  });
+  }
+
+  if (!context) {
+    return {
+      context: null,
+      identity: null,
+      initialSetup: false,
+      response: Response.json({ error: "unauthenticated" }, { status: 401 }),
+    };
+  }
+
+  return {
+    context: null,
+    identity: null,
+    initialSetup: false,
+    response: Response.json({ error: "forbidden" }, { status: 403 }),
+  };
 }
 
 export async function GET() {
-  const { context, response } = await requireOwner();
-  if (response) return response;
+  const gate = await requireOwner();
+  if (gate.response) return gate.response;
+
+  if (gate.initialSetup) {
+    return Response.json({
+      context: null,
+      canonicalTenantId: null,
+      provisioned: false,
+      setupRequired: true,
+      identity: gate.identity ? { displayName: gate.identity.actorName, email: gate.identity.actorEmail } : null,
+      tenants: [],
+    }, { headers: { "cache-control": "private, no-store" } });
+  }
+
+  const ownerContext = gate.context!;
 
   try {
-    const rows = await tenantRows(context!.identityProvider, context!.actorId);
+    const rows = await tenantRows(ownerContext.identityProvider, ownerContext.actorId);
     return Response.json({
-      context: publicAuthorityContext(context!),
-      canonicalTenantId: context!.tenantId,
+      context: publicAuthorityContext(ownerContext),
+      canonicalTenantId: ownerContext.tenantId,
       provisioned: rows.length > 0,
+      setupRequired: ownerContext.tenantStatus === "onboarding",
       tenants: rows.map(toTenantView),
     });
   } catch (error) {
@@ -141,8 +172,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const { context, response } = await requireOwner();
-  if (response) return response;
+  const gate = await requireOwner();
+  if (gate.response) return gate.response;
+  const context = gate.context;
 
   let payload: TenantPayload = {};
   try {
@@ -153,6 +185,7 @@ export async function POST(request: Request) {
 
   const requestedTenantId = typeof payload.tenantId === "string" ? payload.tenantId.trim() : "";
   if (requestedTenantId) {
+    if (!context) return Response.json({ error: "tenant_selection_requires_membership" }, { status: 403 });
     const rows = await tenantRows(context!.identityProvider, context!.actorId);
     const selected = rows.find((row) => row.tenantId === requestedTenantId);
     if (!selected) return Response.json({ error: "cross_tenant_access_denied" }, { status: 403 });
@@ -193,9 +226,11 @@ export async function POST(request: Request) {
 
   try {
     const db = getDb();
-    const existing = await tenantRows(context!.identityProvider, context!.actorId);
+    const actor = context ?? gate.identity;
+    if (!actor) return Response.json({ error: "authenticated_identity_required" }, { status: 401 });
+    const existing = await tenantRows(actor.identityProvider, actor.actorId);
     const now = new Date().toISOString();
-    const tenantId = existing.length === 0 && context!.tenantId === SITES_TENANT_ID
+    const tenantId = existing.length === 0 && actor.identityProvider === "sites" && actor.actorId === context?.actorId && context?.tenantId === SITES_TENANT_ID
       ? context!.tenantId
       : `tenant:${crypto.randomUUID()}`;
     await db
@@ -204,11 +239,11 @@ export async function POST(request: Request) {
         id: tenantId,
         slug,
         name,
-        status: "active",
+        status: "onboarding",
         operatingProfile,
         operatingDomainsJson: JSON.stringify(operatingDomains),
         operatingTransportModesJson: JSON.stringify(operatingTransportModes),
-        createdBy: context!.actorId,
+        createdBy: actor.actorId,
         createdAt: now,
         updatedAt: now,
       })
@@ -217,12 +252,12 @@ export async function POST(request: Request) {
     await db
       .insert(tenantMemberships)
       .values({
-        id: `tenant-owner:${tenantId}:${context!.identityProvider}:${context!.actorId}`,
+        id: `tenant-owner:${tenantId}:${actor.identityProvider}:${actor.actorId}`,
         tenantId,
-        identityProvider: context!.identityProvider,
-        actorId: context!.actorId,
-        actorEmail: context!.actorEmail,
-        displayName: context!.actorName,
+        identityProvider: actor.identityProvider,
+        actorId: actor.actorId,
+        actorEmail: actor.actorEmail,
+        displayName: actor.actorName,
         role: "owner",
         rolesJson: '["owner"]',
         status: "active",
@@ -231,12 +266,15 @@ export async function POST(request: Request) {
       })
       .onConflictDoNothing();
 
-    const rows = await tenantRows(context!.identityProvider, context!.actorId);
+    const rows = await tenantRows(actor.identityProvider, actor.actorId);
+    const createdContext = await getAuthorityContext();
+    if (!createdContext) return Response.json({ error: "tenant_context_unavailable_after_provisioning" }, { status: 503 });
     const response = NextResponse.json(
       {
-        context: publicAuthorityContext(context!),
+        context: publicAuthorityContext(createdContext),
         canonicalTenantId: tenantId,
         provisioned: rows.length > 0,
+        setupRequired: true,
         created: true,
         tenants: rows.map(toTenantView),
       },

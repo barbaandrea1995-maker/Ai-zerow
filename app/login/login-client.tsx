@@ -53,6 +53,20 @@ export default function LoginClient({
 
   const activeMode: AuthMode = resetToken ? "resetPassword" : mode;
 
+  async function routeAfterAuth(fallback: string) {
+    if (returnTo) {
+      router.push(returnTo);
+      return;
+    }
+    try {
+      const response = await fetch("/api/tenants", { cache: "no-store" });
+      const payload = await response.json() as { setupRequired?: boolean };
+      router.push(payload.setupRequired ? "/onboarding?mode=setup" : fallback);
+    } catch {
+      router.push(fallback);
+    }
+  }
+
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -65,7 +79,7 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_in_failed");
         return;
       }
-      router.push(returnTo ?? "/command");
+      await routeAfterAuth("/command");
     } catch {
       setMessage("auth_sign_in_failed");
     } finally {
@@ -85,7 +99,7 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_up_failed");
         return;
       }
-      router.push(returnTo ?? "/tenants");
+      await routeAfterAuth("/onboarding?mode=setup");
     } catch {
       setMessage("auth_sign_up_failed");
     } finally {

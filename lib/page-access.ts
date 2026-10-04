@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { getNeonAuthIdentity } from "@/lib/neon-auth/tenant-context";
 
-export async function requirePageContext() {
+type PageAccessOptions = {
+  allowOnboarding?: boolean;
+};
+
+export async function requirePageContext(options: PageAccessOptions = {}) {
   const identity = await getNeonAuthIdentity();
   if (identity.status === "error") {
     redirect("/login");
@@ -25,11 +29,18 @@ export async function requirePageContext() {
     redirect("/login");
   }
 
+  if (context.tenantStatus === "onboarding" && !options.allowOnboarding) {
+    redirect("/onboarding?mode=setup");
+  }
+
   return context;
 }
 
-export async function requirePageCapability(capability: string) {
-  const context = await requirePageContext();
+export async function requirePageCapability(
+  capability: string,
+  options: PageAccessOptions = {},
+) {
+  const context = await requirePageContext(options);
   if (!hasCapability(context, capability)) {
     redirect(`/access-denied?required=${encodeURIComponent(capability)}`);
   }

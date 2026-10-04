@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { getChatGPTUser, type ChatGPTUser } from "@/app/chatgpt-auth";
 import { getDb } from "@/db";
@@ -53,6 +53,7 @@ export type AuthorityContext = {
   identityProvider: IdentityProvider;
   membershipId: string;
   tenantId: string;
+  tenantStatus: "onboarding" | "active";
   environment: "sites-local-preview" | "sites-production";
   role: AuthorityRole;
   roles: AuthorityRole[];
@@ -158,7 +159,7 @@ async function queryMemberships(
         eq(tenantMemberships.identityProvider, identity.identityProvider),
         eq(tenantMemberships.actorId, identity.actorId),
         eq(tenantMemberships.status, "active"),
-        eq(tenants.status, "active"),
+        or(eq(tenants.status, "active"), eq(tenants.status, "onboarding")),
       ),
     )
     .orderBy(asc(tenants.createdAt));
@@ -224,6 +225,7 @@ function contextFromRow(
     identityProvider: identity.identityProvider,
     membershipId: row.membershipId,
     tenantId: row.tenantId,
+    tenantStatus: row.tenantStatus === "onboarding" ? "onboarding" : "active",
     environment,
     role,
     roles,
@@ -260,6 +262,7 @@ function sitesBootstrapContext(identity: AuthenticatedIdentity): AuthorityContex
     identityProvider: "sites",
     membershipId: `site-owner:${SITES_TENANT_ID}:${identity.actorId}`,
     tenantId: SITES_TENANT_ID,
+    tenantStatus: "onboarding",
     environment,
     role: "owner",
     roles: ["owner"],
@@ -358,6 +361,7 @@ export function publicAuthorityContext(context: AuthorityContext) {
     identityProvider: context.identityProvider,
     membershipId: context.membershipId,
     tenantId: context.tenantId,
+    tenantStatus: context.tenantStatus,
     environment: context.environment,
     role: context.role,
     roles: context.roles,

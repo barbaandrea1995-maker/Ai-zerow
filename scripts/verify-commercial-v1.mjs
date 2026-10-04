@@ -172,7 +172,13 @@ for (const [route, capability] of Object.entries(guardFiles)) {
   const path = join(root, "app", route, "layout.tsx");
   await access(path);
   const source = await readFile(path, "utf8");
-  assert(source.includes(`requirePageCapability("${capability}")`), `${route} must require ${capability}`);
+  if (route === "onboarding") {
+    assert(source.includes("getAuthenticatedIdentity"), "onboarding must require an authenticated account");
+    assert(source.includes('context.tenantStatus === "onboarding"'), "onboarding must allow the primary setup state");
+    assert(source.includes(`hasCapability(context, "${capability}")`), `${route} Authority surface must require ${capability}`);
+  } else {
+    assert(source.includes(`requirePageCapability("${capability}")`), `${route} must require ${capability}`);
+  }
 }
 
 const migration = await readFile(join(root, "drizzle", "0010_command_dashboard_preferences.sql"), "utf8");

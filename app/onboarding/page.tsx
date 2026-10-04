@@ -75,6 +75,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TenantSwitcher } from "@/components/tenant-switcher";
+import PrimaryOnboarding from "@/components/primary-onboarding";
 import { useRouter } from "next/navigation";
 import {
   AUTHORITY_ROLES,
@@ -1257,6 +1258,7 @@ export default function OnboardingPage() {
   const [teams, setTeams] = useState<AuthorityTeamView[]>([]);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [teamSubmitting, setTeamSubmitting] = useState(false);
+  const [surface, setSurface] = useState<"checking" | "primary" | "authority">("checking");
   const visibleNavItems = useMemo(
     () => navItems.filter((item) => Boolean(item.capability && authorityContext?.capabilities.includes(item.capability))),
     [authorityContext],
@@ -1501,9 +1503,31 @@ export default function OnboardingPage() {
   }, []);
 
   useEffect(() => {
+    if (surface !== "authority") return;
     const timer = window.setTimeout(() => void refreshAuthority(), 0);
     return () => window.clearTimeout(timer);
-  }, [refreshAuthority]);
+  }, [refreshAuthority, surface]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/tenants", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { setupRequired?: boolean };
+        if (!active) return;
+        setSurface(response.ok && payload.setupRequired ? "primary" : "authority");
+      })
+      .catch(() => {
+        if (active) setSurface("authority");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (surface === "checking") {
+    return <main className="zw-app-shell flex min-h-screen items-center justify-center px-5 text-slate-100"><div className="carbon-card carbon-card-neon rounded-2xl px-5 py-4 text-sm text-slate-300">Verifico il perimetro del workspace…</div></main>;
+  }
+  if (surface === "primary") return <PrimaryOnboarding />;
 
   const navigate = (id: string, label: string) => {
     setMobileMenu(false);
