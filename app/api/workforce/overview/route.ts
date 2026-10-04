@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records, tenantMemberships } from "@/db/schema";
+import { jobJourneyRecords, s04Records, tenantMemberships, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { isAuthorityRole, ROLE_METADATA } from "@/lib/authority-catalog";
 import { parseJobPayload } from "@/lib/operations-contract";
@@ -78,7 +78,7 @@ export async function GET() {
 
   try {
     const db = getDb();
-    const [membershipRows, workforceRows, jobs, plans, attendance, missionCatalog] = await Promise.all([
+    const [membershipRows, workforceRows, jobs, warehouses, plans, attendance, missionCatalog] = await Promise.all([
       canSeeRegistry
         ? db.select().from(tenantMemberships).where(eq(tenantMemberships.tenantId, context.tenantId)).orderBy(desc(tenantMemberships.updatedAt)).limit(500)
         : Promise.resolve([]),
@@ -92,13 +92,16 @@ export async function GET() {
           inArray(s04Records.module, allowedModules),
         )).limit(500)
         : Promise.resolve([]),
+      hasCapability(context, "warehouse.read")
+        ? db.select().from(tenantWarehouses).where(eq(tenantWarehouses.tenantId, context.tenantId)).limit(500)
+        : Promise.resolve([]),
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.domain, "planning"),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
-        eq(jobJourneyRecords.domain, "field"),
+        inArray(jobJourneyRecords.domain, ["field", "warehouse"]),
         eq(jobJourneyRecords.recordType, "ATTENDANCE"),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
       getMissionResourceCatalog({ tenantId: context.tenantId }),
@@ -186,9 +189,11 @@ export async function GET() {
       ? planViews
       : planViews.filter((plan) => plan.resourceIds.some((resourceId) => resources.some((resource) => resource.id === resourceId)));
     const attendanceJobById = new Map(jobs.map((job) => [job.id, job]));
-    const attendanceViews = attendance.filter((row) => attendanceJobById.has(row.jobId)).map((row) => {
+    const attendanceWarehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+    const attendanceViews = attendance.filter((row) => attendanceJobById.has(row.jobId) || attendanceWarehouseById.has(row.jobId)).map((row) => {
       const payload = parseJson(row.payloadJson);
       const job = attendanceJobById.get(row.jobId);
+      const warehouse = attendanceWarehouseById.get(row.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
       const transition = payload.lastTransition && typeof payload.lastTransition === "object" && !Array.isArray(payload.lastTransition)
         ? payload.lastTransition as JsonObject
@@ -196,7 +201,7 @@ export async function GET() {
       return {
         id: row.id,
         jobId: row.jobId,
-        jobTitle: jobPayload?.title || job?.title || "Perimetro operativo",
+        jobTitle: jobPayload?.title || job?.title || warehouse?.name || "Perimetro operativo",
         workerId: text(payload.workerId, "") || null,
         status: row.status,
         recordedAt: text(transition.recordedAt, "") || null,

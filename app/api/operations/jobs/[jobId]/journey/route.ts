@@ -5,6 +5,8 @@ import {
   inventoryMovements,
   jobJourneyRecords,
   operationalDocuments,
+  routePlans,
+  routeStops,
   s04Records,
   s06Events,
   s06Outbox,
@@ -18,6 +20,7 @@ import { assertMissionResourceSelection, MissionResourceError } from "@/lib/miss
 import { parseJobPayload } from "@/lib/operations-contract";
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
 import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
+import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
 
 export const dynamic = "force-dynamic";
@@ -385,6 +388,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let payload: JsonObject;
     let existing: typeof jobJourneyRecords.$inferSelect | null = null;
     let materialRequest: typeof jobJourneyRecords.$inferSelect | null = null;
+    let routeProjection: Awaited<ReturnType<typeof buildMissionRouteProjection>> = null;
+    let routeInputStops: unknown = null;
+    const routeFallbackStops: MissionStopInput[] = [];
     let eventType = "";
 
     if (action === "planning_create") {
@@ -484,6 +490,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const vehicleId = boundedText(input.vehicleId, 120);
       const cargoAssetId = boundedText(input.cargoAssetId, 120);
       const materialRequestId = boundedText(input.materialRequestId, 120);
+      routeInputStops = input.routeStops ?? input.stops;
       const requestedTransportMode = boundedText(input.transportMode, 48);
       const transportMode: TransportMode = isTransportMode(requestedTransportMode)
         ? requestedTransportMode
@@ -566,6 +573,25 @@ export async function POST(request: Request, routeContext: RouteContext) {
         },
         notes: boundedText(input.notes, 2_000),
       };
+      const requestPayload = materialRequest ? parseJson(materialRequest.payloadJson) : {};
+      const requestWarehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
+      const originWarehouseId = boundedText(requestPayload.warehouseId, 120) || boundedText(requestWarehouse?.id, 120);
+      const destinationEntityId = boundedText(input.destinationEntityId ?? input.dropoffEntityId, 160);
+      const destinationEntityType = boundedText(input.destinationEntityType ?? input.dropoffEntityType, 48).toUpperCase();
+      if (originWarehouseId) {
+        routeFallbackStops.push({
+          kind: "PICKUP",
+          entityType: "MAGAZZINO",
+          entityId: originWarehouseId,
+          label: boundedText(requestWarehouse?.locationLabel, 240) || pickup,
+          cargoActions: [{ action: "LOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }],
+        });
+      }
+      if (destinationEntityId && destinationEntityType) {
+        routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: [{ action: "UNLOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }] });
+      } else if (transportMode === "WAREHOUSE_TO_JOB" || transportMode === "ASSET_TRANSFER") {
+        routeFallbackStops.push({ kind: "DELIVERY", entityType: "CANTIERE", entityId: job.id, label: dropoff, cargoActions: [{ action: "UNLOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }] });
+      }
       eventType = "mission.transport.created";
     } else {
       const recordId = boundedText(input.recordId, 120);
@@ -722,6 +748,25 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
     if (!status || !eventType) return Response.json({ error: "unsupported_journey_transition" }, { status: 409 });
     const recordId = existing?.id ?? crypto.randomUUID();
+    if (action === "mission_create" && !existing) {
+      try {
+        routeProjection = await buildMissionRouteProjection({
+          tenantId: context.tenantId,
+          missionId: recordId,
+          jobId: job.id,
+          driverId: boundedText(payload.driverId, 120),
+          vehicleId: boundedText(payload.vehicleId, 120),
+          plannedStartAt: boundedText(payload.plannedAt, 40),
+          createdBy: context.actorId,
+          stops: routeInputStops,
+          fallbackStops: routeFallbackStops,
+        });
+      } catch (error) {
+        if (error instanceof MissionRouteError) return Response.json({ error: error.code, details: error.details }, { status: 409 });
+        throw error;
+      }
+      payload = { ...payload, route: routeSummaryForPayload(routeProjection) };
+    }
     const nextVersion = existing ? existing.version + 1 : 1;
     const eventId = crypto.randomUUID();
     const eventPayload = JSON.stringify({
@@ -799,7 +844,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         detail: "Passaggio della journey persistito con controllo versione e outbox.",
         createdAt: now, updatedAt: now,
       }),
-    ];
+    ] as unknown as never[];
+    if (routeProjection) {
+      statements.push(db.insert(routePlans).values(routeProjection.plan) as never);
+      for (const stop of routeProjection.stops) statements.push(db.insert(routeStops).values(stop) as never);
+    }
+    if (existing && action === "mission_dispatch") {
+      const route = isRecord(payload.route) ? payload.route : {};
+      const routePlanId = boundedText(route.routePlanId, 160);
+      if (routePlanId) {
+        statements.push(db.update(routePlans).set({ status: "DISPATCHED", updatedAt: now }).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, routePlanId))) as never);
+      }
+    }
     if (materialRequest) {
       const requestPayload = parseJson(materialRequest.payloadJson);
       statements.push(db.update(jobJourneyRecords).set({
@@ -818,7 +874,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.version, materialRequest.version),
       )) as never);
     }
-    const results = await db.batch(statements);
+    const results = await db.batch(statements as [never, ...never[]]);
     const changed = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
     if (!changed) return Response.json({ error: "version_conflict" }, { status: 409 });
     if (materialRequest) {

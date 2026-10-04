@@ -56,6 +56,8 @@ export type AttendanceOperationalContext = {
   trackingError: "vehicle_tracking_device_required" | "vehicle_tracking_device_not_bound" | null;
   origin: OperationalAttachment | null;
   destination: OperationalAttachment | null;
+  routePlanId: string | null;
+  routeStopCount: number;
   checkInGeofence: GeofenceDefinition | null;
   checkOutGeofence: GeofenceDefinition | null;
 };
@@ -193,6 +195,8 @@ export async function resolveAttendanceOperationalContext({
       trackingError: null,
       origin: null,
       destination: null,
+      routePlanId: null,
+      routeStopCount: 0,
       checkInGeofence: jobFence,
       checkOutGeofence: jobFence,
     };
@@ -200,6 +204,25 @@ export async function resolveAttendanceOperationalContext({
 
   const missionPayload = missionMatch.payload;
   const transportMode = upper(missionPayload.transportMode) || "TRANSPORT";
+  const route = isRecord(missionPayload.route) ? missionPayload.route : {};
+  const routeStops = Array.isArray(route.stops)
+    ? route.stops.filter((item): item is JsonObject => isRecord(item)).sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0))
+    : [];
+  const routeFirst = routeStops[0] ?? null;
+  const routeLast = routeStops.at(-1) ?? null;
+  const routePayload: JsonObject = {
+    ...missionPayload,
+    ...(routeFirst ? {
+      originEntityId: stringValue(routeFirst.entityId),
+      originEntityType: upper(routeFirst.entityType),
+      pickup: stringValue(routeFirst.label, stringValue(missionPayload.pickup, "Punto di partenza")),
+    } : {}),
+    ...(routeLast ? {
+      destinationEntityId: stringValue(routeLast.entityId),
+      destinationEntityType: upper(routeLast.entityType),
+      dropoff: stringValue(routeLast.label, stringValue(missionPayload.dropoff, "Destinazione missione")),
+    } : {}),
+  };
   const snapshot = isRecord(missionPayload.materialRequestSnapshot) ? missionPayload.materialRequestSnapshot : {};
   const snapshotWarehouse = isRecord(snapshot.warehouse) ? snapshot.warehouse : {};
   const warehouseId = stringValue(missionPayload.warehouseId)
@@ -209,7 +232,7 @@ export async function resolveAttendanceOperationalContext({
 
   const origin = await resolveAttachment({
     tenantId,
-    payload: missionPayload,
+    payload: routePayload,
     key: "pickup",
     fallbackEntityType: warehouseId ? "MAGAZZINO" : undefined,
     fallbackEntityId: warehouseId,
@@ -217,7 +240,7 @@ export async function resolveAttendanceOperationalContext({
   });
   const destination = await resolveAttachment({
     tenantId,
-    payload: missionPayload,
+    payload: routePayload,
     key: "dropoff",
     fallbackEntityType: transportMode === "WAREHOUSE_TO_JOB" || transportMode === "ASSET_TRANSFER"
       ? "CANTIERE"
@@ -281,6 +304,8 @@ export async function resolveAttendanceOperationalContext({
     trackingError,
     origin,
     destination,
+    routePlanId: stringValue(route.routePlanId) || null,
+    routeStopCount: routeStops.length,
     checkInGeofence: origin?.geofence ?? null,
     checkOutGeofence: destination?.geofence ?? null,
   };
@@ -328,5 +353,7 @@ export function persistedOperationalContext(value: AttendanceOperationalContext)
     trackingSource: value.trackingSource,
     origin: value.origin ? { label: value.origin.label, entityType: value.origin.entityType, entityId: value.origin.entityId, geofenceId: value.origin.geofence?.id ?? null } : null,
     destination: value.destination ? { label: value.destination.label, entityType: value.destination.entityType, entityId: value.destination.entityId, geofenceId: value.destination.geofence?.id ?? null } : null,
+    routePlanId: value.routePlanId,
+    routeStopCount: value.routeStopCount,
   };
 }

@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { geofences, locationEvents, locationSamples, trackingSessions } from "@/db/schema";
+import { geofences, locationEvents, locationSamples, routePlans, routeStops, trackingSessions } from "@/db/schema";
 import { evaluateGeofenceSample, normalizeCoordinate } from "@/lib/location-intelligence/geometry";
 import { eventForResponse, geofenceForEngine, parseEngineState, parseJsonObject } from "@/lib/location-intelligence/repository";
 import type { LocationEventType } from "@/lib/location-intelligence/types";
@@ -54,6 +54,13 @@ export async function ingestLocationPosition({
   const operationalContext = rawEngineState.__operationalContext && typeof rawEngineState.__operationalContext === "object" && !Array.isArray(rawEngineState.__operationalContext)
     ? rawEngineState.__operationalContext as Record<string, unknown>
     : null;
+  const missionId = typeof operationalContext?.missionId === "string" ? operationalContext.missionId : "";
+  const [routePlan] = missionId
+    ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, tenantId), eq(routePlans.missionId, missionId))).limit(1)
+    : [];
+  const routeStopRows = routePlan
+    ? await db.select().from(routeStops).where(and(eq(routeStops.tenantId, tenantId), eq(routeStops.routePlanId, routePlan.id))).orderBy(asc(routeStops.sequence)).limit(100)
+    : [];
   const expectedGeofenceIds = new Set([
     operationalContext && typeof operationalContext.origin === "object" && operationalContext.origin && !Array.isArray(operationalContext.origin)
       ? (operationalContext.origin as Record<string, unknown>).geofenceId
@@ -62,7 +69,12 @@ export async function ingestLocationPosition({
       ? (operationalContext.destination as Record<string, unknown>).geofenceId
       : null,
   ].filter((value): value is string => typeof value === "string" && value.length > 0));
+  for (const stop of routeStopRows) {
+    const metadata = parseJsonObject(stop.evidenceJson);
+    if (typeof metadata.geofenceId === "string") expectedGeofenceIds.add(metadata.geofenceId);
+  }
   const engineState = parseEngineState(session.engineStateJson);
+  const activeRouteStop = routeStopRows.find((stop) => !["DEPARTED", "COMPLETED"].includes(stop.status)) ?? null;
   const sampleId = `LOCATION-SAMPLE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const now = new Date().toISOString();
   const derived = activeGeofences.flatMap((row) => {
@@ -74,14 +86,117 @@ export async function ingestLocationPosition({
       previous: engineState[row.id],
     });
     engineState[row.id] = evaluated.state;
+    const routeStop = activeRouteStop && activeRouteStop.locationId === row.locationId
+      ? (() => {
+        const metadata = parseJsonObject(activeRouteStop.evidenceJson);
+        return !metadata.geofenceId || metadata.geofenceId === row.id ? activeRouteStop : null;
+      })()
+      : null;
+    const routeMetadata = routeStop ? parseJsonObject(routeStop.evidenceJson) : null;
     const drafts = [...evaluated.events];
     for (const draft of evaluated.events) {
       if (draft.eventType !== "GEOFENCE_ENTER_CONFIRMED" && draft.eventType !== "GEOFENCE_EXIT_CONFIRMED") continue;
       const domainType = domainEventType(row.entityType, draft.eventType === "GEOFENCE_ENTER_CONFIRMED");
       if (domainType) drafts.push({ ...draft, eventType: domainType as LocationEventType, dedupeKey: `${draft.dedupeKey}:${domainType}` });
+      if (routeStop) {
+        const entering = draft.eventType === "GEOFENCE_ENTER_CONFIRMED";
+        drafts.push({
+          ...draft,
+          eventType: entering ? "STOP_STARTED" : "STOP_ENDED",
+          dedupeKey: `${draft.dedupeKey}:route-stop:${routeStop.id}`,
+          evidence: {
+            ...draft.evidence,
+            routePlanId: routePlan?.id ?? null,
+            routeStopId: routeStop.id,
+            sequence: routeStop.sequence,
+            kind: routeMetadata?.kind ?? null,
+            attachment: entering ? "ATTACHED" : "DETACHED",
+            businessActionRequired: "CARGO_ACTION_REQUIRES_OPERATIONAL_EVIDENCE",
+          },
+        });
+        if (!entering && routeMetadata?.kind === "DELIVERY" && routeStop.deliveryStatus !== "CONFIRMED") {
+          drafts.push({
+            ...draft,
+            eventType: "DELIVERY_PROBABLE",
+            dedupeKey: `${draft.dedupeKey}:delivery-probable:${routeStop.id}`,
+            evidence: {
+              ...draft.evidence,
+              routePlanId: routePlan?.id ?? null,
+              routeStopId: routeStop.id,
+              rule: "GEOFENCE_ENTRY_DWELL_AND_CONFIRMED_DEPARTURE",
+              confirmed: false,
+            },
+          });
+        }
+      }
     }
-    return drafts.map((draft) => ({ ...draft, confidenceMilli: Math.round(draft.confidence * 1_000) }));
+    return drafts.map((draft) => ({
+      ...draft,
+      confidenceMilli: Math.round(draft.confidence * 1_000),
+      evidence: {
+        ...draft.evidence,
+        operationalContext: operationalContext
+          ? {
+            missionId: operationalContext.missionId ?? null,
+            transportMode: operationalContext.transportMode ?? null,
+            expectedStop: expectedGeofenceIds.has(draft.geofenceId ?? ""),
+            routePlanId: routePlan?.id ?? null,
+          }
+          : null,
+      },
+    }));
   });
+
+  const routeTransitions = new Map<string, { enteredAt?: string; exitedAt?: string; evidence: Record<string, unknown> }>();
+  for (const draft of derived) {
+    if (draft.eventType !== "GEOFENCE_ENTER_CONFIRMED" && draft.eventType !== "GEOFENCE_EXIT_CONFIRMED") continue;
+    const stop = activeRouteStop && activeRouteStop.locationId === draft.locationId && parseJsonObject(activeRouteStop.evidenceJson).geofenceId === draft.geofenceId
+      ? activeRouteStop
+      : null;
+    if (!stop) continue;
+    const previous = routeTransitions.get(stop.id) ?? { evidence: {} };
+    const next = { ...previous, evidence: { ...previous.evidence, lastGpsEvent: draft.eventType, lastObservedAt: draft.occurredAt, geofenceId: draft.geofenceId, locationId: draft.locationId } };
+    if (draft.eventType === "GEOFENCE_ENTER_CONFIRMED") next.enteredAt = draft.occurredAt;
+    if (draft.eventType === "GEOFENCE_EXIT_CONFIRMED") next.exitedAt = draft.occurredAt;
+    routeTransitions.set(stop.id, next);
+  }
+  const routeStatements = routePlan ? routeStopRows.flatMap((stop) => {
+    const transition = routeTransitions.get(stop.id);
+    if (!transition) return [];
+    const metadata = parseJsonObject(stop.evidenceJson);
+    const entering = Boolean(transition.enteredAt);
+    const exiting = Boolean(transition.exitedAt);
+    const current = parseJsonObject(stop.evidenceJson);
+    const evidenceJson = JSON.stringify({
+      ...current,
+      attachment: exiting ? "DETACHED" : entering ? "ATTACHED" : current.attachment ?? "PENDING",
+      gpsEvidence: { ...transition.evidence, routePlanId: routePlan.id, routeStopId: stop.id, operationalOnly: true },
+    });
+    return [db.update(routeStops).set({
+      status: exiting ? "DEPARTED" : entering ? "ARRIVED" : stop.status,
+      deliveryStatus: exiting && metadata.kind === "DELIVERY" && stop.deliveryStatus !== "CONFIRMED" ? "PROBABLE" : stop.deliveryStatus,
+      arrivedAt: transition.enteredAt ?? stop.arrivedAt,
+      departedAt: transition.exitedAt ?? stop.departedAt,
+      evidenceJson,
+      updatedAt: now,
+    }).where(and(eq(routeStops.tenantId, tenantId), eq(routeStops.id, stop.id))) as never];
+  }) : [];
+  const routeTransition = [...routeTransitions.entries()].at(-1);
+  const routeState = routePlan && routeTransition
+    ? { routePlanId: routePlan.id, routeStopId: routeTransition[0], attachment: routeTransition[1].exitedAt ? "DETACHED" : "ATTACHED", observedAt: routeTransition[1].exitedAt ?? routeTransition[1].enteredAt ?? now }
+    : rawEngineState.__routeState ?? null;
+  const routeEnded = Boolean(routePlan && routeTransitions.size > 0 && routeStopRows.every((stop) => {
+    const transition = routeTransitions.get(stop.id);
+    return stop.status === "DEPARTED" || stop.status === "COMPLETED" || Boolean(transition?.exitedAt);
+  }));
+  if (routePlan && routeTransitions.size > 0) {
+    routeStatements.push(db.update(routePlans).set({
+      status: routeEnded ? "COMPLETED" : "IN_PROGRESS",
+      startedAt: routePlan.startedAt ?? now,
+      endedAt: routeEnded ? now : routePlan.endedAt,
+      updatedAt: now,
+    }).where(and(eq(routePlans.tenantId, tenantId), eq(routePlans.id, routePlan.id))) as never);
+  }
 
   await db.batch([
     db.insert(locationSamples).values({
@@ -116,18 +231,14 @@ export async function ingestLocationPosition({
       geofenceId: draft.geofenceId ?? null,
       source: "ZEROW_DETERMINISTIC_LOCATION_ENGINE",
       confidenceMilli: draft.confidenceMilli,
-      evidenceJson: JSON.stringify({
-        ...draft.evidence,
-        operationalContext: operationalContext
-          ? { missionId: operationalContext.missionId ?? null, transportMode: operationalContext.transportMode ?? null, expectedStop: expectedGeofenceIds.has(draft.geofenceId ?? "") }
-          : null,
-      }),
+      evidenceJson: JSON.stringify(draft.evidence),
       correlationId: crypto.randomUUID(),
       dedupeKey: `${session.id}:${draft.dedupeKey}`,
       createdAt: now,
     })),
-    db.update(trackingSessions).set({ engineStateJson: JSON.stringify({ ...engineState, __operationalContext: operationalContext }), updatedAt: now }).where(and(eq(trackingSessions.tenantId, tenantId), eq(trackingSessions.id, session.id), eq(trackingSessions.status, "ACTIVE"))),
-  ]);
+    db.update(trackingSessions).set({ engineStateJson: JSON.stringify({ ...engineState, __operationalContext: operationalContext, __routeState: routeState }), updatedAt: now }).where(and(eq(trackingSessions.tenantId, tenantId), eq(trackingSessions.id, session.id), eq(trackingSessions.status, "ACTIVE"))),
+    ...routeStatements,
+  ] as [never, ...never[]]);
   const events = derived.length
     ? await db.select().from(locationEvents).where(and(eq(locationEvents.tenantId, tenantId), eq(locationEvents.trackingSessionId, session.id), eq(locationEvents.occurredAt, derived[0].occurredAt))).limit(100)
     : [];

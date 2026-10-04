@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records } from "@/db/schema";
+import { jobJourneyRecords, s04Records, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { parseJobPayload } from "@/lib/operations-contract";
 
@@ -38,24 +38,29 @@ export async function GET() {
   ];
   try {
     const db = getDb();
-    const [jobs, attendance] = await Promise.all([
+    const [jobs, warehouses, attendance] = await Promise.all([
       allowedModules.length
         ? db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, allowedModules))).limit(500)
         : Promise.resolve([]),
+      hasCapability(context, "warehouse.read")
+        ? db.select().from(tenantWarehouses).where(eq(tenantWarehouses.tenantId, context.tenantId)).limit(500)
+        : Promise.resolve([]),
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
-        eq(jobJourneyRecords.domain, "field"),
+        inArray(jobJourneyRecords.domain, ["field", "warehouse"]),
         eq(jobJourneyRecords.recordType, "ATTENDANCE"),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
     ]);
     const jobById = new Map(jobs.map((job) => [job.id, job]));
+    const warehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
     const canSeeAllAttendance = hasCapability(context, "workforce.read.all")
       || hasCapability(context, "workforce.manage")
       || hasCapability(context, "attendance.read")
       || hasCapability(context, "attendance.approve");
-    const records = attendance.filter((row) => jobById.has(row.jobId)).map((row) => {
+    const records = attendance.filter((row) => jobById.has(row.jobId) || warehouseById.has(row.jobId)).map((row) => {
       const payload = parseJson(row.payloadJson);
       const job = jobById.get(row.jobId);
+      const warehouse = warehouseById.get(row.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
       const lastTransition = payload.lastTransition && typeof payload.lastTransition === "object" && !Array.isArray(payload.lastTransition)
         ? payload.lastTransition as Record<string, unknown>
@@ -63,9 +68,9 @@ export async function GET() {
       return {
         id: row.id,
         jobId: row.jobId,
-        jobCode: job?.canonicalCode ?? null,
-        jobTitle: jobPayload?.title || job?.title || "Perimetro operativo",
-        jobModule: job?.module ?? "operations",
+        jobCode: job?.canonicalCode ?? warehouse?.code ?? null,
+        jobTitle: jobPayload?.title || job?.title || warehouse?.name || "Perimetro operativo",
+        jobModule: warehouse ? "warehouse" : job?.module ?? "operations",
         status: row.status,
         version: row.version,
         workerId: typeof payload.workerId === "string" ? payload.workerId : null,

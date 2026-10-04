@@ -1,8 +1,10 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { geofences, geoLocations, jobJourneyRecords, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
+import { geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
+import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { allocateServerName } from "@/lib/server-naming";
 import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
@@ -55,7 +57,7 @@ export async function GET() {
   }
   try {
     const db = getDb();
-    const [missions, operationJobs, materialRequestRows] = await Promise.all([
+    const [missions, operationJobs, materialRequestRows, locations, geofenceRows] = await Promise.all([
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.domain, "mission"),
@@ -72,6 +74,8 @@ export async function GET() {
           inArray(jobJourneyRecords.status, ["REQUESTED", "APPROVED", "FULFILLED", "REJECTED"]),
         )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500)
         : Promise.resolve([]),
+      db.select().from(geoLocations).where(and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE"))).limit(500),
+      db.select().from(geofences).where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.status, "ACTIVE"))).limit(500),
     ]);
     const jobIds = [...new Set([
       ...missions.map((mission) => mission.jobId),
@@ -83,9 +87,19 @@ export async function GET() {
       inArray(s04Records.id, jobIds),
     )) : [];
     const jobById = new Map(jobs.map((job) => [job.id, job]));
+    const routePlanRows = missions.length
+      ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), inArray(routePlans.missionId, missions.map((mission) => mission.id)))).limit(500)
+      : [];
+    const routeStopRows = routePlanRows.length
+      ? await db.select().from(routeStops).where(and(eq(routeStops.tenantId, context.tenantId), inArray(routeStops.routePlanId, routePlanRows.map((plan) => plan.id)))).orderBy(routeStops.sequence).limit(1_000)
+      : [];
+    const routeStopsByPlan = new Map<string, typeof routeStops.$inferSelect[]>();
+    for (const stop of routeStopRows) routeStopsByPlan.set(stop.routePlanId, [...(routeStopsByPlan.get(stop.routePlanId) ?? []), stop]);
+    const routePlanByMission = new Map(routePlanRows.map((plan) => [plan.missionId ?? "", plan]));
     const records = missions.map((mission) => {
       const job = jobById.get(mission.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
+      const routePlan = routePlanByMission.get(mission.id);
       return {
         id: mission.id,
         jobId: mission.jobId,
@@ -95,7 +109,26 @@ export async function GET() {
         title: mission.title,
         status: mission.status,
         version: mission.version,
-        payload: parseJson(mission.payloadJson),
+        payload: {
+          ...parseJson(mission.payloadJson),
+          routeReadback: routePlan ? {
+            id: routePlan.id,
+            status: routePlan.status,
+            plannedStartAt: routePlan.plannedStartAt,
+            startedAt: routePlan.startedAt,
+            endedAt: routePlan.endedAt,
+            stops: (routeStopsByPlan.get(routePlan.id) ?? []).map((stop) => ({
+              id: stop.id,
+              sequence: stop.sequence,
+              locationId: stop.locationId,
+              status: stop.status,
+              deliveryStatus: stop.deliveryStatus,
+              arrivedAt: stop.arrivedAt,
+              departedAt: stop.departedAt,
+              metadata: parseJson(stop.evidenceJson),
+            })),
+          } : null,
+        },
         createdAt: mission.createdAt,
         updatedAt: mission.updatedAt,
       };
@@ -135,6 +168,11 @@ export async function GET() {
       jobs: operationJobs.filter((job) => job.recordType !== "adapter-contract").map(jobView),
       missions: records,
       materialRequests,
+      locations: locations.map((location) => ({
+        ...locationForResponse(location),
+        tenantId: undefined,
+        geofence: geofenceRows.find((fence) => fence.locationId === location.id) ? geofenceForResponse(geofenceRows.find((fence) => fence.locationId === location.id)!) : null,
+      })),
       summary: {
         total: records.length,
         planned: records.filter((record) => record.status === "PLANNED").length,
@@ -182,6 +220,7 @@ export async function POST(request: Request) {
   const driverId = boundedText(input.driverId, 120);
   const vehicleId = boundedText(input.vehicleId, 120);
   const cargoAssetId = boundedText(input.cargoAssetId, 120);
+  const routeInputStops = input.routeStops ?? input.stops;
   const requestedTransportMode = boundedText(input.transportMode, 48);
   const transportMode: TransportMode = isTransportMode(requestedTransportMode)
     ? requestedTransportMode
@@ -236,6 +275,30 @@ export async function POST(request: Request) {
     const jobId = crypto.randomUUID();
     const missionId = crypto.randomUUID();
     const eventId = crypto.randomUUID();
+    const routeFallbackStops: MissionStopInput[] = [];
+    const originEntityId = boundedText(input.originEntityId ?? input.pickupEntityId, 160);
+    const originEntityType = boundedText(input.originEntityType ?? input.pickupEntityType, 48).toUpperCase();
+    const destinationEntityId = boundedText(input.destinationEntityId ?? input.dropoffEntityId, 160);
+    const destinationEntityType = boundedText(input.destinationEntityType ?? input.dropoffEntityType, 48).toUpperCase();
+    if (originEntityId && originEntityType) routeFallbackStops.push({ kind: "PICKUP", entityType: originEntityType, entityId: originEntityId, label: pickup, cargoActions: [{ action: "LOAD", assetId: cargoAssetId || null }] });
+    if (destinationEntityId && destinationEntityType) routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: [{ action: "UNLOAD", assetId: cargoAssetId || null }] });
+    let routeProjection: Awaited<ReturnType<typeof buildMissionRouteProjection>> = null;
+    try {
+      routeProjection = await buildMissionRouteProjection({
+        tenantId: context.tenantId,
+        missionId,
+        jobId,
+        driverId: resources.driver.id,
+        vehicleId: resources.vehicle.id,
+        plannedStartAt: resources.window.startsAt,
+        createdBy: context.actorId,
+        stops: routeInputStops,
+        fallbackStops: routeFallbackStops,
+      });
+    } catch (error) {
+      if (error instanceof MissionRouteError) return Response.json({ error: error.code, details: error.details }, { status: 409 });
+      throw error;
+    }
     const naming = await allocateServerName({ tenantId: context.tenantId, module: "mission", description: title });
     const jobPayload = {
       title,
@@ -271,10 +334,11 @@ export async function POST(request: Request) {
           : null,
       },
       notes: boundedText(input.notes, 2_000),
+      route: routeSummaryForPayload(routeProjection),
       standalone: true,
     };
 
-    const results = await db.batch([
+    const statements = [
       db.insert(s04Records).values({
         id: jobId,
         tenantId: context.tenantId,
@@ -330,7 +394,12 @@ export async function POST(request: Request) {
       }),
       db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: "zerow.mission.transport.created", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
       db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.mission", aggregateId: missionId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Missione autonoma persistita con risorse reali, finestra temporale e readback D1.", createdAt: now, updatedAt: now }),
-    ]);
+    ] as unknown as never[];
+    if (routeProjection) {
+      statements.push(db.insert(routePlans).values(routeProjection.plan) as never);
+      for (const stop of routeProjection.stops) statements.push(db.insert(routeStops).values(stop) as never);
+    }
+    const results = await db.batch(statements as [never, ...never[]]);
     if (!results[0] || !results[1]) return Response.json({ error: "mission_readback_unavailable" }, { status: 503 });
     const [createdJob] = await db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.id, jobId))).limit(1);
     const [createdRecord] = await db.select().from(jobJourneyRecords).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.id, missionId))).limit(1);
