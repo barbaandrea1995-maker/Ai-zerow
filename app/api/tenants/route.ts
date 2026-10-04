@@ -21,6 +21,7 @@ import {
   type OperatingProfileId,
 } from "@/lib/tenant-operating-model";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
+import { companyProfileFromTenant, normalizeCompanyProfile, validateCompanyProfile } from "@/lib/company-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ type TenantPayload = {
   operatingProfile?: unknown;
   operatingDomains?: unknown;
   transportModes?: unknown;
+  companyProfile?: unknown;
 };
 
 function errorCode(error: unknown) {
@@ -56,6 +58,20 @@ function tenantRows(identityProvider: IdentityProvider, actorId: string) {
       operatingProfile: tenants.operatingProfile,
       operatingDomainsJson: tenants.operatingDomainsJson,
       operatingTransportModesJson: tenants.operatingTransportModesJson,
+      legalForm: tenants.legalForm,
+      vatNumber: tenants.vatNumber,
+      taxCode: tenants.taxCode,
+      reaNumber: tenants.reaNumber,
+      registeredAddress: tenants.registeredAddress,
+      registeredPostalCode: tenants.registeredPostalCode,
+      registeredCity: tenants.registeredCity,
+      registeredProvince: tenants.registeredProvince,
+      registeredCountry: tenants.registeredCountry,
+      businessEmail: tenants.businessEmail,
+      businessPhone: tenants.businessPhone,
+      pecEmail: tenants.pecEmail,
+      sdiCode: tenants.sdiCode,
+      website: tenants.website,
       createdBy: tenants.createdBy,
       createdAt: tenants.createdAt,
       updatedAt: tenants.updatedAt,
@@ -103,6 +119,7 @@ function toTenantView(row: Awaited<ReturnType<typeof tenantRows>>[number]) {
         return [];
       }
     })(),
+    companyProfile: companyProfileFromTenant(row),
   };
 }
 
@@ -223,6 +240,11 @@ export async function POST(request: Request) {
   if (requestedTransportModes.length !== operatingTransportModes.length) {
     return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(operatingProfile) }, { status: 400 });
   }
+  const companyProfile = normalizeCompanyProfile(payload.companyProfile);
+  const companyProfileError = validateCompanyProfile(companyProfile);
+  if (companyProfileError) {
+    return Response.json({ error: "company_profile_invalid", field: companyProfileError.field, detail: companyProfileError.detail }, { status: 400 });
+  }
 
   try {
     const db = getDb();
@@ -239,6 +261,20 @@ export async function POST(request: Request) {
         id: tenantId,
         slug,
         name,
+        legalForm: companyProfile.legalForm,
+        vatNumber: companyProfile.vatNumber,
+        taxCode: companyProfile.taxCode,
+        reaNumber: companyProfile.reaNumber || null,
+        registeredAddress: companyProfile.registeredAddress,
+        registeredPostalCode: companyProfile.registeredPostalCode,
+        registeredCity: companyProfile.registeredCity,
+        registeredProvince: companyProfile.registeredProvince,
+        registeredCountry: companyProfile.registeredCountry,
+        businessEmail: companyProfile.businessEmail,
+        businessPhone: companyProfile.businessPhone,
+        pecEmail: companyProfile.pecEmail || null,
+        sdiCode: companyProfile.sdiCode || null,
+        website: companyProfile.website || null,
         status: "onboarding",
         operatingProfile,
         operatingDomainsJson: JSON.stringify(operatingDomains),

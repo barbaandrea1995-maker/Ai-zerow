@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations, tenants } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { companyProfileFromTenant, normalizeCompanyProfile, validateCompanyProfile } from "@/lib/company-profile";
 import {
   DEFAULT_OPERATING_DOMAINS,
   DEFAULT_OPERATING_PROFILE,
@@ -44,7 +45,7 @@ export async function GET() {
       : (context.operatingTransportModes || transportModesForProfile(profile));
     return Response.json({
       context: publicAuthorityContext(context),
-      tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status } : null,
+      tenant: tenant ? { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status, companyProfile: companyProfileFromTenant(tenant) } : null,
       operatingProfile: profile,
       operatingDomains: domains,
       transportModes,
@@ -61,9 +62,9 @@ export async function PATCH(request: Request) {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   if (!hasCapability(context, "tenant.manage")) return Response.json({ error: "forbidden", capability: "tenant.manage" }, { status: 403 });
 
-  let input: { operatingProfile?: unknown; operatingDomains?: unknown; transportModes?: unknown };
+  let input: { operatingProfile?: unknown; operatingDomains?: unknown; transportModes?: unknown; companyProfile?: unknown };
   try {
-    input = await request.json() as { operatingProfile?: unknown; operatingDomains?: unknown };
+    input = await request.json() as { operatingProfile?: unknown; operatingDomains?: unknown; transportModes?: unknown; companyProfile?: unknown };
   } catch {
     return Response.json({ error: "invalid_json" }, { status: 400 });
   }
@@ -85,6 +86,11 @@ export async function PATCH(request: Request) {
   if (requestedTransportModes.length !== transportModes.length) {
     return Response.json({ error: "transport_mode_not_available_for_profile", transportModes: transportModesForProfile(profile) }, { status: 400 });
   }
+  const companyProfile = input.companyProfile === undefined ? null : normalizeCompanyProfile(input.companyProfile);
+  const companyProfileError = companyProfile ? validateCompanyProfile(companyProfile) : null;
+  if (companyProfileError) {
+    return Response.json({ error: "company_profile_invalid", field: companyProfileError.field, detail: companyProfileError.detail }, { status: 400 });
+  }
 
   try {
     const db = getDb();
@@ -92,8 +98,30 @@ export async function PATCH(request: Request) {
     if (!tenant) return Response.json({ error: "tenant_not_provisioned" }, { status: 409 });
     const now = new Date().toISOString();
     const eventId = crypto.randomUUID();
+    const tenantUpdates = {
+      operatingProfile: profile,
+      operatingDomainsJson: JSON.stringify(domains),
+      operatingTransportModesJson: JSON.stringify(transportModes),
+      ...(companyProfile ? {
+        legalForm: companyProfile.legalForm,
+        vatNumber: companyProfile.vatNumber,
+        taxCode: companyProfile.taxCode,
+        reaNumber: companyProfile.reaNumber || null,
+        registeredAddress: companyProfile.registeredAddress,
+        registeredPostalCode: companyProfile.registeredPostalCode,
+        registeredCity: companyProfile.registeredCity,
+        registeredProvince: companyProfile.registeredProvince,
+        registeredCountry: companyProfile.registeredCountry,
+        businessEmail: companyProfile.businessEmail,
+        businessPhone: companyProfile.businessPhone,
+        pecEmail: companyProfile.pecEmail || null,
+        sdiCode: companyProfile.sdiCode || null,
+        website: companyProfile.website || null,
+      } : {}),
+      updatedAt: now,
+    };
     await db.batch([
-      db.update(tenants).set({ operatingProfile: profile, operatingDomainsJson: JSON.stringify(domains), operatingTransportModesJson: JSON.stringify(transportModes), updatedAt: now }).where(eq(tenants.id, context.tenantId)),
+      db.update(tenants).set(tenantUpdates).where(eq(tenants.id, context.tenantId)),
       db.insert(s06Events).values({
         eventId,
         tenantId: context.tenantId,
@@ -107,7 +135,7 @@ export async function PATCH(request: Request) {
         aggregateType: "tenant.operating_profile",
         aggregateId: context.tenantId,
         aggregateVersion: 1,
-        payloadJson: JSON.stringify({ profile, domains, transportModes }),
+        payloadJson: JSON.stringify({ profile, domains, transportModes, companyProfile }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey: `tenant-profile-${context.tenantId}-${now}`,
@@ -120,7 +148,7 @@ export async function PATCH(request: Request) {
     const refreshed = await getAuthorityContext();
     return Response.json({
       context: publicAuthorityContext(refreshed ?? context),
-      tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status },
+      tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name, status: tenant.status, companyProfile: companyProfileFromTenant({ ...tenant, ...(companyProfile ?? {}) }) },
       operatingProfile: profile,
       operatingDomains: domains,
       transportModes,

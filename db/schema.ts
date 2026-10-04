@@ -10,6 +10,20 @@ export const tenants = sqliteTable("tenants", {
   id: text("id").primaryKey(),
   slug: text("slug").notNull(),
   name: text("name").notNull(),
+  legalForm: text("legal_form").notNull().default("OTHER"),
+  vatNumber: text("vat_number"),
+  taxCode: text("tax_code"),
+  reaNumber: text("rea_number"),
+  registeredAddress: text("registered_address"),
+  registeredPostalCode: text("registered_postal_code"),
+  registeredCity: text("registered_city"),
+  registeredProvince: text("registered_province"),
+  registeredCountry: text("registered_country").notNull().default("IT"),
+  businessEmail: text("business_email"),
+  businessPhone: text("business_phone"),
+  pecEmail: text("pec_email"),
+  sdiCode: text("sdi_code"),
+  website: text("website"),
   status: text("status").notNull().default("active"),
   operatingProfile: text("operating_profile").notNull().default("FULL_OPERATIONS"),
   operatingDomainsJson: text("operating_domains_json").notNull().default('["operations","warehouse","transport"]'),
@@ -21,6 +35,7 @@ export const tenants = sqliteTable("tenants", {
   slugUnique: uniqueIndex("tenants_slug_uq").on(table.slug),
   statusIdx: index("tenants_status_idx").on(table.status),
   operatingProfileIdx: index("tenants_operating_profile_idx").on(table.operatingProfile, table.status),
+  vatNumberIdx: index("tenants_vat_number_idx").on(table.vatNumber),
 }));
 
 /**

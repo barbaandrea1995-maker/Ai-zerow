@@ -8,6 +8,7 @@ import {
   tenants,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { companyProfileFromTenant, validateCompanyProfile } from "@/lib/company-profile";
 import { parseOperatingDomains } from "@/lib/tenant-operating-model";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,8 @@ export async function POST() {
 
     const domains = parseOperatingDomains(tenant.operatingDomainsJson);
     const requirements: string[] = [];
+    const companyProfileError = validateCompanyProfile(companyProfileFromTenant(tenant));
+    if (companyProfileError) requirements.push("company_profile");
     if (domains.includes("warehouse")) {
       const warehouses = await db.select({ id: tenantWarehouses.id })
         .from(tenantWarehouses)
@@ -45,7 +48,9 @@ export async function POST() {
       return Response.json({
         error: "onboarding_requirements_incomplete",
         requirements,
-        detail: "Configura almeno un magazzino attivo prima di attivare un profilo che include il dominio warehouse.",
+        detail: companyProfileError
+          ? companyProfileError.detail
+          : "Configura almeno un magazzino attivo prima di attivare un profilo che include il dominio warehouse.",
       }, { status: 409 });
     }
 
