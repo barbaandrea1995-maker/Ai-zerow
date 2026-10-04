@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { qrCodes, s04Records } from "@/db/schema";
+import { inventoryItems, qrCodes, s04Records } from "@/db/schema";
 import {
   canonicalPayload,
   directoryMatch,
@@ -56,16 +56,24 @@ export async function GET(request: Request) {
         eq(s04Records.canonicalCode, match.entityId),
       )).limit(1)
       : [];
+    const [material] = match.entityType === "material"
+      ? await getDb().select().from(inventoryItems).where(and(
+        eq(inventoryItems.tenantId, context!.tenantId),
+        eq(inventoryItems.sku, match.entityId),
+      )).limit(1)
+      : [];
     return Response.json({
       ...qrEnvelope(context!, stored ? [qrRecordForResponse(stored)] : []),
       resolved: {
         ...match,
         ...(asset ? { title: asset.title, detail: asset.detail } : {}),
+        ...(material ? { title: material.name, detail: `${material.sku} · ${material.location}` } : {}),
         canonicalPayload: canonical,
-        source: stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : "sites-directory-fallback",
+        source: stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : material ? "sites-inventory-readback" : "sites-directory-fallback",
       },
       record: stored ? qrRecordForResponse(stored) : null,
       asset: asset ? { id: asset.id, canonicalCode: asset.canonicalCode, title: asset.title, detail: asset.detail } : null,
+      material: material ? { id: material.id, sku: material.sku, name: material.name, unit: material.unit, location: material.location, warehouseId: material.warehouseId } : null,
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return Response.json({ error: qrAdapterError(error), module: "qr-barcode" }, { status: 503 });
@@ -93,7 +101,7 @@ export async function POST(request: Request) {
   const format: QrFormat = isQrFormat(formatValue) ? formatValue : "QR";
 
   if (!isQrEntityType(entityTypeValue)) {
-    return Response.json({ error: "entity_type_must_be_asset_warehouse_or_commessa" }, { status: 400 });
+    return Response.json({ error: "entity_type_must_be_asset_material_warehouse_or_commessa" }, { status: 400 });
   }
   if (!/^[A-Z0-9_:#-]{1,80}$/.test(entityId)) {
     return Response.json({ error: "entity_id_invalid" }, { status: 400 });

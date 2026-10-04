@@ -13,7 +13,7 @@ export const QR_CAPABILITIES = {
   write: "qr.write",
 } as const;
 
-export const QR_ENTITY_TYPES = ["asset", "warehouse", "commessa"] as const;
+export const QR_ENTITY_TYPES = ["asset", "material", "warehouse", "commessa"] as const;
 export type QrEntityType = (typeof QR_ENTITY_TYPES)[number];
 export type QrFormat = "QR" | "BARCODE";
 
@@ -56,8 +56,8 @@ export function canonicalPayload(entityType: QrEntityType, entityId: string): st
 }
 
 export function directoryMatch(entityType: QrEntityType, entityId: string): QrDirectoryMatch {
-  const labels: Record<QrEntityType, string> = { asset: "Asset", warehouse: "Magazzino", commessa: "Commessa" };
-  const moduleKey: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "warehouse" ? "warehouse" : "operations";
+  const labels: Record<QrEntityType, string> = { asset: "Asset", material: "Materiale", warehouse: "Magazzino", commessa: "Commessa" };
+  const moduleKey: DirectoryRecord["module"] = entityType === "asset" ? "assets" : entityType === "commessa" ? "operations" : "warehouse";
   return {
     entityType,
     entityId,
@@ -72,7 +72,7 @@ export function parsePayload(input: string): QrDirectoryMatch | null {
   const parts = value.split("|");
   if (parts.length !== 3 || parts[0] !== "AZ1") return null;
   const rawType = parts[1].toLowerCase();
-  const entityType = rawType === "asset" ? "asset" : rawType === "warehouse" ? "warehouse" : rawType === "commessa" ? "commessa" : null;
+  const entityType = rawType === "asset" ? "asset" : rawType === "material" ? "material" : rawType === "warehouse" ? "warehouse" : rawType === "commessa" ? "commessa" : null;
   const entityId = parts[2].trim();
   if (!entityType || !entityId) return null;
   return directoryMatch(entityType, entityId);
@@ -84,7 +84,8 @@ export function inferRawCode(input: string): QrDirectoryMatch | null {
   const canonical = parsePayload(value);
   if (canonical) return canonical;
   if (/^A-[A-Z0-9-]+$/.test(value)) return directoryMatch("asset", value);
-  if (/^(MAT|REQ|SCAN|WH|SKU)-[A-Z0-9-]+$/.test(value)) return directoryMatch("warehouse", value);
+  if (/^(MAT|SKU)-[A-Z0-9-]+$/.test(value)) return directoryMatch("material", value);
+  if (/^(REQ|SCAN|WH)-[A-Z0-9-]+$/.test(value)) return directoryMatch("warehouse", value);
   if (/^(#|OP-|JOB-|COMM-)?[0-9]{3,}$/.test(value)) {
     return directoryMatch("commessa", value.replace(/^#|^(OP-|JOB-|COMM-)/, ""));
   }

@@ -2267,6 +2267,11 @@ select:focus-visible {
   background: rgba(4, 7, 5, .65);
 }
 
+/* Warehouse follows the compact module header used by Asset, Planning and Workforce. */
+.zw-warehouse-module .zw-module-hero {
+  display: none;
+}
+
 @media (max-width: 1279px) {
   .zw-widget-frame--compact,
   .zw-widget-frame--standard { grid-column: span 6; }

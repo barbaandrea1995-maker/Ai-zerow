@@ -19,6 +19,8 @@ import {
   CircleAlert,
   ClipboardList,
   Clock3,
+  Copy,
+  Download,
   Boxes,
   FileText,
   Gauge,
@@ -30,6 +32,7 @@ import {
   PackagePlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Printer,
   QrCode,
   RefreshCw,
   Search,
@@ -206,6 +209,10 @@ function formatQuantity(value: number, unit: string) {
   return value.toLocaleString("it-IT", { maximumFractionDigits: 3 }) + " " + unit;
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character] ?? character);
+}
+
 function stockLabel(status: string) {
   if (status === "OUT_OF_STOCK") return "ESAURITO";
   if (status === "LOW_STOCK") return "SOTTO SCORTA";
@@ -241,7 +248,7 @@ function StockCard({ item, selected, canWrite, onSelect, onMovement }: { item: I
   return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_26px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Boxes className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{item.name}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{item.sku} · {item.location}{item.shelf ? " · " + item.shelf : ""}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={stockLabel(item.status)} tone={tone} /><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2 py-1 text-[10px] text-cyan-100">{item.unit}</span><span className={cn("inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-1 text-[10px]", item.barcode ? "border-cyan-300/20 bg-cyan-300/[.05] text-cyan-100" : "border-lime-300/20 bg-lime-300/[.05] text-lime-100")}><QrCode className="size-3" />{item.barcode ? "BARCODE · " + item.barcode : "QR SERVER · " + (item.qrCode ?? "—")}</span></div><div className="mt-4 grid grid-cols-3 gap-2"><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Fisico</p><p className="mt-1 font-mono text-sm text-slate-200">{item.onHand.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Riservato</p><p className="mt-1 font-mono text-sm text-cyan-100">{item.reserved.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Libero</p><p className="mt-1 font-mono text-sm text-lime-100">{item.available.toLocaleString("it-IT")}</p></div></div><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/70"><div className={cn("h-full rounded-full transition-[width]", item.status === "OUT_OF_STOCK" ? "bg-rose-400" : item.belowMinimum ? "bg-amber-300" : "bg-gradient-to-r from-lime-400 to-lime-200")} style={{ width: width + "%" }} /></div><p className="mt-2 text-[10px] text-slate-600">Minimo {formatQuantity(item.minStock, item.unit)} · v{item.version}</p></button>{canWrite && <Button className="mt-4 h-9 w-full border-white/10 bg-black/20 text-[11px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={onMovement} variant="outline"><ArrowDownToLine className="size-3.5" />Registra movimento</Button>}</article>;
 }
 
-function MaterialQrPreview({ code, sku }: { code: string; sku: string }) {
+function MaterialQrPreview({ code, sku, name = sku, onNotice = () => undefined }: { code: string; sku: string; name?: string; onNotice?: (message: string) => void }) {
   const [dataUrl, setDataUrl] = useState("");
 
   useEffect(() => {
@@ -259,8 +266,37 @@ function MaterialQrPreview({ code, sku }: { code: string; sku: string }) {
     return () => { active = false; };
   }, [code]);
 
-  if (!dataUrl) return null;
-  return <div className="mt-4 flex items-center gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3"><img alt={"QR " + sku} className="size-20 rounded-lg bg-[#efffb9] p-1" src={dataUrl} /><div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-lime-200/75">QR DA STAMPARE</p><p className="mt-1 break-all font-mono text-[10px] text-slate-500">{code}</p><p className="mt-1 text-[10px] text-slate-600">Payload server-side collegato alla movimentazione.</p><a className="mt-2 inline-flex text-[10px] font-semibold text-lime-200 hover:text-lime-100" download={"ai-zerow-" + sku.toLowerCase() + ".png"} href={dataUrl}>Scarica PNG</a></div></div>;
+  const download = () => {
+    if (!dataUrl) return;
+    const anchor = document.createElement("a");
+    anchor.href = dataUrl;
+    anchor.download = `ai-zerow-${sku.toLowerCase()}.png`;
+    anchor.click();
+    onNotice("Etichetta QR scaricata.");
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      onNotice("Payload QR copiato.");
+    } catch {
+      onNotice("Copia non disponibile su questo dispositivo.");
+    }
+  };
+
+  const print = () => {
+    if (!dataUrl) return;
+    const popup = window.open("", "_blank", "width=480,height=620");
+    if (!popup) {
+      onNotice("Il browser ha bloccato la stampa: abilita le finestre popup.");
+      return;
+    }
+    popup.document.open();
+    popup.document.write(`<!doctype html><html><head><title>${escapeHtml(sku)} · AI-ZEROW</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#071006;font-family:Arial,sans-serif}.label{width:330px;padding:22px;border:2px solid #071006;border-radius:18px;text-align:center}.label img{width:250px;height:250px;display:block;margin:12px auto}.brand{font-weight:800;letter-spacing:.18em;font-size:14px}.code{font-size:20px;font-weight:700;letter-spacing:.08em}.name{font-size:13px;margin-top:6px;color:#435143}@media print{.label{border:1px solid #071006}}</style></head><body><div class="label"><div class="brand">AI-ZEROW COMMAND</div><img src="${dataUrl}" alt="QR ${escapeHtml(sku)}"><div class="code">${escapeHtml(sku)}</div><div class="name">${escapeHtml(name)}</div></div><script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script></body></html>`);
+    popup.document.close();
+  };
+
+  return <section className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.035] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-lime-200/75">IDENTITÀ FISICA</p><p className="mt-1 text-xs font-semibold text-slate-100">QR del materiale</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Stampa il codice e applicalo sul contenitore: ogni scansione torna al catalogo tenant.</p></div><QrCode className="size-4 text-lime-200" /></div><div className="mt-3 flex flex-col items-center gap-3 rounded-xl border border-lime-300/15 bg-lime-100 p-3"><div className="grid size-[132px] place-items-center overflow-hidden rounded-lg bg-[#dfff5c]">{dataUrl ? <img alt={`QR ${sku}`} className="size-full" src={dataUrl} /> : <LoaderCircle className="size-5 animate-spin text-[#071006]" />}</div><div className="text-center"><p className="font-mono text-xs font-semibold tracking-[.08em] text-[#071006]">{sku}</p><p className="mt-1 text-[10px] text-[#38502b]">{code}</p></div></div><div className="mt-3 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!dataUrl} onClick={print}><Printer className="size-3.5" />Stampa etichetta</Button><Button className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" disabled={!dataUrl} onClick={download} variant="outline"><Download className="size-3.5" />PNG</Button><Button aria-label="Copia payload QR" className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" onClick={() => void copy()} variant="outline"><Copy className="size-3.5" />Copia</Button></div></section>;
 }
 
 export default function WarehouseControl() {
@@ -475,6 +511,7 @@ export default function WarehouseControl() {
     <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton><button aria-label="Apri Magazzino" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => navigate("/warehouse")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[10px] uppercase tracking-[.2em] text-lime-300/75">warehouse</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca materiale" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-sm text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca SKU, materiale, ubicazione…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">MAGAZZINO</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "READING" : "D1 VERIFIED"}</span><IconButton label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton label="Aggiorna magazzino" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
 
       <div className="mx-auto w-full max-w-[1600px] px-4 pb-24 pt-5 sm:px-7 sm:pb-8 sm:pt-7">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />AI-ZEROW / WAREHOUSE</div><h1 className="mt-2 text-2xl font-semibold tracking-[-.04em] text-slate-50 sm:text-[28px]">Magazzino</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Catalogo materiali, giacenze, movimenti e identità QR nello stesso registro operativo.</p></div><div className="flex flex-wrap items-center gap-2"><Button className="bg-lime-300 text-[10px] font-semibold text-[#050705] shadow-[0_0_24px_rgba(200,255,34,.15)] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration} title={canRegister ? "Registra un nuovo materiale" : "Richiede la capability warehouse.register"}><PackagePlus className="size-3.5" />Registra materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[10px] text-lime-100 hover:bg-lime-300/10" onClick={() => { setMovementAction("receive"); setMovementMode("scan"); setMovementIdentifier(""); setMovementItemId(""); setModal("movement"); }} variant="outline"><ScanLine className="size-3.5" />Nuovo movimento</Button></div></div>
         <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MODULE 07 · MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Anagrafiche, giacenze, prenotazioni e movimenti vivono nello stesso ledger tenant-scoped. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica materiale" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">inventory · tenant</p></div></section>
 
         <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Anagrafiche" value={payload?.summary.itemCount ?? 0} detail="Materiali censiti nel tenant" icon={Boxes} tone="cyan" /><KpiCard label="Disponibile" value={totals.available.toLocaleString("it-IT")} detail="Unità non prenotate" icon={CheckCircle2} tone="lime" /><KpiCard label="Riservato" value={totals.reserved.toLocaleString("it-IT")} detail="Unità per commesse" icon={ClipboardList} tone="cyan" /><KpiCard label="Sotto scorta" value={payload?.summary.lowStockCount ?? 0} detail="Da valutare nel replenishment" icon={AlertTriangle} tone="amber" /></section>
@@ -496,7 +533,7 @@ export default function WarehouseControl() {
       </div>
     </section>
   </div><CommandMobileNav active="warehouse" allowedNavigation={allowedNavigation} role={context?.role} />
-+    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}>
+    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
         <form className="space-y-5" onSubmit={submit}>
           <DialogHeader>
