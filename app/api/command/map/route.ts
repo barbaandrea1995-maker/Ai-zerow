@@ -42,6 +42,33 @@ function assetLabel(vehicleId: string, records: Map<string, ReturnType<typeof re
   return payloadText(record.payload, "title") || record.title || record.canonicalCode || `Mezzo ${vehicleId}`;
 }
 
+function locationPresentation(
+  entityType: string,
+  entityId: string,
+  records: Map<string, ReturnType<typeof recordForResponse>>,
+  warehouseById: Map<string, typeof tenantWarehouses.$inferSelect>,
+) {
+  const record = records.get(entityId);
+  const warehouse = warehouseById.get(entityId);
+  const payload = record?.payload ?? {};
+  const isWarehouse = entityType === "MAGAZZINO";
+  return {
+    code: record?.canonicalCode || warehouse?.code || null,
+    description: payloadText(payload, "description") || record?.detail || (warehouse ? `Sede operativa di ${warehouse.name}` : "Sede operativa"),
+    client: payloadText(payload, "clientName") || payloadText(payload, "client") || null,
+    category: payloadText(payload, "category") || (isWarehouse ? "Deposito e movimentazione" : null),
+    openingType: payloadText(payload, "openingType") || null,
+    jobType: payloadText(payload, "jobType") || null,
+    specialization: payloadText(payload, "specialization") || null,
+    dueDate: payloadText(payload, "dueDate") || null,
+    priority: payloadText(payload, "priority") || null,
+    operationalStatus: record?.status || warehouse?.status || null,
+    progress: record?.progress ?? null,
+    geofenceRadiusMeters: warehouse?.geofenceRadiusMeters ?? null,
+    locationSource: warehouse?.locationSource || null,
+  };
+}
+
 function sampleState(recordedAt: string) {
   const timestamp = Date.parse(recordedAt);
   if (!Number.isFinite(timestamp)) return "UNKNOWN" as const;
@@ -81,7 +108,7 @@ export async function GET() {
         .orderBy(asc(tenantWarehouses.name))
         .limit(200),
       db.select().from(s04Records)
-        .where(and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, ["operations", "assets"])))
+        .where(and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, ["operations", "assets", "warehouse"])))
         .orderBy(desc(s04Records.updatedAt))
         .limit(800),
       db.select().from(locationEvents)
@@ -109,6 +136,7 @@ export async function GET() {
     const knownLocationEntities = new Set(locationRows.map((location) => `${location.entityType}:${location.entityId}`));
 
     const locations = locationRows.map((location) => ({
+      ...locationPresentation(location.entityType, location.entityId, records, warehouseById),
       id: location.id,
       entityType: location.entityType,
       entityId: location.entityId,
@@ -124,6 +152,7 @@ export async function GET() {
     const warehouseLocations = warehouseRows.flatMap((warehouse) => {
       if (knownLocationEntities.has(`MAGAZZINO:${warehouse.id}`)) return [];
       return [{
+        ...locationPresentation("MAGAZZINO", warehouse.id, records, warehouseById),
         id: `warehouse-location:${warehouse.id}`,
         entityType: "MAGAZZINO",
         entityId: warehouse.id,

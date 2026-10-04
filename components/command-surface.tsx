@@ -482,6 +482,19 @@ export default function CommandSurface({
   const [editMode, setEditMode] = useState(false);
   const [savingLayout, setSavingLayout] = useState(false);
 
+  const openMapEntity = ({ entityType, entityId }: { entityType: string; entityId: string }) => {
+    setSelectedMarker("");
+    if (entityType === "CANTIERE" || entityType === "COMMESSA") {
+      router.push(`/operations/${encodeURIComponent(entityId)}`);
+      return;
+    }
+    if (entityType === "MAGAZZINO") {
+      router.push(`/warehouse?warehouse=${encodeURIComponent(entityId)}`);
+      return;
+    }
+    if (entityType === "ASSET") router.push("/assets");
+  };
+
   useEffect(() => {
     let active = true;
 
@@ -667,7 +680,7 @@ export default function CommandSurface({
     }
 
     if (item.id === "operational-map") {
-      return <div className="h-full" id="operational-map"><OperationalMapBoard live mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
+      return <div className="h-full" id="operational-map"><OperationalMapBoard live mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onOpenEntity={openMapEntity} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
     }
     if (item.id === "company-ai") {
       return <div className="h-full" id="company-ai"><CompanyAiPanel onOpenLedger={() => setLedgerOpen(true)} onQueryChange={setAssistantQuery} onQuickPrompt={(prompt) => { setAssistantQuery(prompt); setAssistantResponse(`Pronto a preparare: “${prompt}”. Conferma e policy restano necessarie prima di qualsiasi scrittura.`); }} onSubmit={submitAssistant} query={assistantQuery} response={assistantPanelResponse} runtimeStatus={aiRuntimeStatus} /></div>;
