@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geofences, locationEvents, locationSamples, trackingSessions } from "@/db/schema";
 import { evaluateGeofenceSample, normalizeCoordinate } from "@/lib/location-intelligence/geometry";
-import { eventForResponse, geofenceForEngine, parseEngineState } from "@/lib/location-intelligence/repository";
+import { eventForResponse, geofenceForEngine, parseEngineState, parseJsonObject } from "@/lib/location-intelligence/repository";
 import type { LocationEventType } from "@/lib/location-intelligence/types";
 import type { TrackingPosition } from "@/lib/location-intelligence/providers";
 
@@ -50,6 +50,18 @@ export async function ingestLocationPosition({
   }
 
   const activeGeofences = await db.select().from(geofences).where(and(eq(geofences.tenantId, tenantId), eq(geofences.status, "ACTIVE"))).limit(500);
+  const rawEngineState = parseJsonObject(session.engineStateJson);
+  const operationalContext = rawEngineState.__operationalContext && typeof rawEngineState.__operationalContext === "object" && !Array.isArray(rawEngineState.__operationalContext)
+    ? rawEngineState.__operationalContext as Record<string, unknown>
+    : null;
+  const expectedGeofenceIds = new Set([
+    operationalContext && typeof operationalContext.origin === "object" && operationalContext.origin && !Array.isArray(operationalContext.origin)
+      ? (operationalContext.origin as Record<string, unknown>).geofenceId
+      : null,
+    operationalContext && typeof operationalContext.destination === "object" && operationalContext.destination && !Array.isArray(operationalContext.destination)
+      ? (operationalContext.destination as Record<string, unknown>).geofenceId
+      : null,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
   const engineState = parseEngineState(session.engineStateJson);
   const sampleId = `LOCATION-SAMPLE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const now = new Date().toISOString();
@@ -104,12 +116,17 @@ export async function ingestLocationPosition({
       geofenceId: draft.geofenceId ?? null,
       source: "ZEROW_DETERMINISTIC_LOCATION_ENGINE",
       confidenceMilli: draft.confidenceMilli,
-      evidenceJson: JSON.stringify(draft.evidence),
+      evidenceJson: JSON.stringify({
+        ...draft.evidence,
+        operationalContext: operationalContext
+          ? { missionId: operationalContext.missionId ?? null, transportMode: operationalContext.transportMode ?? null, expectedStop: expectedGeofenceIds.has(draft.geofenceId ?? "") }
+          : null,
+      }),
       correlationId: crypto.randomUUID(),
       dedupeKey: `${session.id}:${draft.dedupeKey}`,
       createdAt: now,
     })),
-    db.update(trackingSessions).set({ engineStateJson: JSON.stringify(engineState), updatedAt: now }).where(and(eq(trackingSessions.tenantId, tenantId), eq(trackingSessions.id, session.id), eq(trackingSessions.status, "ACTIVE"))),
+    db.update(trackingSessions).set({ engineStateJson: JSON.stringify({ ...engineState, __operationalContext: operationalContext }), updatedAt: now }).where(and(eq(trackingSessions.tenantId, tenantId), eq(trackingSessions.id, session.id), eq(trackingSessions.status, "ACTIVE"))),
   ]);
   const events = derived.length
     ? await db.select().from(locationEvents).where(and(eq(locationEvents.tenantId, tenantId), eq(locationEvents.trackingSessionId, session.id), eq(locationEvents.occurredAt, derived[0].occurredAt))).limit(100)

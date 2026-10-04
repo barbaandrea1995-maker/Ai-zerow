@@ -363,15 +363,23 @@ const authorityPage = await readFile(join(root, "app", "onboarding", "page.tsx")
 assert(authorityPage.includes("/api/authority/teams") && authorityPage.includes("Crea squadra"), "Authority must expose a real team creation and readback surface");
 
 const attendanceRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "attendance", "route.ts"), "utf8");
-assert(attendanceRoute.includes('tracking: "ON_DUTY_ONLY"'), "Attendance must declare on-duty tracking policy");
+const attendancePolicy = await readFile(join(root, "lib", "location-intelligence", "attendance-policy.ts"), "utf8");
+assert(attendanceRoute.includes('tracking: "ATTENDANCE_GATED_ON_DUTY_ONLY"') && attendanceRoute.includes("driverTracking"), "Attendance must declare attendance-gated on-duty tracking policy");
 assert(attendanceRoute.includes("correction_approve"), "Attendance must support governed corrections");
 assert(attendanceRoute.includes("idempotency_key_required"), "Attendance replay must require idempotency");
 assert(attendanceRoute.includes("4_DECIMAL_PLACES"), "Attendance location must be precision-limited");
 assert(attendanceRoute.includes("recordedAt: now") && attendanceRoute.includes("clientObservedAt"), "Attendance must keep the official timestamp server-owned");
-assert(attendanceRoute.includes("evaluateGeofence") && attendanceRoute.includes("UNCONFIGURED"), "Attendance must evaluate geofence server-side without inventing coordinates");
+assert(attendanceRoute.includes("evaluateAttendanceGeofence") && attendancePolicy.includes("NO_GEOFENCE") && attendancePolicy.includes("pointInPolygon"), "Attendance must evaluate circle/polygon geofences server-side without inventing coordinates");
+assert(attendanceRoute.includes("trackingSessionId") && attendanceRoute.includes("AFTER_VALID_ATTENDANCE_CHECK_IN"), "Driver tracking must be opened by a valid attendance check-in");
 assert(attendanceRoute.includes("attendance.self") && attendanceRoute.includes("attendance.approve"), "Attendance actions must expose dedicated capabilities with legacy aliases");
 const attendanceControl = await readFile(join(root, "components", "attendance-control.tsx"), "utf8");
-assert(attendanceControl.includes("navigator.geolocation") && attendanceControl.includes("/attendance"), "Attendance UI must capture optional on-duty GPS and bind to the server route");
+assert(attendanceControl.includes("navigator.geolocation") && attendanceControl.includes("/attendance") && attendanceControl.includes("check_in") && attendanceControl.includes("check_out") && attendanceControl.includes("consentire la posizione"), "Attendance UI must capture and require GPS for entry/exit");
+const trackingSessionRoute = await readFile(join(root, "app", "api", "location", "sessions", "route.ts"), "utf8");
+assert(trackingSessionRoute.includes("valid_attendance_check_in_required") && trackingSessionRoute.includes("tracking_requires_driver_attendance"), "Direct tracking start must remain behind the attendance gate");
+const trackingDeviceRoute = await readFile(join(root, "app", "api", "location", "devices", "route.ts"), "utf8");
+assert(trackingDeviceRoute.includes("tracking_requires_valid_attendance_check_in") && trackingDeviceRoute.includes("if (!session)"), "Polling must not read GPS before an active attendance-bound session");
+const locationIngest = await readFile(join(root, "lib", "location-intelligence", "ingest.ts"), "utf8");
+assert(locationIngest.includes("__operationalContext") && locationIngest.includes("expectedStop"), "Location events must retain mission/expected-stop context without exposing raw coordinates to Company AI");
 const attendanceOverview = await readFile(join(root, "components", "attendance-overview.tsx"), "utf8");
 assert(attendanceOverview.includes("/api/workforce/attendance") && attendanceOverview.includes("Timestamp server"), "Attendance module must expose a central server-timestamped readback");
 const attendanceOverviewRoute = await readFile(join(root, "app", "api", "workforce", "attendance", "route.ts"), "utf8");

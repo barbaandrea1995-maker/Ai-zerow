@@ -19,6 +19,7 @@ type AttendanceRecord = {
 };
 
 type AttendanceResponse = { records?: AttendanceRecord[]; error?: string };
+type AttendanceWriteResponse = { error?: string; reason?: string; tracking?: { status?: string } };
 type AttendanceAction = "check_in" | "pause" | "resume" | "check_out";
 
 function statusLabel(status: string) {
@@ -83,6 +84,11 @@ export function AttendanceControl({ jobId, onChanged }: { jobId: string; onChang
     setNotice("");
     const location = await readLocation();
     setLocationState(location ? "captured" : "unavailable");
+    if ((action === "check_in" || action === "check_out") && !location) {
+      setNotice("Per entrata e uscita devi consentire la posizione: il server valida timestamp e geofence.");
+      setBusy("");
+      return;
+    }
     try {
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/attendance`, {
         method: "POST",
@@ -95,13 +101,17 @@ export function AttendanceControl({ jobId, onChanged }: { jobId: string; onChang
           idempotencyKey: `attendance-${action}-${jobId}-${crypto.randomUUID()}`,
         }),
       });
-      await response.json();
-      if (!response.ok) throw new Error("La timbratura non è stata registrata.");
+      const payload = await response.json() as AttendanceWriteResponse;
+      if (!response.ok) {
+        if (payload.error === "attendance_geofence_required" || payload.error === "driver_origin_geofence_required") throw new Error("Timbratura rifiutata: devi essere dentro il geofence operativo assegnato.");
+        if (payload.error === "driver_tracking_device_not_bound" || payload.error === "vehicle_tracking_device_required") throw new Error("Prima di timbrare devi avere mezzo e dispositivo GPS associati alla missione.");
+        throw new Error("La timbratura non è stata registrata.");
+      }
       await refresh();
       await onChanged?.();
-      setNotice(location ? "Presenza registrata con posizione osservata." : "Presenza registrata. GPS non disponibile: la posizione resta assente.");
-    } catch {
-      setNotice("La timbratura non è stata registrata. Controlla i dati e riprova.");
+      setNotice(payload.tracking?.status === "STARTED" ? "Ingresso registrato: tracking GPS attivo per la missione." : payload.tracking?.status === "CLOSED" ? "Uscita registrata: tracking GPS terminato." : "Presenza registrata con posizione osservata.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "La timbratura non è stata registrata. Controlla i dati e riprova.");
     } finally {
       setBusy("");
     }
@@ -113,7 +123,7 @@ export function AttendanceControl({ jobId, onChanged }: { jobId: string; onChang
       <button aria-label="Aggiorna timbrature" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => void refresh()} type="button"><RefreshCw className="size-4" /></button>
     </div>
     <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center"><div className="rounded-2xl border border-white/[.08] bg-black/25 p-4"><div className="flex flex-wrap items-center gap-2"><span className={`size-2 rounded-full ${status === "CHECKED_IN" ? "bg-lime-300 shadow-[0_0_14px_rgba(200,255,34,.8)]" : status === "PAUSED" ? "bg-amber-300" : "bg-slate-600"}`} /><span className="text-[11px] font-semibold text-slate-100">{statusLabel(status)}</span><span className="rounded-full border border-white/10 px-2 py-1 font-mono text-[8px] text-slate-600">{state === "loading" ? "AGGIORNAMENTO" : state === "error" ? "NON DISPONIBILE" : "DATI AGGIORNATI"}</span></div><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[10px] text-slate-500"><span>Ultimo evento: <strong className="font-medium text-slate-300">{formatTime(latest?.payload.lastTransition?.recordedAt ?? latest?.updatedAt)}</strong></span><span className="inline-flex items-center gap-1.5">{locationState === "captured" ? <MapPin className="size-3 text-lime-200" /> : <MapPin className="size-3 text-slate-600" />}Posizione {locationState === "captured" ? "osservata" : locationState === "unavailable" ? "non disponibile" : "in attesa"}</span></div></div><div className="flex flex-wrap gap-2">{actions.map(({ action, label, icon: Icon }) => <button className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 ${action === "check_out" ? "border border-rose-300/25 bg-rose-300/[.04] text-rose-100 hover:bg-rose-300/[.08]" : "bg-lime-300 text-[#050705] hover:bg-lime-200"}`} disabled={Boolean(busy) || state === "loading"} key={action} onClick={() => void execute(action)} type="button">{busy === action ? <LoaderCircle className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}{label}</button>)}</div></div>
-    <div className="mt-3 flex items-center gap-2 text-[9px] text-slate-600"><ShieldCheck className="size-3.5 text-cyan-200/70" />La posizione viene arrotondata e inviata solo con l’azione di presenza; il geofence viene valutato quando la sede della commessa ha coordinate configurate.</div>
+    <div className="mt-3 flex items-center gap-2 text-[9px] text-slate-600"><ShieldCheck className="size-3.5 text-cyan-200/70" />La posizione viene letta solo quando effettui una timbratura. Entrata e uscita richiedono GPS e geofence; per un autista il tracking continua fino all’uscita.</div>
     {notice && <p className="mt-3 rounded-xl border border-white/[.08] bg-black/20 px-3 py-2 text-[10px] text-slate-400">{notice}</p>}
   </section>;
 }

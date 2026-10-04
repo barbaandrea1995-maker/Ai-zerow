@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { locationEvents, s06Events, s06Outbox, s06Reconciliations, trackingDevices, trackingSessions, vehicleDeviceBindings } from "@/db/schema";
+import { jobJourneyRecords, locationEvents, s06Events, s06Outbox, s06Reconciliations, trackingDevices, trackingSessions, vehicleDeviceBindings } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { auditLocationAccess, sessionForResponse } from "@/lib/location-intelligence/repository";
+import { auditLocationAccess, parseJsonObject, sessionForResponse } from "@/lib/location-intelligence/repository";
 import { isTrackingSource } from "@/lib/location-intelligence/types";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,29 @@ export async function POST(request: Request) {
       if (employeeId !== context.actorId && !canManageOther(context)) return Response.json({ error: "employee_scope_forbidden" }, { status: 403 });
       if (!hasCapability(context, "attendance.self") && !canManageOther(context)) return Response.json({ error: "forbidden", capability: "attendance.self" }, { status: 403 });
       if (input.policyAccepted !== true) return Response.json({ error: "tracking_policy_confirmation_required" }, { status: 400 });
+      const attendanceId = bounded(input.attendanceId, 160);
+      if (!attendanceId) return Response.json({ error: "valid_attendance_check_in_required" }, { status: 409 });
+      const [attendance] = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.id, attendanceId),
+        eq(jobJourneyRecords.domain, "field"),
+        eq(jobJourneyRecords.recordType, "ATTENDANCE"),
+      )).limit(1);
+      if (!attendance || !["CHECKED_IN", "PAUSED"].includes(attendance.status)) return Response.json({ error: "valid_attendance_check_in_required" }, { status: 409 });
+      const attendancePayload = parseJsonObject(attendance.payloadJson);
+      const attendanceContext = attendancePayload.operationalContext && typeof attendancePayload.operationalContext === "object" && !Array.isArray(attendancePayload.operationalContext)
+        ? attendancePayload.operationalContext as JsonObject
+        : {};
+      if (bounded(attendancePayload.workerId, 160) !== employeeId || bounded(attendanceContext.mode, 32).toUpperCase() !== "DRIVER") {
+        return Response.json({ error: "tracking_requires_driver_attendance" }, { status: 409 });
+      }
+      const linkedSessionId = bounded(attendancePayload.tracking && typeof attendancePayload.tracking === "object" && !Array.isArray(attendancePayload.tracking)
+        ? (attendancePayload.tracking as JsonObject).sessionId
+        : "", 160);
+      if (linkedSessionId) {
+        const [linkedSession] = await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, linkedSessionId))).limit(1);
+        if (linkedSession) return Response.json({ context: publicAuthorityContext(context), session: sessionForResponse(linkedSession), idempotent: true, source: "attendance_check_in_gate" }, { headers: responseHeaders() });
+      }
       const shiftId = bounded(input.shiftId, 160);
       const vehicleId = bounded(input.vehicleId, 160);
       const trackingDeviceId = bounded(input.trackingDeviceId, 160);
@@ -121,10 +145,10 @@ export async function POST(request: Request) {
     const eventType = action === "close" ? "TRACKING_SESSION_ENDED" : undefined;
     const eventId = crypto.randomUUID();
     const update = db.update(trackingSessions).set({ status: nextStatus, endedAt: action === "close" ? now : session.endedAt, updatedAt: now }).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, sessionId), eq(trackingSessions.status, session.status)));
-    const statements = [update];
+    const statements: BatchItem<"sqlite">[] = [update];
     if (eventType) statements.push(db.insert(locationEvents).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventType, occurredAt: now, trackingSessionId: session.id, employeeId: session.employeeId, vehicleId: session.vehicleId, locationId: null, geofenceId: null, source: "ZEROW_SERVER_SESSION", confidenceMilli: 1000, evidenceJson: JSON.stringify({ action, reason: bounded(input.reason, 240) }), correlationId: crypto.randomUUID(), dedupeKey: `tracking-session-ended:${session.id}:${now}`, createdAt: now }));
     statements.push(db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `location.tracking_session.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-location-intelligence", occurredAt: now, observedAt: now, aggregateType: "tracking.session", aggregateId: session.id, aggregateVersion: Date.now(), payloadJson: JSON.stringify({ action, previousStatus: session.status, nextStatus, reason: bounded(input.reason, 240) }), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }));
-    await db.batch(statements);
+    await db.batch(statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
     const [updated] = await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, sessionId))).limit(1);
     if (!updated) return Response.json({ error: "tracking_session_readback_unavailable" }, { status: 503 });
     return Response.json({ context: publicAuthorityContext(context), session: sessionForResponse(updated), eventId, readback: "verified" }, { headers: responseHeaders() });

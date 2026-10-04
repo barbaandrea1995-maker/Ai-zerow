@@ -163,10 +163,13 @@ export async function POST(request: Request) {
       if (!device) return Response.json({ error: "tracking_device_not_found" }, { status: 404 });
       const [provider] = await db.select().from(trackingProviders).where(and(eq(trackingProviders.tenantId, context.tenantId), eq(trackingProviders.id, device.providerId))).limit(1);
       if (!provider) return Response.json({ error: "tracking_provider_not_found" }, { status: 404 });
+      const [session] = await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.trackingDeviceId, device.id), eq(trackingSessions.status, "ACTIVE"))).limit(1);
+      if (!session) {
+        return Response.json({ error: "tracking_requires_valid_attendance_check_in", deviceId, externalDeviceId: device.externalDeviceId, ingested: false }, { status: 409, headers: responseHeaders() });
+      }
       const position = await trackingProviderFor(provider.providerType).getVehicleCurrentPosition(device.externalDeviceId);
       if (!position) return Response.json({ error: "tracking_position_unavailable", deviceId, externalDeviceId: device.externalDeviceId }, { status: 502 });
-      const [session] = await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.trackingDeviceId, device.id), eq(trackingSessions.status, "ACTIVE"))).limit(1);
-      const ingestion = session ? await ingestLocationPosition({ tenantId: context.tenantId, trackingSessionId: session.id, source: provider.providerType, position }) : null;
+      const ingestion = await ingestLocationPosition({ tenantId: context.tenantId, trackingSessionId: session.id, source: provider.providerType, position });
       await auditLocationAccess({ context, capability: "location.manage.tracking.devices", action: "POLL", resourceType: "TRACCAR_POSITION", purpose: "Lettura on-demand della posizione GPS tramite ZEROW.", metadata: { deviceId, externalDeviceId: device.externalDeviceId, ingested: Boolean(ingestion) } });
       return Response.json({ deviceId, externalDeviceId: device.externalDeviceId, position, ingested: Boolean(ingestion), trackingSessionId: session?.id ?? null, ingestion: ingestion ? { idempotent: ingestion.idempotent, events: ingestion.events.length } : null, readback: "verified" }, { headers: responseHeaders() });
     }

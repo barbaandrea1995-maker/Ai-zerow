@@ -1,7 +1,14 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { jobJourneyRecords, locationEvents, s04Records, s06Events, s06Outbox, s06Reconciliations, trackingSessions } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import {
+  evaluateAttendanceGeofence,
+  persistedOperationalContext,
+  resolveAttendanceOperationalContext,
+} from "@/lib/location-intelligence/attendance-policy";
+import { sessionForResponse } from "@/lib/location-intelligence/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -91,40 +98,6 @@ function sanitizeLocation(value: unknown) {
   };
 }
 
-function geofenceForJob(payload: JsonObject) {
-  const candidate = isRecord(payload.geofence) ? payload.geofence : payload;
-  const lat = Number(candidate.latitude ?? candidate.lat);
-  const lon = Number(candidate.longitude ?? candidate.lon ?? candidate.lng);
-  const radiusM = Number(candidate.radiusM ?? candidate.geofenceRadiusM);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radiusM) || lat < -90 || lat > 90 || lon < -180 || lon > 180 || radiusM < 20 || radiusM > 10_000) return null;
-  return { lat, lon, radiusM: Math.round(radiusM) };
-}
-
-function distanceMeters(left: { lat: number; lon: number }, right: { lat: number; lon: number }) {
-  const earthRadius = 6_371_000;
-  const toRadians = (value: number) => value * Math.PI / 180;
-  const deltaLat = toRadians(right.lat - left.lat);
-  const deltaLon = toRadians(right.lon - left.lon);
-  const lat1 = toRadians(left.lat);
-  const lat2 = toRadians(right.lat);
-  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
-  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function evaluateGeofence(location: ReturnType<typeof sanitizeLocation>, payload: JsonObject) {
-  if (!location) return { status: "NO_LOCATION" as const, distanceM: null, radiusM: null };
-  const geofence = geofenceForJob(payload);
-  if (!geofence) return { status: "UNCONFIGURED" as const, distanceM: null, radiusM: null };
-  const distanceM = Math.round(distanceMeters(location, geofence));
-  const accuracyM = location.accuracyM ?? 0;
-  const status = distanceM + accuracyM <= geofence.radiusM
-    ? "INSIDE"
-    : distanceM - accuracyM > geofence.radiusM
-      ? "OUTSIDE"
-      : "UNCERTAIN";
-  return { status, distanceM, radiusM: geofence.radiusM };
-}
-
 function attendanceForResponse(row: typeof jobJourneyRecords.$inferSelect) {
   return {
     id: row.id,
@@ -160,8 +133,10 @@ export async function GET(_request: Request, routeContext: RouteContext) {
       context: publicAuthorityContext(context),
       contract: {
         source: "sites-d1-field-attendance",
-        tracking: "ON_DUTY_ONLY",
-        location: "OPTIONAL_ROUNDED_4DP",
+        tracking: "ATTENDANCE_GATED_ON_DUTY_ONLY",
+        location: "REQUIRED_FOR_ENTRY_EXIT_ROUNDED_4DP",
+        fieldGeofence: "ENTRY_AND_EXIT_REQUIRE_INSIDE",
+        driverTracking: "START_ON_VALID_ENTRY_END_ON_VALID_EXIT",
         offline: "idempotency_key_required",
         externalExecutor: "deferred",
       },
@@ -235,9 +210,56 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (latest && action !== "check_in" && expectedVersion === null) return Response.json({ error: "expected_version_required" }, { status: 400 });
 
     const location = sanitizeLocation(input.location);
-    const locationWithGeofence = location
-      ? { ...location, geofence: evaluateGeofence(location, parseJson(job.payloadJson)) }
-      : null;
+    const operational = await resolveAttendanceOperationalContext({ context, job });
+    const requiresLocation = action === "check_in" || action === "check_out";
+    if (requiresLocation && !location) {
+      return Response.json({ error: "location_required_for_attendance", reason: "timestamp_and_geolocation_are_required_for_entry_and_exit" }, { status: 400 });
+    }
+    const attendanceGeofence = evaluateAttendanceGeofence(location, action === "check_in"
+      ? operational.checkInGeofence
+      : action === "check_out"
+        ? operational.checkOutGeofence ?? operational.jobGeofence
+        : operational.jobGeofence);
+    if ((action === "check_in" || action === "check_out") && operational.mode === "FIELD" && attendanceGeofence.status !== "INSIDE") {
+      return Response.json({ error: "attendance_geofence_required", reason: "field_attendance_requires_inside_job_geofence", geofence: attendanceGeofence }, { status: 409 });
+    }
+    if (action === "check_in" && operational.mode === "DRIVER" && operational.trackingError) {
+      return Response.json({ error: operational.trackingError, reason: "driver_check_in_requires_an_active_vehicle_tracking_binding", missionId: operational.mission?.id ?? null, vehicleId: operational.vehicleId }, { status: 409 });
+    }
+    if (action === "check_in" && operational.mode === "DRIVER" && operational.origin && !operational.checkInGeofence) {
+      return Response.json({ error: "driver_origin_geofence_required", reason: "the_assigned_origin_must_have_a_confirmed_geofence", missionId: operational.mission?.id ?? null, origin: operational.origin.entityId }, { status: 409 });
+    }
+    if (action === "check_in" && operational.mode === "DRIVER" && operational.checkInGeofence && attendanceGeofence.status !== "INSIDE") {
+      return Response.json({ error: "driver_origin_geofence_required", reason: "driver_check_in_must_start_inside_the_assigned_origin_geofence", geofence: attendanceGeofence }, { status: 409 });
+    }
+    const locationWithGeofence = location ? { ...location, geofence: attendanceGeofence } : null;
+
+    const currentPayload = latest ? parseJson(latest.payloadJson) : {};
+    const transitions = Array.isArray(currentPayload.transitions) ? currentPayload.transitions.filter(isRecord).slice(-49) : [];
+    const aggregateId = latest?.id ?? crypto.randomUUID();
+    let activeTrackingSession: typeof trackingSessions.$inferSelect | null = null;
+    let trackingSessionId: string | null = null;
+    let trackingOperation: "start" | "pause" | "resume" | "close" | null = null;
+    if (operational.mode === "DRIVER") {
+      const sessionRows = await db.select().from(trackingSessions).where(and(
+        eq(trackingSessions.tenantId, context.tenantId),
+        eq(trackingSessions.employeeId, context.actorId),
+        inArray(trackingSessions.status, ["ACTIVE", "PAUSED"]),
+      )).orderBy(desc(trackingSessions.startedAt)).limit(5);
+      activeTrackingSession = sessionRows[0] ?? null;
+      if (action === "check_in") {
+        if (activeTrackingSession) return Response.json({ error: "driver_tracking_session_already_active", sessionId: activeTrackingSession.id }, { status: 409 });
+        trackingOperation = "start";
+        trackingSessionId = `TRACKING-SESSION-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+      } else if (action === "pause" || action === "resume" || action === "check_out") {
+        if (!activeTrackingSession) return Response.json({ error: "driver_tracking_session_not_open", reason: "driver_tracking_is_opened_by_check_in_and_closed_by_check_out" }, { status: 409 });
+        if (action === "pause" && activeTrackingSession.status !== "ACTIVE") return Response.json({ error: "driver_tracking_session_not_active" }, { status: 409 });
+        if (action === "resume" && activeTrackingSession.status !== "PAUSED") return Response.json({ error: "driver_tracking_session_not_paused" }, { status: 409 });
+        trackingOperation = action === "check_out" ? "close" : action;
+        trackingSessionId = activeTrackingSession.id;
+      }
+    }
+
     const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
     const workerId = hasCapability(context, "workforce.read.all") || hasCapability(context, "workforce.manage")
       ? bounded(input.workerId, 120, context.actorId)
@@ -249,38 +271,95 @@ export async function POST(request: Request, routeContext: RouteContext) {
       by: context.actorId,
       note: bounded(input.note, 1_000),
       location: locationWithGeofence,
+      dutyMode: operational.mode,
+      missionId: operational.mission?.id ?? null,
+      vehicleId: operational.vehicleId,
+      trackingSessionId,
     };
-    const currentPayload = latest ? parseJson(latest.payloadJson) : {};
-    const transitions = Array.isArray(currentPayload.transitions) ? currentPayload.transitions.filter(isRecord).slice(-49) : [];
+    const trackingState = operational.mode === "DRIVER"
+      ? {
+        mode: "DRIVER",
+        status: trackingOperation === "start" ? "STARTED" : trackingOperation === "pause" ? "PAUSED" : trackingOperation === "resume" ? "ACTIVE" : trackingOperation === "close" ? "CLOSED" : "NOT_STARTED",
+        sessionId: trackingSessionId,
+        missionId: operational.mission?.id ?? null,
+        vehicleId: operational.vehicleId,
+        trackingDeviceId: operational.trackingDeviceId,
+        source: operational.trackingSource,
+        updatedAt: now,
+      }
+      : { mode: "FIELD", status: "NOT_REQUIRED", sessionId: null, updatedAt: now };
     const payload = {
       ...currentPayload,
       workerId,
       teamId: bounded(input.teamId, 120),
-      privacy: { mode: "ON_DUTY_ONLY", locationOptional: true, precision: "4_DECIMAL_PLACES", retentionClass: "OPERATIONAL" },
+      privacy: { mode: "ON_DUTY_ONLY", locationOptional: false, precision: "4_DECIMAL_PLACES", retentionClass: "OPERATIONAL" },
+      operationalContext: persistedOperationalContext(operational),
+      tracking: trackingOperation === null && action !== "correction_request" && action !== "correction_approve"
+        ? currentPayload.tracking ?? trackingState
+        : trackingState,
       transitions: [...transitions, transition],
       lastTransition: transition,
       status: actionContract.next,
       correctionNote: action === "correction_request" ? bounded(input.correctionNote ?? input.note, 2_000) : bounded(currentPayload.correctionNote, 2_000),
     } satisfies JsonObject;
     const eventId = crypto.randomUUID();
-    const aggregateId = latest?.id ?? crypto.randomUUID();
     const nextVersion = (latest?.version ?? 0) + 1;
-    const results = latest
-      ? await db.batch([
+    const attendanceStatements: BatchItem<"sqlite">[] = latest
+      ? [
         db.update(jobJourneyRecords).set({ status: actionContract.next, version: nextVersion, payloadJson: JSON.stringify(payload), updatedBy: context.actorId, updatedAt: now }).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.id, latest.id), eq(jobJourneyRecords.version, latest.version))),
         db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.recordedAt, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: nextVersion, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
         db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: `zerow.field.attendance.${action}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.attendance", aggregateId, expectedVersion: nextVersion, observedVersion: nextVersion, status: "SITES_READBACK_VERIFIED", detail: "Attendance aggiornata con transizione versionata e policy on-duty.", createdAt: now, updatedAt: now }),
-      ])
-      : await db.batch([
+      ]
+      : [
         db.insert(jobJourneyRecords).values({ id: aggregateId, tenantId: context.tenantId, jobId: job.id, domain: "field", recordType: "ATTENDANCE", title: "Presenza operativa", status: actionContract.next, version: 1, payloadJson: JSON.stringify(payload), idempotencyKey, createdBy: context.actorId, updatedBy: context.actorId, createdAt: now, updatedAt: now }),
         db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: `field.attendance.${action}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-field-attendance", occurredAt: transition.recordedAt, observedAt: now, aggregateType: "job.journey.attendance", aggregateId, aggregateVersion: 1, payloadJson: JSON.stringify(transition), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),
         db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: `zerow.field.attendance.${action}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.attendance", aggregateId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Check-in attendance persistito con policy on-duty.", createdAt: now, updatedAt: now }),
-      ]);
+      ];
+    const trackingStatements: BatchItem<"sqlite">[] = [];
+    if (trackingOperation === "start" && trackingSessionId && operational.trackingDeviceId && operational.vehicleId && operational.trackingSource) {
+      const trackingEventId = crypto.randomUUID();
+      const evidence = {
+        attendanceId: aggregateId,
+        jobId: job.id,
+        missionId: operational.mission?.id ?? null,
+        transportMode: operational.mission?.transportMode ?? null,
+        policy: "AFTER_VALID_ATTENDANCE_CHECK_IN",
+        policySnapshotId: `policy:${context.tenantId}:attendance-driver-v1`,
+        trackingSource: operational.trackingSource,
+        trackingDeviceId: operational.trackingDeviceId,
+        vehicleId: operational.vehicleId,
+        bindingId: operational.bindingId,
+        origin: operational.origin ? { entityType: operational.origin.entityType, entityId: operational.origin.entityId, geofenceId: operational.origin.geofence?.id ?? null } : null,
+        destination: operational.destination ? { entityType: operational.destination.entityType, entityId: operational.destination.entityId, geofenceId: operational.destination.geofence?.id ?? null } : null,
+      };
+      trackingStatements.push(
+        db.insert(trackingSessions).values({ id: trackingSessionId, tenantId: context.tenantId, employeeId: context.actorId, vehicleId: operational.vehicleId, trackingDeviceId: operational.trackingDeviceId, shiftId: `ATTENDANCE-${aggregateId}`, startedAt: now, endedAt: null, trackingSource: operational.trackingSource, status: "ACTIVE", createdBy: context.actorId, policySnapshotId: `policy:${context.tenantId}:attendance-driver-v1`, engineStateJson: JSON.stringify({ __operationalContext: persistedOperationalContext(operational) }), failureReason: "", createdAt: now, updatedAt: now }),
+        db.insert(locationEvents).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventType: "TRACKING_SESSION_STARTED", occurredAt: now, trackingSessionId, employeeId: context.actorId, vehicleId: operational.vehicleId, locationId: attendanceGeofence.locationId, geofenceId: attendanceGeofence.geofenceId, source: "ZEROW_ATTENDANCE_GATE", confidenceMilli: attendanceGeofence.status === "INSIDE" ? 1000 : 700, evidenceJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), dedupeKey: `tracking-session-started:${trackingSessionId}`, createdAt: now }),
+        db.insert(s06Events).values({ eventId: trackingEventId, tenantId: context.tenantId, eventType: "location.tracking_session.started", schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-location-intelligence", occurredAt: now, observedAt: now, aggregateType: "tracking.session", aggregateId: trackingSessionId, aggregateVersion: 1, payloadJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey: `${idempotencyKey}:tracking`, status: "COMMITTED_SITES_READBACK", createdAt: now }),
+        db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId: trackingEventId, topic: "zerow.location.tracking_session.started", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
+        db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "tracking.session", aggregateId: trackingSessionId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Tracking aperto dal server esclusivamente dopo una timbratura di ingresso valida.", createdAt: now, updatedAt: now }),
+      );
+    } else if (trackingOperation && activeTrackingSession) {
+      const nextTrackingStatus = trackingOperation === "close" ? "CLOSED" : trackingOperation === "pause" ? "PAUSED" : "ACTIVE";
+      const trackingEventId = crypto.randomUUID();
+      const evidence = { attendanceId: aggregateId, jobId: job.id, missionId: operational.mission?.id ?? null, action: trackingOperation, previousStatus: activeTrackingSession.status, nextStatus: nextTrackingStatus, policy: "ATTENDANCE_BOUND" };
+      trackingStatements.push(
+        db.update(trackingSessions).set({ status: nextTrackingStatus, endedAt: trackingOperation === "close" ? now : activeTrackingSession.endedAt, updatedAt: now }).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, activeTrackingSession.id), eq(trackingSessions.status, activeTrackingSession.status))),
+        ...(trackingOperation === "close" ? [db.insert(locationEvents).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventType: "TRACKING_SESSION_ENDED", occurredAt: now, trackingSessionId: activeTrackingSession.id, employeeId: activeTrackingSession.employeeId, vehicleId: activeTrackingSession.vehicleId, locationId: attendanceGeofence.locationId, geofenceId: attendanceGeofence.geofenceId, source: "ZEROW_ATTENDANCE_GATE", confidenceMilli: attendanceGeofence.status === "INSIDE" ? 1000 : 700, evidenceJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), dedupeKey: `tracking-session-ended:${activeTrackingSession.id}:${aggregateId}`, createdAt: now })] : []),
+        db.insert(s06Events).values({ eventId: trackingEventId, tenantId: context.tenantId, eventType: `location.tracking_session.${trackingOperation}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-location-intelligence", occurredAt: now, observedAt: now, aggregateType: "tracking.session", aggregateId: activeTrackingSession.id, aggregateVersion: Date.now(), payloadJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey: `${idempotencyKey}:tracking`, status: "COMMITTED_SITES_READBACK", createdAt: now }),
+        db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId: trackingEventId, topic: `zerow.location.tracking_session.${trackingOperation}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
+        db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "tracking.session", aggregateId: activeTrackingSession.id, expectedVersion: Date.now(), observedVersion: Date.now(), status: "SITES_READBACK_VERIFIED", detail: "Stato tracking riallineato alla transizione di presenza.", createdAt: now, updatedAt: now }),
+      );
+    }
+    const results = await db.batch([...attendanceStatements, ...trackingStatements] as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
     const updated = latest ? (results[0] as unknown as (typeof jobJourneyRecords.$inferSelect)[])[0] : (await db.select().from(jobJourneyRecords).where(eq(jobJourneyRecords.id, aggregateId)).limit(1))[0];
     if (!updated) return Response.json({ error: "attendance_readback_unavailable" }, { status: 503 });
-    return Response.json({ attendance: attendanceForResponse(updated), eventId, idempotent: false, readback: "verified" }, { status: latest ? 200 : 201, headers: { "cache-control": "private, no-store" } });
+    const [trackingReadback] = trackingSessionId
+      ? await db.select().from(trackingSessions).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, trackingSessionId))).limit(1)
+      : [];
+    return Response.json({ attendance: attendanceForResponse(updated), tracking: trackingReadback ? sessionForResponse(trackingReadback) : { status: operational.mode === "DRIVER" ? trackingState.status : "NOT_REQUIRED", sessionId: null }, eventId, idempotent: false, readback: "verified" }, { status: latest ? 200 : 201, headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/unique|constraint/i.test(message)) return Response.json({ error: "attendance_idempotency_or_version_conflict" }, { status: 409 });
