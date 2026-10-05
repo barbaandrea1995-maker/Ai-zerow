@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   inventoryItems,
@@ -19,6 +19,7 @@ import {
   quantityToMilli,
   replenishmentProposalForItem,
   type InventoryMovementType,
+  warehouseForResponse,
 } from "@/lib/inventory-contract";
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
 
@@ -69,12 +70,14 @@ function normalizedIdentifier(value: unknown) {
   return boundedText(value, 180).toUpperCase();
 }
 
-async function findItemByIdentifier(tenantId: string, value: unknown) {
+async function findItemByIdentifier(tenantId: string, value: unknown, warehouseId?: string) {
   const raw = boundedText(value, 180);
   const normalized = raw.toUpperCase();
   if (!raw) return null;
+  const warehouseCondition = warehouseId ? eq(inventoryItems.warehouseId, warehouseId) : undefined;
   const [item] = await getDb().select().from(inventoryItems).where(and(
     eq(inventoryItems.tenantId, tenantId),
+    ...(warehouseCondition ? [warehouseCondition] : []),
     or(
       eq(inventoryItems.id, raw),
       eq(inventoryItems.id, normalized),
@@ -88,27 +91,57 @@ async function findItemByIdentifier(tenantId: string, value: unknown) {
   return item ?? null;
 }
 
-async function inventoryReadback(tenantId: string, filters: { itemId?: string; jobId?: string } = {}) {
+async function inventoryReadback(tenantId: string, filters: { itemId?: string; jobId?: string; warehouseId?: string } = {}) {
   const db = getDb();
   const itemConditions = [eq(inventoryItems.tenantId, tenantId)];
   if (filters.itemId) itemConditions.push(eq(inventoryItems.id, filters.itemId));
-  const movementConditions = [eq(inventoryMovements.tenantId, tenantId)];
-  if (filters.itemId) movementConditions.push(eq(inventoryMovements.itemId, filters.itemId));
-  if (filters.jobId) movementConditions.push(eq(inventoryMovements.jobId, filters.jobId));
-
-  const [items, movements] = await Promise.all([
+  if (filters.warehouseId) itemConditions.push(eq(inventoryItems.warehouseId, filters.warehouseId));
+  const [items, warehouses] = await Promise.all([
     db.select().from(inventoryItems)
       .where(and(...itemConditions))
       .orderBy(desc(inventoryItems.updatedAt))
       .limit(500),
-    db.select().from(inventoryMovements)
+    db.select().from(tenantWarehouses)
+      .where(and(
+        eq(tenantWarehouses.tenantId, tenantId),
+        ...(filters.warehouseId ? [eq(tenantWarehouses.id, filters.warehouseId)] : []),
+      ))
+      .orderBy(tenantWarehouses.name),
+  ]);
+  const movementConditions = [eq(inventoryMovements.tenantId, tenantId)];
+  if (filters.itemId) movementConditions.push(eq(inventoryMovements.itemId, filters.itemId));
+  if (filters.jobId) movementConditions.push(eq(inventoryMovements.jobId, filters.jobId));
+  const itemIds = items.map((item) => item.id);
+  if (itemIds.length) movementConditions.push(inArray(inventoryMovements.itemId, itemIds));
+  const movements = itemIds.length
+    ? await db.select().from(inventoryMovements)
       .where(and(...movementConditions))
       .orderBy(desc(inventoryMovements.createdAt))
-      .limit(250),
-  ]);
+      .limit(250)
+    : [];
+  const warehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const movementResponses = movements.map((movement) => {
+    const item = itemById.get(movement.itemId);
+    const warehouse = item?.warehouseId ? warehouseById.get(item.warehouseId) : null;
+    return {
+      ...inventoryMovementForResponse(movement),
+      warehouseId: item?.warehouseId ?? null,
+      warehouse: warehouse ? {
+        id: warehouse.id,
+        code: warehouse.code,
+        name: warehouse.name,
+        locationLabel: warehouse.locationLabel,
+      } : null,
+    };
+  });
   return {
-    items: items.map(inventoryItemForResponse),
-    movements: movements.map(inventoryMovementForResponse),
+    scope: filters.warehouseId
+      ? { type: "WAREHOUSE" as const, warehouseId: filters.warehouseId }
+      : { type: "TENANT_CONSOLIDATED" as const },
+    warehouses: warehouses.map(warehouseForResponse),
+    items: items.map((item) => inventoryItemForResponse(item, item.warehouseId ? warehouseById.get(item.warehouseId) ?? null : null)),
+    movements: movementResponses,
     replenishment: items.map(replenishmentProposalForItem).filter((item): item is NonNullable<typeof item> => Boolean(item)),
     summary: {
       itemCount: items.length,
@@ -164,16 +197,27 @@ export async function GET(request: Request) {
   const itemId = boundedText(url.searchParams.get("itemId"), 120);
   const jobId = boundedText(url.searchParams.get("jobId"), 160);
   const identifier = boundedText(url.searchParams.get("identifier"), 180);
+  const warehouseId = boundedText(url.searchParams.get("warehouseId"), 120);
   try {
-    const resolvedItem = identifier ? await findItemByIdentifier(context.tenantId, identifier) : null;
+    let resolvedWarehouse: typeof tenantWarehouses.$inferSelect | null = null;
+    if (warehouseId) {
+      const [warehouse] = await getDb().select().from(tenantWarehouses).where(and(
+        eq(tenantWarehouses.tenantId, context.tenantId),
+        eq(tenantWarehouses.id, warehouseId),
+        eq(tenantWarehouses.status, "active"),
+      )).limit(1);
+      if (!warehouse) return Response.json({ error: "warehouse_not_found_or_inactive" }, { status: 404 });
+      resolvedWarehouse = warehouse;
+    }
+    const resolvedItem = identifier ? await findItemByIdentifier(context.tenantId, identifier, warehouseId || undefined) : null;
     if (identifier && !resolvedItem) {
-      return Response.json({ error: "inventory_identifier_not_found" }, { status: 404 });
+      return Response.json({ error: warehouseId ? "inventory_identifier_not_in_selected_warehouse" : "inventory_identifier_not_found" }, { status: 404 });
     }
     return Response.json({
       context: publicAuthorityContext(context),
-      ...(await inventoryReadback(context.tenantId, { itemId: itemId || resolvedItem?.id || undefined, jobId: jobId || undefined })),
-      resolvedItem: resolvedItem ? inventoryItemForResponse(resolvedItem) : null,
-      readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
+      ...(await inventoryReadback(context.tenantId, { itemId: itemId || resolvedItem?.id || undefined, jobId: jobId || undefined, warehouseId: warehouseId || undefined })),
+      resolvedItem: resolvedItem ? inventoryItemForResponse(resolvedItem, resolvedWarehouse) : null,
+      readback: { status: "verified", scope: warehouseId ? "warehouse" : "tenant", warehouseId: warehouseId || undefined, checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {
     return Response.json({ error: "inventory_readback_unavailable" }, { status: 503 });
@@ -193,6 +237,7 @@ export async function POST(request: Request) {
   }
   const input = parsed.value;
   const action = boundedText(input.action, 32).toLowerCase();
+  const requestedWarehouseId = boundedText(input.warehouseId, 120);
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
   if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
@@ -218,7 +263,7 @@ export async function POST(request: Request) {
       )).limit(1);
       if (!movement) return Response.json({ error: "inventory_idempotency_readback_unavailable" }, { status: 503 });
       return Response.json({
-        ...(await inventoryReadback(context.tenantId, { itemId: movement.itemId })),
+        ...(await inventoryReadback(context.tenantId, { itemId: movement.itemId, warehouseId: requestedWarehouseId || undefined })),
         movement: inventoryMovementForResponse(movement),
         idempotent: true,
         eventId: existingEvent.eventId,
@@ -347,7 +392,7 @@ export async function POST(request: Request) {
         }),
       ]);
 
-      const readback = await inventoryReadback(context.tenantId, { itemId });
+      const readback = await inventoryReadback(context.tenantId, { itemId, warehouseId });
       return Response.json({ ...readback, movement: readback.movements[0], idempotent: false, eventId }, {
         status: 201,
         headers: { "cache-control": "private, no-store" },
@@ -360,8 +405,9 @@ export async function POST(request: Request) {
     const movementType = MUTATION_ACTIONS[action as keyof typeof MUTATION_ACTIONS];
     const submittedItemId = boundedText(input.itemId, 120);
     const identifier = boundedText(input.identifier, 180);
-    const resolvedByIdentifier = identifier ? await findItemByIdentifier(context.tenantId, identifier) : null;
-    if (identifier && !resolvedByIdentifier) return Response.json({ error: "inventory_identifier_not_found" }, { status: 404 });
+    if (!requestedWarehouseId) return Response.json({ error: "warehouse_required_for_movement" }, { status: 400 });
+    const resolvedByIdentifier = identifier ? await findItemByIdentifier(context.tenantId, identifier, requestedWarehouseId) : null;
+    if (identifier && !resolvedByIdentifier) return Response.json({ error: "inventory_identifier_not_in_selected_warehouse" }, { status: 404 });
     if (submittedItemId && resolvedByIdentifier && submittedItemId !== resolvedByIdentifier.id) {
       return Response.json({ error: "inventory_identifier_item_mismatch" }, { status: 409 });
     }
@@ -395,6 +441,9 @@ export async function POST(request: Request) {
       eq(inventoryItems.id, itemId),
     )).limit(1);
     if (!current) return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
+    if (current.warehouseId !== requestedWarehouseId) {
+      return Response.json({ error: "inventory_item_belongs_to_other_warehouse" }, { status: 409 });
+    }
     if (current.version !== expectedVersion) {
       return Response.json({ error: "version_conflict", expectedVersion, currentVersion: current.version }, { status: 409 });
     }
@@ -453,6 +502,7 @@ export async function POST(request: Request) {
       quantityMilli,
       jobId: canonicalJobId,
       missionId: missionId || null,
+      warehouseId: current.warehouseId,
       before: { onHandMilli: current.onHandMilli, reservedMilli: current.reservedMilli },
       after: { onHandMilli: nextOnHand, reservedMilli: nextReserved },
       version: nextVersion,
@@ -524,14 +574,14 @@ export async function POST(request: Request) {
     const updated = (results[0] as (typeof inventoryItems.$inferSelect)[])[0];
     if (!updated) return Response.json({ error: "version_conflict", currentVersion: current.version }, { status: 409 });
 
-    const readback = await inventoryReadback(context.tenantId, { itemId });
+    const readback = await inventoryReadback(context.tenantId, { itemId, warehouseId: requestedWarehouseId });
     return Response.json({ ...readback, movement: readback.movements[0], idempotent: false, eventId }, {
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
     if (error instanceof CanonicalCodeConflictError) return Response.json({ error: error.code }, { status: 409 });
     const message = error instanceof Error ? error.message : "";
-    if (/inventory_items_tenant_barcode_uq/.test(message)) return Response.json({ error: "inventory_barcode_already_registered" }, { status: 409 });
+    if (/inventory_items_tenant_warehouse_barcode_uq|inventory_items_tenant_barcode_uq/.test(message)) return Response.json({ error: "inventory_barcode_already_registered_in_warehouse" }, { status: 409 });
     if (/inventory_items_tenant_qr_code_uq/.test(message)) return Response.json({ error: "inventory_qr_already_registered" }, { status: 409 });
     if (/unique|constraint/i.test(message)) return Response.json({ error: "inventory_idempotency_or_version_conflict" }, { status: 409 });
     return Response.json({ error: "inventory_write_unavailable" }, { status: 503 });

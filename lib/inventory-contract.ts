@@ -38,7 +38,7 @@ export function warehouseForResponse(row: typeof tenantWarehouses.$inferSelect) 
       status: "configured",
     },
     locationSource: row.locationSource,
-    locationStatus: "SERVER_VALIDATED_COORDINATES" as const,
+    locationStatus: row.locationSource === "MAPBOX" ? "SERVER_VERIFIED_MAPBOX_LOCATION" as const : "SERVER_VALIDATED_COORDINATES" as const,
     status: row.status,
     version: row.version,
     createdAt: row.createdAt,
@@ -77,7 +77,7 @@ export function milliToQuantity(value: number) {
   return Math.round(value) / 1_000;
 }
 
-export function inventoryItemForResponse(row: typeof inventoryItems.$inferSelect) {
+export function inventoryItemForResponse(row: typeof inventoryItems.$inferSelect, warehouse: typeof tenantWarehouses.$inferSelect | null = null) {
   const availableMilli = Math.max(0, row.onHandMilli - row.reservedMilli);
   return {
     id: row.id,
@@ -85,6 +85,13 @@ export function inventoryItemForResponse(row: typeof inventoryItems.$inferSelect
     name: row.name,
     unit: row.unit,
     warehouseId: row.warehouseId,
+    warehouse: warehouse ? {
+      id: warehouse.id,
+      code: warehouse.code,
+      name: warehouse.name,
+      locationLabel: warehouse.locationLabel,
+      status: warehouse.status,
+    } : null,
     location: row.location,
     shelf: row.storageShelf,
     barcode: row.barcode,

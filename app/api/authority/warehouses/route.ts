@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { warehouseForResponse } from "@/lib/inventory-contract";
+import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
 import { allocateServerName } from "@/lib/server-naming";
 
 export const dynamic = "force-dynamic";
@@ -75,20 +76,28 @@ export async function POST(request: Request) {
   }
 
   const name = boundedText(input.name, 120);
-  const locationLabel = boundedText(input.locationLabel ?? input.location, 180);
-  const latitude = numberValue(input.latitude);
-  const longitude = numberValue(input.longitude);
+  const locationQuery = boundedText(input.locationQuery ?? input.locationLabel ?? input.location, 240);
+  const provider = boundedText(input.locationProvider ?? input.provider, 32).toUpperCase();
+  const providerPlaceId = boundedText(input.providerPlaceId, 160);
   const radius = numberValue(input.geofenceRadiusMeters ?? input.radiusMeters) ?? 100;
-  const locationSource = boundedText(input.locationSource, 32) === "browser_geolocation" ? "browser_geolocation" : "manual";
 
   if (name.length < 2) return Response.json({ error: "warehouse_name_required" }, { status: 400 });
-  if (locationLabel.length < 2) return Response.json({ error: "warehouse_location_required" }, { status: 400 });
-  if (latitude === null || latitude < -90 || latitude > 90 || longitude === null || longitude < -180 || longitude > 180) {
-    return Response.json({ error: "server_coordinates_required" }, { status: 400 });
-  }
+  if (locationQuery.length < 5) return Response.json({ error: "warehouse_location_required" }, { status: 400 });
+  if (provider !== "MAPBOX" || !providerPlaceId) return Response.json({ error: "warehouse_server_location_required" }, { status: 400 });
   if (!Number.isInteger(radius) || radius < 25 || radius > 5_000) {
     return Response.json({ error: "geofence_radius_must_be_25_to_5000_meters" }, { status: 400 });
   }
+
+  const geocoded = await geocodeWithMapbox(locationQuery);
+  if (geocoded.status === "not_configured") return Response.json({ error: "warehouse_geocoder_not_configured" }, { status: 503 });
+  if (geocoded.status !== "used") return Response.json({ error: "warehouse_geocoder_unavailable" }, { status: 503 });
+  const candidate = geocoded.candidates.find((item) => item.providerPlaceId === providerPlaceId);
+  if (!candidate) return Response.json({ error: "warehouse_location_confirmation_expired" }, { status: 409 });
+
+  const locationLabel = candidate.formattedAddress;
+  const latitude = candidate.latitude;
+  const longitude = candidate.longitude;
+  const locationSource = "MAPBOX";
 
   const now = new Date().toISOString();
   const warehouseId = crypto.randomUUID();
@@ -114,7 +123,9 @@ export async function POST(request: Request) {
       longitude,
       geofenceRadiusMeters: radius,
       locationSource,
-      locationStatus: "SERVER_VALIDATED_COORDINATES",
+      providerPlaceId: candidate.providerPlaceId,
+      geocodeConfidence: candidate.confidence,
+      locationStatus: "SERVER_VERIFIED_MAPBOX_LOCATION",
     });
 
     await db.batch([
@@ -140,17 +151,17 @@ export async function POST(request: Request) {
         entityType: "MAGAZZINO",
         entityId: warehouseId,
         formattedAddress: locationLabel,
-        street: "",
-        streetNumber: "",
-        city: locationLabel,
-        province: "",
-        postalCode: "",
-        country: "IT",
+        street: candidate.street,
+        streetNumber: candidate.streetNumber,
+        city: candidate.city,
+        province: candidate.province,
+        postalCode: candidate.postalCode,
+        country: candidate.country,
         latitudeE6: Math.round(latitude * 1_000_000),
         longitudeE6: Math.round(longitude * 1_000_000),
-        provider: locationSource === "browser_geolocation" ? "NATIVE_DEVICE" : "MANUAL",
-        providerPlaceId: null,
-        geocodeConfidenceMilli: 0,
+        provider: "MAPBOX",
+        providerPlaceId: candidate.providerPlaceId,
+        geocodeConfidenceMilli: Math.round(Math.min(1, Math.max(0, candidate.confidence)) * 1_000),
         verifiedByUser: 1,
         verifiedAt: now,
         status: "ACTIVE",

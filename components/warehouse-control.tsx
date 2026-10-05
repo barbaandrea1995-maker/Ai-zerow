@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
 import {
   Activity,
@@ -70,6 +70,7 @@ type InventoryItem = {
   name: string;
   unit: string;
   warehouseId: string | null;
+  warehouse: { id: string; code: string; name: string; locationLabel: string; status: string } | null;
   location: string;
   shelf: string;
   barcode: string | null;
@@ -107,6 +108,8 @@ type InventoryMovement = {
   quantity: number;
   before: { onHand: number; reserved: number };
   after: { onHand: number; reserved: number };
+  warehouseId: string | null;
+  warehouse: { id: string; code: string; name: string; locationLabel: string } | null;
   note: string;
   createdAt: string;
 };
@@ -126,12 +129,14 @@ type ReplenishmentProposal = {
 
 type InventoryPayload = {
   context?: { actorName?: string; actorEmail?: string; role: string; capabilities: string[] };
+  scope?: { type: "WAREHOUSE" | "TENANT_CONSOLIDATED"; warehouseId?: string };
+  warehouses?: WarehouseLocation[];
   items: InventoryItem[];
   movements: InventoryMovement[];
   replenishment: ReplenishmentProposal[];
   summary: { itemCount: number; lowStockCount: number; movementCount: number };
   resolvedItem?: InventoryItem | null;
-  readback?: { status?: string; scope?: string; checkedAt?: string };
+  readback?: { status?: string; scope?: string; warehouseId?: string; checkedAt?: string };
 };
 
 type WarehouseCatalogPayload = {
@@ -210,6 +215,17 @@ function formatQuantity(value: number, unit: string) {
   return value.toLocaleString("it-IT", { maximumFractionDigits: 3 }) + " " + unit;
 }
 
+function inventoryErrorLabel(error: string | undefined) {
+  if (error === "warehouse_required_for_movement") return "Apri prima il registro di un magazzino.";
+  if (error === "warehouse_not_found_or_inactive") return "Il magazzino selezionato non è più attivo: aggiorna il registro.";
+  if (error === "inventory_identifier_not_in_selected_warehouse") return "Il codice non appartiene al registro del magazzino selezionato.";
+  if (error === "inventory_item_belongs_to_other_warehouse") return "Materiale appartenente a un altro magazzino: operazione bloccata.";
+  if (error === "inventory_barcode_already_registered_in_warehouse") return "Questo barcode è già registrato nel magazzino selezionato.";
+  if (error === "warehouse_required") return "Seleziona un magazzino server-side per aprire il registro.";
+  if (error === "version_conflict") return "Il saldo è cambiato: readback aggiornato.";
+  return "Operazione non eseguita: " + (error ?? "errore");
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character] ?? character);
 }
@@ -246,7 +262,7 @@ function StockCard({ item, selected, canWrite, onSelect, onMovement }: { item: I
   const denominator = Math.max(item.onHand, item.minStock, 1);
   const width = Math.max(0, Math.min(100, item.available / denominator * 100));
   const tone = stockTone(item.status);
-  return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_26px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Boxes className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{item.name}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{item.sku} · {item.location}{item.shelf ? " · " + item.shelf : ""}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={stockLabel(item.status)} tone={tone} /><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2 py-1 text-[10px] text-cyan-100">{item.unit}</span><span className={cn("inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-1 text-[10px]", item.barcode ? "border-cyan-300/20 bg-cyan-300/[.05] text-cyan-100" : "border-lime-300/20 bg-lime-300/[.05] text-lime-100")}><QrCode className="size-3" />{item.barcode ? "BARCODE · " + item.barcode : "QR SERVER · " + (item.qrCode ?? "—")}</span></div><div className="mt-4 grid grid-cols-3 gap-2"><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Fisico</p><p className="mt-1 font-mono text-sm text-slate-200">{item.onHand.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Riservato</p><p className="mt-1 font-mono text-sm text-cyan-100">{item.reserved.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Libero</p><p className="mt-1 font-mono text-sm text-lime-100">{item.available.toLocaleString("it-IT")}</p></div></div><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/70"><div className={cn("h-full rounded-full transition-[width]", item.status === "OUT_OF_STOCK" ? "bg-rose-400" : item.belowMinimum ? "bg-amber-300" : "bg-gradient-to-r from-lime-400 to-lime-200")} style={{ width: width + "%" }} /></div><p className="mt-2 text-[10px] text-slate-600">Minimo {formatQuantity(item.minStock, item.unit)} · v{item.version}</p></button>{canWrite && <Button className="mt-4 h-9 w-full border-white/10 bg-black/20 text-[11px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={onMovement} variant="outline"><ArrowDownToLine className="size-3.5" />Registra movimento</Button>}</article>;
+  return <article className={cn("rounded-2xl border p-4 transition", selected ? "border-lime-300/40 bg-lime-300/[.075] shadow-[0_0_26px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")}><button className="w-full text-left" onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Boxes className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-100">{item.name}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{item.sku} · {item.warehouse?.code ?? item.location}{item.shelf ? " · " + item.shelf : ""}</p><p className="mt-1 truncate text-[10px] text-slate-600">{item.warehouse?.name ?? "Registro non assegnato"}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={stockLabel(item.status)} tone={tone} /><span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2 py-1 text-[10px] text-cyan-100">{item.unit}</span><span className={cn("inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-2 py-1 text-[10px]", item.barcode ? "border-cyan-300/20 bg-cyan-300/[.05] text-cyan-100" : "border-lime-300/20 bg-lime-300/[.05] text-lime-100")}><QrCode className="size-3" />{item.barcode ? "BARCODE · " + item.barcode : "QR SERVER · " + (item.qrCode ?? "—")}</span></div><div className="mt-4 grid grid-cols-3 gap-2"><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Fisico</p><p className="mt-1 font-mono text-sm text-slate-200">{item.onHand.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Riservato</p><p className="mt-1 font-mono text-sm text-cyan-100">{item.reserved.toLocaleString("it-IT")}</p></div><div><p className="text-[10px] uppercase tracking-[.12em] text-slate-600">Libero</p><p className="mt-1 font-mono text-sm text-lime-100">{item.available.toLocaleString("it-IT")}</p></div></div><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-black/70"><div className={cn("h-full rounded-full transition-[width]", item.status === "OUT_OF_STOCK" ? "bg-rose-400" : item.belowMinimum ? "bg-amber-300" : "bg-gradient-to-r from-lime-400 to-lime-200")} style={{ width: width + "%" }} /></div><p className="mt-2 text-[10px] text-slate-600">Minimo {formatQuantity(item.minStock, item.unit)} · v{item.version}</p></button>{canWrite && <Button className="mt-4 h-9 w-full border-white/10 bg-black/20 text-[11px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={onMovement} variant="outline"><ArrowDownToLine className="size-3.5" />Registra movimento</Button>}</article>;
 }
 
 function MaterialQrPreview({ code, sku, name = sku, onNotice = () => undefined }: { code: string; sku: string; name?: string; onNotice?: (message: string) => void }) {
@@ -297,7 +313,7 @@ function MaterialQrPreview({ code, sku, name = sku, onNotice = () => undefined }
     popup.document.close();
   };
 
-  return <section className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.035] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-lime-200/75">IDENTITÀ FISICA</p><p className="mt-1 text-xs font-semibold text-slate-100">QR del materiale</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Stampa il codice e applicalo sul contenitore: ogni scansione torna al catalogo tenant.</p></div><QrCode className="size-4 text-lime-200" /></div><div className="mt-3 flex flex-col items-center gap-3 rounded-xl border border-lime-300/15 bg-lime-100 p-3"><div className="grid size-[132px] place-items-center overflow-hidden rounded-lg bg-[#dfff5c]">{dataUrl ? <img alt={`QR ${sku}`} className="size-full" src={dataUrl} /> : <LoaderCircle className="size-5 animate-spin text-[#071006]" />}</div><div className="text-center"><p className="font-mono text-xs font-semibold tracking-[.08em] text-[#071006]">{sku}</p><p className="mt-1 text-[10px] text-[#38502b]">{code}</p></div></div><div className="mt-3 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!dataUrl} onClick={print}><Printer className="size-3.5" />Stampa etichetta</Button><Button className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" disabled={!dataUrl} onClick={download} variant="outline"><Download className="size-3.5" />PNG</Button><Button aria-label="Copia payload QR" className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" onClick={() => void copy()} variant="outline"><Copy className="size-3.5" />Copia</Button></div></section>;
+  return <section className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.035] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-lime-200/75">IDENTITÀ FISICA</p><p className="mt-1 text-xs font-semibold text-slate-100">QR del materiale</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Stampa il codice e applicalo sul contenitore: ogni scansione torna al registro del deposito corretto.</p></div><QrCode className="size-4 text-lime-200" /></div><div className="mt-3 flex flex-col items-center gap-3 rounded-xl border border-lime-300/15 bg-lime-100 p-3"><div className="grid size-[132px] place-items-center overflow-hidden rounded-lg bg-[#dfff5c]">{dataUrl ? <img alt={`QR ${sku}`} className="size-full" src={dataUrl} /> : <LoaderCircle className="size-5 animate-spin text-[#071006]" />}</div><div className="text-center"><p className="font-mono text-xs font-semibold tracking-[.08em] text-[#071006]">{sku}</p><p className="mt-1 text-[10px] text-[#38502b]">{code}</p></div></div><div className="mt-3 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!dataUrl} onClick={print}><Printer className="size-3.5" />Stampa etichetta</Button><Button className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" disabled={!dataUrl} onClick={download} variant="outline"><Download className="size-3.5" />PNG</Button><Button aria-label="Copia payload QR" className="h-9 border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10" onClick={() => void copy()} variant="outline"><Copy className="size-3.5" />Copia</Button></div></section>;
 }
 
 export default function WarehouseControl() {
@@ -308,10 +324,12 @@ export default function WarehouseControl() {
   const [refreshing, setRefreshing] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState("");
+  const selectedWarehouseRef = useRef("");
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [stockFilter, setStockFilter] = useState<StockFilter>("ALL");
-  const [locationFilter, setLocationFilter] = useState("ALL");
+  const [shelfFilter, setShelfFilter] = useState("ALL");
   const [modal, setModal] = useState<Modal>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -328,21 +346,33 @@ export default function WarehouseControl() {
     window.setTimeout(() => setNotice(""), 4200);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (requestedWarehouseId?: string) => {
     setRefreshing(true);
     try {
-      const [response, catalogResponse] = await Promise.all([
-        fetch("/api/warehouse/inventory", { cache: "no-store" }),
-        fetch("/api/warehouse/catalog", { cache: "no-store" }),
-      ]);
-      if (response.status === 403 || catalogResponse.status === 403) {
+      const catalogResponse = await fetch("/api/warehouse/catalog", { cache: "no-store" });
+      if (catalogResponse.status === 403) {
+        setState("forbidden");
+        return;
+      }
+      const nextCatalog = await catalogResponse.json() as WarehouseCatalogPayload & { error?: string };
+      if (!catalogResponse.ok) throw new Error(nextCatalog.error ?? "warehouse_catalog_unavailable");
+      const activeWarehouses = nextCatalog.warehouses.filter((warehouse) => warehouse.status === "active");
+      const preferred = requestedWarehouseId ?? selectedWarehouseRef.current;
+      const nextWarehouseId = preferred && activeWarehouses.some((warehouse) => warehouse.id === preferred)
+        ? preferred
+        : activeWarehouses[0]?.id ?? "";
+      selectedWarehouseRef.current = nextWarehouseId;
+      setSelectedWarehouseId(nextWarehouseId);
+      const inventoryUrl = nextWarehouseId
+        ? `/api/warehouse/inventory?warehouseId=${encodeURIComponent(nextWarehouseId)}`
+        : "/api/warehouse/inventory";
+      const response = await fetch(inventoryUrl, { cache: "no-store" });
+      if (response.status === 403) {
         setState("forbidden");
         return;
       }
       const next = await response.json() as InventoryPayload & { error?: string };
-      const nextCatalog = await catalogResponse.json() as WarehouseCatalogPayload & { error?: string };
       if (!response.ok) throw new Error(next.error ?? "inventory_readback_unavailable");
-      if (!catalogResponse.ok) throw new Error(nextCatalog.error ?? "warehouse_catalog_unavailable");
       setPayload(next);
       setCatalog(nextCatalog);
       setSelectedId((current) => current && next.items.some((item) => item.id === current) ? current : next.items[0]?.id ?? "");
@@ -364,11 +394,15 @@ export default function WarehouseControl() {
   const capabilities = useMemo(() => context?.capabilities ?? ["warehouse.read"], [context]);
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => allowedNavigation.includes(item.id) || capabilities.includes(item.capability)), [allowedNavigation, capabilities]);
-  const items = useMemo(() => payload?.items ?? [], [payload?.items]);
+  const items = useMemo(() => {
+    const readItems = payload?.items ?? [];
+    return selectedWarehouseId ? readItems.filter((item) => item.warehouseId === selectedWarehouseId) : [];
+  }, [payload?.items, selectedWarehouseId]);
   const warehouses = useMemo(() => catalog?.warehouses ?? [], [catalog?.warehouses]);
   const units = useMemo(() => catalog?.units ?? [], [catalog?.units]);
   const warehouseById = useMemo(() => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse])), [warehouses]);
-  const locations = useMemo(() => [...new Set(items.map((item) => item.location).filter(Boolean))].sort(), [items]);
+  const selectedWarehouse = selectedWarehouseId ? warehouseById.get(selectedWarehouseId) ?? null : null;
+  const shelves = useMemo(() => [...new Set(items.map((item) => item.shelf).filter(Boolean))].sort(), [items]);
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return items.filter((item) => {
@@ -376,9 +410,10 @@ export default function WarehouseControl() {
       const haystack = [item.id, item.sku, item.name, item.unit, item.location, warehouse?.name, warehouse?.locationLabel, item.status].filter(Boolean).join(" ").toLowerCase();
       return (!normalized || haystack.includes(normalized))
         && (stockFilter === "ALL" || item.status === stockFilter)
-        && (locationFilter === "ALL" || item.location === locationFilter);
+        && (shelfFilter === "ALL" || item.shelf === shelfFilter)
+        && (!selectedWarehouseId || item.warehouseId === selectedWarehouseId);
     });
-  }, [items, locationFilter, query, stockFilter, warehouseById]);
+  }, [items, query, selectedWarehouseId, shelfFilter, stockFilter, warehouseById]);
   const selected = items.find((item) => item.id === selectedId) ?? filteredItems[0] ?? null;
   const movementItem = items.find((item) => item.id === movementItemId) ?? null;
   const movementNeedsAvailable = ["reserve", "pick", "load", "consume"].includes(movementAction);
@@ -432,7 +467,8 @@ export default function WarehouseControl() {
     }
     setMovementResolving(true);
     try {
-      const response = await fetch(`/api/warehouse/inventory?identifier=${encodeURIComponent(normalized)}`, { cache: "no-store" });
+      const scopeQuery = selectedWarehouseId ? `&warehouseId=${encodeURIComponent(selectedWarehouseId)}` : "";
+      const response = await fetch(`/api/warehouse/inventory?identifier=${encodeURIComponent(normalized)}${scopeQuery}`, { cache: "no-store" });
       const result = await response.json() as InventoryPayload & { error?: string };
       if (!response.ok || !result.resolvedItem) throw new Error(result.error ?? "inventory_identifier_not_found");
       setMovementIdentifier(normalized);
@@ -441,7 +477,7 @@ export default function WarehouseControl() {
       notify(`Materiale verificato · ${result.resolvedItem.name}`);
     } catch {
       setMovementItemId("");
-      notify("Codice non riconosciuto nel catalogo materiali del tenant.");
+      notify(selectedWarehouseId ? "Codice non riconosciuto nel registro scorte del magazzino selezionato." : "Codice non riconosciuto nel catalogo materiali del tenant.");
     } finally {
       setMovementResolving(false);
     }
@@ -471,8 +507,8 @@ export default function WarehouseControl() {
       return;
     }
     const body: Record<string, unknown> = modal === "register"
-      ? { action, name: field("name"), barcode: registrationMode === "barcode" ? registrationBarcode : "", unit: field("unit"), warehouseId: field("warehouseId"), shelf: field("shelf"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
-      : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", expectedVersion: movementItem?.version, quantity: field("quantity"), jobId: field("jobId"), missionId: field("missionId"), note: field("note") };
+      ? { action, name: field("name"), barcode: registrationMode === "barcode" ? registrationBarcode : "", unit: field("unit"), warehouseId: field("warehouseId") || selectedWarehouseId, shelf: field("shelf"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
+      : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", warehouseId: selectedWarehouseId, expectedVersion: movementItem?.version, quantity: field("quantity"), jobId: field("jobId"), missionId: field("missionId"), note: field("note") };
     body.idempotencyKey = "warehouse-" + action + "-" + crypto.randomUUID();
     setBusy(true);
     try {
@@ -480,7 +516,7 @@ export default function WarehouseControl() {
       const result = await response.json() as InventoryPayload & { error?: string };
       if (!response.ok) {
         if (response.status === 409) await refresh();
-        notify(result.error === "version_conflict" ? "Il saldo è cambiato: readback aggiornato." : "Operazione non eseguita: " + (result.error ?? "errore"));
+        notify(inventoryErrorLabel(result.error));
         return;
       }
       await refresh();
@@ -512,16 +548,27 @@ export default function WarehouseControl() {
     <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton><button aria-label="Apri Magazzino" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => navigate("/warehouse")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[10px] uppercase tracking-[.2em] text-lime-300/75">warehouse</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca materiale" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-sm text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca SKU, materiale, ubicazione…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">MAGAZZINO</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "READING" : "D1 VERIFIED"}</span><IconButton label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton label="Aggiorna magazzino" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
 
       <div className="mx-auto w-full max-w-[1600px] px-4 pb-24 pt-5 sm:px-7 sm:pb-8 sm:pt-7">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />AI-ZEROW / WAREHOUSE</div><h1 className="mt-2 text-2xl font-semibold tracking-[-.04em] text-slate-50 sm:text-[28px]">Magazzino</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Catalogo materiali, giacenze, movimenti e identità QR nello stesso registro operativo.</p></div><div className="flex flex-wrap items-center gap-2"><Button className="bg-lime-300 text-[10px] font-semibold text-[#050705] shadow-[0_0_24px_rgba(200,255,34,.15)] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration} title={canRegister ? "Registra un nuovo materiale" : "Richiede la capability warehouse.register"}><PackagePlus className="size-3.5" />Registra materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[10px] text-lime-100 hover:bg-lime-300/10" onClick={() => { setMovementAction("receive"); setMovementMode("scan"); setMovementIdentifier(""); setMovementItemId(""); setModal("movement"); }} variant="outline"><ScanLine className="size-3.5" />Nuovo movimento</Button></div></div>
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />AI-ZEROW / WAREHOUSE</div><h1 className="mt-2 text-2xl font-semibold tracking-[-.04em] text-slate-50 sm:text-[28px]">Magazzino</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Catalogo materiali, giacenze, movimenti e identità QR nello stesso registro operativo.</p></div><div className="flex flex-wrap items-center gap-2"><Button className="bg-lime-300 text-[10px] font-semibold text-[#050705] shadow-[0_0_24px_rgba(200,255,34,.15)] hover:bg-lime-200" disabled={!canRegister || !selectedWarehouseId} onClick={openRegistration} title={!selectedWarehouseId ? "Apri prima un registro magazzino" : canRegister ? "Registra un nuovo materiale" : "Richiede la capability warehouse.register"}><PackagePlus className="size-3.5" />Registra materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[10px] text-lime-100 hover:bg-lime-300/10" disabled={!canWrite || !selectedWarehouseId} onClick={() => { setMovementAction("receive"); setMovementMode("scan"); setMovementIdentifier(""); setMovementItemId(""); setModal("movement"); }} title={!selectedWarehouseId ? "Apri prima un registro magazzino" : "Registra un movimento nel deposito selezionato"} variant="outline"><ScanLine className="size-3.5" />Nuovo movimento</Button></div></div>
+        <section className="carbon-card-neon mt-4 rounded-2xl border border-lime-300/20 p-4 sm:p-5" aria-labelledby="warehouse-scope-title">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Warehouse className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">REGISTRO SCORTE SERVER-SIDE</p><h2 className="mt-1 text-base font-semibold text-slate-100" id="warehouse-scope-title">Seleziona il deposito operativo</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Ogni magazzino ha una propria anagrafica, geofence, giacenza e cronologia movimenti. Il cambio deposito rilegge il registro corretto dal server.</p></div></div>
+            <span className="rounded-full border border-lime-300/20 bg-lime-300/[.05] px-3 py-1.5 font-mono text-[10px] text-lime-200">{payload?.scope?.type === "WAREHOUSE" ? "WAREHOUSE SCOPED" : "SELECTING"}</span>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:items-end">
+            <label className="grid gap-2 text-xs text-slate-400" htmlFor="warehouse-register-select">Registro da aprire<select aria-label="Registro scorte del magazzino" className="h-11 rounded-xl border border-lime-300/20 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/50" id="warehouse-register-select" onChange={(event) => { const nextId = event.target.value; selectedWarehouseRef.current = nextId; setSelectedWarehouseId(nextId); setSelectedId(""); void refresh(nextId); }} value={selectedWarehouseId}><option value="">Nessun deposito attivo</option>{warehouses.filter((warehouse) => warehouse.status === "active").map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>)}</select></label>
+            {selectedWarehouse ? <div className="rounded-xl border border-white/[.08] bg-black/20 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-[10px] text-lime-200">{selectedWarehouse.code} · REGISTRO DEDICATO</span><span className="text-[10px] text-cyan-100">geofence {selectedWarehouse.geofence.radiusMeters} m</span></div><p className="mt-2 text-xs font-semibold text-slate-200">{selectedWarehouse.name}</p><p className="mt-1 text-[10px] text-slate-500">{selectedWarehouse.locationLabel}</p><p className="mt-2 text-[9px] uppercase tracking-[.14em] text-slate-600">{selectedWarehouse.locationStatus} · luogo verificato dal server</p></div> : <div className="rounded-xl border border-dashed border-amber-300/20 bg-amber-300/[.03] p-3 text-xs text-amber-100/80">Configura almeno un luogo server-side prima di registrare o movimentare scorte.</div>}
+          </div>
+        </section>
+
         <WarehouseAttendanceControl warehouses={warehouses} />
 
-        <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Anagrafiche, giacenze, prenotazioni e movimenti vivono nello stesso ledger tenant-scoped. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica materiale" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">inventory · tenant</p></div></section>
+        <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Ogni deposito ha il suo registro server-side: anagrafiche, giacenze e movimenti restano separati. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister || !selectedWarehouseId} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica nel deposito selezionato" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">{selectedWarehouse?.code ?? "warehouse"} · D1</p></div></section>
 
-        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Anagrafiche" value={payload?.summary.itemCount ?? 0} detail="Materiali censiti nel tenant" icon={Boxes} tone="cyan" /><KpiCard label="Disponibile" value={totals.available.toLocaleString("it-IT")} detail="Unità non prenotate" icon={CheckCircle2} tone="lime" /><KpiCard label="Riservato" value={totals.reserved.toLocaleString("it-IT")} detail="Unità per commesse" icon={ClipboardList} tone="cyan" /><KpiCard label="Sotto scorta" value={payload?.summary.lowStockCount ?? 0} detail="Da valutare nel replenishment" icon={AlertTriangle} tone="amber" /></section>
+        <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Anagrafiche" value={payload?.summary.itemCount ?? 0} detail={selectedWarehouse ? `Materiali in ${selectedWarehouse.code}` : "Seleziona un deposito"} icon={Boxes} tone="cyan" /><KpiCard label="Disponibile" value={totals.available.toLocaleString("it-IT")} detail="Unità non prenotate nel registro" icon={CheckCircle2} tone="lime" /><KpiCard label="Riservato" value={totals.reserved.toLocaleString("it-IT")} detail="Unità per commesse" icon={ClipboardList} tone="cyan" /><KpiCard label="Sotto scorta" value={payload?.summary.lowStockCount ?? 0} detail="Da valutare in questo deposito" icon={AlertTriangle} tone="amber" /></section>
 
-        <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">WAREHOUSE CONTROL DECK</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Registro e disponibilità</h2><p className="mt-1 text-xs text-slate-500">Il saldo disponibile è fisico meno prenotato; ogni modifica richiede la versione attesa.</p></div><span className="flex items-center gap-2 font-mono text-[10px] text-slate-600"><span className="size-1.5 rounded-full bg-lime-300" />{filteredItems.length} / {items.length} RECORD</span></div><div className="mt-4 flex flex-wrap gap-2"><label className="relative min-w-[240px] flex-1 md:hidden"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Filtra materiali" className="h-10 border-white/10 bg-black/25 pl-9 text-xs" onChange={(event) => setQuery(event.target.value)} placeholder="Filtra questa superficie…" value={query} /></label><select aria-label="Filtra stato scorta" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setStockFilter(event.target.value as StockFilter)} value={stockFilter}><option className="bg-[#080c09]" value="ALL">Tutti gli stati</option><option className="bg-[#080c09]" value="ACTIVE">Operativi</option><option className="bg-[#080c09]" value="LOW_STOCK">Sotto scorta</option><option className="bg-[#080c09]" value="OUT_OF_STOCK">Esauriti</option></select><select aria-label="Filtra ubicazione" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setLocationFilter(event.target.value)} value={locationFilter}><option className="bg-[#080c09]" value="ALL">Tutte le ubicazioni</option>{locations.map((location) => <option className="bg-[#080c09]" key={location} value={location}>{location}</option>)}</select><Button className="h-10 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => { setQuery(""); setStockFilter("ALL"); setLocationFilter("ALL"); }} variant="outline"><RefreshCw className="size-3.5" />Reset filtri</Button></div></section>
+        <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">WAREHOUSE CONTROL DECK</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Registro e disponibilità</h2><p className="mt-1 text-xs text-slate-500">Il saldo disponibile è fisico meno prenotato; ogni modifica richiede la versione attesa e il deposito selezionato.</p></div><span className="flex items-center gap-2 font-mono text-[10px] text-slate-600"><span className="size-1.5 rounded-full bg-lime-300" />{filteredItems.length} / {items.length} RECORD · {selectedWarehouse?.code ?? "—"}</span></div><div className="mt-4 flex flex-wrap gap-2"><label className="relative min-w-[240px] flex-1 md:hidden"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Filtra materiali" className="h-10 border-white/10 bg-black/25 pl-9 text-xs" onChange={(event) => setQuery(event.target.value)} placeholder="Filtra questa superficie…" value={query} /></label><select aria-label="Filtra stato scorta" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setStockFilter(event.target.value as StockFilter)} value={stockFilter}><option className="bg-[#080c09]" value="ALL">Tutti gli stati</option><option className="bg-[#080c09]" value="ACTIVE">Operativi</option><option className="bg-[#080c09]" value="LOW_STOCK">Sotto scorta</option><option className="bg-[#080c09]" value="OUT_OF_STOCK">Esauriti</option></select><select aria-label="Filtra scaffale" className="h-10 rounded-xl border border-white/10 bg-black/25 px-3 text-xs text-slate-300 outline-none focus:border-lime-300/40" onChange={(event) => setShelfFilter(event.target.value)} value={shelfFilter}><option className="bg-[#080c09]" value="ALL">Tutti gli scaffali</option>{shelves.map((shelf) => <option className="bg-[#080c09]" key={shelf} value={shelf}>{shelf}</option>)}</select><Button className="h-10 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => { setQuery(""); setStockFilter("ALL"); setShelfFilter("ALL"); }} variant="outline"><RefreshCw className="size-3.5" />Reset filtri</Button></div></section>
 
-        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">REGISTRO CANONICO</p><h2 className="mt-1 text-base font-semibold text-slate-100">Materiali e saldi</h2></div><IconButton label="Aggiorna registro materiali" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div><div className="mt-4 space-y-3">{filteredItems.map((item) => <StockCard canWrite={canWrite} item={item} key={item.id} onMovement={() => openMovement(item)} onSelect={() => setSelectedId(item.id)} selected={item.id === selected?.id} />)}{filteredItems.length === 0 && <div className="rounded-2xl border border-dashed border-lime-300/15 bg-black/15 p-12 text-center"><Boxes className="mx-auto size-9 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessun materiale nel perimetro</p><p className="mt-1 text-xs text-slate-600">Registra un materiale oppure rimuovi i filtri.</p><Button className="mt-5 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister} onClick={openRegistration}><PackagePlus className="size-3.5" />Registra materiale</Button></div>}</div></section>
+        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">REGISTRO CANONICO</p><h2 className="mt-1 text-base font-semibold text-slate-100">Materiali e saldi</h2></div><IconButton label="Aggiorna registro materiali" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div><div className="mt-4 space-y-3">{filteredItems.map((item) => <StockCard canWrite={canWrite} item={item} key={item.id} onMovement={() => openMovement(item)} onSelect={() => setSelectedId(item.id)} selected={item.id === selected?.id} />)}{filteredItems.length === 0 && <div className="rounded-2xl border border-dashed border-lime-300/15 bg-black/15 p-12 text-center"><Boxes className="mx-auto size-9 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessun materiale nel perimetro</p><p className="mt-1 text-xs text-slate-600">Apri un deposito o registra un materiale nel registro selezionato.</p><Button className="mt-5 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister || !selectedWarehouseId} onClick={openRegistration}><PackagePlus className="size-3.5" />Registra materiale</Button></div>}</div></section>
 
           <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">MATERIAL INSPECTOR</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{selected?.name ?? "Nessun materiale selezionato"}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected ? selected.sku + " · " + selected.id : "Seleziona una riga dal registro"}</p>{selected && <p className="mt-1 text-[10px] text-slate-500">{selected.barcode ? "BARCODE · " + selected.barcode : "QR SERVER · " + (selected.qrCode ?? "—")} {selected.shelf ? "· scaffale " + selected.shelf : ""}</p>}</div>{selected && <StatusPill label={stockLabel(selected.status)} tone={stockTone(selected.status)} />}</div>{selected ? <><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Disponibilità</p><p className="mt-2 font-mono text-xl text-lime-100">{formatQuantity(selected.available, selected.unit)}</p><p className="mt-1 text-[10px] text-slate-600">fisico {selected.onHand.toLocaleString("it-IT")} · riservato {selected.reserved.toLocaleString("it-IT")}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Guard stock</p><p className={cn("mt-2 text-sm font-semibold", selected.status === "ACTIVE" ? "text-lime-200" : "text-amber-200")}>{selected.status === "ACTIVE" ? "AVAILABLE" : "ATTENTION"}</p><p className="mt-1 text-[10px] text-slate-600">minimo {formatQuantity(selected.minStock, selected.unit)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Ubicazione</p><p className="mt-2 text-sm text-slate-200">{selected.location}</p><p className="mt-1 text-[10px] text-slate-600">ultimo readback · {formatDate(selected.updatedAt)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Versione</p><p className="mt-2 font-mono text-sm text-cyan-100">v{selected.version}</p><p className="mt-1 text-[10px] text-slate-600">optimistic concurrency</p></div></div>{selected.qrCode && <MaterialQrPreview code={selected.qrCode} sku={selected.sku} />}<div className="mt-4 flex flex-wrap gap-2">{canWrite && <Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" onClick={() => openMovement(selected)}><ArrowDownToLine className="size-3.5" />Movimenta</Button>}<Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href="/operations">Richiesta da commessa <BriefcaseBusiness className="size-3.5" /></Link></div></> : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-7 text-center text-xs text-slate-600">Seleziona un materiale per vedere saldo, versione e collegamenti.</div>}</section>
 
@@ -571,9 +618,9 @@ export default function WarehouseControl() {
                     {units.map((unit) => <option className="bg-[#080c09]" key={unit.code} value={unit.code}>{unit.label} · {unit.symbol}</option>)}
                   </select>
                 </label>
-                <label className="text-xs text-slate-400">
+              <label className="text-xs text-slate-400">
                   Magazzino di ubicazione
-                  <select aria-label="Magazzino di ubicazione" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" defaultValue="" name="warehouseId" required>
+                  <select aria-label="Magazzino di ubicazione" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40 disabled:cursor-not-allowed disabled:opacity-80" disabled name="warehouseId" required value={selectedWarehouseId}>
                     <option className="bg-[#080c09]" disabled value="">Seleziona un magazzino server-side</option>
                     {warehouses.filter((warehouse) => warehouse.status === "active").map((warehouse) => <option className="bg-[#080c09]" key={warehouse.id} value={warehouse.id}>{warehouse.name} · {warehouse.code} · {warehouse.locationLabel}</option>)}
                   </select>

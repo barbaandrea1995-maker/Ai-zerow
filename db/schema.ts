@@ -41,9 +41,9 @@ export const tenants = sqliteTable("tenants", {
 /**
  * Tenant-owned warehouse locations. Coordinates are persisted as microdegrees
  * so the server can validate and compare them without floating point drift.
- * The location label is deliberately provider-neutral until a geocoder is
- * connected; the API only exposes SERVER_VALIDATED_COORDINATES when the
- * coordinates and radius pass its validation rules.
+ * New locations are confirmed by the server geocoder before they become
+ * canonical operational places; legacy manual rows remain readable for
+ * compatibility but cannot bypass the location confirmation flow.
  */
 export const tenantWarehouses = sqliteTable("tenant_warehouses", {
   id: text("id").primaryKey(),
@@ -464,8 +464,8 @@ export const inventoryItems = sqliteTable("inventory_items", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => ({
-  tenantSkuUnique: uniqueIndex("inventory_items_tenant_sku_uq").on(table.tenantId, table.sku),
-  tenantBarcodeUnique: uniqueIndex("inventory_items_tenant_barcode_uq").on(table.tenantId, table.barcode),
+  warehouseSkuUnique: uniqueIndex("inventory_items_tenant_warehouse_sku_uq").on(table.tenantId, table.warehouseId, table.sku),
+  warehouseBarcodeUnique: uniqueIndex("inventory_items_tenant_warehouse_barcode_uq").on(table.tenantId, table.warehouseId, table.barcode),
   tenantQrCodeUnique: uniqueIndex("inventory_items_tenant_qr_code_uq").on(table.tenantId, table.qrCode),
   tenantStatusIdx: index("inventory_items_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
   tenantWarehouseIdx: index("inventory_items_tenant_warehouse_idx").on(table.tenantId, table.warehouseId, table.updatedAt),

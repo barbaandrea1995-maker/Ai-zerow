@@ -16,7 +16,9 @@ export async function POST(request: Request) {
       ? "operations.write"
       : hasCapability(context, "mission.write")
         ? "mission.write"
-        : null;
+        : hasCapability(context, "tenant.manage")
+          ? "tenant.manage"
+          : null;
   if (!capability) return Response.json({ error: "forbidden", capability: "mission.write" }, { status: 403 });
 
   let payload: Record<string, unknown>;
