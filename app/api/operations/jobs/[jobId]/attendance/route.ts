@@ -203,6 +203,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(jobJourneyRecords.recordType, "ATTENDANCE"),
     )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1);
     const now = new Date().toISOString();
+    const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
+    const correctionAt = bounded(input.correctionAt, 40);
+    const correctionAtIsValid = Boolean(correctionAt && Number.isFinite(Date.parse(correctionAt)));
     const expectedVersion = typeof input.expectedVersion === "number" ? Math.floor(input.expectedVersion) : null;
     const previousStatus = latest?.status as AttendanceStatus | undefined;
     const validTransitions: Record<keyof typeof ACTIONS, AttendanceStatus[]> = {
@@ -288,9 +291,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
       }
     }
 
-    const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
-    const correctionAt = bounded(input.correctionAt, 40);
-    const correctionAtIsValid = Boolean(correctionAt && Number.isFinite(Date.parse(correctionAt)));
     const workerId = hasCapability(context, "workforce.read.all") || hasCapability(context, "workforce.manage")
       ? bounded(input.workerId, 120, context.actorId)
       : context.actorId;
