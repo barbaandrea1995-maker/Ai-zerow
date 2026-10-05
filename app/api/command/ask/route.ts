@@ -61,6 +61,9 @@ export async function POST(request: Request) {
   const requestedAction = typeof payload.actionType === "string" ? payload.actionType.trim().slice(0, 64) : "query";
   const actionType = requestedAction || "query";
   const approvalRequired = !["query", "read", "overview"].includes(actionType.toLowerCase());
+  if (!hasCapability(context!, "command.read") && !["query", "read", "overview"].includes(actionType.toLowerCase())) {
+    return Response.json({ error: "operational_ai_is_read_only" }, { status: 403 });
+  }
   const requestedIdempotencyKey = typeof payload.idempotencyKey === "string" ? payload.idempotencyKey.trim().slice(0, 160) : "";
   if (command.length < 2 || command.length > 500) {
     return Response.json({ error: "prompt_must_be_2_to_500_characters" }, { status: 400 });

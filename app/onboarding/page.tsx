@@ -62,6 +62,7 @@ import AuthorityMembershipControl, {
 } from "@/components/authority-membership-control";
 import { TenantOperatingProfile } from "@/components/tenant-operating-profile";
 import TenantWarehouseControl from "@/components/tenant-warehouse-control";
+import WarehouseAssignmentControl from "@/components/warehouse-assignment-control";
 import {
   Dialog,
   DialogClose,
@@ -1942,6 +1943,12 @@ export default function OnboardingPage() {
               }}
               onNotify={notify}
               onRefresh={refreshAuthority}
+            />
+
+            <WarehouseAssignmentControl
+              canManage={canManageAuthority}
+              memberships={memberships}
+              onNotify={notify}
             />
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

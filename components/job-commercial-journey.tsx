@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MissionResourceFields } from "@/components/mission-resource-fields";
 import { PlanningResourceFields } from "@/components/planning-resource-fields";
-import { AttendanceControl } from "@/components/attendance-control";
 import { TRANSPORT_MODE_CATALOG, type TransportMode } from "@/lib/tenant-operating-model";
 
 type JourneyRecord = { id: string; domain: string; recordType: string; title: string; status: string; version: number; payload: Record<string, unknown>; updatedAt: string };
@@ -363,7 +362,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       })}
     </div>
 
-    <AttendanceControl jobId={jobId} />
+    <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.025] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">PRESENZE CENTRALIZZATE</p><p className="mt-1 text-[11px] text-slate-400">Ingresso, pausa e uscita si gestiscono esclusivamente dal modulo Presenze.</p></div><a className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.06] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.12]" href="/presenze">Apri Presenze <RefreshCw className="size-3.5" /></a></div></div>
 
     <div className="relative mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
       <article className="rounded-[20px] border border-white/[0.075] bg-black/25 p-4">

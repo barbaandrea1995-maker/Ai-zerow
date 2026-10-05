@@ -43,6 +43,7 @@ type WorkforceContext = {
   actorName: string;
   actorEmail: string;
   role: string;
+  roles?: string[];
   capabilities: string[];
 };
 
@@ -287,5 +288,5 @@ export default function WorkforceControl() {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · RISORSE OPERATIVE</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,.8)]" />Disponibilità aggiornata · accesso personalizzato</span></div>
       </div>
     </section>
-  </div><CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={context?.role} />{notice && <button className="fixed bottom-5 right-5 z-50 max-w-[390px] rounded-xl border border-amber-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CircleAlert className="mr-2 inline size-4 text-amber-200" />{notice}</button>}</main>;
+  </div><CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />{notice && <button className="fixed bottom-5 right-5 z-50 max-w-[390px] rounded-xl border border-amber-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CircleAlert className="mr-2 inline size-4 text-amber-200" />{notice}</button>}</main>;
 }

@@ -824,7 +824,7 @@ export default function CommandSurface({
         </section>
       </div>
 
-      <CommandMobileNav active="home" allowedNavigation={access.allowedNavigation} role={access.role} />
+      <CommandMobileNav active="home" allowedNavigation={access.allowedNavigation} role={access.role} roles={access.roles} />
       <CommandWidgetCustomizer catalog={widgetCatalog} dirty={dirtyLayout} layout={widgetLayout} onLayoutChange={setWidgetLayout} onOpenChange={setCustomizerOpen} onReset={resetLayout} onSave={saveLayout} open={customizerOpen} saving={savingLayout} />
       <CommandLedgerDialog onOpenChange={setLedgerOpen} open={ledgerOpen} runtimeStatus={aiRuntimeStatus} />
       <NewJobDialog onCreated={(title) => { setNewJobOpen(false); notify(`Bozza locale creata: ${title}`); }} onOpenChange={setNewJobOpen} open={newJobOpen} />

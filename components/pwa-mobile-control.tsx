@@ -218,7 +218,7 @@ function CheckRow({ icon: Icon, label, detail, state }: { icon: LucideIcon; labe
   );
 }
 
-export default function PwaMobileControl({ access, actor, role }: { access: Pick<CommandSurfaceAccess, "allowedNavigation">; actor: AccountActor; role: string }) {
+export default function PwaMobileControl({ access, actor, role }: { access: Pick<CommandSurfaceAccess, "allowedNavigation" | "roles">; actor: AccountActor; role: string }) {
   const router = useRouter();
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -472,7 +472,7 @@ export default function PwaMobileControl({ access, actor, role }: { access: Pick
           </div>
         </section>
       </div>
-      <CommandMobileNav active="more" allowedNavigation={access.allowedNavigation} role={role} />
+      <CommandMobileNav active="more" allowedNavigation={access.allowedNavigation} role={role} roles={access.roles} />
     </main>
   );
 }

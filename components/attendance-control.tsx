@@ -59,6 +59,8 @@ function attendanceErrorMessage(error: unknown) {
   if (isNetworkFailure(error)) {
     return "Connessione non disponibile: la richiesta non è arrivata al server. Nessuna timbratura è stata modificata. Riprova con la rete attiva.";
   }
+  if (error instanceof Error && error.message === "driver_attendance_geofence_required") return "Timbratura rifiutata: devi essere dentro la geofence del punto di partenza o di consegna della missione.";
+  if (error instanceof Error && error.message === "attendance_geofence_required") return "Timbratura rifiutata: devi essere dentro la geofence della commessa.";
   if (error instanceof Error && error.message.trim()) return error.message;
   return "La timbratura non è stata registrata. Controlla i dati e riprova.";
 }

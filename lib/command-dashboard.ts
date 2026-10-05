@@ -73,7 +73,7 @@ export const COMMAND_WIDGET_CATALOG = [
     id: "operational-map",
     label: "Mappa operativa",
     description: "Vista territoriale di lavori, team e asset autorizzati.",
-    requiredCapabilities: ["operations.read"],
+    requiredCapabilities: ["operations.read", "location.read.current"],
     allowedSizes: ["wide", "full"],
     defaultSize: "wide",
   },
@@ -154,6 +154,7 @@ export type CommandWidgetPublicDefinition = {
 
 export type CommandSurfaceAccess = {
   role: string;
+  roles?: string[];
   canCustomize: boolean;
   allowedNavigation: CommandNavigationId[];
   widgetCatalog: CommandWidgetPublicDefinition[];
@@ -179,6 +180,7 @@ export const COMMAND_NAVIGATION = [
   { id: "events", path: "/events", requiredCapability: "events.read" },
   { id: "pwa", path: "/pwa/diagnostics", requiredCapability: "pwa.read" },
   { id: "settings", path: "/settings", requiredCapability: "settings.read" },
+  { id: "company-ai", path: "/ai", requiredCapability: "company_ai.read" },
 ] as const;
 
 export type CommandNavigationId = (typeof COMMAND_NAVIGATION)[number]["id"];
@@ -267,9 +269,11 @@ export function firstAuthorizedPath(capabilities: readonly string[]) {
 export function commandSurfaceAccess(
   role: string,
   capabilities: readonly string[],
+  roles?: readonly string[],
 ): CommandSurfaceAccess {
   return {
     role,
+    roles: roles ? [...roles] : undefined,
     canCustomize: capabilities.includes("command.customize"),
     allowedNavigation: getAllowedCommandNavigation(capabilities).map((item) => item.id),
     widgetCatalog: publicCommandWidgetCatalog(capabilities),

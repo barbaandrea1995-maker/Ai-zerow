@@ -128,7 +128,7 @@ function NavButton({ children, active, onClick }: { children: ReactNode; active?
   return <button aria-current={active ? "page" : undefined} className={`group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition ${active ? "border-lime-300/25 bg-lime-300/10 text-lime-200 shadow-[inset_3px_0_0_#c8ff22]" : "border-transparent text-slate-500 hover:border-lime-300/10 hover:bg-white/[0.045] hover:text-slate-100"}`} onClick={onClick} type="button">{children}</button>;
 }
 
-export default function SecurityPrivacyControl({ access, actor, role }: { access: Pick<CommandSurfaceAccess, "allowedNavigation">; actor: AccountActor; role: string }) {
+export default function SecurityPrivacyControl({ access, actor, role }: { access: Pick<CommandSurfaceAccess, "allowedNavigation" | "roles">; actor: AccountActor; role: string }) {
   const router = useRouter();
   const [data, setData] = useState<SecuritySnapshot>({});
   const [filter, setFilter] = useState<Filter>("ALL");
@@ -211,7 +211,7 @@ export default function SecurityPrivacyControl({ access, actor, role }: { access
           </div>
         </section>
       </div>
-      <CommandMobileNav active="more" allowedNavigation={access.allowedNavigation} role={role} />
+      <CommandMobileNav active="more" allowedNavigation={access.allowedNavigation} role={role} roles={access.roles} />
       {toast ? <button className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,0.14)]" onClick={() => setToast("")} type="button">{toast}</button> : null}
     </main>
   );

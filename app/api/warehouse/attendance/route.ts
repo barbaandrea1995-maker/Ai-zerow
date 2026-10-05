@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { geofences, jobJourneyRecords, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
+import { geofences, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { warehouseIsInScope, warehouseScope } from "@/lib/attendance-scope";
 import { evaluateAttendanceGeofence } from "@/lib/location-intelligence/attendance-policy";
 import { geofenceForEngine } from "@/lib/location-intelligence/repository";
 
@@ -59,15 +60,22 @@ export async function GET(request: Request) {
   const warehouseId = bounded(new URL(request.url).searchParams.get("warehouseId"), 160);
   try {
     const db = getDb();
+    const [warehouses, workforceRows] = await Promise.all([
+      db.select().from(tenantWarehouses).where(and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.status, "active"))).limit(500),
+      db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500),
+    ]);
+    const scope = warehouseScope(context, warehouses, workforceRows);
+    if (warehouseId && !warehouseIsInScope(scope, warehouseId)) return Response.json({ error: "warehouse_assignment_required" }, { status: 403 });
     const records = await db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.domain, "warehouse"),
       eq(jobJourneyRecords.recordType, "ATTENDANCE"),
-      ...(warehouseId ? [eq(jobJourneyRecords.jobId, warehouseId)] : []),
+      ...(warehouseId ? [eq(jobJourneyRecords.jobId, warehouseId)] : scope.mode === "ALL" ? [] : scope.warehouseIds.length ? [inArray(jobJourneyRecords.jobId, scope.warehouseIds)] : [eq(jobJourneyRecords.jobId, "__NO_ASSIGNED_WAREHOUSE__")]),
     )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
     return Response.json({
       context: publicAuthorityContext(context),
-      contract: { source: "sites-d1-warehouse-attendance-readback", geofence: "ENTRY_AND_EXIT_REQUIRE_INSIDE_WAREHOUSE", tracking: "NOT_REQUIRED_UNLESS_DRIVER_DUTY" },
+      contract: { source: "sites-d1-warehouse-attendance-readback", geofence: "ENTRY_AND_EXIT_REQUIRE_INSIDE_ASSIGNED_WAREHOUSE", tracking: "NOT_REQUIRED_UNLESS_DRIVER_DUTY", assignment: "SERVER_SIDE_ONLY" },
+      warehouseScope: scope,
       records: records.map(recordForResponse),
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
@@ -97,6 +105,12 @@ export async function POST(request: Request) {
 
   try {
     const db = getDb();
+    const [warehouses, workforceRows] = await Promise.all([
+      db.select().from(tenantWarehouses).where(and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.status, "active"))).limit(500),
+      db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500),
+    ]);
+    const scope = warehouseScope(context, warehouses, workforceRows);
+    if (!warehouseIsInScope(scope, warehouseId)) return Response.json({ error: "warehouse_assignment_required", reason: "Il profilo non ha un magazzino assegnato nel perimetro corrente." }, { status: 403 });
     const [warehouse] = await db.select().from(tenantWarehouses).where(and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.id, warehouseId), eq(tenantWarehouses.status, "active"))).limit(1);
     if (!warehouse) return Response.json({ error: "warehouse_not_found" }, { status: 404 });
     const [geofenceRow] = await db.select().from(geofences).where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.entityType, "MAGAZZINO"), eq(geofences.entityId, warehouse.id), eq(geofences.status, "ACTIVE"))).limit(1);

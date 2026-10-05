@@ -9,7 +9,7 @@ export default async function SecurityGovernancePage() {
 
   return (
     <SecurityPrivacyControl
-      access={commandSurfaceAccess(authority.role, authority.capabilities)}
+      access={commandSurfaceAccess(authority.role, authority.capabilities, authority.roles)}
       actor={{ email: authority.actorEmail, name: authority.actorName }}
       role={authority.role}
     />

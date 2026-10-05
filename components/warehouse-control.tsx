@@ -50,7 +50,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { WarehouseCodeScanner } from "@/components/warehouse-code-scanner";
-import { WarehouseAttendanceControl } from "@/components/warehouse-attendance-control";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -128,7 +127,7 @@ type ReplenishmentProposal = {
 };
 
 type InventoryPayload = {
-  context?: { actorName?: string; actorEmail?: string; role: string; capabilities: string[] };
+  context?: { actorName?: string; actorEmail?: string; role: string; roles?: string[]; capabilities: string[] };
   scope?: { type: "WAREHOUSE" | "TENANT_CONSOLIDATED"; warehouseId?: string };
   warehouses?: WarehouseLocation[];
   items: InventoryItem[];
@@ -560,7 +559,7 @@ export default function WarehouseControl() {
           </div>
         </section>
 
-        <WarehouseAttendanceControl warehouses={warehouses} />
+        <section className="carbon-card-neon mt-4 rounded-2xl border border-cyan-300/15 p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">PRESENZE CENTRALIZZATE</p><p className="mt-1 text-[11px] text-slate-400">Il magazzino resta il registro operativo; entrata, pausa e uscita si eseguono nel modulo Presenze sul solo deposito assegnato.</p></div><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.06] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.12]" href="/presenze"><Clock3 className="size-3.5" />Apri Presenze</Link></div></section>
 
         <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Ogni deposito ha il suo registro server-side: anagrafiche, giacenze e movimenti restano separati. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister || !selectedWarehouseId} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica nel deposito selezionato" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">{selectedWarehouse?.code ?? "warehouse"} · D1</p></div></section>
 
@@ -582,7 +581,7 @@ export default function WarehouseControl() {
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.07] py-5 text-[10px] text-slate-700"><span>AI-ZEROW COMMAND · MODULE 07 · material control</span><span className="flex items-center gap-2"><span>ultra carbon core</span><span className="size-1 rounded-full bg-lime-300" /><span>capability filtered</span></span></footer>
       </div>
     </section>
-  </div><CommandMobileNav active="warehouse" allowedNavigation={allowedNavigation} role={context?.role} />
+  </div><CommandMobileNav active="warehouse" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />
     <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
         <form className="space-y-5" onSubmit={submit}>

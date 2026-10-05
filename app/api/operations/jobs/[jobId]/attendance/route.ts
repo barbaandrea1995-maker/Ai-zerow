@@ -3,13 +3,14 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
 import { jobJourneyRecords, locationEvents, s04Records, s06Events, s06Outbox, s06Reconciliations, trackingSessions } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { attendanceScopeTokens } from "@/lib/attendance-scope";
 import {
   evaluateAttendanceGeofence,
   persistedOperationalContext,
   resolveAttendanceOperationalContext,
 } from "@/lib/location-intelligence/attendance-policy";
 import { sessionForResponse } from "@/lib/location-intelligence/repository";
-import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { canReadAllMissions, canReadAllOperations, rowMatchesContext } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ async function routeJobId(routeContext: RouteContext) {
 }
 
 async function findJob(tenantId: string, reference: string) {
-  const base = and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "operations"));
+  const base = and(eq(s04Records.tenantId, tenantId), inArray(s04Records.module, ["operations", "mission"]));
   const [byId] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.id, reference))).limit(1);
   if (byId) return byId;
   const [byCode] = await getDb().select().from(s04Records).where(and(base, eq(s04Records.canonicalCode, reference))).limit(1);
@@ -85,12 +86,23 @@ async function findJob(tenantId: string, reference: string) {
 }
 
 async function canAccessJob(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, job: typeof s04Records.$inferSelect) {
-  if (canReadAllOperations(context)) return true;
+  if (job.module === "mission" ? canReadAllMissions(context) : canReadAllOperations(context)) return true;
   const workforceRows = await getDb().select().from(s04Records).where(and(
     eq(s04Records.tenantId, context.tenantId),
     eq(s04Records.module, "workforce"),
   )).limit(500);
-  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
+  const scopeTokens = attendanceScopeTokens(context, workforceRows);
+  if (rowMatchesContext(job, context, scopeTokens)) return true;
+  // A delivery driver is assigned on the mission journey record. The
+  // operational job can therefore be visible to that driver even when the
+  // parent commessa has no direct assignment field.
+  const missionRows = await getDb().select().from(jobJourneyRecords).where(and(
+    eq(jobJourneyRecords.tenantId, context.tenantId),
+    eq(jobJourneyRecords.jobId, job.id),
+    eq(jobJourneyRecords.domain, "mission"),
+    eq(jobJourneyRecords.recordType, "TRANSPORT"),
+  )).limit(100);
+  return missionRows.some((row) => rowMatchesContext(row, context, scopeTokens));
 }
 
 function sanitizeLocation(value: unknown) {
@@ -247,8 +259,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
       : action === "check_out"
         ? operational.checkOutGeofence ?? operational.jobGeofence
         : operational.jobGeofence);
-    if ((action === "check_in" || action === "check_out") && operational.mode === "FIELD" && attendanceGeofence.status !== "INSIDE") {
-      return Response.json({ error: "attendance_geofence_required", reason: "field_attendance_requires_inside_job_geofence", geofence: attendanceGeofence }, { status: 409 });
+    if ((action === "check_in" || action === "check_out") && ["FIELD", "DRIVER"].includes(operational.mode) && attendanceGeofence.status !== "INSIDE") {
+      return Response.json({
+        error: operational.mode === "DRIVER" ? "driver_attendance_geofence_required" : "attendance_geofence_required",
+        reason: operational.mode === "DRIVER" ? "driver_attendance_requires_inside_origin_or_destination_geofence" : "field_attendance_requires_inside_job_geofence",
+        geofence: attendanceGeofence,
+      }, { status: 409 });
     }
     if (action === "check_in" && operational.mode === "DRIVER" && operational.trackingError) {
       return Response.json({ error: operational.trackingError, reason: "driver_check_in_requires_an_active_vehicle_tracking_binding", missionId: operational.mission?.id ?? null, vehicleId: operational.vehicleId }, { status: 409 });
