@@ -50,7 +50,10 @@ export function CommandMobileNav({
   role?: string;
   roles?: string[];
 }) {
-  const effectiveRoles = new Set([role, ...(roles ?? [])].filter((value): value is string => Boolean(value)));
+  // Keep the client boundary tolerant of legacy/partial authority payloads.
+  // The server remains the source of truth; this only prevents a malformed
+  // optional roles field from taking down the whole PWA shell.
+  const effectiveRoles = new Set([role, ...(Array.isArray(roles) ? roles : [])].filter((value): value is string => Boolean(value)));
   const hasOperationalNavigation = allowedNavigation?.some((id) =>
     ["operations", "mission", "attendance", "warehouse"].includes(id),
   ) ?? false;
