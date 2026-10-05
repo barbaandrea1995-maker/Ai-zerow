@@ -1,10 +1,11 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { operationalDocuments, s04Records } from "@/db/schema";
+import { jobJourneyRecords, operationalDocuments, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { recordForResponse } from "@/lib/s04-adapter";
 import { documentCanDownload } from "@/lib/document-security";
 import { ALLOWED_OPERATIONAL_DOCUMENT_MIMES, MAX_OPERATIONAL_DOCUMENT_BYTES } from "@/lib/document-contract";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export async function GET() {
 
   try {
     const db = getDb();
-    const [documentRows, jobRows] = await Promise.all([
+    const [documentRows, jobRows, workforceRows, missionRows] = await Promise.all([
       db.select().from(operationalDocuments)
         .where(eq(operationalDocuments.tenantId, context.tenantId))
         .orderBy(desc(operationalDocuments.createdAt))
@@ -66,10 +67,22 @@ export async function GET() {
         .where(eq(s04Records.tenantId, context.tenantId))
         .orderBy(desc(s04Records.updatedAt))
         .limit(500),
+      db.select().from(s04Records)
+        .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce")))
+        .limit(500),
+      db.select().from(jobJourneyRecords)
+        .where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.domain, "mission")))
+        .limit(1_000),
     ]);
-    const jobs = jobRows.filter((row) => row.module === "operations").map(jobResponse);
+    const scopeTokens = teamScopeTokens(workforceRows, context);
+    const broadRead = canReadAllOperations(context);
+    const visibleMissionJobIds = new Set(missionRows.filter((row) => rowMatchesContext(row, context, scopeTokens)).map((row) => row.jobId));
+    const visibleJobRows = jobRows.filter((row) => row.module === "operations" && (broadRead || rowMatchesContext(row, context, scopeTokens) || visibleMissionJobIds.has(row.id)));
+    const visibleJobIds = new Set(visibleJobRows.map((row) => row.id));
+    const visibleDocumentRows = documentRows.filter((row) => visibleJobIds.has(row.jobId));
+    const jobs = visibleJobRows.map(jobResponse);
     const jobsById = new Map(jobs.map((job) => [job.id, job]));
-    const documents = documentRows.map((row) => documentResponse(row, jobsById));
+    const documents = visibleDocumentRows.map((row) => documentResponse(row, jobsById));
     const pending = documents.filter((document) => ["PENDING_PROVIDER", "MANUAL_REVIEW"].includes(document.scanStatus)).length;
     const blocked = documents.filter((document) => ["BLOCKED_MALWARE", "QUARANTINED", "QUARANTINED_PENDING_SCAN", "QUARANTINED_REVIEW"].includes(document.status)).length;
     const unscanned = documents.filter((document) => document.scanStatus === "NOT_RUN" || document.status === "AVAILABLE_UNSCANNED").length;

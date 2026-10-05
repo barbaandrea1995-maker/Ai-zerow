@@ -51,6 +51,9 @@ export type JobAssignment = {
   role: string;
   assignedAt: string;
   assignedBy: string;
+  responsibleActorId?: string;
+  responsibleMembershipId?: string;
+  teamId?: string;
 };
 
 export type JobPayload = {
@@ -245,6 +248,9 @@ export function parseJobPayload(payloadJson: string): JobPayload {
       role: text(rawAssignment.role, "Responsabile operativo"),
       assignedAt: text(rawAssignment.assignedAt, new Date().toISOString()),
       assignedBy: text(rawAssignment.assignedBy, "server-readback"),
+      ...(text(rawAssignment.responsibleActorId, text(rawAssignment.responsibleId)) ? { responsibleActorId: text(rawAssignment.responsibleActorId, text(rawAssignment.responsibleId)) } : {}),
+      ...(text(rawAssignment.responsibleMembershipId, text(rawAssignment.membershipId)) ? { responsibleMembershipId: text(rawAssignment.responsibleMembershipId, text(rawAssignment.membershipId)) } : {}),
+      ...(text(rawAssignment.teamId) ? { teamId: text(rawAssignment.teamId) } : {}),
     }
     : null;
 

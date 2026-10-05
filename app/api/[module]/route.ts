@@ -14,6 +14,7 @@ import {
 } from "@/lib/s04-adapter";
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
 import { canonicalPayload } from "@/lib/qr-adapter";
+import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,32 @@ async function resolveModule(context: RouteContext): Promise<S04Module | null> {
   return isS04Module(module) ? module : null;
 }
 
+function canReadTenantWarehouse(context: NonNullable<Awaited<ReturnType<typeof getS04Context>>>) {
+  return context.roles.some((role) => ["owner", "admin", "manager", "office", "warehouse_manager", "warehouse_operator", "auditor"].includes(role))
+    || context.capabilities.includes("warehouse.write");
+}
+
+async function scopedReadModel(
+  context: NonNullable<Awaited<ReturnType<typeof getS04Context>>>,
+  moduleKey: S04Module,
+) {
+  const rows = await getS04ReadModel(moduleKey, context.tenantId);
+  if (moduleKey === "warehouse" && canReadTenantWarehouse(context)) return rows;
+  const tenantWide = moduleKey === "operations"
+    ? canReadAllOperations(context)
+    : moduleKey === "mission"
+      ? canReadAllMissions(context)
+      : moduleKey === "assets"
+        ? canReadAllOperations(context)
+        : moduleKey === "workforce"
+          ? context.roles.some((role) => ["owner", "admin", "manager", "office", "auditor"].includes(role)) || context.capabilities.includes("workforce.read.all")
+          : true;
+  if (tenantWide) return rows;
+  const workforceRows = moduleKey === "workforce" ? rows : await getS04ReadModel("workforce", context.tenantId);
+  const scopeTokens = teamScopeTokens(workforceRows, context);
+  return rows.filter((row) => rowMatchesContext(row, context, scopeTokens));
+}
+
 export async function GET(_request: Request, routeContext: RouteContext) {
   const moduleKey = await resolveModule(routeContext);
   if (!moduleKey) return invalidModuleResponse();
@@ -39,7 +66,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   if (denied) return denied;
 
   try {
-    const rows = await getS04ReadModel(moduleKey, context!.tenantId);
+    const rows = await scopedReadModel(context!, moduleKey);
     return Response.json(s04Envelope(context!, moduleKey, rows.map(recordForResponse)), {
       headers: { "cache-control": "no-store" },
     });
@@ -140,7 +167,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(s04Records.id, existingEvent[0].aggregateId),
       )).limit(1);
       if (!existingRecord) return Response.json({ error: "s04_idempotency_readback_unavailable" }, { status: 503 });
-      const records = await getS04ReadModel(moduleKey, context!.tenantId);
+      const records = await scopedReadModel(context!, moduleKey);
       return Response.json({
         ...s04Envelope(context!, moduleKey, records.map(recordForResponse)),
         created: recordForResponse(existingRecord),
@@ -266,7 +293,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     )).limit(1);
     if (!row) return Response.json({ error: "s04_readback_unavailable" }, { status: 503 });
 
-    const records = await getS04ReadModel(moduleKey, context!.tenantId);
+    const records = await scopedReadModel(context!, moduleKey);
     return Response.json({
       ...s04Envelope(context!, moduleKey, records.map(recordForResponse)),
       created: recordForResponse(row),

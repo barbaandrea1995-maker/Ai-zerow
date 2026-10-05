@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (!hasCapability(context, "mission.read")) {
     return Response.json({ error: "forbidden", capability: "mission.read" }, { status: 403 });
   }
-  if (!hasCapability(context, "workforce.registry.read") && !hasCapability(context, "workforce.read.all")) {
+  if (!hasCapability(context, "mission.resources.read")) {
     return Response.json({ error: "resource_registry_access_required" }, { status: 403 });
   }
 

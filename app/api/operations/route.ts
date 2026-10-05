@@ -23,6 +23,7 @@ import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledge, searchCompa
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -119,12 +120,20 @@ export async function GET() {
   }
 
   try {
-    const rows = await getDb()
-      .select()
-      .from(s04Records)
-      .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
-      .orderBy(desc(s04Records.updatedAt));
-    return Response.json(operationEnvelope(context, rows.map(recordForResponse)), {
+    const db = getDb();
+    const [rows, workforceRows] = await Promise.all([
+      db.select().from(s04Records)
+        .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
+        .orderBy(desc(s04Records.updatedAt)),
+      db.select().from(s04Records)
+        .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce")))
+        .limit(500),
+    ]);
+    const scopeTokens = teamScopeTokens(workforceRows, context);
+    const visibleRows = canReadAllOperations(context)
+      ? rows
+      : rows.filter((row) => rowMatchesContext(row, context, scopeTokens));
+    return Response.json(operationEnvelope(context, visibleRows.map(recordForResponse)), {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

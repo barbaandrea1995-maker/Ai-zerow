@@ -185,14 +185,11 @@ const authorityActivity: Array<{
   tone: Tone;
 }> = [];
 
-const permissionMatrixRoles = [
-  "worker",
-  "field_supervisor",
-  "manager",
-  "admin",
-  "technical",
-  "auditor",
-] as const;
+// Keep the matrix aligned with the canonical multi-mansione catalog. The
+// selected tenant profile still filters the runtime capabilities server-side;
+// this table is the complete authority reference, not a second permission
+// source.
+const permissionMatrixRoles = AUTHORITY_ROLES;
 const permissionModules = [
   { module: "Command", read: "command.read", write: "command.customize" },
   { module: "Commesse", read: "operations.read", write: "operations.write" },

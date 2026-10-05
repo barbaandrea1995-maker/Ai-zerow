@@ -19,6 +19,7 @@ import {
   type JobPayload,
 } from "@/lib/operations-contract";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -193,13 +194,23 @@ async function workspaceResponse(
   const planningJourney = journeyRecords.filter((record) => record.recordType === "plan");
   const attendanceJourney = journeyRecords.filter((record) => record.recordType === "attendance");
   const byModule = (module: string) => related.filter((record) => record.module === module);
-  const planningRecords = [
-    ...(assignment ? [assignment] : []),
-    ...planningJourney,
-    ...byModule("workforce"),
-    ...byModule("mission"),
-  ];
-  const fieldRecords = [...evidence, ...attendanceJourney];
+  const canReadPlanning = hasCapability(context, "planning.read") || hasCapability(context, "workforce.read");
+  const canReadWorkforce = hasCapability(context, "workforce.read");
+  const canReadMission = hasCapability(context, "mission.read");
+  const canReadAssets = hasCapability(context, "asset.read");
+  const canReadWarehouse = hasCapability(context, "warehouse.read") || hasCapability(context, "warehouse.request");
+  const canReadField = hasCapability(context, "field.read") || hasCapability(context, "attendance.read") || hasCapability(context, "attendance.self");
+  const planningRecords = canReadPlanning
+    ? [
+      ...(assignment ? [assignment] : []),
+      ...planningJourney,
+      ...(canReadWorkforce ? byModule("workforce") : []),
+      ...(canReadMission ? byModule("mission") : []),
+    ]
+    : [];
+  const resourceRecords = canReadAssets ? byModule("assets") : [];
+  const materialRecords = canReadWarehouse ? byModule("warehouse") : [];
+  const fieldRecords = canReadField ? [...evidence, ...attendanceJourney] : [];
 
   return {
     context: publicAuthorityContext(context),
@@ -215,8 +226,8 @@ async function workspaceResponse(
       sections: {
         activities: section(activities.length ? "readback" : "empty", activities),
         planning: section(planningRecords.length ? "readback" : "empty", planningRecords),
-        resources: section(byModule("assets").length ? "readback" : "empty", byModule("assets")),
-        materials: section(byModule("warehouse").length ? "readback" : "empty", byModule("warehouse")),
+        resources: section(canReadAssets ? (resourceRecords.length ? "readback" : "empty") : "deferred", resourceRecords),
+        materials: section(canReadWarehouse ? (materialRecords.length ? "readback" : "empty") : "deferred", materialRecords),
         field: section(fieldRecords.length ? "readback" : "deferred", fieldRecords),
         rapportino: section(payload.rapportino ? "readback" : "deferred", []),
         control: section("readback", []),
@@ -257,6 +268,15 @@ async function findJob(
   return { rows, jobRow };
 }
 
+function canReadJob(
+  context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
+  jobRow: typeof s04Records.$inferSelect,
+  rows: (typeof s04Records.$inferSelect)[],
+) {
+  if (canReadAllOperations(context)) return true;
+  return rowMatchesContext(jobRow, context, teamScopeTokens(rows, context));
+}
+
 export async function GET(_request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -278,6 +298,9 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     const { rows, jobRow } = await findJob(context, requestedJobId);
     if (!jobRow) {
       return Response.json({ error: "job_not_found", requestedJobId, readback: { status: "empty", scope: "tenant" } }, { status: 404 });
+    }
+    if (!canReadJob(context, jobRow, rows)) {
+      return Response.json({ error: "job_not_found", requestedJobId, readback: { status: "empty", scope: "assigned" } }, { status: 404 });
     }
     return Response.json(await workspaceResponse(context, jobRow, rows, requestedJobId), {
       headers: { "cache-control": "no-store" },
@@ -320,6 +343,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
   try {
     const { rows, jobRow } = await findJob(context, requestedJobId);
     if (!jobRow) return Response.json({ error: "job_not_found", requestedJobId }, { status: 404 });
+    if (!canReadJob(context, jobRow, rows)) return Response.json({ error: "job_not_found", requestedJobId }, { status: 404 });
 
     const db = getDb();
     const existing = await db.select().from(s06Events).where(and(
@@ -409,6 +433,9 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         role: boundedText(input.role, 120, "Responsabile operativo"),
         assignedAt: now,
         assignedBy: context.actorId,
+        ...(boundedText(input.responsibleActorId ?? input.responsibleId, 160) ? { responsibleActorId: boundedText(input.responsibleActorId ?? input.responsibleId, 160) } : {}),
+        ...(boundedText(input.responsibleMembershipId ?? input.membershipId, 160) ? { responsibleMembershipId: boundedText(input.responsibleMembershipId ?? input.membershipId, 160) } : {}),
+        ...(boundedText(input.teamId, 160) ? { teamId: boundedText(input.teamId, 160) } : {}),
       };
       eventType = "operations.job.assigned";
       change = { responsible: next.assignment.responsible, team: next.assignment.team };

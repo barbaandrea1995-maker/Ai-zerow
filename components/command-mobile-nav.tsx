@@ -36,12 +36,18 @@ export function CommandMobileNav({
   active,
   allowedNavigation,
   role,
+  roles,
 }: {
   active: MobileNavItem;
   allowedNavigation?: CommandNavigationId[];
   role?: string;
+  roles?: string[];
 }) {
-  if (!role || !OPERATIONAL_ROLES.has(role)) return null;
+  const effectiveRoles = new Set([role, ...(roles ?? [])].filter((value): value is string => Boolean(value)));
+  const hasOperationalNavigation = allowedNavigation?.some((id) =>
+    ["operations", "mission", "attendance", "warehouse"].includes(id),
+  ) ?? false;
+  if (![...effectiveRoles].some((value) => OPERATIONAL_ROLES.has(value)) && !hasOperationalNavigation) return null;
 
   const can = (id: CommandNavigationId) =>
     !allowedNavigation || allowedNavigation.includes(id);
@@ -61,9 +67,14 @@ export function CommandMobileNav({
   if (can("attendance")) items.push({ id: "attendance", label: "Presenze", href: "/presenze", icon: ClipboardCheck });
   if (can("warehouse")) items.push({ id: "warehouse", label: "Magazzino", href: "/warehouse", icon: Package });
   items.push({ id: "more", label: "Altro", href: moreHref, icon: Grid2X2 });
-  const visibleItems = items.length > 5
-    ? [...items.filter((item) => item.id !== "more").slice(0, 4), items[items.length - 1]]
-    : items;
+  const moreItem = items.find((item) => item.id === "more");
+  const baseItems = items.filter((item) => item.id !== "more");
+  const firstFour = baseItems.slice(0, 4);
+  const activeItem = baseItems.find((item) => item.id === active);
+  if (activeItem && !firstFour.some((item) => item.id === activeItem.id)) {
+    firstFour.splice(Math.max(0, firstFour.length - 1), 1, activeItem);
+  }
+  const visibleItems = items.length > 5 && moreItem ? [...firstFour, moreItem] : items;
 
   return (
     <nav aria-label="Navigazione mobile" className="zw-mobile-nav">

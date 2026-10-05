@@ -14,6 +14,7 @@ import { auditLocationAccess, defaultGeofenceRadius, geofenceForResponse, locati
 import { getLocationProviderStatus } from "@/lib/location-intelligence/providers";
 import { isGeofenceShape, isLocationEntityType } from "@/lib/location-intelligence/types";
 import { normalizeCoordinate } from "@/lib/location-intelligence/geometry";
+import { canReadAllLocations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export async function GET() {
 
   try {
     const db = getDb();
-    const [locations, fences] = await Promise.all([
+    const [locations, fences, scopeRows] = await Promise.all([
       db.select().from(geoLocations)
         .where(eq(geoLocations.tenantId, context.tenantId))
         .orderBy(asc(geoLocations.entityType), asc(geoLocations.updatedAt))
@@ -62,19 +63,36 @@ export async function GET() {
         .where(eq(geofences.tenantId, context.tenantId))
         .orderBy(asc(geofences.entityType), asc(geofences.updatedAt))
         .limit(500),
+      db.select().from(s04Records)
+        .where(eq(s04Records.tenantId, context.tenantId))
+        .limit(1_000),
     ]);
+    const allLocationsVisible = canReadAllLocations(context);
+    const scopeTokens = teamScopeTokens(scopeRows, context);
+    const visibleEntityIds = new Set(scopeRows
+      .filter((row) => rowMatchesContext(row, context, scopeTokens))
+      .flatMap((row) => [row.id, row.canonicalCode].filter(Boolean)));
+    const visibleLocations = allLocationsVisible
+      ? locations
+      : locations.filter((location) =>
+        visibleEntityIds.has(location.entityId)
+        || (location.entityType === "MAGAZZINO" && hasCapability(context, "warehouse.read")),
+      );
+    const visibleFences = allLocationsVisible
+      ? fences
+      : fences.filter((fence) => visibleLocations.some((location) => location.id === fence.locationId));
     await auditLocationAccess({
       context,
       capability,
       action: "READ",
       resourceType: "GEO_LOCATIONS",
       purpose: "Visualizzazione delle sedi e dei perimetri operativi autorizzati.",
-      metadata: { locationCount: locations.length, geofenceCount: fences.length },
+      metadata: { locationCount: visibleLocations.length, geofenceCount: visibleFences.length, scope: allLocationsVisible ? "tenant" : "assigned" },
     });
     return Response.json({
       context: publicAuthorityContext(context),
-      locations: locations.map(locationForResponse),
-      geofences: fences.map(geofenceForResponse),
+      locations: visibleLocations.map(locationForResponse),
+      geofences: visibleFences.map(geofenceForResponse),
       providers: getLocationProviderStatus(),
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: responseHeaders() });

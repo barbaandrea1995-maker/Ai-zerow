@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { getPlanningResourceOptions, type PlanningAvailabilityWindow } from "@/lib/planning-resources";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,15 @@ async function findJob(tenantId: string, reference: string) {
   return byCode ?? null;
 }
 
+async function canAccessJob(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, job: typeof s04Records.$inferSelect) {
+  if (canReadAllOperations(context)) return true;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
+}
+
 export async function GET(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -34,6 +44,7 @@ export async function GET(request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const url = new URL(request.url);
     const startsAt = url.searchParams.get("startsAt")?.trim() ?? "";
     const endsAt = url.searchParams.get("endsAt")?.trim() ?? "";

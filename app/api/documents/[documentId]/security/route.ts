@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { operationalDocuments, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { operationalDocuments, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import {
   DOCUMENT_SECURITY_ACTIONS,
@@ -11,6 +11,7 @@ import {
   type DocumentProviderResult,
   type DocumentSecurityAction,
 } from "@/lib/document-security";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,21 @@ async function findDocument(tenantId: string | null, id: string) {
     : eq(operationalDocuments.id, id);
   const [row] = await getDb().select().from(operationalDocuments).where(where).limit(1);
   return row ?? null;
+}
+
+async function canAccessDocument(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, document: typeof operationalDocuments.$inferSelect) {
+  if (canReadAllOperations(context)) return true;
+  const [job] = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "operations"),
+    eq(s04Records.id, document.jobId),
+  )).limit(1);
+  if (!job) return false;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
 }
 
 export async function GET(_request: Request, routeContext: RouteContext) {
@@ -120,6 +136,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const db = getDb();
     const current = await findDocument(context?.tenantId ?? null, id);
     if (!current) return Response.json({ error: "document_not_found" }, { status: 404 });
+    if (context && !(await canAccessDocument(context, current))) return Response.json({ error: "document_not_found" }, { status: 404 });
     if (action === "provider_result" && providerSha256 !== current.sha256.toLowerCase()) {
       return Response.json({ error: "provider_sha256_mismatch" }, { status: 409 });
     }

@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s04Records, w10Workflows } from "@/db/schema";
 import { hasCapability } from "@/lib/authority-context";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import {
   getS04Context,
   recordForResponse,
@@ -59,12 +60,17 @@ export async function GET() {
       }
     }
 
+    const scopeTokens = teamScopeTokens(rows, context);
+    const visibleRows = canReadAllOperations(context)
+      ? rows
+      : rows.filter((row) => rowMatchesContext(row, context, scopeTokens));
+
     return Response.json({
       modules: readableModules,
       requestedModules: DASHBOARD_MODULES,
-      records: rows.map(recordForResponse),
+      records: visibleRows.map(recordForResponse),
       w10,
-      readback: { status: "ok", count: rows.length, checkedAt: new Date().toISOString() },
+      readback: { status: "ok", count: visibleRows.length, checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "no-store" } });
   } catch {
     return Response.json({ error: "command_dashboard_readback_failed" }, { status: 503 });

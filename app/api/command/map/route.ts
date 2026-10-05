@@ -14,6 +14,7 @@ import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/li
 import { auditLocationAccess, eventForResponse } from "@/lib/location-intelligence/repository";
 import { getLocationProviderStatus } from "@/lib/location-intelligence/providers";
 import { recordForResponse } from "@/lib/s04-adapter";
+import { canReadAllLocations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -128,14 +129,31 @@ export async function GET() {
         .limit(500),
     ]);
 
-    const records = new Map(catalogRows.map((row) => {
+    const allLocationsVisible = canReadAllLocations(context);
+    const scopeTokens = teamScopeTokens(catalogRows, context);
+    const visibleCatalogRows = allLocationsVisible
+      ? catalogRows
+      : catalogRows.filter((row) => rowMatchesContext(row, context, scopeTokens));
+    const visibleCatalogIds = new Set(visibleCatalogRows.flatMap((row) => [row.id, row.canonicalCode].filter(Boolean)));
+    const eventLocationIds = new Set(eventRows.map((event) => event.locationId).filter((value): value is string => Boolean(value)));
+    const visibleLocationRows = allLocationsVisible
+      ? locationRows
+      : locationRows.filter((location) =>
+        visibleCatalogIds.has(location.entityId)
+        || eventLocationIds.has(location.id)
+        || (location.entityType === "MAGAZZINO" && hasCapability(context, "warehouse.read")),
+      );
+    const visibleFenceRows = allLocationsVisible
+      ? fenceRows
+      : fenceRows.filter((fence) => visibleLocationRows.some((location) => location.id === fence.locationId));
+    const records = new Map(visibleCatalogRows.map((row) => {
       const parsed = recordForResponse(row);
       return [parsed.id, parsed] as const;
     }));
     const warehouseById = new Map(warehouseRows.map((warehouse) => [warehouse.id, warehouse] as const));
-    const knownLocationEntities = new Set(locationRows.map((location) => `${location.entityType}:${location.entityId}`));
+    const knownLocationEntities = new Set(visibleLocationRows.map((location) => `${location.entityType}:${location.entityId}`));
 
-    const locations = locationRows.map((location) => ({
+    const locations = visibleLocationRows.map((location) => ({
       ...locationPresentation(location.entityType, location.entityId, records, warehouseById),
       id: location.id,
       entityType: location.entityType,
@@ -227,7 +245,7 @@ export async function GET() {
         ...location,
         latestEvent: latestEventByLocation.get(location.id) ? eventForResponse(latestEventByLocation.get(location.id)!) : null,
       })),
-      geofences: fenceRows.map((fence) => ({
+      geofences: visibleFenceRows.map((fence) => ({
         id: fence.id,
         locationId: fence.locationId,
         entityType: fence.entityType,

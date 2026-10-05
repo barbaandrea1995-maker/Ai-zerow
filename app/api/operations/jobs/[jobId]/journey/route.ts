@@ -24,6 +24,7 @@ import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, typ
 import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
+import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -47,12 +48,12 @@ const ACTION_CAPABILITY = {
   material_request: "warehouse.request",
   material_review: "warehouse.write",
   material_fulfill: "warehouse.write",
-  mission_create: "mission.write",
-  mission_dispatch: "mission.write",
-  mission_deliver: "mission.write",
-  mission_verify_pod: "mission.write",
-  mission_reconcile: "mission.write",
-  mission_close: "mission.write",
+  mission_create: "mission.manage",
+  mission_dispatch: "mission.execute",
+  mission_deliver: "mission.execute",
+  mission_verify_pod: "mission.manage",
+  mission_reconcile: "mission.manage",
+  mission_close: "mission.manage",
 } as const;
 
 function isRecord(value: unknown): value is JsonObject {
@@ -146,6 +147,22 @@ async function findJob(tenantId: string, reference: string) {
   const [byCode] = await db.select().from(s04Records)
     .where(and(base, eq(s04Records.canonicalCode, reference))).limit(1);
   return byCode ?? null;
+}
+
+async function canAccessJourneyJob(context: AuthorityContext, job: typeof s04Records.$inferSelect) {
+  if (canReadAllOperations(context) || canReadAllMissions(context)) return true;
+  const db = getDb();
+  const workforceRows = await db.select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  if (rowMatchesContext(job, context, teamScopeTokens(workforceRows, context))) return true;
+  const missionRows = await db.select().from(jobJourneyRecords).where(and(
+    eq(jobJourneyRecords.tenantId, context.tenantId),
+    eq(jobJourneyRecords.jobId, job.id),
+    eq(jobJourneyRecords.domain, "mission"),
+  )).limit(100);
+  return missionRows.some((row) => rowMatchesContext(row, context));
 }
 
 function recordForResponse(row: typeof jobJourneyRecords.$inferSelect) {
@@ -319,6 +336,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJourneyJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     return Response.json(await journeyReadback(context, job), {
       headers: { "cache-control": "private, no-store" },
     });
@@ -345,7 +363,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (!hasCapability(context, capability)) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
-  if (action === "mission_create" && (!hasCapability(context, "workforce.registry.read") || !hasCapability(context, "asset.read"))) {
+  if (action === "mission_create" && !hasCapability(context, "mission.resources.read")) {
     return Response.json({ error: "mission_resource_registry_access_required" }, { status: 403 });
   }
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
@@ -358,6 +376,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJourneyJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (action === "mission_create" && job.recordType === "adapter-contract") {
       return Response.json({ error: "operational_job_required" }, { status: 409 });
     }

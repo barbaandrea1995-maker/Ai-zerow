@@ -10,6 +10,7 @@ import {
 import { askCompanyAiWithOpenAi } from "@/lib/company-ai-openai";
 import { searchCompanyAiKnowledge } from "@/lib/company-ai-knowledge";
 import { getLocationContextForCommand } from "@/lib/location-intelligence/company-ai-tools";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import {
   getS07Context,
   getS07Ledger,
@@ -133,11 +134,16 @@ export async function POST(request: Request) {
         status: s04Records.status,
         progress: s04Records.progress,
         updatedAt: s04Records.updatedAt,
+        payloadJson: s04Records.payloadJson,
       }).from(s04Records).where(and(
         eq(s04Records.tenantId, context!.tenantId),
         inArray(s04Records.module, readableModules),
       )).orderBy(desc(s04Records.updatedAt)).limit(36)
       : [];
+    const scopeTokens = teamScopeTokens(operationalRows, context!);
+    const visibleOperationalRows = canReadAllOperations(context!)
+      ? operationalRows
+      : operationalRows.filter((row) => rowMatchesContext(row, context!, scopeTokens));
     const knowledgeHints = searchCompanyAiKnowledge(command, { limit: 6 });
     let locationContext: unknown[] = [];
     try {
@@ -152,7 +158,7 @@ export async function POST(request: Request) {
       prompt: command,
       actionType,
       approvalRequired,
-      operationalContext: operationalRows.map((row) => ({
+      operationalContext: visibleOperationalRows.map((row) => ({
         id: row.canonicalCode ?? row.id,
         module: row.module,
         title: row.title,
@@ -167,8 +173,8 @@ export async function POST(request: Request) {
     });
     const fallbackMessage = approvalRequired
       ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi scrittura."
-      : operationalRows.length
-        ? `Ho trovato ${operationalRows.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
+      : visibleOperationalRows.length
+        ? `Ho trovato ${visibleOperationalRows.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
         : "Non risultano record operativi autorizzati nel readback. Nessuna conclusione viene inventata.";
     const answer = aiOutcome.result?.answer || fallbackMessage;
     const aiRuntime = {
@@ -186,7 +192,7 @@ export async function POST(request: Request) {
       citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
       suggestedActions: aiOutcome.result?.suggestedActions ?? [],
       limitations: aiOutcome.result?.limitations ?? [],
-      contextRecordIds: operationalRows.map((row) => row.canonicalCode ?? row.id),
+      contextRecordIds: visibleOperationalRows.map((row) => row.canonicalCode ?? row.id),
       locationContextEventIds: locationContext.flatMap((item) => {
         if (!isRecord(item) || typeof item.id !== "string") return [];
         return [item.id];

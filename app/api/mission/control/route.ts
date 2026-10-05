@@ -8,6 +8,12 @@ import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload,
 import { parseJobPayload } from "@/lib/operations-contract";
 import { allocateServerName } from "@/lib/server-naming";
 import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
+import {
+  canReadAllLocations,
+  canReadAllMissions,
+  canReadAllOperations,
+  rowMatchesContext,
+} from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +30,21 @@ function boundedText(value: unknown, max: number, fallback = "") {
 
 function validDateTime(value: string) {
   return value.length >= 10 && Number.isFinite(Date.parse(value));
+}
+
+function locationReferences(value: unknown, output = new Set<string>(), depth = 0) {
+  if (depth > 5 || !value || typeof value !== "object") return output;
+  if (Array.isArray(value)) {
+    for (const item of value) locationReferences(item, output, depth + 1);
+    return output;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (["locationId", "geoLocationId", "originEntityId", "destinationEntityId", "pickupEntityId", "dropoffEntityId"].includes(key)) {
+      if (typeof child === "string" && child.trim()) output.add(child.trim());
+    }
+    if (["route", "stops", "routeReadback", "origin", "destination"].includes(key)) locationReferences(child, output, depth + 1);
+  }
+  return output;
 }
 
 function missionResponse(row: typeof jobJourneyRecords.$inferSelect, job: typeof s04Records.$inferSelect | null, idempotent: boolean) {
@@ -77,9 +98,31 @@ export async function GET() {
       db.select().from(geoLocations).where(and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE"))).limit(500),
       db.select().from(geofences).where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.status, "ACTIVE"))).limit(500),
     ]);
+    const allOperationsVisible = canReadAllOperations(context);
+    const allMissionsVisible = canReadAllMissions(context);
+    const requestJobIds = new Set(materialRequestRows.map((request) => request.jobId));
+    const visibleOperationJobs = operationJobs.filter((job) =>
+      allOperationsVisible || requestJobIds.has(job.id) || rowMatchesContext(job, context),
+    );
+    const visibleJobIds = new Set(visibleOperationJobs.map((job) => job.id));
+    const visibleMissionRows = missions.filter((mission) =>
+      allMissionsVisible || visibleJobIds.has(mission.jobId) || rowMatchesContext(mission, context),
+    );
+    const visibleMaterialRequestRows = materialRequestRows.filter((request) =>
+      allMissionsVisible || visibleJobIds.has(request.jobId) || rowMatchesContext(request, context),
+    );
+    const visibleLocationIds = new Set<string>();
+    for (const mission of visibleMissionRows) locationReferences(parseJson(mission.payloadJson), visibleLocationIds);
+    for (const job of visibleOperationJobs) locationReferences(parseJson(job.payloadJson), visibleLocationIds);
+    const visibleLocations = canReadAllLocations(context)
+      ? locations
+      : locations.filter((location) => visibleLocationIds.has(location.id) || visibleLocationIds.has(location.entityId));
+    const visibleGeofences = canReadAllLocations(context)
+      ? geofenceRows
+      : geofenceRows.filter((fence) => visibleLocations.some((location) => location.id === fence.locationId));
     const jobIds = [...new Set([
-      ...missions.map((mission) => mission.jobId),
-      ...materialRequestRows.map((request) => request.jobId),
+      ...visibleMissionRows.map((mission) => mission.jobId),
+      ...visibleMaterialRequestRows.map((request) => request.jobId),
     ])];
     const jobs = jobIds.length ? await db.select().from(s04Records).where(and(
       eq(s04Records.tenantId, context.tenantId),
@@ -87,8 +130,8 @@ export async function GET() {
       inArray(s04Records.id, jobIds),
     )) : [];
     const jobById = new Map(jobs.map((job) => [job.id, job]));
-    const routePlanRows = missions.length
-      ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), inArray(routePlans.missionId, missions.map((mission) => mission.id)))).limit(500)
+    const routePlanRows = visibleMissionRows.length
+      ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), inArray(routePlans.missionId, visibleMissionRows.map((mission) => mission.id)))).limit(500)
       : [];
     const routeStopRows = routePlanRows.length
       ? await db.select().from(routeStops).where(and(eq(routeStops.tenantId, context.tenantId), inArray(routeStops.routePlanId, routePlanRows.map((plan) => plan.id)))).orderBy(routeStops.sequence).limit(1_000)
@@ -96,7 +139,7 @@ export async function GET() {
     const routeStopsByPlan = new Map<string, typeof routeStops.$inferSelect[]>();
     for (const stop of routeStopRows) routeStopsByPlan.set(stop.routePlanId, [...(routeStopsByPlan.get(stop.routePlanId) ?? []), stop]);
     const routePlanByMission = new Map(routePlanRows.map((plan) => [plan.missionId ?? "", plan]));
-    const records = missions.map((mission) => {
+    const records = visibleMissionRows.map((mission) => {
       const job = jobById.get(mission.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
       const routePlan = routePlanByMission.get(mission.id);
@@ -133,7 +176,7 @@ export async function GET() {
         updatedAt: mission.updatedAt,
       };
     });
-    const materialRequests = materialRequestRows.map((request) => {
+    const materialRequests = visibleMaterialRequestRows.map((request) => {
       const requestPayload = parseJson(request.payloadJson);
       const job = jobById.get(request.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
@@ -165,13 +208,13 @@ export async function GET() {
 
     return Response.json({
       context: publicAuthorityContext(context),
-      jobs: operationJobs.filter((job) => job.recordType !== "adapter-contract").map(jobView),
+      jobs: visibleOperationJobs.filter((job) => job.recordType !== "adapter-contract").map(jobView),
       missions: records,
       materialRequests,
-      locations: locations.map((location) => ({
+      locations: visibleLocations.map((location) => ({
         ...locationForResponse(location),
         tenantId: undefined,
-        geofence: geofenceRows.find((fence) => fence.locationId === location.id) ? geofenceForResponse(geofenceRows.find((fence) => fence.locationId === location.id)!) : null,
+        geofence: visibleGeofences.find((fence) => fence.locationId === location.id) ? geofenceForResponse(visibleGeofences.find((fence) => fence.locationId === location.id)!) : null,
       })),
       summary: {
         total: records.length,
@@ -189,10 +232,10 @@ export async function GET() {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "mission.write")) {
-    return Response.json({ error: "forbidden", capability: "mission.write" }, { status: 403 });
+  if (!hasCapability(context, "mission.manage")) {
+    return Response.json({ error: "forbidden", capability: "mission.manage" }, { status: 403 });
   }
-  if (!hasCapability(context, "workforce.registry.read") || !hasCapability(context, "asset.read")) {
+  if (!hasCapability(context, "mission.resources.read")) {
     return Response.json({ error: "mission_resource_registry_access_required" }, { status: 403 });
   }
 

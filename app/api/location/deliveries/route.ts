@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { deliveryEvents, locationEvents, routePlans, routeStops, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { deliveryEvents, locationEvents, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { canReadAllLocations, canReadAllMissions, payloadMatchesContext } from "@/lib/operational-scope";
 import { auditLocationAccess } from "@/lib/location-intelligence/repository";
 import { DELIVERY_EVIDENCE_TYPES } from "@/lib/location-intelligence/types";
 
@@ -28,9 +29,27 @@ export async function GET() {
   const capability = hasCapability(context, "location.read.history") ? "location.read.history" : hasCapability(context, "mission.read") ? "mission.read" : null;
   if (!capability) return Response.json({ error: "forbidden", capability: "location.read.history" }, { status: 403 });
   try {
-    const rows = await getDb().select().from(deliveryEvents).where(eq(deliveryEvents.tenantId, context.tenantId)).orderBy(desc(deliveryEvents.occurredAt)).limit(300);
-    await auditLocationAccess({ context, capability, action: "READ", resourceType: "DELIVERY_EVENTS", purpose: "Consultazione delle evidenze di consegna.", metadata: { returned: rows.length } });
-    return Response.json({ context: publicAuthorityContext(context), deliveries: rows.map((row) => ({ ...row, tenantId: undefined })), readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() } }, { headers: { "cache-control": "private, no-store" } });
+    const db = getDb();
+    const rows = await db.select().from(deliveryEvents).where(eq(deliveryEvents.tenantId, context.tenantId)).orderBy(desc(deliveryEvents.occurredAt)).limit(300);
+    const broadRead = canReadAllMissions(context) || canReadAllLocations(context);
+    const missionIds = [...new Set(rows.map((row) => row.missionId).filter((value): value is string => Boolean(value)))];
+    const plans = missionIds.length
+      ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), inArray(routePlans.missionId, missionIds))).limit(500)
+      : [];
+    const driverIds = new Set(plans.map((plan) => plan.driverId));
+    if (!broadRead && driverIds.size) {
+      const workforceRows = await db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500);
+      for (const row of workforceRows) {
+        if (payloadMatchesContext(row.payloadJson, context)) driverIds.add(row.id);
+      }
+    }
+    const visiblePlanIds = new Set(plans.filter((plan) => broadRead || driverIds.has(plan.driverId)).map((plan) => plan.id));
+    const visibleRows = broadRead ? rows : rows.filter((row) => {
+      const plan = plans.find((candidate) => candidate.missionId === row.missionId);
+      return Boolean(plan && visiblePlanIds.has(plan.id));
+    });
+    await auditLocationAccess({ context, capability, action: "READ", resourceType: "DELIVERY_EVENTS", purpose: "Consultazione delle evidenze di consegna.", metadata: { returned: visibleRows.length } });
+    return Response.json({ context: publicAuthorityContext(context), deliveries: visibleRows.map((row) => ({ ...row, tenantId: undefined })), readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() } }, { headers: { "cache-control": "private, no-store" } });
   } catch {
     return Response.json({ error: "delivery_readback_unavailable" }, { status: 503 });
   }
@@ -39,7 +58,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "mission.write")) return Response.json({ error: "forbidden", capability: "mission.write" }, { status: 403 });
+  if (!hasCapability(context, "mission.execute") && !hasCapability(context, "mission.manage")) return Response.json({ error: "forbidden", capability: "mission.execute" }, { status: 403 });
   let input: JsonObject;
   try {
     const parsed = await request.json() as unknown;
@@ -72,7 +91,16 @@ export async function POST(request: Request) {
     const previousOpenStop = routeRows.find((candidate) => candidate.sequence < stop.sequence && !["DEPARTED", "COMPLETED"].includes(candidate.status));
     if (previousOpenStop) return Response.json({ error: "previous_route_stop_not_closed", previousRouteStopId: previousOpenStop.id, previousSequence: previousOpenStop.sequence }, { status: 409 });
     const canConfirmForOthers = hasCapability(context, "workforce.manage") || hasCapability(context, "authority.manage");
-    if (!canConfirmForOthers && plan.driverId !== context.actorId) return Response.json({ error: "delivery_scope_forbidden" }, { status: 403 });
+    if (!canConfirmForOthers) {
+      const driverMatches = plan.driverId === context.actorId
+        || plan.driverId === context.membershipId
+        || plan.driverId === `AUTH-DRIVER-${context.actorId}`;
+      if (!driverMatches) {
+        const workforceRows = await db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500);
+        const driver = workforceRows.find((row) => row.id === plan.driverId);
+        if (!driver || !payloadMatchesContext(driver.payloadJson, context)) return Response.json({ error: "delivery_scope_forbidden" }, { status: 403 });
+      }
+    }
     const arrivals = await db.select().from(locationEvents).where(and(
       eq(locationEvents.tenantId, context.tenantId),
       eq(locationEvents.locationId, stop.locationId),

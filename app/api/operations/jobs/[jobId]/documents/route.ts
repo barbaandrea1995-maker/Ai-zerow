@@ -9,6 +9,7 @@ import {
   s06Reconciliations,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import { documentCanDownload } from "@/lib/document-security";
 import {
   matchesOperationalDocumentSignature,
@@ -47,6 +48,15 @@ async function findJob(tenantId: string, reference: string) {
   return byCode ?? null;
 }
 
+async function canAccessJob(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, job: typeof s04Records.$inferSelect) {
+  if (canReadAllOperations(context)) return true;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
+}
+
 function responseDocument(row: typeof operationalDocuments.$inferSelect) {
   return {
     id: row.id,
@@ -80,6 +90,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const rows = await getDb().select().from(operationalDocuments).where(and(
       eq(operationalDocuments.tenantId, context.tenantId),
       eq(operationalDocuments.jobId, job.id),
@@ -130,6 +141,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId), eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);

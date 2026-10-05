@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { recordForResponse } from "@/lib/s04-adapter";
+import { canReadAllOperations, parseScopePayload, rowMatchesContext } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -58,10 +59,25 @@ export async function GET(request: Request) {
   if (!hasCapability(context, "asset.read")) return Response.json({ error: "forbidden", capability: "asset.read" }, { status: 403 });
   const assetId = bounded(new URL(request.url).searchParams.get("assetId"), 160);
   try {
+    const db = getDb();
     const rows = assetId
       ? [await findAsset(context.tenantId, assetId)].filter((row): row is NonNullable<typeof row> => Boolean(row))
-      : await getDb().select().from(s04Records).where(eq(s04Records.tenantId, context.tenantId)).orderBy(desc(s04Records.updatedAt)).limit(500);
-    const assets = rows.filter((row) => row.module === "assets").map((row) => {
+      : await db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "assets"))).orderBy(desc(s04Records.updatedAt)).limit(500);
+    const assignments = canReadAllOperations(context)
+      ? []
+      : await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.domain, "assets"),
+        eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+      )).limit(1_000);
+    const assignedAssetIds = new Set(assignments.filter((row) => rowMatchesContext(row, context)).flatMap((row) => {
+      const payload = parseScopePayload(row.payloadJson);
+      return [row.jobId, typeof payload.assetId === "string" ? payload.assetId : ""].filter(Boolean);
+    }));
+    const visibleRows = canReadAllOperations(context)
+      ? rows
+      : rows.filter((row) => rowMatchesContext(row, context) || assignedAssetIds.has(row.id) || (row.canonicalCode ? assignedAssetIds.has(row.canonicalCode) : false));
+    const assets = visibleRows.filter((row) => row.module === "assets").map((row) => {
       const payload = parseJson(row.payloadJson);
       return { ...recordForResponse(row), lifecycle: { status: bounded(payload.lifecycleStatus, 24, "AVAILABLE"), maintenance: isRecord(payload.maintenance) ? payload.maintenance : null } };
     });
@@ -89,6 +105,15 @@ export async function POST(request: Request) {
     const db = getDb();
     const asset = await findAsset(context.tenantId, assetId);
     if (!asset) return Response.json({ error: "asset_not_found" }, { status: 404 });
+    if (!canReadAllOperations(context) && !rowMatchesContext(asset, context)) {
+      const assignments = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.domain, "assets"),
+        eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+        eq(jobJourneyRecords.jobId, asset.id),
+      )).limit(1_000);
+      if (!assignments.some((row) => rowMatchesContext(row, context))) return Response.json({ error: "asset_scope_forbidden" }, { status: 403 });
+    }
     const [existingEvent] = await db.select().from(s06Events).where(and(eq(s06Events.tenantId, context.tenantId), eq(s06Events.idempotencyKey, idempotencyKey))).limit(1);
     if (existingEvent) {
       const existing = await findAsset(context.tenantId, asset.id);

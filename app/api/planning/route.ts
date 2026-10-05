@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { parseJobPayload } from "@/lib/operations-contract";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function GET() {
 
   try {
     const db = getDb();
-    const [jobs, plans] = await Promise.all([
+    const [jobs, plans, workforceRows] = await Promise.all([
       db.select().from(s04Records).where(and(
         eq(s04Records.tenantId, context.tenantId),
         inArray(s04Records.module, allowedModules),
@@ -67,11 +68,18 @@ export async function GET() {
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.domain, "planning"),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
+      db.select().from(s04Records).where(and(
+        eq(s04Records.tenantId, context.tenantId),
+        eq(s04Records.module, "workforce"),
+      )).limit(500),
     ]);
-    const allowedJobIds = new Set(jobs.filter((job) => job.recordType !== "adapter-contract").map((job) => job.id));
-    const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId));
-    const jobById = new Map(jobs.map((job) => [job.id, job]));
-    const jobViews = jobs.filter((job) => job.recordType !== "adapter-contract").map((job) => {
+    const scopeTokens = teamScopeTokens(workforceRows, context);
+    const broadRead = canReadAllOperations(context);
+    const visibleJobs = jobs.filter((job) => job.recordType !== "adapter-contract" && (broadRead || rowMatchesContext(job, context, scopeTokens)));
+    const allowedJobIds = new Set(visibleJobs.map((job) => job.id));
+    const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
+    const jobById = new Map(visibleJobs.map((job) => [job.id, job]));
+    const jobViews = visibleJobs.map((job) => {
       const payload = parseJobPayload(job.payloadJson);
       return {
         id: job.id,

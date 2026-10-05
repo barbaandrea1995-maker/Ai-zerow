@@ -64,7 +64,9 @@ export const OPERATING_PROFILE_CATALOG: Record<OperatingProfileId, {
     label: "Solo magazzino",
     description: "Scorte, materiali, richieste e movimentazioni di deposito.",
     domains: ["warehouse"],
-    transportModes: ["WAREHOUSE_TO_RECIPIENT", "RETURN_TO_WAREHOUSE", "WAREHOUSE_TRANSFER"],
+    // A warehouse-only tenant can prepare an outbound request for a recipient;
+    // assigning and executing the actual transport remains a separate domain.
+    transportModes: ["WAREHOUSE_TO_RECIPIENT"],
   },
   TRANSPORT: {
     label: "Solo trasporti",
@@ -76,7 +78,7 @@ export const OPERATING_PROFILE_CATALOG: Record<OperatingProfileId, {
     label: "Magazzino + trasporti",
     description: "Magazzino con flotta, autisti e consegne collegate.",
     domains: ["warehouse", "transport"],
-    transportModes: ["ASSET_TRANSFER", "WAREHOUSE_TO_RECIPIENT", "RETURN_TO_WAREHOUSE", "WAREHOUSE_TRANSFER"],
+    transportModes: ["ASSET_TRANSFER", "WAREHOUSE_TO_RECIPIENT", "WAREHOUSE_TO_JOB", "RETURN_TO_WAREHOUSE", "WAREHOUSE_TRANSFER"],
   },
   FULL_OPERATIONS: {
     label: "Azienda completa",
@@ -138,8 +140,7 @@ export function parseTransportModes(value: unknown, profile: unknown = DEFAULT_O
   if (typeof value !== "string") return transportModesForProfile(profile);
   try {
     const parsed = JSON.parse(value) as unknown;
-    const modes = normalizeTransportModes(parsed);
-    return modes.length ? modes : transportModesForProfile(profile);
+    return resolveTransportModesForProfile(parsed, profile);
   } catch {
     return transportModesForProfile(profile);
   }
@@ -169,15 +170,17 @@ export function parseOperatingDomains(value: unknown): OperatingDomain[] {
   }
 }
 
-const CAPABILITY_DOMAIN_PREFIXES: Array<[string, OperatingDomain]> = [
-  ["warehouse.", "warehouse"],
-  ["mission.", "transport"],
-  ["asset.", "transport"],
-  ["operations.", "operations"],
-  ["field.", "operations"],
-  ["documents.", "operations"],
-  ["finance.", "operations"],
-  ["procurement.", "operations"],
+const CAPABILITY_DOMAIN_PREFIXES: Array<[string, OperatingDomain[]]> = [
+  ["warehouse.", ["warehouse"]],
+  ["mission.", ["transport"]],
+  ["asset.", ["transport"]],
+  ["operations.", ["operations"]],
+  ["field.", ["operations"]],
+  // Transport tenants must be able to read DDT/POD and other delivery
+  // evidence even when they do not run a construction-operations profile.
+  ["documents.", ["operations", "transport"]],
+  ["finance.", ["operations"]],
+  ["procurement.", ["operations"]],
 ];
 
 /**
@@ -189,7 +192,7 @@ const CAPABILITY_DOMAIN_PREFIXES: Array<[string, OperatingDomain]> = [
  */
 const CROSS_DOMAIN_CAPABILITY_PREFIXES = ["workforce.", "planning."] as const;
 
-export function domainForCapability(capability: string): OperatingDomain | null {
+export function domainForCapability(capability: string): OperatingDomain[] | null {
   if (CROSS_DOMAIN_CAPABILITY_PREFIXES.some((prefix) => capability.startsWith(prefix))) return null;
   return CAPABILITY_DOMAIN_PREFIXES.find(([prefix]) => capability.startsWith(prefix))?.[1] ?? null;
 }
@@ -201,6 +204,6 @@ export function filterCapabilitiesForDomains(
   const enabled = new Set(domains);
   return capabilities.filter((capability) => {
     const domain = domainForCapability(capability);
-    return !domain || enabled.has(domain);
+    return !domain || domain.some((item) => enabled.has(item));
   });
 }

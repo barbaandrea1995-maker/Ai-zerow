@@ -1,13 +1,29 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { operationalDocuments } from "@/db/schema";
+import { operationalDocuments, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { documentCanDownload } from "@/lib/document-security";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ documentId: string }> };
+
+async function canAccessDocument(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, jobId: string) {
+  if (canReadAllOperations(context)) return true;
+  const [job] = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "operations"),
+    eq(s04Records.id, jobId),
+  )).limit(1);
+  if (!job) return false;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
+}
 
 function contentDisposition(fileName: string) {
   const ascii = fileName.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "_");
@@ -35,6 +51,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
       eq(operationalDocuments.id, documentId),
     )).limit(1);
     if (!document) return Response.json({ error: "document_not_found" }, { status: 404 });
+    if (!(await canAccessDocument(context, document.jobId))) return Response.json({ error: "document_not_found" }, { status: 404 });
     if (!documentCanDownload(document.scanStatus, document.status)) {
       return Response.json({ error: "document_security_hold", scanStatus: document.scanStatus, status: document.status }, {
         status: 423,

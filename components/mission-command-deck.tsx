@@ -499,7 +499,7 @@ export default function MissionCommandDeck() {
     });
   }, [missions, query, statusFilter]);
   const selected = missions.find((mission) => mission.id === selectedId) ?? filteredMissions[0] ?? null;
-  const canWrite = capabilities.includes("mission.write");
+  const canWrite = capabilities.includes("mission.manage") || capabilities.includes("mission.execute");
   const enabledTransportModes = context?.operatingTransportModes ?? [];
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
   const counts = useMemo(() => ({

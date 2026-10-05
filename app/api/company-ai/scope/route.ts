@@ -12,6 +12,7 @@ import {
   searchCompanyAiKnowledgeForScope,
 } from "@/lib/company-ai-knowledge";
 import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -79,11 +80,20 @@ function denied(context: Awaited<ReturnType<typeof getAuthorityContext>>, capabi
 
 async function findJob(jobRef: string, tenantId: string) {
   const rows = await getDb()
-    .select({ id: s04Records.id, canonicalCode: s04Records.canonicalCode, title: s04Records.title })
+    .select()
     .from(s04Records)
     .where(and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "operations"), or(eq(s04Records.id, jobRef), eq(s04Records.canonicalCode, jobRef))))
     .limit(1);
   return rows[0] ?? null;
+}
+
+async function canAccessJob(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, job: typeof s04Records.$inferSelect) {
+  if (canReadAllOperations(context)) return true;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
 }
 
 async function responseForScope(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, scope: typeof companyAiJobScopes.$inferSelect, status = 200) {
@@ -113,6 +123,7 @@ export async function GET(request: Request) {
   try {
     const job = await findJob(jobRef, context!.tenantId);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context!, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const rows = await getDb().select().from(companyAiJobScopes)
       .where(and(eq(companyAiJobScopes.tenantId, context!.tenantId), eq(companyAiJobScopes.jobId, job.id)))
       .orderBy(desc(companyAiJobScopes.version));
@@ -173,6 +184,7 @@ export async function POST(request: Request) {
     const db = getDb();
     const job = await findJob(jobRef, context!.tenantId);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context!, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
 
     const existingEvent = await db.select().from(s06Events)
       .where(and(eq(s06Events.tenantId, context!.tenantId), eq(s06Events.idempotencyKey, idempotencyKey)))

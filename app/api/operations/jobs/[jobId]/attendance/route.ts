@@ -9,6 +9,7 @@ import {
   resolveAttendanceOperationalContext,
 } from "@/lib/location-intelligence/attendance-policy";
 import { sessionForResponse } from "@/lib/location-intelligence/repository";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,15 @@ async function findJob(tenantId: string, reference: string) {
   return byCode ?? null;
 }
 
+async function canAccessJob(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>, job: typeof s04Records.$inferSelect) {
+  if (canReadAllOperations(context)) return true;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
+}
+
 function sanitizeLocation(value: unknown) {
   if (!isRecord(value)) return null;
   const lat = typeof value.lat === "number" ? value.lat : Number(value.lat);
@@ -123,6 +133,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const records = await getDb().select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, job.id),
@@ -167,6 +178,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
       eq(s06Events.idempotencyKey, idempotencyKey),
