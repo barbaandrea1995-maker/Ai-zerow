@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, LayoutDashboard, RefreshCw } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import { ZerowWorkspaceSidebar } from "@/components/zerow-workspace-sidebar";
 
@@ -41,7 +40,6 @@ function activeNavigation(pathname: string): CommandNavigationId {
 
 export function GlobalModuleControls({ initialAuthority }: { initialAuthority: GlobalAuthority | null }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const hidden = isHiddenPath(pathname);
@@ -86,14 +84,6 @@ export function GlobalModuleControls({ initialAuthority }: { initialAuthority: G
 
   if (hidden) return null;
 
-  const goBack = () => {
-    if (window.history.length > 1) {
-      router.back();
-      return;
-    }
-    router.push("/command");
-  };
-
   return (
     <>
       {canShowSidebar && initialAuthority ? (
@@ -111,35 +101,6 @@ export function GlobalModuleControls({ initialAuthority }: { initialAuthority: G
           role={initialAuthority.role}
         />
       ) : null}
-      <div className="zw-module-action-rail" aria-label="Azioni modulo">
-        <button
-          aria-label="Torna indietro"
-          className="zw-module-action-rail__button"
-          onClick={goBack}
-          type="button"
-        >
-          <ArrowLeft aria-hidden="true" className="size-4" />
-          <span>Indietro</span>
-        </button>
-        <button
-          aria-label="Aggiorna modulo"
-          className="zw-module-action-rail__button"
-          onClick={() => window.location.reload()}
-          type="button"
-        >
-          <RefreshCw aria-hidden="true" className="size-4" />
-          <span>Aggiorna</span>
-        </button>
-        <button
-          aria-label="Apri Command"
-          className="zw-module-action-rail__button zw-module-action-rail__button--workspace"
-          onClick={() => router.push("/command")}
-          type="button"
-        >
-          <LayoutDashboard aria-hidden="true" className="size-4" />
-          <span>Command</span>
-        </button>
-      </div>
     </>
   );
 }
