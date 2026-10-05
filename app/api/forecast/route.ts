@@ -1,3 +1,3 @@
-import { GET } from "@/app/api/finance/entries/route";
+import { GET } from "@/app/api/weather/route";
 
 export { GET };

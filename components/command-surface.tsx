@@ -124,6 +124,43 @@ type W10Summary = {
   checkedAt: string;
 };
 
+type WeatherLocation = {
+  id: string;
+  entityType: string;
+  entityId: string;
+  label: string;
+  address?: string | null;
+  coordinates: { latitude: number; longitude: number };
+};
+
+type WeatherSnapshotResponse = {
+  provider?: { id?: string; status?: string; attribution?: string };
+  current?: {
+    observedAt?: string;
+    temperatureC?: number | null;
+    apparentTemperatureC?: number | null;
+    humidityPct?: number | null;
+    precipitationMm?: number | null;
+    windSpeedKmh?: number | null;
+    windDirection?: string;
+    condition?: string;
+  };
+  hourly?: Array<{
+    time?: string;
+    temperatureC?: number | null;
+    precipitationProbabilityPct?: number | null;
+    weatherCode?: number | null;
+    condition?: string;
+  }>;
+  daily?: Array<{
+    date?: string;
+    temperatureMaxC?: number | null;
+    temperatureMinC?: number | null;
+    precipitationProbabilityPct?: number | null;
+    condition?: string;
+  }>;
+};
+
 type CommandPreferencesResponse = {
   canCustomize?: boolean;
   catalog?: CommandWidgetPublicDefinition[];
@@ -232,33 +269,100 @@ function PlanningCommandPanel() {
   return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">P2 / PLANNING</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Piano operativo</h2><p className="mt-1 text-[11px] text-slate-500">Attività, missioni e risorse reali.</p></div><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.07] text-lime-200"><CalendarClock className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Perimetri</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.jobs ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Piani</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.plans ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Pubblicati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.published ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Conflitti</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.conflicted ?? "—"}</p></div></div><Button className="mt-auto h-9 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/planning")}><CalendarClock className="size-3.5" />Apri pianificazione</Button></section>;
 }
 
+function weatherDay(value?: string) {
+  if (!value) return "—";
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString("it-IT", { weekday: "short", day: "numeric" });
+}
+
+function weatherNumber(value: number | null | undefined, suffix = "") {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value * 10) / 10}${suffix}` : "—";
+}
+
 function WeatherCommandPanel() {
   const router = useRouter();
+  const [locations, setLocations] = useState<WeatherLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState("");
+  const [snapshot, setSnapshot] = useState<WeatherSnapshotResponse | null>(null);
+  const [locationsLoading, setLocationsLoading] = useState(true);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/command/map", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { locations?: WeatherLocation[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "weather_locations_unavailable");
+        const next = (Array.isArray(payload.locations) ? payload.locations : [])
+          .filter((location) => ["COMMESSA", "CANTIERE", "MAGAZZINO"].includes(location.entityType));
+        if (!active) return;
+        setLocations(next);
+        setWeatherLoading(Boolean(next.length));
+        setSelectedLocationId((current) => next.some((location) => location.id === current) ? current : next[0]?.id ?? "");
+        setError("");
+      })
+      .catch((caught) => {
+        if (!active) return;
+        setLocations([]);
+        setSelectedLocationId("");
+        setError(caught instanceof Error ? caught.message : "weather_locations_unavailable");
+      })
+      .finally(() => { if (active) setLocationsLoading(false); });
+    return () => { active = false; };
+  }, [refreshToken]);
+
+  useEffect(() => {
+    if (!selectedLocationId) return;
+    let active = true;
+    void fetch(`/api/weather?locationId=${encodeURIComponent(selectedLocationId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as WeatherSnapshotResponse & { error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "weather_provider_unavailable");
+        if (!active) return;
+        setSnapshot(payload);
+        setError("");
+      })
+      .catch((caught) => {
+        if (!active) return;
+        setSnapshot(null);
+        setError(caught instanceof Error ? caught.message : "weather_provider_unavailable");
+      })
+      .finally(() => { if (active) setWeatherLoading(false); });
+    return () => { active = false; };
+  }, [refreshToken, selectedLocationId]);
+
+  const selectedLocation = locations.find((location) => location.id === selectedLocationId);
+  const current = snapshot?.current;
+  const hasData = Boolean(selectedLocationId && snapshot && current);
+  const noLocations = !locationsLoading && locations.length === 0;
+
   return (
     <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">LIVE / WEATHER</p>
           <h2 className="mt-1 text-sm font-semibold text-slate-100">Meteo operativo</h2>
           <p className="mt-1 text-[11px] text-slate-500">Condizioni utili per squadre, mezzi e cantieri.</p>
         </div>
-        <span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><CloudSun className="size-4" /></span>
-      </div>
-      <div className="carbon-inset mt-5 flex flex-1 flex-col justify-between rounded-xl p-4">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          {[["Temperatura", "—"], ["Condizioni", "—"], ["Vento", "—"]].map(([label, value]) => (
-            <div key={label}>
-              <p className="text-[9px] uppercase tracking-[.12em] text-slate-600">{label}</p>
-              <p className="mt-2 font-mono text-base text-slate-300">{value}</p>
-            </div>
-          ))}
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden rounded-full border border-lime-300/20 bg-lime-300/[.05] px-2 py-1 text-[9px] font-semibold uppercase tracking-[.1em] text-lime-100 sm:inline-flex">{snapshot?.provider?.id ?? "OPEN-METEO"} · SERVER</span>
+          <button aria-label="Aggiorna meteo" className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200 transition hover:border-cyan-200/50" onClick={() => { setLocationsLoading(true); setWeatherLoading(Boolean(selectedLocationId)); setRefreshToken((value) => value + 1); }} type="button"><RefreshCw className={`size-4 ${locationsLoading || weatherLoading ? "animate-spin" : ""}`} /></button>
         </div>
-        <p className="mt-5 rounded-lg border border-amber-300/15 bg-amber-300/[.045] p-3 text-[10px] leading-4 text-amber-100/75">
-          Provider meteo non collegato · NOT RUN. Nessuna condizione viene simulata.
-        </p>
+      </div>
+      {locations.length > 0 && <label className="mt-4 block"><span className="sr-only">Sede meteo</span><select aria-label="Sede per il meteo" className="h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-[11px] text-slate-200 outline-none focus:border-lime-300/40" onChange={(event) => { setSnapshot(null); setWeatherLoading(Boolean(event.target.value)); setSelectedLocationId(event.target.value); }} value={selectedLocationId}><option className="bg-[#080c09]" value="">Seleziona sede operativa</option>{locations.map((location) => <option className="bg-[#080c09]" key={location.id} value={location.id}>{location.label} · {location.entityType === "MAGAZZINO" ? "magazzino" : "cantiere"}</option>)}</select></label>}
+      <div className="carbon-inset mt-4 flex flex-1 flex-col justify-between rounded-xl p-4">
+        {hasData ? <>
+          <div className="flex items-start justify-between gap-3"><div><p className="truncate text-xs font-semibold text-slate-100">{selectedLocation?.label ?? "Sede operativa"}</p><p className="mt-1 truncate text-[10px] text-slate-600">{selectedLocation?.address || "Coordinate server-side"}</p></div><CloudSun className="size-6 shrink-0 text-cyan-200" /></div>
+          <div className="mt-5 grid grid-cols-3 gap-2 text-center"><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Temperatura</p><p className="mt-2 font-mono text-xl text-slate-100">{weatherNumber(current?.temperatureC, "°")}</p></div><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Condizioni</p><p className="mt-2 truncate text-[11px] text-slate-200">{current?.condition ?? "—"}</p></div><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Vento</p><p className="mt-2 font-mono text-sm text-slate-200">{weatherNumber(current?.windSpeedKmh, " km/h")}</p><p className="text-[9px] text-slate-600">{current?.windDirection ?? "—"}</p></div></div>
+          <div className="mt-5 grid grid-cols-3 gap-2 border-t border-white/[.07] pt-3 text-center"><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Percepita</p><p className="mt-1 text-[11px] text-slate-300">{weatherNumber(current?.apparentTemperatureC, "°")}</p></div><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Umidità</p><p className="mt-1 text-[11px] text-slate-300">{weatherNumber(current?.humidityPct, "%")}</p></div><div><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Pioggia</p><p className="mt-1 text-[11px] text-slate-300">{weatherNumber(current?.precipitationMm, " mm")}</p></div></div>
+          <div className="mt-5 flex gap-2 overflow-x-auto pb-1">{(snapshot?.daily ?? []).map((day) => <div className="min-w-[104px] rounded-lg border border-white/[.08] bg-black/20 p-2.5" key={day.date}><p className="text-[9px] uppercase text-slate-500">{weatherDay(day.date)}</p><p className="mt-2 text-[10px] text-slate-300">{day.condition ?? "—"}</p><p className="mt-1 font-mono text-[10px] text-lime-100">{weatherNumber(day.temperatureMaxC, "°")} / {weatherNumber(day.temperatureMinC, "°")}</p><p className="mt-1 text-[9px] text-cyan-200/70">Pioggia {weatherNumber(day.precipitationProbabilityPct, "%")}</p></div>)}</div>
+          <p className="mt-4 text-[9px] text-slate-600">{snapshot?.provider?.attribution ?? "Open-Meteo"} · aggiornamento server-side</p>
+        </> : <div className="flex flex-1 flex-col items-center justify-center text-center"><CloudSun className={`size-8 ${weatherLoading ? "animate-pulse text-cyan-200" : "text-slate-700"}`} /><p className="mt-3 text-xs text-slate-300">{locationsLoading ? "Cerco le sedi operative…" : noLocations ? "Nessuna sede geocodificata disponibile." : weatherLoading ? "Leggo le condizioni…" : "Seleziona una sede operativa."}</p><p className="mt-2 max-w-xs text-[10px] leading-4 text-slate-600">{error ? "Il provider non ha restituito il dato. Riprova tra poco." : "Il meteo viene letto solo per luoghi server-side autorizzati."}</p></div>}
       </div>
       <button className="mt-4 flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" onClick={() => router.push("/externals")} type="button">
-        Configura provider <ArrowUpRight className="size-3.5" />
+        Vedi contratto provider <ArrowUpRight className="size-3.5" />
       </button>
     </section>
   );
