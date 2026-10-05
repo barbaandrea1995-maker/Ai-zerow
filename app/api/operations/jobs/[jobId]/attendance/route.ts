@@ -207,7 +207,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
       pause: ["CHECKED_IN"],
       resume: ["PAUSED"],
       check_out: ["CHECKED_IN", "PAUSED"],
-      correction_request: ["CHECKED_OUT"],
+      // A forgotten exit is requested while the shift is still open. The
+      // request intentionally bypasses the live geofence check, but it does
+      // not close the attendance until an authorised approver confirms it.
+      correction_request: ["CHECKED_IN", "PAUSED", "CHECKED_OUT"],
       correction_approve: ["CORRECTION_REQUESTED"],
     };
     if (action !== "check_in" && (!previousStatus || !validTransitions[action].includes(previousStatus))) {
@@ -220,6 +223,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
       return Response.json({ error: "version_conflict", expectedVersion, currentVersion: latest.version }, { status: 409 });
     }
     if (latest && action !== "check_in" && expectedVersion === null) return Response.json({ error: "expected_version_required" }, { status: 400 });
+
+    if (action === "correction_request") {
+      const correctionNote = bounded(input.correctionNote ?? input.note, 2_000);
+      if (correctionNote.length < 8) return Response.json({ error: "correction_note_required" }, { status: 400 });
+    }
 
     const location = sanitizeLocation(input.location);
     const operational = await resolveAttendanceOperationalContext({ context, job });
@@ -257,16 +265,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (activeTrackingSession) return Response.json({ error: "driver_tracking_session_already_active", sessionId: activeTrackingSession.id }, { status: 409 });
         trackingOperation = "start";
         trackingSessionId = `TRACKING-SESSION-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
-      } else if (action === "pause" || action === "resume" || action === "check_out") {
+      } else if (action === "pause" || action === "resume" || action === "check_out" || action === "correction_approve") {
         if (!activeTrackingSession) return Response.json({ error: "driver_tracking_session_not_open", reason: "driver_tracking_is_opened_by_check_in_and_closed_by_check_out" }, { status: 409 });
         if (action === "pause" && activeTrackingSession.status !== "ACTIVE") return Response.json({ error: "driver_tracking_session_not_active" }, { status: 409 });
         if (action === "resume" && activeTrackingSession.status !== "PAUSED") return Response.json({ error: "driver_tracking_session_not_paused" }, { status: 409 });
-        trackingOperation = action === "check_out" ? "close" : action;
+        trackingOperation = action === "check_out" || action === "correction_approve" ? "close" : action;
         trackingSessionId = activeTrackingSession.id;
       }
     }
 
     const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
+    const correctionAt = bounded(input.correctionAt, 40);
+    const correctionAtIsValid = Boolean(correctionAt && Number.isFinite(Date.parse(correctionAt)));
     const workerId = hasCapability(context, "workforce.read.all") || hasCapability(context, "workforce.manage")
       ? bounded(input.workerId, 120, context.actorId)
       : context.actorId;
@@ -276,6 +286,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       clientObservedAt: Number.isFinite(Date.parse(clientObservedAt)) ? clientObservedAt : null,
       by: context.actorId,
       note: bounded(input.note, 1_000),
+      correctionAt: action === "correction_request" && correctionAtIsValid ? correctionAt : null,
       location: locationWithGeofence,
       dutyMode: operational.mode,
       missionId: operational.mission?.id ?? null,
