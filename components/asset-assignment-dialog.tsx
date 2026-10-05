@@ -13,9 +13,22 @@ type AssetRecord = {
   id: string;
   canonicalCode?: string;
   title: string;
+  detail?: string;
   status?: string;
   payload?: Record<string, unknown>;
   lifecycle?: { status?: string } | null;
+};
+
+type ExistingAssignment = {
+  id: string;
+  assetId: string;
+  assetCode?: string | null;
+  assetTitle?: string | null;
+  kind?: string;
+  status?: string;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  assignee?: { name?: string | null };
 };
 
 type Assignee = {
@@ -31,6 +44,7 @@ type Assignee = {
 type AssetAssignmentDialogProps = {
   assets: AssetRecord[];
   initialAsset: AssetRecord | null;
+  assignments: ExistingAssignment[];
   assignees: Assignee[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,6 +60,53 @@ function entityType(asset: AssetRecord | null) {
 function lifecycleStatus(asset: AssetRecord) {
   const value = asset.lifecycle?.status ?? asset.payload?.lifecycleStatus ?? asset.status;
   return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "AVAILABLE";
+}
+
+function payloadText(asset: AssetRecord, key: string) {
+  const value = asset.payload?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function assetIdentity(asset: AssetRecord) {
+  const code = asset.canonicalCode?.trim() || asset.id;
+  const description = payloadText(asset, "description") || payloadText(asset, "title") || asset.detail?.trim() || (asset.title !== code ? asset.title : "");
+  const brand = payloadText(asset, "brand");
+  const model = payloadText(asset, "model");
+  const registration = payloadText(asset, "registration");
+  const serialNumber = payloadText(asset, "serialNumber");
+  const location = payloadText(asset, "location");
+  const type = entityType(asset) === "VEHICLE" ? "Mezzo" : payloadText(asset, "entityType").toUpperCase() === "EQUIPMENT" ? "Attrezzatura" : "Asset operativo";
+  const technical = [brand && model ? `${brand} ${model}` : brand || model, registration && `Targa ${registration}`, serialNumber && `Matricola ${serialNumber}`, location && `Sede ${location}`]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  return { code, description: description || "Descrizione non indicata", technical: technical.length ? technical.join(" · ") : type };
+}
+
+function assignmentStatus(assignment: ExistingAssignment) {
+  return typeof assignment.status === "string" ? assignment.status.toUpperCase() : "";
+}
+
+function assignmentConflict(assetId: string, assignments: ExistingAssignment[], startsAt: string, endsAt: string, kind: AssignmentKind) {
+  const requestedStart = Date.parse(startsAt);
+  const requestedEnd = kind === "LONG_TERM" ? Number.POSITIVE_INFINITY : Date.parse(endsAt);
+  if (!Number.isFinite(requestedStart) || (kind === "SHORT_TERM" && !Number.isFinite(requestedEnd))) return null;
+  return assignments.find((assignment) => {
+    if (assignment.assetId !== assetId || ["RETURNED", "CANCELLED"].includes(assignmentStatus(assignment))) return false;
+    const existingStart = Date.parse(assignment.startsAt ?? "");
+    if (!Number.isFinite(existingStart)) return ["ACTIVE", "SCHEDULED"].includes(assignmentStatus(assignment));
+    const parsedExistingEnd = assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY;
+    const existingEnd = Number.isFinite(parsedExistingEnd) ? parsedExistingEnd : Number.POSITIVE_INFINITY;
+    return requestedStart < existingEnd && existingStart < requestedEnd;
+  }) ?? null;
+}
+
+function assignmentReason(assignment: ExistingAssignment | null) {
+  if (!assignment) return "";
+  const assignee = assignment.assignee?.name?.trim() || "una risorsa del tenant";
+  const until = assignment.kind?.toUpperCase() === "LONG_TERM" || !assignment.endsAt
+    ? "fino al rientro"
+    : `fino al ${new Date(assignment.endsAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}`;
+  return `Affidato a ${assignee} · ${until}`;
 }
 
 function localInputValue(date: Date) {
@@ -71,7 +132,7 @@ function defaultEnd() {
 
 function friendlyError(error: string) {
   const errors: Record<string, string> = {
-    asset_assignment_conflict: "Uno degli asset è già impegnato nella finestra indicata.",
+    asset_assignment_conflict: "Uno degli asset è già assegnato o impegnato nella finestra indicata: scegli una risorsa libera.",
     assignee_not_found_or_inactive: "La persona selezionata non è più attiva nel tenant.",
     vehicle_assignee_driver_capability_required: "Per un mezzo devi selezionare una persona con mansione Autista.",
     asset_assignee_operator_capability_required: "Per questo asset devi selezionare una persona con mansione Operatore.",
@@ -82,7 +143,7 @@ function friendlyError(error: string) {
   return errors[error] ?? "Assegnazione non completata: verifica i dati e riprova.";
 }
 
-export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, onOpenChange, onCreated, onNotice }: AssetAssignmentDialogProps) {
+export function AssetAssignmentDialog({ assets, initialAsset, assignments, assignees, open, onOpenChange, onCreated, onNotice }: AssetAssignmentDialogProps) {
   const [kind, setKind] = useState<AssignmentKind>("SHORT_TERM");
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [assigneeMembershipId, setAssigneeMembershipId] = useState("");
@@ -94,33 +155,37 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, o
   const [error, setError] = useState("");
 
   const selectableAssets = useMemo(() => [...assets]
-    .filter((candidate) => lifecycleStatus(candidate) === "AVAILABLE")
-    .sort((left, right) => Number(right.id === initialAsset?.id) - Number(left.id === initialAsset?.id)), [assets, initialAsset?.id]);
+    .filter((candidate) => lifecycleStatus(candidate) === "AVAILABLE" && !assignmentConflict(candidate.id, assignments, startsAt, endsAt, kind))
+    .sort((left, right) => Number(right.id === initialAsset?.id) - Number(left.id === initialAsset?.id)), [assets, assignments, endsAt, initialAsset?.id, kind, startsAt]);
+  const unavailableAssets = useMemo(() => [...assets]
+    .filter((candidate) => lifecycleStatus(candidate) !== "AVAILABLE" || Boolean(assignmentConflict(candidate.id, assignments, startsAt, endsAt, kind)))
+    .sort((left, right) => Number(right.id === initialAsset?.id) - Number(left.id === initialAsset?.id)), [assets, assignments, endsAt, initialAsset?.id, kind, startsAt]);
   const selectedAssets = useMemo(() => selectableAssets.filter((candidate) => selectedAssetIds.includes(candidate.id)), [selectableAssets, selectedAssetIds]);
   const selectedTypes = useMemo(() => new Set(selectedAssets.map(entityType)), [selectedAssets]);
   const initialAssetId = initialAsset?.id;
-  const initialAssetAvailable = initialAsset ? lifecycleStatus(initialAsset) === "AVAILABLE" : false;
   const primaryType = entityType(initialAsset);
   const eligibleAssignees = useMemo(() => assignees.filter((assignee) => [...selectedTypes].every((type) => assignee.eligibleFor.includes(type))), [assignees, selectedTypes]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- defaults follow the selected asset and dialog lifecycle. */
   useEffect(() => {
     if (!open) return;
+    const nextStart = defaultStart();
+    const nextEnd = defaultEnd();
     setKind("SHORT_TERM");
-    setSelectedAssetIds(initialAssetId && initialAssetAvailable ? [initialAssetId] : []);
+    setSelectedAssetIds(initialAssetId && initialAsset && lifecycleStatus(initialAsset) === "AVAILABLE" && !assignmentConflict(initialAssetId, assignments, nextStart, nextEnd, "SHORT_TERM") ? [initialAssetId] : []);
     setAssigneeMembershipId("");
-    setStartsAt(defaultStart());
-    setEndsAt(defaultEnd());
+    setStartsAt(nextStart);
+    setEndsAt(nextEnd);
     setPurpose(primaryType === "VEHICLE" ? "Consegna mezzo" : "Consegna asset operativo");
     setNotes("");
     setError("");
-  }, [initialAssetAvailable, initialAssetId, open, primaryType]);
+  }, [assignments, initialAsset, initialAssetId, open, primaryType]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedAssetIds.length || !assigneeMembershipId) {
-      setError(selectedAssetIds.length ? "Seleziona la persona che riceverà le risorse." : "Seleziona almeno un asset disponibile.");
+    if (!selectedAssets.length || !assigneeMembershipId) {
+      setError(selectedAssets.length ? "Seleziona la persona che riceverà le risorse." : "Seleziona almeno un asset disponibile.");
       return;
     }
     if (!startsAt || (kind === "SHORT_TERM" && !endsAt)) {
@@ -134,8 +199,8 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, o
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          assetId: selectedAssetIds[0],
-          assetIds: selectedAssetIds,
+          assetId: selectedAssets[0].id,
+          assetIds: selectedAssets.map((asset) => asset.id),
           assigneeMembershipId,
           assignmentKind: kind,
           startsAt: toIso(startsAt),
@@ -149,8 +214,8 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, o
       if (!response.ok) throw new Error(payload.error ?? "asset_assignment_write_failed");
       onCreated();
       onOpenChange(false);
-      onNotice(selectedAssetIds.length > 1
-        ? `${selectedAssetIds.length} asset assegnati alla stessa risorsa.`
+      onNotice(selectedAssets.length > 1
+        ? `${selectedAssets.length} asset assegnati alla stessa risorsa.`
         : kind === "SHORT_TERM" ? "Assegnazione breve registrata." : "Assegnazione continuativa registrata.");
     } catch (caught) {
       setError(friendlyError(caught instanceof Error ? caught.message : "asset_assignment_write_failed"));
@@ -180,16 +245,24 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, o
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/80">ASSET DA CONSEGNARE</p>
-              <p className="mt-1 text-[11px] text-slate-500">Puoi associare più mezzi o attrezzature alla stessa risorsa.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Puoi associare più mezzi o attrezzature alla stessa risorsa. Gli asset già affidati o impegnati nella finestra scelta restano visibili ma non selezionabili.</p>
             </div>
             <span className="rounded-lg border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1.5 font-mono text-[10px] text-cyan-100">{selectedAssets.length} SELEZIONATI</span>
           </div>
           <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto overscroll-contain pr-1">
             {selectableAssets.map((candidate) => {
               const selected = selectedAssetIds.includes(candidate.id);
-              return <button aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? "border-lime-300/45 bg-lime-300/[.08]" : "border-white/10 bg-black/20 hover:border-cyan-300/30"}`} key={candidate.id} onClick={() => { setSelectedAssetIds((current) => current.includes(candidate.id) ? current.filter((id) => id !== candidate.id) : [...current, candidate.id]); setAssigneeMembershipId(""); setError(""); }} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${selected ? "border-lime-300/35 bg-lime-300/15 text-lime-100" : "border-white/10 bg-white/[.03] text-slate-500"}`}>{selected ? <Check className="size-4" /> : <Package className="size-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-100">{candidate.canonicalCode ?? candidate.title}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{candidate.title}{entityType(candidate) === "VEHICLE" ? " · mezzo" : " · asset operativo"}</span></span><span className="text-[9px] uppercase tracking-[.12em] text-lime-200/70">Disponibile</span></button>;
+              const identity = assetIdentity(candidate);
+              return <button aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? "border-lime-300/45 bg-lime-300/[.08]" : "border-white/10 bg-black/20 hover:border-cyan-300/30"}`} key={candidate.id} onClick={() => { setSelectedAssetIds((current) => current.includes(candidate.id) ? current.filter((id) => id !== candidate.id) : [...current, candidate.id]); setAssigneeMembershipId(""); setError(""); }} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${selected ? "border-lime-300/35 bg-lime-300/15 text-lime-100" : "border-white/10 bg-white/[.03] text-slate-500"}`}>{selected ? <Check className="size-4" /> : <Package className="size-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-100">{identity.code}</span><span className="mt-1 block truncate text-[11px] text-slate-200">{identity.description}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{identity.technical}</span></span><span className="text-[9px] uppercase tracking-[.12em] text-lime-200/70">Disponibile</span></button>;
             })}
-            {selectableAssets.length === 0 && <p className="rounded-xl border border-dashed border-amber-300/20 p-4 text-center text-[10px] text-amber-100/80">Nessun asset disponibile per una nuova consegna.</p>}
+            {unavailableAssets.map((candidate) => {
+              const identity = assetIdentity(candidate);
+              const conflict = assignmentConflict(candidate.id, assignments, startsAt, endsAt, kind);
+              const lifecycle = lifecycleStatus(candidate);
+              const reason = lifecycle !== "AVAILABLE" ? `Stato: ${lifecycle.replaceAll("_", " ").toLowerCase()}` : assignmentReason(conflict);
+              return <div aria-disabled="true" className="flex w-full items-center gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.025] p-3 opacity-80" key={candidate.id}><span className="grid size-8 shrink-0 place-items-center rounded-lg border border-amber-300/20 bg-amber-300/[.06] text-amber-100/70"><Package className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">{identity.code}</span><span className="mt-1 block truncate text-[11px] text-slate-300">{identity.description}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{identity.technical}</span><span className="mt-1 block truncate text-[10px] text-amber-100/80">{reason || "Non disponibile per questa finestra"}</span></span><span className="shrink-0 text-[9px] uppercase tracking-[.12em] text-amber-100/70">Non disponibile</span></div>;
+            })}
+            {selectableAssets.length === 0 && unavailableAssets.length === 0 && <p className="rounded-xl border border-dashed border-amber-300/20 p-4 text-center text-[10px] text-amber-100/80">Nessun asset registrato nel catalogo.</p>}
           </div>
         </div>
 
