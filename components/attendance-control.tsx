@@ -147,7 +147,8 @@ export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jo
       });
       const payload = await response.json() as AttendanceWriteResponse;
       if (!response.ok) {
-        if (payload.error === "attendance_geofence_required" || payload.error === "driver_origin_geofence_required") throw new Error("Timbratura rifiutata: devi essere dentro il geofence operativo assegnato.");
+        if (payload.error === "driver_attendance_geofence_required" || payload.error === "driver_origin_geofence_required") throw new Error("driver_attendance_geofence_required");
+        if (payload.error === "attendance_geofence_required") throw new Error("attendance_geofence_required");
         if (payload.error === "driver_tracking_device_not_bound" || payload.error === "vehicle_tracking_device_required") throw new Error("Prima di timbrare devi avere mezzo e dispositivo GPS associati alla missione.");
         if (payload.error === "correction_note_required") throw new Error("Inserisci il motivo della correzione.");
         throw new Error("La timbratura non è stata registrata.");

@@ -116,6 +116,7 @@ type EventsPayload = {
     actorName?: string;
     actorEmail?: string;
     role?: string;
+    roles?: string[];
     capabilities?: string[];
     tenantId?: string;
   };
@@ -720,7 +721,7 @@ export default function EventsControlPage() {
 </div>
 </section>
 </div>
-<CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={role} />
+<CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={role} roles={snapshot.context?.roles} />
 <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
 <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
 <form className="space-y-4" onSubmit={appendEvent}>

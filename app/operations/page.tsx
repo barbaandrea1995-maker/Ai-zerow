@@ -1342,6 +1342,7 @@ export default function OperationsPage() {
         active="operations"
         allowedNavigation={allowedNavigation}
         role={authority.role}
+        roles={authority.roles}
       />
       {canWriteOperations && newJobOpen && (
         <OperationsCommessaIntake
