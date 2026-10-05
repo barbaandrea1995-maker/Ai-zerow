@@ -13,6 +13,7 @@ export default async function OperationsLayout({
       actor={{ email: authority.actorEmail, name: authority.actorName }}
       capabilities={authority.capabilities}
       role={authority.role}
+      roles={authority.roles}
     >
       {children}
     </AuthorityAccessProvider>
