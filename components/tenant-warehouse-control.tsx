@@ -212,7 +212,7 @@ export default function TenantWarehouseControl({
       <div className="mt-4 flex items-start gap-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3 text-[10px] leading-5 text-cyan-100/70"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-cyan-200" />Il server riconosce l’indirizzo, conserva il luogo canonico e collega il deposito al proprio registro scorte. Coordinate e geofence non vengono più inventate o inserite a mano nel client.</div>
 
       <Dialog open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) resetLocationSelection(); }}>
-        <DialogContent className="border-lime-300/20 bg-[#090d0a] text-slate-100 sm:max-w-[620px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] overflow-y-auto overscroll-contain border-lime-300/20 bg-[#090d0a] text-slate-100 sm:max-w-[620px]">
           <form id="tenant-warehouse-form" className="space-y-4" onSubmit={submit}>
             <DialogHeader><DialogTitle>Configura un magazzino</DialogTitle><DialogDescription className="text-slate-500">Crea un luogo canonico server-side. Il server assegna il codice, verifica l’indirizzo e apre il registro scorte dedicato a questo deposito.</DialogDescription></DialogHeader>
             <div className="grid gap-4 sm:grid-cols-2">

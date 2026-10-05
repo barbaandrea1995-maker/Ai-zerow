@@ -34,6 +34,13 @@ function bounded(value: unknown, max: number, fallback = "") {
   return stringValue(value, fallback).slice(0, max);
 }
 
+function boundedList(value: unknown, maxItems = 32, maxLength = 160) {
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values
+    .map((item) => bounded(item, maxLength))
+    .filter(Boolean))].slice(0, maxItems);
+}
+
 function upper(value: unknown) {
   return stringValue(value).toUpperCase();
 }
@@ -115,6 +122,10 @@ function assignmentForResponse(row: typeof jobJourneyRecords.$inferSelect) {
     assetTitle: stringValue(payload.assetTitle, row.title),
     entityType: upper(payload.entityType) || "ASSET",
     assignmentClass: upper(payload.assignmentClass) || "ASSET",
+    assignmentGroupId: stringValue(payload.assignmentGroupId) || null,
+    assetIds: Array.isArray(payload.assetIds)
+      ? payload.assetIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim())
+      : [stringValue(payload.assetId, row.jobId)],
     assignee: {
       membershipId: stringValue(payload.assigneeMembershipId),
       actorId: stringValue(payload.assigneeActorId),
@@ -165,7 +176,7 @@ function resourceIds(payload: JsonObject) {
   if (Array.isArray(payload.resources)) {
     ids.push(...payload.resources.map((resource) => isRecord(resource) ? resource.id : null));
   }
-  return [...new Set(ids.filter((value): value is string => typeof value === "string" && value.trim()).map((value) => value.trim()))];
+  return [...new Set(ids.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()))];
 }
 
 function journeyWindow(payload: JsonObject) {
@@ -278,7 +289,7 @@ export async function POST(request: Request) {
   const parsed = await readBody(request);
   if ("error" in parsed) return Response.json({ error: parsed.error }, { status: parsed.error === "payload_too_large" ? 413 : 400 });
   const input = parsed.value;
-  const assetId = bounded(input.assetId, 160);
+  const assetIds = boundedList(input.assetIds ?? input.assetId);
   const assigneeMembershipId = bounded(input.assigneeMembershipId, 200);
   const kind = assignmentKind(input.assignmentKind);
   const startsAt = bounded(input.startsAt, 64);
@@ -287,7 +298,7 @@ export async function POST(request: Request) {
   const notes = bounded(input.notes, 2_000);
   const idempotencyKey = bounded(input.idempotencyKey, 160);
 
-  if (!assetId) return Response.json({ error: "asset_id_required" }, { status: 400 });
+  if (!assetIds.length) return Response.json({ error: "asset_id_required" }, { status: 400 });
   if (!assigneeMembershipId) return Response.json({ error: "assignee_membership_required" }, { status: 400 });
   if (!kind) return Response.json({ error: "assignment_kind_invalid" }, { status: 400 });
   if (!validDate(startsAt)) return Response.json({ error: "assignment_start_invalid" }, { status: 400 });
@@ -307,16 +318,31 @@ export async function POST(request: Request) {
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.id, existingEvent.aggregateId),
       )).limit(1);
+      const existingGroupId = existing ? stringValue(parseJson(existing.payloadJson).assignmentGroupId) : "";
+      const existingRows = existingGroupId
+        ? (await assignmentRows(context.tenantId)).filter((row) => stringValue(parseJson(row.payloadJson).assignmentGroupId) === existingGroupId)
+        : existing ? [existing] : [];
       return existing
-        ? Response.json({ assignment: assignmentForResponse(existing), idempotent: true, eventId: existingEvent.eventId }, { headers: { "cache-control": "private, no-store" } })
+        ? Response.json({
+          assignment: assignmentForResponse(existingRows[0] ?? existing),
+          assignments: (existingRows.length ? existingRows : [existing]).map(assignmentForResponse),
+          idempotent: true,
+          eventId: existingEvent.eventId,
+          assignmentGroupId: existingGroupId || null,
+        }, { headers: { "cache-control": "private, no-store" } })
         : Response.json({ error: "asset_assignment_idempotency_readback_unavailable" }, { status: 503 });
     }
 
-    const asset = await findAsset(context.tenantId, assetId);
-    if (!asset) return Response.json({ error: "asset_not_found" }, { status: 404 });
-    const assetPayload = parseJson(asset.payloadJson);
-    const currentLifecycle = upper(assetPayload.lifecycleStatus || asset.status || "AVAILABLE");
-    if (currentLifecycle !== "AVAILABLE") return Response.json({ error: "asset_not_assignable", lifecycleStatus: currentLifecycle }, { status: 409 });
+    const assets = [] as Array<{ asset: NonNullable<Awaited<ReturnType<typeof findAsset>>>; payload: JsonObject; kindClass: string }>;
+    for (const requestedAssetId of assetIds) {
+      const asset = await findAsset(context.tenantId, requestedAssetId);
+      if (!asset) return Response.json({ error: "asset_not_found", assetId: requestedAssetId }, { status: 404 });
+      if (assets.some((entry) => entry.asset.id === asset.id)) continue;
+      const payload = parseJson(asset.payloadJson);
+      const currentLifecycle = upper(payload.lifecycleStatus || asset.status || "AVAILABLE");
+      if (currentLifecycle !== "AVAILABLE") return Response.json({ error: "asset_not_assignable", assetId: asset.id, lifecycleStatus: currentLifecycle }, { status: 409 });
+      assets.push({ asset, payload, kindClass: assetClass(payload) });
+    }
 
     const [member] = await db.select().from(tenantMemberships).where(and(
       eq(tenantMemberships.tenantId, context.tenantId),
@@ -325,119 +351,142 @@ export async function POST(request: Request) {
     )).limit(1);
     if (!member) return Response.json({ error: "assignee_not_found_or_inactive" }, { status: 404 });
     const roles = normalizeAuthorityRoles(member.rolesJson, member.role);
-    const kindClass = assetClass(assetPayload);
-    if (kindClass === "VEHICLE" && !isDriver(roles)) return Response.json({ error: "vehicle_assignee_driver_capability_required" }, { status: 422 });
-    if (kindClass !== "VEHICLE" && !isOperator(roles)) return Response.json({ error: "asset_assignee_operator_capability_required" }, { status: 422 });
+    for (const entry of assets) {
+      if (entry.kindClass === "VEHICLE" && !isDriver(roles)) return Response.json({ error: "vehicle_assignee_driver_capability_required" }, { status: 422 });
+      if (entry.kindClass !== "VEHICLE" && !isOperator(roles)) return Response.json({ error: "asset_assignee_operator_capability_required" }, { status: 422 });
+    }
 
     const [rows, journeyRows] = await Promise.all([assignmentRows(context.tenantId), scheduledJourneyRows(context.tenantId)]);
     const requestedWindow = assignmentWindow(startsAt, endsAt);
-    const conflict = rows.find((row) => {
-      const status = upper(row.status) as AssignmentStatus;
-      if (TERMINAL_STATUSES.has(status)) return false;
-      const payload = parseJson(row.payloadJson);
-      const existingWindow = dateRange(payload);
-      if (!existingWindow) return false;
-      const sameAsset = stringValue(payload.assetId, row.jobId) === asset.id;
-      const samePerson = stringValue(payload.assigneeMembershipId) === member.id || stringValue(payload.assigneeActorId) === member.actorId;
-      const sameClass = upper(payload.assignmentClass || assetClass(payload)) === kindClass;
-      return (sameAsset || (samePerson && sameClass)) && overlaps(requestedWindow, { start: existingWindow.start, end: existingWindow.end });
-    });
-    if (conflict) {
-      const conflictPayload = parseJson(conflict.payloadJson);
-      return Response.json({
-        error: "asset_assignment_conflict",
-        conflict: {
-          id: conflict.id,
-          assetId: stringValue(conflictPayload.assetId, conflict.jobId),
-          assetTitle: stringValue(conflictPayload.assetTitle, conflict.title),
-          assigneeName: stringValue(conflictPayload.assigneeName, "Persona assegnata"),
-          startsAt: stringValue(conflictPayload.startsAt),
-          endsAt: stringValue(conflictPayload.endsAt) || null,
-          status: conflict.status,
-        },
-      }, { status: 409 });
-    }
-    const journeyConflict = journeyRows.find((row) => {
-      const payload = parseJson(row.payloadJson);
-      const window = journeyWindow(payload);
-      return window && resourceIds(payload).includes(asset.id) && overlaps(requestedWindow, { start: window.start, end: window.end });
-    });
-    if (journeyConflict) {
-      const payload = parseJson(journeyConflict.payloadJson);
-      const window = journeyWindow(payload);
-      return Response.json({
-        error: "asset_assignment_conflict",
-        conflictType: "MISSION_OR_PLANNING",
-        conflict: {
-          id: journeyConflict.id,
-          assetId: asset.id,
-          assetTitle: asset.title,
-          assigneeName: "Risorsa già impegnata",
-          startsAt: window?.startsAt ?? "",
-          endsAt: window?.endsAt ?? null,
-          status: journeyConflict.status,
-          title: journeyConflict.title,
-        },
-      }, { status: 409 });
+    for (const entry of assets) {
+      const conflict = rows.find((row) => {
+        const status = upper(row.status) as AssignmentStatus;
+        if (TERMINAL_STATUSES.has(status)) return false;
+        const payload = parseJson(row.payloadJson);
+        const existingWindow = dateRange(payload);
+        if (!existingWindow) return false;
+        return stringValue(payload.assetId, row.jobId) === entry.asset.id
+          && overlaps(requestedWindow, { start: existingWindow.start, end: existingWindow.end });
+      });
+      if (conflict) {
+        const conflictPayload = parseJson(conflict.payloadJson);
+        return Response.json({
+          error: "asset_assignment_conflict",
+          conflict: {
+            id: conflict.id,
+            assetId: stringValue(conflictPayload.assetId, conflict.jobId),
+            assetTitle: stringValue(conflictPayload.assetTitle, conflict.title),
+            assigneeName: stringValue(conflictPayload.assigneeName, "Risorsa già assegnata"),
+            startsAt: stringValue(conflictPayload.startsAt),
+            endsAt: stringValue(conflictPayload.endsAt) || null,
+            status: conflict.status,
+          },
+        }, { status: 409 });
+      }
+      const journeyConflict = journeyRows.find((row) => {
+        const payload = parseJson(row.payloadJson);
+        const window = journeyWindow(payload);
+        return window && resourceIds(payload).includes(entry.asset.id) && overlaps(requestedWindow, { start: window.start, end: window.end });
+      });
+      if (journeyConflict) {
+        const payload = parseJson(journeyConflict.payloadJson);
+        const window = journeyWindow(payload);
+        return Response.json({
+          error: "asset_assignment_conflict",
+          conflictType: "MISSION_OR_PLANNING",
+          conflict: {
+            id: journeyConflict.id,
+            assetId: entry.asset.id,
+            assetTitle: entry.asset.title,
+            assigneeName: "Risorsa già impegnata",
+            startsAt: window?.startsAt ?? "",
+            endsAt: window?.endsAt ?? null,
+            status: journeyConflict.status,
+            title: journeyConflict.title,
+          },
+        }, { status: 409 });
+      }
     }
 
     const now = new Date().toISOString();
     const normalizedStart = new Date(Date.parse(startsAt)).toISOString();
     const normalizedEnd = endsAt ? new Date(Date.parse(endsAt)).toISOString() : null;
     const status: AssignmentStatus = Date.parse(normalizedStart) > Date.now() ? "SCHEDULED" : "ACTIVE";
-    const assignmentId = `ASSET-ASSIGN-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
-    const assignmentPayload: JsonObject = {
-      assetId: asset.id,
-      assetCode: asset.canonicalCode,
-      assetTitle: asset.title,
-      entityType: upper(assetPayload.entityType) || "ASSET",
-      assignmentClass: kindClass,
-      assignmentKind: kind,
-      assigneeMembershipId: member.id,
-      assigneeActorId: member.actorId,
-      assigneeEmail: member.actorEmail,
-      assigneeName: member.displayName,
-      assigneeRole: member.role,
-      assigneeRoles: roles,
-      startsAt: normalizedStart,
-      endsAt: normalizedEnd,
-      purpose,
-      notes,
-      source: "asset-assignment-registry",
-      createdAt: now,
-    };
-    await db.insert(jobJourneyRecords).values({
-      id: assignmentId,
-      tenantId: context.tenantId,
-      jobId: asset.id,
-      domain: "assets",
-      recordType: "ASSET_ASSIGNMENT",
-      title: `${asset.title} · ${member.displayName}`.slice(0, 180),
-      status,
-      version: 1,
-      payloadJson: JSON.stringify(assignmentPayload),
-      idempotencyKey,
-      createdBy: context.actorId,
-      updatedBy: context.actorId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const eventId = await writeEvent({
-      tenantId: context.tenantId,
-      actorId: context.actorId,
-      eventType: "asset.assignment.created",
-      aggregateId: assignmentId,
-      aggregateVersion: 1,
-      idempotencyKey,
-      payload: { assetId: asset.id, assigneeMembershipId: member.id, assignmentKind: kind, startsAt: normalizedStart, endsAt: normalizedEnd, status },
-      now,
-    });
-    const [created] = await db.select().from(jobJourneyRecords).where(and(
-      eq(jobJourneyRecords.tenantId, context.tenantId),
-      eq(jobJourneyRecords.id, assignmentId),
-    )).limit(1);
-    if (!created) return Response.json({ error: "asset_assignment_readback_unavailable" }, { status: 503 });
-    return Response.json({ assignment: assignmentForResponse(created), eventId, idempotent: false, readback: "verified" }, { status: 201, headers: { "cache-control": "private, no-store" } });
+    const assignmentGroupId = `ASSET-BATCH-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+    const resolvedAssetIds = assets.map((entry) => entry.asset.id);
+    const createdRows: Array<typeof jobJourneyRecords.$inferSelect> = [];
+    const eventIds: string[] = [];
+    for (const [index, entry] of assets.entries()) {
+      const assignmentId = `ASSET-ASSIGN-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+      const assignmentIdempotencyKey = index === 0 ? idempotencyKey : `${idempotencyKey}:${index}`;
+      const assignmentPayload: JsonObject = {
+        assetId: entry.asset.id,
+        assetIds: resolvedAssetIds,
+        assignmentGroupId,
+        assetCode: entry.asset.canonicalCode,
+        assetTitle: entry.asset.title,
+        entityType: upper(entry.payload.entityType) || "ASSET",
+        assignmentClass: entry.kindClass,
+        assignmentKind: kind,
+        assigneeMembershipId: member.id,
+        assigneeActorId: member.actorId,
+        assigneeEmail: member.actorEmail,
+        assigneeName: member.displayName,
+        assigneeRole: member.role,
+        assigneeRoles: roles,
+        startsAt: normalizedStart,
+        endsAt: normalizedEnd,
+        purpose,
+        notes,
+        source: "asset-assignment-registry",
+        createdAt: now,
+      };
+      await db.insert(jobJourneyRecords).values({
+        id: assignmentId,
+        tenantId: context.tenantId,
+        jobId: entry.asset.id,
+        domain: "assets",
+        recordType: "ASSET_ASSIGNMENT",
+        title: `${entry.asset.title} · ${member.displayName}`.slice(0, 180),
+        status,
+        version: 1,
+        payloadJson: JSON.stringify(assignmentPayload),
+        idempotencyKey: assignmentIdempotencyKey,
+        createdBy: context.actorId,
+        updatedBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const eventId = await writeEvent({
+        tenantId: context.tenantId,
+        actorId: context.actorId,
+        eventType: "asset.assignment.created",
+        aggregateId: assignmentId,
+        aggregateVersion: 1,
+        idempotencyKey: assignmentIdempotencyKey,
+        payload: { assetId: entry.asset.id, assetIds: resolvedAssetIds, assignmentGroupId, assigneeMembershipId: member.id, assignmentKind: kind, startsAt: normalizedStart, endsAt: normalizedEnd, status },
+        now,
+      });
+      const [created] = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.id, assignmentId),
+      )).limit(1);
+      if (!created) return Response.json({ error: "asset_assignment_readback_unavailable" }, { status: 503 });
+      createdRows.push(created);
+      eventIds.push(eventId);
+    }
+    const firstCreated = createdRows[0];
+    if (!firstCreated) return Response.json({ error: "asset_assignment_readback_unavailable" }, { status: 503 });
+    return Response.json({
+      assignment: assignmentForResponse(firstCreated),
+      assignments: createdRows.map(assignmentForResponse),
+      assignmentGroupId,
+      assetCount: createdRows.length,
+      eventId: eventIds[0],
+      eventIds,
+      idempotent: false,
+      readback: "verified",
+    }, { status: 201, headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/unique|constraint/i.test(message)) return Response.json({ error: "asset_assignment_idempotency_or_version_conflict" }, { status: 409 });

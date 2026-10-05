@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarClock, LoaderCircle, Send, ShieldCheck, UserRound, X } from "lucide-react";
+import { CalendarClock, Check, LoaderCircle, Package, Send, ShieldCheck, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,9 @@ type AssetRecord = {
   id: string;
   canonicalCode?: string;
   title: string;
+  status?: string;
   payload?: Record<string, unknown>;
+  lifecycle?: { status?: string } | null;
 };
 
 type Assignee = {
@@ -27,7 +29,8 @@ type Assignee = {
 };
 
 type AssetAssignmentDialogProps = {
-  asset: AssetRecord | null;
+  assets: AssetRecord[];
+  initialAsset: AssetRecord | null;
   assignees: Assignee[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -38,6 +41,11 @@ type AssetAssignmentDialogProps = {
 function entityType(asset: AssetRecord | null) {
   const value = typeof asset?.payload?.entityType === "string" ? asset.payload.entityType.toUpperCase() : "ASSET";
   return value === "VEHICLE" ? "VEHICLE" : "ASSET";
+}
+
+function lifecycleStatus(asset: AssetRecord) {
+  const value = asset.lifecycle?.status ?? asset.payload?.lifecycleStatus ?? asset.status;
+  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "AVAILABLE";
 }
 
 function localInputValue(date: Date) {
@@ -63,7 +71,7 @@ function defaultEnd() {
 
 function friendlyError(error: string) {
   const errors: Record<string, string> = {
-    asset_assignment_conflict: "La risorsa o la persona è già impegnata nella finestra indicata.",
+    asset_assignment_conflict: "Uno degli asset è già impegnato nella finestra indicata.",
     assignee_not_found_or_inactive: "La persona selezionata non è più attiva nel tenant.",
     vehicle_assignee_driver_capability_required: "Per un mezzo devi selezionare una persona con mansione Autista.",
     asset_assignee_operator_capability_required: "Per questo asset devi selezionare una persona con mansione Operatore.",
@@ -74,8 +82,9 @@ function friendlyError(error: string) {
   return errors[error] ?? "Assegnazione non completata: verifica i dati e riprova.";
 }
 
-export function AssetAssignmentDialog({ asset, assignees, open, onOpenChange, onCreated, onNotice }: AssetAssignmentDialogProps) {
+export function AssetAssignmentDialog({ assets, initialAsset, assignees, open, onOpenChange, onCreated, onNotice }: AssetAssignmentDialogProps) {
   const [kind, setKind] = useState<AssignmentKind>("SHORT_TERM");
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [assigneeMembershipId, setAssigneeMembershipId] = useState("");
   const [startsAt, setStartsAt] = useState(defaultStart);
   const [endsAt, setEndsAt] = useState(defaultEnd);
@@ -84,26 +93,34 @@ export function AssetAssignmentDialog({ asset, assignees, open, onOpenChange, on
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const type = entityType(asset);
-  const eligibleAssignees = useMemo(() => assignees.filter((assignee) => assignee.eligibleFor.includes(type)), [assignees, type]);
+  const selectableAssets = useMemo(() => [...assets]
+    .filter((candidate) => lifecycleStatus(candidate) === "AVAILABLE")
+    .sort((left, right) => Number(right.id === initialAsset?.id) - Number(left.id === initialAsset?.id)), [assets, initialAsset?.id]);
+  const selectedAssets = useMemo(() => selectableAssets.filter((candidate) => selectedAssetIds.includes(candidate.id)), [selectableAssets, selectedAssetIds]);
+  const selectedTypes = useMemo(() => new Set(selectedAssets.map(entityType)), [selectedAssets]);
+  const initialAssetId = initialAsset?.id;
+  const initialAssetAvailable = initialAsset ? lifecycleStatus(initialAsset) === "AVAILABLE" : false;
+  const primaryType = entityType(initialAsset);
+  const eligibleAssignees = useMemo(() => assignees.filter((assignee) => [...selectedTypes].every((type) => assignee.eligibleFor.includes(type))), [assignees, selectedTypes]);
 
   /* eslint-disable react-hooks/set-state-in-effect -- defaults follow the selected asset and dialog lifecycle. */
   useEffect(() => {
     if (!open) return;
     setKind("SHORT_TERM");
+    setSelectedAssetIds(initialAssetId && initialAssetAvailable ? [initialAssetId] : []);
     setAssigneeMembershipId("");
     setStartsAt(defaultStart());
     setEndsAt(defaultEnd());
-    setPurpose(type === "VEHICLE" ? "Consegna mezzo" : "Consegna asset operativo");
+    setPurpose(primaryType === "VEHICLE" ? "Consegna mezzo" : "Consegna asset operativo");
     setNotes("");
     setError("");
-  }, [asset?.id, open, type]);
+  }, [initialAssetAvailable, initialAssetId, open, primaryType]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!asset || !assigneeMembershipId) {
-      setError("Seleziona la persona che riceverà la risorsa.");
+    if (!selectedAssetIds.length || !assigneeMembershipId) {
+      setError(selectedAssetIds.length ? "Seleziona la persona che riceverà le risorse." : "Seleziona almeno un asset disponibile.");
       return;
     }
     if (!startsAt || (kind === "SHORT_TERM" && !endsAt)) {
@@ -117,7 +134,8 @@ export function AssetAssignmentDialog({ asset, assignees, open, onOpenChange, on
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          assetId: asset.id,
+          assetId: selectedAssetIds[0],
+          assetIds: selectedAssetIds,
           assigneeMembershipId,
           assignmentKind: kind,
           startsAt: toIso(startsAt),
@@ -131,7 +149,9 @@ export function AssetAssignmentDialog({ asset, assignees, open, onOpenChange, on
       if (!response.ok) throw new Error(payload.error ?? "asset_assignment_write_failed");
       onCreated();
       onOpenChange(false);
-      onNotice(kind === "SHORT_TERM" ? "Assegnazione breve registrata." : "Assegnazione continuativa registrata.");
+      onNotice(selectedAssetIds.length > 1
+        ? `${selectedAssetIds.length} asset assegnati alla stessa risorsa.`
+        : kind === "SHORT_TERM" ? "Assegnazione breve registrata." : "Assegnazione continuativa registrata.");
     } catch (caught) {
       setError(friendlyError(caught instanceof Error ? caught.message : "asset_assignment_write_failed"));
     } finally {
@@ -146,26 +166,43 @@ export function AssetAssignmentDialog({ asset, assignees, open, onOpenChange, on
           <div className="flex items-start gap-3">
             <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200 shadow-[0_0_24px_rgba(200,255,34,.1)]"><UserRound className="size-5" /></span>
             <div>
-              <DialogTitle className="text-xl tracking-[-.03em] text-slate-50">Assegna risorsa</DialogTitle>
-              <DialogDescription className="mt-1 text-slate-500">Consegna {asset?.canonicalCode ?? asset?.title ?? "la risorsa"} alla persona giusta, per una finestra definita.</DialogDescription>
+              <DialogTitle className="text-xl tracking-[-.03em] text-slate-50">Assegna risorse</DialogTitle>
+              <DialogDescription className="mt-1 text-slate-500">Seleziona uno o più asset disponibili e consegnali alla stessa persona per una finestra definita.</DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         <div className="rounded-2xl border border-lime-300/15 bg-lime-300/[.035] p-4">
-          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" /><p className="text-[11px] leading-5 text-slate-500">Il catalogo mostra solo persone attive e abilitate da Authority. Per un mezzo compare soltanto chi ha la mansione Autista; per un asset compare chi può operare sul campo.</p></div>
+          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" /><p className="text-[11px] leading-5 text-slate-500">Il catalogo mostra solo asset disponibili e persone attive abilitate da Authority. Il server ricontrolla sovrapposizioni, disponibilità e capability per ogni asset prima di registrare la consegna.</p></div>
+        </div>
+
+        <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.025] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/80">ASSET DA CONSEGNARE</p>
+              <p className="mt-1 text-[11px] text-slate-500">Puoi associare più mezzi o attrezzature alla stessa risorsa.</p>
+            </div>
+            <span className="rounded-lg border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1.5 font-mono text-[10px] text-cyan-100">{selectedAssets.length} SELEZIONATI</span>
+          </div>
+          <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto overscroll-contain pr-1">
+            {selectableAssets.map((candidate) => {
+              const selected = selectedAssetIds.includes(candidate.id);
+              return <button aria-pressed={selected} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${selected ? "border-lime-300/45 bg-lime-300/[.08]" : "border-white/10 bg-black/20 hover:border-cyan-300/30"}`} key={candidate.id} onClick={() => { setSelectedAssetIds((current) => current.includes(candidate.id) ? current.filter((id) => id !== candidate.id) : [...current, candidate.id]); setAssigneeMembershipId(""); setError(""); }} type="button"><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${selected ? "border-lime-300/35 bg-lime-300/15 text-lime-100" : "border-white/10 bg-white/[.03] text-slate-500"}`}>{selected ? <Check className="size-4" /> : <Package className="size-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-100">{candidate.canonicalCode ?? candidate.title}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{candidate.title}{entityType(candidate) === "VEHICLE" ? " · mezzo" : " · asset operativo"}</span></span><span className="text-[9px] uppercase tracking-[.12em] text-lime-200/70">Disponibile</span></button>;
+            })}
+            {selectableAssets.length === 0 && <p className="rounded-xl border border-dashed border-amber-300/20 p-4 text-center text-[10px] text-amber-100/80">Nessun asset disponibile per una nuova consegna.</p>}
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block space-y-2"><span className="text-xs text-slate-400">Durata</span><select aria-label="Durata assegnazione" className="h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" value={kind} onChange={(event) => setKind(event.target.value as AssignmentKind)}><option className="bg-[#090d0a]" value="SHORT_TERM">Breve · con rientro</option><option className="bg-[#090d0a]" value="LONG_TERM">Lunga · fino a rientro</option></select></label>
-          <label className="block space-y-2"><span className="text-xs text-slate-400">Persona autorizzata</span><select aria-label="Persona autorizzata" className="h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" value={assigneeMembershipId} onChange={(event) => setAssigneeMembershipId(event.target.value)}><option className="bg-[#090d0a]" value="">Seleziona dal catalogo Authority</option>{eligibleAssignees.map((assignee) => <option className="bg-[#090d0a]" key={assignee.membershipId} value={assignee.membershipId}>{assignee.name} · {assignee.roleLabels.join(" · ")}</option>)}</select>{eligibleAssignees.length === 0 && <span className="block text-[10px] text-amber-200/80">Nessuna persona compatibile nel tenant.</span>}</label>
+          <label className="block space-y-2"><span className="text-xs text-slate-400">Persona autorizzata per tutti gli asset</span><select aria-label="Persona autorizzata" className="h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/50 focus:ring-2 focus:ring-lime-300/10" value={assigneeMembershipId} onChange={(event) => setAssigneeMembershipId(event.target.value)}><option className="bg-[#090d0a]" value="">Seleziona dal catalogo Authority</option>{eligibleAssignees.map((assignee) => <option className="bg-[#090d0a]" key={assignee.membershipId} value={assignee.membershipId}>{assignee.name} · {assignee.roleLabels.join(" · ")}</option>)}</select>{selectedAssets.length > 0 && eligibleAssignees.length === 0 && <span className="block text-[10px] text-amber-200/80">Nessuna persona compatibile con tutti gli asset selezionati.</span>}</label>
           <label className="block space-y-2"><span className="text-xs text-slate-400">Inizio</span><span className="relative block"><CalendarClock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Inizio assegnazione" className="h-11 border-white/10 bg-black/30 pl-10 text-sm text-slate-100" onChange={(event) => setStartsAt(event.target.value)} type="datetime-local" value={startsAt} /></span></label>
           <label className={`block space-y-2 ${kind === "LONG_TERM" ? "sm:col-span-1" : ""}`}><span className="text-xs text-slate-400">Fine {kind === "LONG_TERM" && <span className="text-slate-600">(fino al rientro)</span>}</span><span className="relative block"><CalendarClock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Fine assegnazione" className="h-11 border-white/10 bg-black/30 pl-10 text-sm text-slate-100 disabled:opacity-45" disabled={kind === "LONG_TERM"} onChange={(event) => setEndsAt(event.target.value)} type="datetime-local" value={kind === "LONG_TERM" ? "" : endsAt} /></span></label>
         </div>
-        <label className="block space-y-2"><span className="text-xs text-slate-400">Motivo operativo <span className="text-slate-600">(opzionale)</span></span><Input className="h-11 border-white/10 bg-black/30 text-sm text-slate-100" onChange={(event) => setPurpose(event.target.value)} placeholder={type === "VEHICLE" ? "Es. consegna mezzo alla squadra Nord" : "Es. attrezzatura per intervento"} value={purpose} /></label>
+        <label className="block space-y-2"><span className="text-xs text-slate-400">Motivo operativo <span className="text-slate-600">(opzionale)</span></span><Input className="h-11 border-white/10 bg-black/30 text-sm text-slate-100" onChange={(event) => setPurpose(event.target.value)} placeholder={primaryType === "VEHICLE" ? "Es. consegna mezzo alla squadra Nord" : "Es. attrezzatura per intervento"} value={purpose} /></label>
         <label className="block space-y-2"><span className="text-xs text-slate-400">Nota di consegna <span className="text-slate-600">(opzionale)</span></span><Textarea className="min-h-24 border-white/10 bg-black/30 text-sm text-slate-100" onChange={(event) => setNotes(event.target.value)} placeholder="Condizioni, dotazioni o indicazioni per il rientro" value={notes} /></label>
         {error && <p className="rounded-xl border border-rose-300/20 bg-rose-300/[.05] px-3 py-2.5 text-xs text-rose-100">{error}</p>}
-        <DialogFooter className="gap-2 sm:justify-between"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400 hover:border-white/20 hover:bg-white/[.04]"><X className="size-3.5" />Annulla</Button></DialogClose><Button type="submit" disabled={saving || eligibleAssignees.length === 0} className="bg-lime-300 text-[#060806] shadow-[0_0_22px_rgba(200,255,34,.14)] hover:bg-lime-200">{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{saving ? "Salvataggio…" : "Conferma assegnazione"}</Button></DialogFooter>
+        <DialogFooter className="gap-2 sm:justify-between"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400 hover:border-white/20 hover:bg-white/[.04]"><X className="size-3.5" />Annulla</Button></DialogClose><Button type="submit" disabled={saving || selectedAssets.length === 0 || eligibleAssignees.length === 0} className="bg-lime-300 text-[#060806] shadow-[0_0_22px_rgba(200,255,34,.14)] hover:bg-lime-200">{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{saving ? "Salvataggio…" : "Conferma assegnazione"}</Button></DialogFooter>
       </form>
     </DialogContent>
   </Dialog>;
