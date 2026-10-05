@@ -424,7 +424,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (Date.parse(endsAt) <= Date.parse(startsAt)) return Response.json({ error: "planning_end_must_follow_start" }, { status: 400 });
       let canonicalResources: PlanningResource[];
       try {
-        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds);
+        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds, { startsAt, endsAt });
       } catch (error) {
         if (error instanceof PlanningRegistryError) return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
         throw error;

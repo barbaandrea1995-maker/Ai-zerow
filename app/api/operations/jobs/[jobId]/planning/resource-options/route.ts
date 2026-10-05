@@ -70,7 +70,7 @@ export async function GET(request: Request, routeContext: RouteContext) {
       options: {
         workforce,
         assets: assets.filter((item) => item.assignable),
-        unavailableAssets: assets.filter((item) => !item.assignable),
+        unavailableAssets: assets.filter((item) => !item.assignable && !item.assignmentCustody),
         unavailableForWindow: planningOptions.filter((item) => item.assignable && !item.availableForWindow),
       },
       existingPlans: plans.map((plan) => ({ id: plan.id, status: plan.status, version: plan.version, title: plan.title, updatedAt: plan.updatedAt })),

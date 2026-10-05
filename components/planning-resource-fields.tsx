@@ -14,6 +14,13 @@ type ResourceOption = {
   qualifications: string[];
   updatedAt: string;
   availableForWindow: boolean;
+  attachedAssets?: Array<{
+    id: string;
+    code: string | null;
+    label: string;
+    kind: "asset" | "vehicle";
+    status: string;
+  }>;
   availabilityConflict?: {
     recordId: string;
     title: string;
@@ -45,9 +52,7 @@ type PlanningResourceFieldsProps = {
 };
 
 function labelFor(resource: ResourceOption) {
-  return resource.code && resource.code !== resource.label
-    ? `${resource.code} · ${resource.label}`
-    : resource.label;
+  return resource.code ? `${resource.code} · ${resource.label}` : resource.label;
 }
 
 function kindLabel(kind: ResourceOption["kind"]) {
@@ -113,6 +118,7 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
     { label: "Persone e squadre", icon: Users, items: resources.filter((resource) => resource.kind === "person" || resource.kind === "team") },
     { label: "Asset e mezzi", icon: Wrench, items: resources.filter((resource) => resource.kind === "asset" || resource.kind === "vehicle") },
   ], [resources]);
+  const attachedAssetCount = useMemo(() => new Set(resources.filter((resource) => selectedIds.includes(resource.id)).flatMap((resource) => resource.attachedAssets?.map((asset) => asset.id) ?? [])).size, [resources, selectedIds]);
 
   function toggle(id: string) {
     onChange(selectedIds.includes(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]);
@@ -123,9 +129,9 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
       <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><Users className="size-4" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">RISORSE REALI · PIANO GIORNALIERO</p>
-        <p className="mt-1 text-[10px] leading-4 text-slate-500">Seleziona soltanto persone, squadre, asset e mezzi registrati nell’azienda. La disponibilità viene verificata prima della pubblicazione.</p>
+        <p className="mt-1 text-[10px] leading-4 text-slate-500">Seleziona persone e squadre registrate. Mezzi e asset affidati a lungo termine vengono inclusi automaticamente nella scheda della persona, con nome e identificativo leggibili.</p>
       </div>
-      <span className="shrink-0 font-mono text-[9px] text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : state === "error" ? "NON DISPONIBILE" : `${selectedIds.length} SELEZIONATE`}</span>
+      <span className="shrink-0 text-right font-mono text-[9px] text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : state === "error" ? "NON DISPONIBILE" : <>{selectedIds.length} SELEZIONATE{attachedAssetCount ? <span className="block text-cyan-200/70">+ {attachedAssetCount} ASSET COLLEGATI</span> : null}</>}</span>
     </div>
     {state === "error" && <p className="mt-3 text-[10px] text-amber-200">Registro risorse non disponibile: il piano non può essere confermato.</p>}
     {state === "ready" && availabilityWindow?.window && <p className="mt-3 text-[10px] text-cyan-200/80">Disponibilità verificata per la finestra selezionata: le risorse già occupate da un’altra attività non sono selezionabili.</p>}
@@ -138,7 +144,7 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
           const conflict = resource.availabilityConflict;
           return <label className={`flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 transition ${available ? "cursor-pointer" : "cursor-not-allowed opacity-55"} ${selectedIds.includes(resource.id) ? "border-lime-300/35 bg-lime-300/[0.07]" : "border-white/[0.08] bg-black/15 hover:border-lime-300/20"}`} key={resource.id}>
             <input aria-label={`Seleziona ${labelFor(resource)}`} checked={selectedIds.includes(resource.id)} className="size-4 accent-lime-300" disabled={!available} onChange={() => toggle(resource.id)} type="checkbox" value={resource.id} />
-            <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-medium text-slate-200">{labelFor(resource)}</span><span className="mt-0.5 block truncate text-[9px] text-slate-600">{kindLabel(resource.kind)} · {resourceStatusLabel(resource.status)}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</span>{conflict && <span className="mt-1 block truncate text-[9px] text-amber-200/80">Impegnata: {conflict.title}</span>}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-medium text-slate-200">{labelFor(resource)}</span><span className="mt-0.5 block truncate text-[9px] text-slate-600">{kindLabel(resource.kind)} · {resourceStatusLabel(resource.status)}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</span>{resource.attachedAssets?.length ? <span className="mt-1 block truncate text-[9px] text-cyan-200/80">Asset affidati: {resource.attachedAssets.map((asset) => asset.code ? `${asset.code} · ${asset.label}` : asset.label).join(" · ")}</span> : null}{conflict && <span className="mt-1 block truncate text-[9px] text-amber-200/80">Impegnata: {conflict.title}</span>}</span>
           </label>;
         })}</div>
       </div>)}

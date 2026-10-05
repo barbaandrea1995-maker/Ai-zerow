@@ -324,9 +324,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
     const now = new Date().toISOString();
     if (action === "what_if" || action === "draft" || action === "revise") {
+      const resourceWindow = (() => {
+        const startsAt = bounded(input.startsAt, 40);
+        const endsAt = bounded(input.endsAt, 40);
+        return startsAt && endsAt && Number.isFinite(Date.parse(startsAt)) && Number.isFinite(Date.parse(endsAt)) && Date.parse(endsAt) > Date.parse(startsAt)
+          ? { startsAt, endsAt }
+          : undefined;
+      })();
       let canonicalResources: PlanningResource[];
       try {
-        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds);
+        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds, resourceWindow);
       } catch (error) {
         if (error instanceof PlanningResourceError) {
           return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
