@@ -250,6 +250,15 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
     const currentPayload = latest ? parseJson(latest.payloadJson) : {};
     const transitions = Array.isArray(currentPayload.transitions) ? currentPayload.transitions.filter(isRecord).slice(-49) : [];
+    const previousCorrection = [...transitions].reverse().find((item) => item.action === "correction_request");
+    const requestedCorrectionAt = previousCorrection && typeof previousCorrection.correctionAt === "string"
+      ? previousCorrection.correctionAt
+      : "";
+    const effectiveCorrectionAt = action === "correction_request" && correctionAtIsValid
+      ? correctionAt
+      : action === "correction_approve" && Number.isFinite(Date.parse(requestedCorrectionAt))
+        ? requestedCorrectionAt
+        : null;
     const aggregateId = latest?.id ?? crypto.randomUUID();
     let activeTrackingSession: typeof trackingSessions.$inferSelect | null = null;
     let trackingSessionId: string | null = null;
@@ -286,7 +295,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       clientObservedAt: Number.isFinite(Date.parse(clientObservedAt)) ? clientObservedAt : null,
       by: context.actorId,
       note: bounded(input.note, 1_000),
-      correctionAt: action === "correction_request" && correctionAtIsValid ? correctionAt : null,
+      correctionAt: effectiveCorrectionAt,
       location: locationWithGeofence,
       dutyMode: operational.mode,
       missionId: operational.mission?.id ?? null,
