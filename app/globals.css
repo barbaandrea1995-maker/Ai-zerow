@@ -1909,6 +1909,34 @@ select:focus-visible {
   backdrop-filter: blur(18px);
 }
 
+/* One navigation rail for every authenticated surface. Legacy module-local
+   copies stay in source temporarily for safe rollback, but never render. */
+.zw-command-sidebar:not(.zw-workspace-sidebar),
+main > div > aside:not(.zw-workspace-sidebar) {
+  display: none !important;
+}
+
+.zw-global-workspace-sidebar {
+  position: fixed !important;
+  z-index: 110 !important;
+}
+
+@media (min-width: 1024px) {
+  body.has-zerow-workspace-sidebar > main,
+  body.has-zerow-workspace-sidebar .zw-app-shell,
+  body:has(.zw-global-workspace-sidebar) > main,
+  body:has(.zw-global-workspace-sidebar) .zw-app-shell {
+    padding-left: 248px;
+  }
+
+  body.has-zerow-workspace-sidebar:has(.zw-global-workspace-sidebar.is-collapsed) > main,
+  body.has-zerow-workspace-sidebar:has(.zw-global-workspace-sidebar.is-collapsed) .zw-app-shell,
+  body:has(.zw-global-workspace-sidebar.is-collapsed) > main,
+  body:has(.zw-global-workspace-sidebar.is-collapsed) .zw-app-shell {
+    padding-left: 76px;
+  }
+}
+
 @media (max-width: 767px) {
   .zw-command-sidebar {
     width: min(340px, calc(100vw - 20px));

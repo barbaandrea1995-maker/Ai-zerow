@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { GlobalModuleControls } from "@/components/global-module-controls";
+import { GlobalModuleControls, type GlobalAuthority } from "@/components/global-module-controls";
 import { PwaRegister } from "@/components/pwa-register";
+import { getAuthorityContext } from "@/lib/authority-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -27,14 +28,24 @@ export const viewport: Viewport = {
   themeColor: "#030504",
 };
 
-export default function RootLayout({
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  let authority: GlobalAuthority | null = null;
+  try {
+    const context = await getAuthorityContext();
+    if (context) authority = { role: context.role, capabilities: context.capabilities };
+  } catch {
+    authority = null;
+  }
+
   return (
     <html lang="it">
-      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls /></body>
+      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls initialAuthority={authority} /></body>
     </html>
   );
 }
