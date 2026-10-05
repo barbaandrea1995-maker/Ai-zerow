@@ -162,6 +162,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
 export async function POST(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  let failureStage = "route_start";
   const reference = await routeJobId(routeContext);
   if (!reference) return Response.json({ error: "invalid_job_id" }, { status: 400 });
   const parsed = await readBoundedJson(request);
@@ -175,6 +176,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
 
   try {
+    failureStage = "find_job";
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
@@ -193,6 +195,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       return Response.json({ attendance: attendanceForResponse(record), eventId: existingEvent.eventId, idempotent: true }, { headers: { "cache-control": "private, no-store" } });
     }
 
+    failureStage = "read_latest_attendance";
     const [latest] = await db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, job.id),
@@ -229,6 +232,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (correctionNote.length < 8) return Response.json({ error: "correction_note_required" }, { status: 400 });
     }
 
+    failureStage = "resolve_operational_context";
     const location = sanitizeLocation(input.location);
     const operational = await resolveAttendanceOperationalContext({ context, job });
     const requiresLocation = action === "check_in" || action === "check_out";
@@ -263,6 +267,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let activeTrackingSession: typeof trackingSessions.$inferSelect | null = null;
     let trackingSessionId: string | null = null;
     let trackingOperation: "start" | "pause" | "resume" | "close" | null = null;
+    failureStage = "resolve_tracking_context";
     if (operational.mode === "DRIVER") {
       const sessionRows = await db.select().from(trackingSessions).where(and(
         eq(trackingSessions.tenantId, context.tenantId),
@@ -330,6 +335,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     } satisfies JsonObject;
     const eventId = crypto.randomUUID();
     const nextVersion = (latest?.version ?? 0) + 1;
+    failureStage = "build_attendance_statements";
     const attendanceStatements: BatchItem<"sqlite">[] = latest
       ? [
         db.update(jobJourneyRecords).set({ status: actionContract.next, version: nextVersion, payloadJson: JSON.stringify(payload), updatedBy: context.actorId, updatedAt: now }).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.id, latest.id), eq(jobJourneyRecords.version, latest.version))).returning(),
@@ -379,7 +385,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "tracking.session", aggregateId: activeTrackingSession.id, expectedVersion: Date.now(), observedVersion: Date.now(), status: "SITES_READBACK_VERIFIED", detail: "Stato tracking riallineato alla transizione di presenza.", createdAt: now, updatedAt: now }),
       );
     }
+    failureStage = "commit_attendance_batch";
     const results = await db.batch([...attendanceStatements, ...trackingStatements] as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+    failureStage = "read_attendance_back";
     const updated = latest ? (results[0] as unknown as (typeof jobJourneyRecords.$inferSelect)[])[0] : (await db.select().from(jobJourneyRecords).where(eq(jobJourneyRecords.id, aggregateId)).limit(1))[0];
     if (!updated) return Response.json({ error: "attendance_readback_unavailable" }, { status: 503 });
     const [trackingReadback] = trackingSessionId
@@ -388,6 +396,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     return Response.json({ attendance: attendanceForResponse(updated), tracking: trackingReadback ? sessionForResponse(trackingReadback) : { status: operational.mode === "DRIVER" ? trackingState.status : "NOT_REQUIRED", sessionId: null }, eventId, idempotent: false, readback: "verified" }, { status: latest ? 200 : 201, headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
+    console.error("attendance_write_failed", { stage: failureStage, action, message: message.slice(0, 240) });
     if (/unique|constraint/i.test(message)) return Response.json({ error: "attendance_idempotency_or_version_conflict" }, { status: 409 });
     return Response.json({ error: "attendance_write_unavailable" }, { status: 503 });
   }
