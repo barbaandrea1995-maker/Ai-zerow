@@ -51,7 +51,7 @@ function assignmentKind(value: unknown): AssignmentKind | null {
 }
 
 function isDriver(roles: readonly AuthorityRole[]) {
-  return roles.includes("driver");
+  return roles.includes("driver") || roles.includes("delivery_driver");
 }
 
 function isOperator(roles: readonly AuthorityRole[]) {

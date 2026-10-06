@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
+import { assetTransportCapabilities, assetUsageMode, vehicleCanTransport, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
 
 export type MissionResourceKind = "driver" | "vehicle" | "cargo";
 export type MissionAvailability = "READY" | "DATE_REQUIRED" | "NO_RESOURCES";
@@ -9,6 +10,9 @@ export type MissionResource = {
   id: string;
   code: string | null;
   label: string;
+  model: string | null;
+  registration: string | null;
+  serialNumber: string | null;
   kind: MissionResourceKind;
   actorId: string | null;
   membershipId: string | null;
@@ -17,6 +21,10 @@ export type MissionResource = {
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
   custody: { assignmentId: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
   qualifications: string[];
+  usageMode: AssetUsageMode | null;
+  transportCapabilities: TransportCapability[];
+  deliveryEligible: boolean;
+  eligibilityReason: string | null;
   updatedAt: string;
 };
 
@@ -33,6 +41,8 @@ export class MissionResourceError extends Error {
       | "cargo_asset_unavailable"
       | "mission_resource_conflict"
       | "vehicle_assigned_to_other_driver"
+      | "delivery_driver_capability_required"
+      | "vehicle_transport_profile_required"
       | "mission_window_invalid",
     public readonly details?: Record<string, unknown>,
   ) {
@@ -52,8 +62,8 @@ function parseJson(value: string): JsonObject {
   }
 }
 
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.trim() : fallback;
 }
 
 function upper(value: unknown) {
@@ -84,13 +94,38 @@ function qualifications(payload: JsonObject) {
     : [];
 }
 
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
+function deliveryDriverEligible(payload: JsonObject) {
+  const roles = stringList(payload.authorityRoles || payload.roles).map((role) => role.toLowerCase());
+  const capabilities = stringList(payload.capabilities);
+  return payload.deliveryDriver === true
+    || roles.includes("delivery_driver")
+    || capabilities.includes("mission.delivery.execute");
+}
+
+function requiresDeliveryDriver(transportMode?: string) {
+  return ["ASSET_TRANSFER", "WAREHOUSE_TO_RECIPIENT", "WAREHOUSE_TO_JOB", "RETURN_TO_WAREHOUSE", "WAREHOUSE_TRANSFER"].includes(upper(transportMode));
+}
+
 function resourceFromRow(row: typeof s04Records.$inferSelect, kind: MissionResourceKind): MissionResource {
   const payload = parseJson(row.payloadJson);
   const status = lifecycleStatus(row, payload);
+  const label = stringValue(payload.title || payload.description || payload.name || row.detail || row.title) || row.title;
+  const usageMode = kind === "vehicle" || kind === "cargo" ? assetUsageMode(payload) : null;
+  const transportCapabilities = kind === "vehicle" || kind === "cargo" ? assetTransportCapabilities(payload) : [];
+  const deliveryEligible = kind === "driver" ? deliveryDriverEligible(payload) : kind === "vehicle" ? vehicleCanTransport(payload) : true;
   return {
     id: row.id,
     code: row.canonicalCode,
-    label: row.title,
+    label,
+    model: stringValue(payload.model) || null,
+    registration: stringValue(payload.registration) || null,
+    serialNumber: stringValue(payload.serialNumber || payload.serial) || null,
     kind,
     actorId: stringValue(payload.actorId) || null,
     membershipId: stringValue(payload.authorityMembershipId || payload.membershipId) || null,
@@ -99,6 +134,10 @@ function resourceFromRow(row: typeof s04Records.$inferSelect, kind: MissionResou
     conflict: null,
     custody: null,
     qualifications: qualifications(payload),
+    usageMode,
+    transportCapabilities,
+    deliveryEligible,
+    eligibilityReason: kind === "vehicle" && !deliveryEligible ? "vehicle_transport_profile_required" : null,
     updatedAt: row.updatedAt,
   };
 }
@@ -194,6 +233,7 @@ export async function getMissionResourceCatalog(args: {
   plannedAt?: string;
   plannedEndAt?: string;
   excludeRecordId?: string;
+  transportMode?: string;
 }) {
   const rows = await getDb().select().from(s04Records).where(eq(s04Records.tenantId, args.tenantId)).orderBy(desc(s04Records.updatedAt)).limit(1000);
   const resources = rows.flatMap((row) => {
@@ -224,12 +264,21 @@ export async function getMissionResourceCatalog(args: {
     const cargoCustodyConflict = resource.kind === "cargo" && custody
       ? { recordId: custody.assignmentId, title: `Assegnata a ${custody.assigneeName}`, startsAt: custody.startsAt, endsAt: custody.endsAt ?? window?.endsAt ?? custody.startsAt }
       : null;
+    const capabilityBlocked = resource.kind === "vehicle"
+      ? !resource.deliveryEligible
+      : resource.kind === "driver" && requiresDeliveryDriver(args.transportMode)
+        ? !resource.deliveryEligible
+        : false;
+    const eligibilityReason = capabilityBlocked
+      ? resource.kind === "driver" ? "delivery_driver_capability_required" : "vehicle_transport_profile_required"
+      : resource.eligibilityReason;
     return {
       ...resource,
-      available: resource.available && !conflict && !cargoCustodyConflict,
+      available: resource.available && !capabilityBlocked && !conflict && !cargoCustodyConflict,
       conflict: conflict
         ? { recordId: conflict.recordId, title: conflict.title, startsAt: conflict.startsAt, endsAt: conflict.endsAt }
         : cargoCustodyConflict,
+      eligibilityReason,
       custody: custody ?? null,
     } satisfies MissionResource;
   });
@@ -266,6 +315,7 @@ export async function assertMissionResourceSelection(args: {
   driverId: string;
   vehicleId: string;
   cargoAssetId?: string;
+  transportMode?: string;
   plannedAt: string;
   plannedEndAt?: string;
   excludeRecordId?: string;
@@ -278,6 +328,12 @@ export async function assertMissionResourceSelection(args: {
   if (!driver) throw new MissionResourceError("driver_not_found");
   if (!vehicle) throw new MissionResourceError("vehicle_not_found");
   if (args.cargoAssetId && !cargoAsset) throw new MissionResourceError("cargo_asset_not_found");
+  if (requiresDeliveryDriver(args.transportMode) && !driver.deliveryEligible) {
+    throw new MissionResourceError("delivery_driver_capability_required", { resourceId: driver.id });
+  }
+  if (!vehicle.deliveryEligible) {
+    throw new MissionResourceError("vehicle_transport_profile_required", { resourceId: vehicle.id, usageMode: vehicle.usageMode });
+  }
   if (!driver.available) throw new MissionResourceError(driver.conflict ? "mission_resource_conflict" : "driver_unavailable", { resourceId: driver.id, conflict: driver.conflict });
   if (vehicle.custody && vehicle.custody.assigneeActorId !== driver.actorId && vehicle.custody.assigneeMembershipId !== driver.membershipId) {
     throw new MissionResourceError("vehicle_assigned_to_other_driver", {

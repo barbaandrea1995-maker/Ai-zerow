@@ -24,6 +24,10 @@ export const dynamic = "force-dynamic";
 
 type JsonObject = Record<string, unknown>;
 
+function hasDriverRole(roles: readonly AuthorityRole[]) {
+  return roles.includes("driver") || roles.includes("delivery_driver");
+}
+
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -400,15 +404,15 @@ export async function PATCH(request: Request) {
     const nextVersion = target.version + 1;
     const aggregateType = "authority.membership";
     const driverResourceId = `AUTH-DRIVER-${target.actorId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
-    const [driverResource] = targetRoles.includes("driver") || nextRoles.includes("driver")
+    const [driverResource] = hasDriverRole(targetRoles) || hasDriverRole(nextRoles)
       ? await db.select().from(s04Records).where(and(
         eq(s04Records.tenantId, context.tenantId),
         eq(s04Records.id, driverResourceId),
       )).limit(1)
       : [];
-    const driverAvailable = nextRoles.includes("driver") && nextStatus === "active";
-    const driverStatus = driverAvailable ? "AVAILABLE" : nextRoles.includes("driver") ? "SUSPENDED" : "INACTIVE";
-    const driverNaming = nextRoles.includes("driver") && !driverResource
+    const driverAvailable = hasDriverRole(nextRoles) && nextStatus === "active";
+    const driverStatus = driverAvailable ? "AVAILABLE" : hasDriverRole(nextRoles) ? "SUSPENDED" : "INACTIVE";
+    const driverNaming = hasDriverRole(nextRoles) && !driverResource
       ? await allocateServerName({
         tenantId: context.tenantId,
         module: "workforce",
@@ -433,6 +437,8 @@ export async function PATCH(request: Request) {
       authorityMembershipId: target.id,
       actorId: target.actorId,
       actorEmail: target.actorEmail,
+      authorityRoles: nextRoles,
+      deliveryDriver: nextRoles.includes("delivery_driver"),
       source: "authority-membership-sync",
       updatedAt: now,
     };

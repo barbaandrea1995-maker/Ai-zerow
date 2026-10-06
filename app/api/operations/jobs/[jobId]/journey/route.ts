@@ -50,6 +50,8 @@ const ACTION_CAPABILITY = {
   material_fulfill: "warehouse.write",
   mission_create: "mission.manage",
   mission_dispatch: "mission.execute",
+  mission_load: "mission.delivery.execute",
+  mission_unload: "mission.delivery.execute",
   mission_deliver: "mission.execute",
   mission_verify_pod: "mission.manage",
   mission_reconcile: "mission.manage",
@@ -163,6 +165,23 @@ async function canAccessJourneyJob(context: AuthorityContext, job: typeof s04Rec
     eq(jobJourneyRecords.domain, "mission"),
   )).limit(100);
   return missionRows.some((row) => rowMatchesContext(row, context));
+}
+
+async function canRecordDriverMissionAction(context: AuthorityContext, row: typeof jobJourneyRecords.$inferSelect) {
+  if (hasCapability(context, "mission.manage")) return true;
+  if (!hasCapability(context, "mission.delivery.execute")) return false;
+  const payload = parseJson(row.payloadJson);
+  const driverId = boundedText(payload.driverId, 160);
+  if (!driverId) return false;
+  const [driver] = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+    eq(s04Records.id, driverId),
+  )).limit(1);
+  if (!driver) return false;
+  const driverPayload = parseJson(driver.payloadJson);
+  return boundedText(driverPayload.actorId, 200) === context.actorId
+    || boundedText(driverPayload.authorityMembershipId, 200) === context.membershipId;
 }
 
 function recordForResponse(row: typeof jobJourneyRecords.$inferSelect) {
@@ -413,6 +432,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let routeInputStops: unknown = null;
     const routeFallbackStops: MissionStopInput[] = [];
     let eventType = "";
+    let missionActionStopId = "";
+    let missionActionRoutePlanId = "";
+    let missionActionEvent: JsonObject | null = null;
 
     if (action === "planning_create") {
       domain = "planning";
@@ -553,6 +575,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           driverId,
           vehicleId,
           cargoAssetId: cargoAssetId || undefined,
+          transportMode,
           plannedAt,
           plannedEndAt: plannedEndAtInput || undefined,
         });
@@ -637,6 +660,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
       title = row.title;
       payload = parseJson(row.payloadJson);
 
+      if ((action === "mission_load" || action === "mission_unload") && !(await canRecordDriverMissionAction(context, row))) {
+        return Response.json({ error: "assigned_delivery_driver_required" }, { status: 403 });
+      }
+
       if (action === "planning_publish") {
         if (domain !== "planning" || row.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition" }, { status: 409 });
         status = "PUBLISHED";
@@ -713,6 +740,51 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = "DISPATCHED";
         payload = { ...payload, dispatchedAt: boundedText(input.dispatchedAt, 40, now), dispatchedBy: context.actorId };
         eventType = "mission.transport.dispatched";
+      } else if (action === "mission_load" || action === "mission_unload") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["PLANNED", "DISPATCHED"].includes(row.status)) {
+          return Response.json({ error: "invalid_mission_loading_transition" }, { status: 409 });
+        }
+        if (action === "mission_unload" && row.status !== "DISPATCHED") {
+          return Response.json({ error: "mission_must_be_in_transit_before_unload" }, { status: 409 });
+        }
+        const route = isRecord(payload.route) ? payload.route : {};
+        missionActionRoutePlanId = boundedText(route.routePlanId, 160);
+        missionActionStopId = boundedText(input.stopId, 160);
+        if (missionActionStopId) {
+          if (!missionActionRoutePlanId) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+          const [stop] = await db.select({ id: routeStops.id }).from(routeStops).where(and(
+            eq(routeStops.tenantId, context.tenantId),
+            eq(routeStops.routePlanId, missionActionRoutePlanId),
+            eq(routeStops.id, missionActionStopId),
+          )).limit(1);
+          if (!stop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+        }
+        const timeline = Array.isArray(payload.operationalTimeline)
+          ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        const actionEvent = {
+          id: crypto.randomUUID(),
+          type: action === "mission_load" ? "LOAD_CONFIRMED" : "UNLOAD_CONFIRMED",
+          recordedAt: now,
+          occurredAt: now,
+          recordedBy: context.actorId,
+          stopId: missionActionStopId || null,
+          sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
+          note: boundedText(input.note, 2_000),
+          assetId: boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160) || null,
+          source: "mission-driver-action",
+        };
+        missionActionEvent = actionEvent;
+        status = row.status;
+        payload = {
+          ...payload,
+          operationalTimeline: [...timeline, actionEvent].slice(-500),
+          lastOperationalEvent: actionEvent,
+          ...(action === "mission_load"
+            ? { lastLoadAt: now, loadConfirmedAt: now }
+            : { lastUnloadAt: now, unloadConfirmedAt: now }),
+        };
+        eventType = action === "mission_load" ? "mission.transport.loaded" : "mission.transport.unloaded";
       } else if (action === "mission_deliver") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DISPATCHED") {
           return Response.json({ error: "invalid_mission_transition" }, { status: 409 });
@@ -801,6 +873,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       status,
       version: nextVersion,
       materialRequestId: materialRequest?.id ?? null,
+      ...(missionActionEvent ? { operationalEvent: missionActionEvent } : {}),
     });
     const mutation = existing
       ? db.update(jobJourneyRecords).set({

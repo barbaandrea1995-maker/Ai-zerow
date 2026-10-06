@@ -48,6 +48,7 @@ import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { assetUsageLabel } from "@/lib/asset-contract";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type LifecycleAction = "maintenance_open" | "maintenance_close" | "block" | "release";
@@ -125,7 +126,7 @@ const navItems: NavItem[] = [
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner", admin: "Amministratore", manager: "Manager", office: "Ufficio", technical: "Tecnico",
   field_supervisor: "Caposquadra", worker: "Operatore", warehouse_manager: "Responsabile magazzino",
-  warehouse_operator: "Magazziniere", driver: "Autista", maintenance: "Manutentore", auditor: "Auditor",
+  warehouse_operator: "Magazziniere", driver: "Autista", delivery_driver: "Autista di consegna", maintenance: "Manutentore", auditor: "Auditor",
 };
 
 const toneStyles: Record<Tone, { icon: string; badge: string }> = {
@@ -172,6 +173,13 @@ function assetType(asset: AssetRecord) {
 function assetLabel(asset: AssetRecord) {
   const type = assetType(asset);
   return type === "VEHICLE" ? "MEZZO" : type === "EQUIPMENT" ? "ATTREZZATURA" : "ASSET";
+}
+
+function assetDisplayName(asset: AssetRecord) {
+  const description = payloadValue(asset, "title", "");
+  if (description && description !== asset.canonicalCode && description !== asset.title) return description;
+  const technical = [payloadValue(asset, "brand", ""), payloadValue(asset, "model", "")].filter(Boolean).join(" ");
+  return technical || asset.canonicalCode || asset.title;
 }
 
 function AssetTypeIcon({ asset, className }: { asset: AssetRecord; className?: string }) {
@@ -246,7 +254,7 @@ function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; va
 
 function AssetRow({ asset, selected, assignment, onSelect }: { asset: AssetRecord; selected: boolean; assignment?: Assignment; onSelect: () => void }) {
   const status = lifecycleStatus(asset);
-  return <button className={cn("w-full rounded-2xl border p-3.5 text-left transition sm:p-4", selected ? "border-lime-300/45 bg-lime-300/[.075] shadow-[0_0_30px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")} onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[lifecycleTone(status)].icon)}><AssetTypeIcon asset={asset} className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-[13px] font-semibold text-slate-100">{asset.canonicalCode ?? asset.title}</p><p className="mt-1 truncate text-[10px] text-slate-500">{asset.canonicalCode && asset.title !== asset.canonicalCode ? `${asset.title} · ` : ""}{assetLabel(asset)} · {payloadValue(asset, "location", "Ubicazione da definire")}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={lifecycleLabel(status)} tone={lifecycleTone(status)} /><StatusPill label={assetLabel(asset)} tone="cyan" />{assignment && <StatusPill label={assignment.assignee.name} tone={assignmentTone(assignment.status)} />}</div><div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-500"><span>{payloadValue(asset, "brand", "Marca non indicata")} {payloadValue(asset, "model", "")}</span><span>{payloadValue(asset, "registration", payloadValue(asset, "serialNumber", "Identificativo da completare"))}</span></div></button>;
+  return <button className={cn("w-full rounded-2xl border p-3.5 text-left transition sm:p-4", selected ? "border-lime-300/45 bg-lime-300/[.075] shadow-[0_0_30px_rgba(200,255,34,.09)]" : "border-white/[.08] bg-black/20 hover:border-lime-300/25 hover:bg-lime-300/[.03]")} onClick={onSelect} type="button"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><span className={cn("grid size-10 shrink-0 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[lifecycleTone(status)].icon)}><AssetTypeIcon asset={asset} className="size-[18px]" /></span><div className="min-w-0"><p className="truncate text-[13px] font-semibold text-slate-100">{assetDisplayName(asset)}</p><p className="mt-1 truncate font-mono text-[10px] text-slate-600">{asset.canonicalCode ?? asset.id} · {assetLabel(asset)} · {payloadValue(asset, "location", "Ubicazione da definire")}</p></div></div><ChevronRight className={cn("size-4 shrink-0", selected ? "text-lime-200" : "text-slate-700")} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><StatusPill label={lifecycleLabel(status)} tone={lifecycleTone(status)} /><StatusPill label={assetLabel(asset)} tone="cyan" /><StatusPill label={assetUsageLabel(asset.payload?.usageMode ?? asset.payload?.operationalProfile)} tone="amber" />{assignment && <StatusPill label={assignment.assignee.name} tone={assignmentTone(assignment.status)} />}</div><div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-500"><span>{payloadValue(asset, "brand", "Marca non indicata")} {payloadValue(asset, "model", "")}</span><span>{payloadValue(asset, "registration", payloadValue(asset, "serialNumber", "Identificativo da completare"))}</span></div></button>;
 }
 
 function AssetQrCard({ asset, onNotice }: { asset: AssetRecord; onNotice: (message: string) => void }) {

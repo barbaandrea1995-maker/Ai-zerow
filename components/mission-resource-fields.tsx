@@ -8,6 +8,9 @@ type ResourceOption = {
   id: string;
   code: string | null;
   label: string;
+  model?: string | null;
+  registration?: string | null;
+  serialNumber?: string | null;
   kind: "driver" | "vehicle" | "cargo";
   actorId: string | null;
   membershipId: string | null;
@@ -16,6 +19,10 @@ type ResourceOption = {
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
   custody: { assignmentId: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
   qualifications: string[];
+  usageMode?: string | null;
+  transportCapabilities?: string[];
+  deliveryEligible?: boolean;
+  eligibilityReason?: string | null;
   updatedAt: string;
 };
 
@@ -47,9 +54,9 @@ type MissionResourceFieldsProps = {
 };
 
 function resourceLabel(resource: ResourceOption) {
-  return resource.code && resource.code !== resource.label
-    ? `${resource.code} · ${resource.label}`
-    : resource.label;
+  const identifiers = [resource.model, resource.registration ? `targa ${resource.registration}` : null, resource.serialNumber ? `matr. ${resource.serialNumber}` : null].filter(Boolean);
+  const readable = [resource.label, ...identifiers].join(" · ");
+  return resource.code && resource.code !== resource.label ? `${readable} · ${resource.code}` : readable;
 }
 
 export function MissionResourceFields({
@@ -76,6 +83,7 @@ export function MissionResourceFields({
       setState("loading");
       const params = new URLSearchParams({ plannedAt });
       if (plannedEndAt) params.set("plannedEndAt", plannedEndAt);
+      if (transportMode) params.set("transportMode", transportMode);
       void fetch(`/api/mission/resources?${params.toString()}`, { cache: "no-store" })
         .then(async (response) => {
           const payload = await response.json() as { catalog?: ResourceCatalog };
@@ -89,7 +97,7 @@ export function MissionResourceFields({
         });
     }, 140);
     return () => window.clearTimeout(timer);
-  }, [plannedAt, plannedEndAt]);
+  }, [plannedAt, plannedEndAt, transportMode]);
 
   const selectedDriver = useMemo(() => catalog?.drivers.find((resource) => resource.id === driverId) ?? null, [catalog, driverId]);
   const selectableDrivers = useMemo(() => catalog?.drivers.filter((resource) => resource.available) ?? [], [catalog]);
@@ -110,7 +118,7 @@ export function MissionResourceFields({
       </div>
     </div>
     <label className="text-xs text-slate-400">Autista reale<select aria-label="Autista reale" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="driverId" onChange={(event) => onDriverChange(event.target.value)} required value={driverId}><option value="">{!hasDate ? "Prima scegli data e ora" : selectableDrivers.length ? "Seleziona autista" : "Nessun autista disponibile"}</option>{selectableDrivers.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}{resource.qualifications.length ? ` · ${resource.qualifications.join(", ")}` : ""}</option>)}</select></label>
-    <label className="text-xs text-slate-400">Mezzo reale<select aria-label="Mezzo reale" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="vehicleId" onChange={(event) => onVehicleChange(event.target.value)} required value={vehicleId}><option value="">{!hasDate ? "Prima scegli data e ora" : selectableVehicles.length ? "Seleziona mezzo" : "Nessun mezzo disponibile"}</option>{selectableVehicles.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
+    <label className="text-xs text-slate-400">Mezzo di trasporto<select aria-label="Mezzo di trasporto" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="vehicleId" onChange={(event) => onVehicleChange(event.target.value)} required value={vehicleId}><option value="">{!hasDate ? "Prima scegli data e ora" : selectableVehicles.length ? "Seleziona mezzo abilitato al trasporto" : "Nessun mezzo di trasporto disponibile"}</option>{selectableVehicles.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>
     {(!transportMode || transportMode === "ASSET_TRANSFER" || transportMode === "RETURN_TO_WAREHOUSE") && <label className="text-xs text-slate-400 sm:col-span-2">Asset o attrezzatura {transportMode === "ASSET_TRANSFER" ? <span className="text-rose-200">(obbligatorio)</span> : <span className="text-slate-600">(opzionale)</span>}<select aria-label="Asset o attrezzatura" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="cargoAssetId" onChange={(event) => onCargoAssetChange(event.target.value)} required={transportMode === "ASSET_TRANSFER"} value={cargoAssetId}><option value="">{transportMode === "ASSET_TRANSFER" ? "Seleziona asset disponibile" : "Nessun asset associato"}</option>{selectableCargo.map((resource) => <option key={resource.id} value={resource.id}>{resourceLabel(resource)}</option>)}</select></label>}
     {state === "idle" && <p className="text-[10px] text-slate-600 sm:col-span-2">Inserisci la data pianificata per verificare risorse e conflitti.</p>}
     {state === "error" && <p className="text-[10px] text-amber-200 sm:col-span-2">Registro risorse non disponibile: la missione non può essere confermata.</p>}

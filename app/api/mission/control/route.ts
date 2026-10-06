@@ -291,6 +291,7 @@ export async function POST(request: Request) {
       driverId,
       vehicleId,
       cargoAssetId: cargoAssetId || undefined,
+      transportMode,
       plannedAt,
       plannedEndAt: plannedEndAt || undefined,
     });

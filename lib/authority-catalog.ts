@@ -20,6 +20,10 @@ const MISSION_READ = ["mission.read"];
 // assigned mission must not expose the entire driver/vehicle registry.
 const MISSION_MANAGE = ["mission.read", "mission.write", "mission.manage", "mission.resources.read", "mission.execute"];
 const MISSION_EXECUTE = ["mission.read", "mission.execute"];
+// Delivery execution is deliberately narrower than mission management. The
+// dispatcher creates and assigns the mission; this role only performs the
+// assigned transport flow and writes its operational evidence.
+const MISSION_DELIVERY_EXECUTE = ["mission.delivery.execute", "mission.report.write"];
 const DOCUMENTS_READ = ["documents.read"];
 const DOCUMENTS_WRITE = ["documents.read", "documents.write"];
 const PLANNING_READ = ["planning.read"];
@@ -123,6 +127,11 @@ export const ROLE_CAPABILITIES = {
     ASSET_READ, DOCUMENTS_READ, COMMUNICATION, COMPANY_AI_READ, QR_READ, LOCATION_READ_CURRENT,
     LOCATION_DRIVER_TIMELINE,
   ),
+  delivery_driver: capabilitySet(
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_READ, MISSION_EXECUTE,
+    MISSION_DELIVERY_EXECUTE, ASSET_READ, DOCUMENTS_READ, COMMUNICATION, COMPANY_AI_READ, QR_READ,
+    LOCATION_READ_CURRENT, LOCATION_DRIVER_TIMELINE,
+  ),
   maintenance: capabilitySet(
     PLATFORM, WORKFORCE_SELF, ATTENDANCE_SELF, FIELD, WAREHOUSE_REQUEST, ASSET_WRITE, DOCUMENTS_READ, COMPANY_AI_READ,
     COMMUNICATION, QR_READ,
@@ -149,6 +158,7 @@ export const ROLE_METADATA = {
   warehouse_manager: { label: "Responsabile magazzino", purpose: "Anagrafica materiali, scorte, movimenti, missioni e controllo deposito." },
   warehouse_operator: { label: "Magazziniere", purpose: "Movimenti, prelievi, carichi e operatività autorizzata senza creare anagrafiche materiali." },
   driver: { label: "Autista", purpose: "Missioni, mezzi e documenti di trasporto assegnati." },
+  delivery_driver: { label: "Autista di consegna", purpose: "Esegue missioni di consegna e trasferimento assegnate, con eventi di carico, scarico e prova operativa." },
   maintenance: { label: "Manutentore", purpose: "Asset, manutenzione ed evidenze tecniche assegnate." },
   auditor: { label: "Auditor", purpose: "Lettura trasversale, evidenze e controllo senza scrittura." },
 } as const;

@@ -112,13 +112,14 @@ export async function POST(request: Request) {
     // driver invitation provisions the operational resource once, so Mission
     // can select it through the normal tenant-scoped availability readback.
     const driverResourceId = `AUTH-DRIVER-${identity.actor.id}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 200);
-    const [existingDriverResource] = membershipRoles.includes("driver")
+    const hasDriverRole = membershipRoles.includes("driver") || membershipRoles.includes("delivery_driver");
+    const [existingDriverResource] = hasDriverRole
       ? await db.select({ id: s04Records.id }).from(s04Records).where(and(
         eq(s04Records.tenantId, invitation.tenantId),
         eq(s04Records.id, driverResourceId),
       )).limit(1)
       : [];
-    const driverNaming = membershipRoles.includes("driver") && !existingDriverResource
+    const driverNaming = hasDriverRole && !existingDriverResource
       ? await allocateServerName({
         tenantId: invitation.tenantId,
         module: "workforce",
@@ -148,6 +149,8 @@ export async function POST(request: Request) {
           authorityMembershipId: membershipId,
           actorId: identity.actor.id,
           actorEmail: normalizedIdentityEmail,
+          authorityRoles: membershipRoles,
+          deliveryDriver: membershipRoles.includes("delivery_driver"),
           qualifications: [],
           source: "authority-membership-acceptance",
           createdAt: now,

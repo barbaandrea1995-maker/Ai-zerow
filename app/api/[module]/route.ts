@@ -15,6 +15,7 @@ import {
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
 import { canonicalPayload } from "@/lib/qr-adapter";
 import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { assetTransportCapabilities as canonicalAssetTransportCapabilities, normalizeAssetUsageMode } from "@/lib/asset-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const meta = typeof payload.meta === "string" ? payload.meta.trim() : "";
   const status = typeof payload.status === "string" ? payload.status.trim() : "READ MODEL";
   const entityType = typeof payload.entityType === "string" ? payload.entityType.trim().toLowerCase() : undefined;
+  const assetUsageMode = moduleKey === "assets"
+    ? normalizeAssetUsageMode(payload.usageMode || payload.operationalProfile, entityType)
+    : null;
+  const assetTransportCapabilities = moduleKey === "assets"
+    ? canonicalAssetTransportCapabilities({ ...payload, entityType, usageMode: assetUsageMode })
+    : null;
   const rawBarcode = typeof payload.barcode === "string" ? payload.barcode.trim() : "";
   const barcode = rawBarcode.slice(0, 120);
   const tone = typeof payload.tone === "string" && VALID_TONES.has(payload.tone) ? payload.tone : "lime";
@@ -204,6 +211,15 @@ export async function POST(request: Request, routeContext: RouteContext) {
       ...payload,
       title,
       entityType,
+      ...(moduleKey === "assets" ? {
+        usageMode: assetUsageMode,
+        operationalProfile: assetUsageMode,
+        transportCapabilities: assetTransportCapabilities,
+        assetProfile: {
+          usageMode: assetUsageMode,
+          transportCapabilities: assetTransportCapabilities,
+        },
+      } : {}),
       barcode: barcode || undefined,
       idempotencyKey,
       naming,
