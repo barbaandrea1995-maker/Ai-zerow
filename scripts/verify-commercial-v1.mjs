@@ -38,7 +38,7 @@ assert(e2eAudit.includes("authenticatedE2E") && e2eAudit.includes("suspiciousBut
 const uiAudit = await readFile(join(root, "scripts", "audit-ui-alignment.mjs"), "utf8");
 assert(uiAudit.includes("commercial-modules.json") && uiAudit.includes("globalFallbackContract"), "UI audit must cover the canonical module registry and global action fallback");
 
-assert.equal(AUTHORITY_ROLES.length, 13, "The canonical role catalog must contain 13 roles");
+assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
 assert.equal(new Set(COMMAND_WIDGET_CATALOG.map((widget) => widget.id)).size, COMMAND_WIDGET_CATALOG.length, "Widget IDs must be unique");
 assert(COMMAND_WIDGET_CATALOG.some((widget) => widget.id === "finance-procurement" && widget.requiredCapabilities.includes("finance.read") && widget.requiredCapabilities.includes("procurement.read")), "W10 Command widget must require both Finance and Procurement read capabilities");
@@ -106,6 +106,8 @@ assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers mus
 assert(ROLE_CAPABILITIES.worker.includes("attendance.self"), "Field workers must retain self attendance capability");
 assert(ROLE_CAPABILITIES.manager.includes("attendance.approve"), "Managers must retain attendance approval capability");
 assert(ROLE_CAPABILITIES.worker.includes("pwa.read") && ROLE_CAPABILITIES.driver.includes("pwa.read"), "Operational roles must retain PWA diagnostics visibility");
+assert(ROLE_CAPABILITIES.delivery_driver.includes("mission.delivery.execute") && ROLE_CAPABILITIES.delivery_driver.includes("mission.report.write"), "Delivery drivers must execute delivery missions and write mission reports");
+assert(!ROLE_CAPABILITIES.delivery_driver.includes("mission.manage"), "Delivery drivers must not manage mission planning");
 const multiRoleFixture = normalizeAuthorityRoles('["driver","warehouse_manager","driver"]');
 assert.deepEqual(multiRoleFixture, ["driver", "warehouse_manager"], "Multi-role memberships must normalize and deduplicate roles");
 const multiRoleCapabilities = new Set(multiRoleFixture.flatMap((role) => ROLE_CAPABILITIES[role]));
