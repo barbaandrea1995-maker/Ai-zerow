@@ -2335,3 +2335,109 @@ main > div > aside:not(.zw-workspace-sidebar) {
   .zw-widget-frame__controls button { transition: none !important; }
   .zw-command-nav-item:hover { transform: none; }
 }
+
+/* Commercial shell v2: one hierarchy for every authenticated surface. */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid rgba(229, 255, 88, .82);
+  outline-offset: 2px;
+}
+
+.zw-command-topbar {
+  min-height: 72px;
+  border-bottom: 1px solid rgba(200, 255, 34, .12);
+  background: linear-gradient(180deg, rgba(7, 12, 8, .92), rgba(4, 7, 5, .78));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .12);
+  backdrop-filter: blur(20px);
+}
+
+.zw-command-topbar__brand,
+.zw-command-sidebar button[aria-label="Apri Command"] {
+  transition: opacity var(--zw-motion-fast), transform var(--zw-motion-fast);
+}
+
+.zw-command-topbar__brand:hover,
+.zw-command-sidebar button[aria-label="Apri Command"]:hover {
+  opacity: .92;
+}
+
+.zw-command-nav-item {
+  min-height: 42px;
+  border: 1px solid transparent;
+  letter-spacing: .055em;
+}
+
+.zw-command-sidebar__nav-caption,
+.zw-command-sidebar__footer {
+  letter-spacing: .16em;
+}
+
+.zw-command-sidebar .text-slate-600,
+.zw-command-sidebar .text-slate-700,
+.zw-command-topbar .text-slate-600,
+.carbon-card .text-slate-600,
+.carbon-card-neon .text-slate-600,
+.carbon-inset .text-slate-600 {
+  color: rgba(178, 194, 181, .72) !important;
+}
+
+.zw-command-sidebar .text-slate-500,
+.zw-command-topbar .text-slate-500,
+.carbon-card .text-slate-500,
+.carbon-card-neon .text-slate-500,
+.carbon-inset .text-slate-500 {
+  color: rgba(178, 194, 181, .84) !important;
+}
+
+.zw-module-hero {
+  min-height: 176px;
+  border: 1px solid rgba(200, 255, 34, .14);
+  background:
+    linear-gradient(115deg, rgba(200, 255, 34, .09), transparent 38%),
+    linear-gradient(160deg, rgba(19, 31, 20, .94), rgba(5, 9, 6, .98));
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .22), inset 0 1px 0 rgba(255, 255, 255, .035);
+}
+
+.zw-module-hero h1 {
+  max-width: 760px;
+  font-size: clamp(1.9rem, 4vw, 3.2rem) !important;
+  line-height: 1.06;
+}
+
+.zw-module-hero > div.absolute.bottom-0.right-8 {
+  opacity: .78;
+}
+
+@media (max-width: 767px) {
+  .zw-command-topbar {
+    min-height: 64px;
+    height: 64px !important;
+    padding-right: 12px !important;
+    padding-left: 12px !important;
+  }
+
+  .zw-module-hero {
+    min-height: 0;
+    border-radius: 20px !important;
+    padding: 20px !important;
+  }
+
+  .zw-module-hero h1 {
+    font-size: clamp(1.8rem, 10vw, 2.55rem) !important;
+  }
+
+  .zw-module-hero > div.absolute.bottom-0.right-8 {
+    display: none;
+  }
+
+  /* Every transient notice stays above the role-specific bottom bar. */
+  body:has(.zw-mobile-nav) .fixed.bottom-5 {
+    right: 12px !important;
+    bottom: calc(86px + env(safe-area-inset-bottom)) !important;
+    left: 12px !important;
+    max-width: none !important;
+  }
+
+  .zw-mobile-nav__item {
+    font-size: .65rem;
+  }
+}

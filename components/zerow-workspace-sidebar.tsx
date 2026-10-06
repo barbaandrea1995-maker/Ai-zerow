@@ -39,22 +39,22 @@ type SidebarItem = {
 };
 
 const NAV_LABELS: Record<CommandNavigationId, string> = {
-  command: "CONTROL",
-  operations: "OPERATIONS",
-  workforce: "WORKFORCE",
+  command: "CENTRALE",
+  operations: "COMMESSE",
+  workforce: "PERSONE",
   planning: "PIANIFICAZIONE",
   attendance: "PRESENZE",
-  finance: "FINANCE",
-  procurement: "PROCUREMENT",
+  finance: "FINANZA",
+  procurement: "ACQUISTI",
   assets: "ASSET",
-  warehouse: "MAGAZZINO",
+  warehouse: "MAGAZZINI",
   mission: "MISSIONI",
   documents: "DOCUMENTI",
   governance: "GOVERNANCE",
   communications: "COMUNICAZIONI",
-  "company-ai": "COMPANY AI",
+  "company-ai": "AI CENTRALE",
   externals: "INTEGRAZIONI",
-  authority: "AUTHORITY",
+  authority: "AUTORITÀ",
   events: "EVENTI",
   pwa: "STATO PWA",
   settings: "IMPOSTAZIONI",
@@ -95,6 +95,7 @@ const ROLE_LABELS: Record<string, string> = {
   driver: "Autista",
   maintenance: "Manutentore",
   auditor: "Auditor",
+  operator: "Operatore",
 };
 
 function roleLabel(role: string) {
@@ -194,14 +195,14 @@ export function ZerowWorkspaceSidebar({
           <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span>
             <span className="mt-0.5 block truncate text-[10px] uppercase tracking-[.1em] text-slate-600">
-              {roleLabel(role)} · tenant scoped
+              {roleLabel(role)} · azienda corrente
             </span>
           </span>
         </button>
 
         <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
           <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[.22em] text-slate-700">
-            Area autorizzata
+            Navigazione
           </p>
           <div className="mt-2 space-y-1">
             {items.map((item) => {
@@ -228,7 +229,7 @@ export function ZerowWorkspaceSidebar({
 
         <div className="zw-command-sidebar__footer mt-4 border-t border-white/[.07] pt-4">
           <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[.14em] text-slate-600">
-            <span>Sistema</span>
+            <span>Stato piattaforma</span>
             <span className="flex items-center gap-1.5 text-lime-200">
               <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />
               DATI AGGIORNATI

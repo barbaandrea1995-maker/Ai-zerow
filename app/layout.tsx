@@ -7,9 +7,6 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AI-ZEROW COMMAND · Control Center",
   description: "Operational command center for jobs, assets, teams and governed AI workflows.",
-  other: {
-    "codex-preview": "development",
-  },
   icons: {
     icon: [
       { url: "/icons/ai-zerow-192.png", type: "image/png", sizes: "192x192" },

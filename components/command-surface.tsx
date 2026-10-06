@@ -840,7 +840,7 @@ export default function CommandSurface({
 
           <div className="zw-command-tenant mt-7 flex items-center gap-3 rounded-2xl p-3">
             <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><HardHat className="size-4" /></span>
-            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · tenant scoped</span></span>
+            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · azienda corrente</span></span>
           </div>
 
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">

@@ -13,9 +13,9 @@ export function CommandHero({ onNewJob, recordCount, statusLabel }: CommandHeroP
     <section className="zw-command-hero zw-page-enter" aria-labelledby="command-hero-title">
       <div className="zw-command-hero__grid" aria-hidden="true" />
       <div className="zw-command-hero__copy">
-        <div className="zw-command-hero__kicker"><Radar className="size-3.5" /> COMMAND / LIVE OPERATING SYSTEM</div>
-        <h1 id="command-hero-title"><span>CONTROL TODAY.</span><strong>A CLEANER TOMORROW.</strong></h1>
-        <p>Dati. Persone. Impatto. Un futuro più pulito, oggi è operativo.</p>
+        <div className="zw-command-hero__kicker"><Radar className="size-3.5" /> CENTRALE OPERATIVA</div>
+        <h1 id="command-hero-title"><span>TUTTO SOTTO CONTROLLO.</span><strong>UN PASSO AVANTI, OGNI GIORNO.</strong></h1>
+        <p>Dati, persone e attività in un’unica vista operativa.</p>
         <div className="zw-command-hero__actions">
           <button className="zw-button-primary" onClick={onNewJob} type="button"><Plus className="size-4" />Nuovo lavoro</button>
           <Link className="zw-button-secondary" href="/operations"><BriefcaseBusiness className="size-4" />Apri commesse<ArrowUpRight className="size-3.5" /></Link>
@@ -38,7 +38,7 @@ export function CommandHero({ onNewJob, recordCount, statusLabel }: CommandHeroP
       <div className="zw-command-hero__telemetry" aria-label="Telemetria dashboard" role="status">
         <span><i />{statusLabel}</span>
         <span><strong>{recordCount}</strong> record verificati</span>
-        <span>AI-ZEROW / v3</span>
+        <span>AI-ZEROW / OPERATIVO</span>
       </div>
     </section>
   );
