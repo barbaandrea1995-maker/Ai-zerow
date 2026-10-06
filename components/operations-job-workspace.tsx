@@ -228,6 +228,29 @@ function valueOr(value: unknown, fallback = "—") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function formatCommercialDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "Da pianificare";
+  const raw = value.trim();
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T12:00:00`)
+    : new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function looksLikeAddress(value: string, location: string) {
+  const normalizedValue = value.trim().toLocaleLowerCase("it-IT");
+  const normalizedLocation = location.trim().toLocaleLowerCase("it-IT");
+  return (
+    normalizedValue === normalizedLocation ||
+    /^(via|viale|corso|piazza|largo|strada|contrada|km)\b/i.test(value.trim())
+  );
+}
+
 function InfoRow({
   label,
   value,
@@ -275,15 +298,14 @@ function CompletionGate({
           </span>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200/75">
-              Chiusura commessa
+              Pronta per la chiusura
             </p>
             <h2 className="mt-1 text-[15px] font-semibold text-slate-100">
-              Criteri di chiusura
+              Cosa manca per chiudere
             </h2>
             <p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-500">
-              Il 100% indica l’avanzamento operativo. La commessa può essere
-              chiusa quando scheda, attività, assegnazione, evidenze e rapportino
-              risultano completi.
+              La commessa è pronta per la chiusura quando dati, attività,
+              assegnazioni, evidenze e rapportino sono completi.
             </p>
           </div>
         </div>
@@ -338,7 +360,7 @@ function JourneyRail({
         </span>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200/70">
-            Percorso operativo
+            Percorso della commessa
           </p>
           <h2 className="mt-1 text-[15px] font-semibold text-slate-100">
             Dalla commessa alla chiusura
@@ -779,14 +801,25 @@ export default function OperationsJobWorkspace({
     "Descrizione operativa da completare.",
   );
   const jobSummary = compactDescription(jobDescription);
+  const hasRealDescription = Boolean(
+    typeof jobData.description === "string" && jobData.description.trim(),
+  );
+  const displayTitle =
+    hasRealDescription && looksLikeAddress(job.title, locationLabel)
+      ? compactDescription(jobDescription, 100)
+      : job.title;
+  const heroSummary =
+    displayTitle !== job.title
+      ? "Lavoro organizzato e monitorato dalla scheda della commessa."
+      : jobSummary;
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
       : "Nuova commessa";
   const sourceMode =
     payloadText("sourceMode") === "COMPANY_AI"
-      ? "Preparata con Company AI"
-      : "Inserimento guidato";
+      ? "Da preventivo"
+      : "Inserimento manuale";
   const priority = payloadText("priority", "STANDARD");
   const rawScope = jobData.scope;
   const jobScope =
@@ -799,7 +832,17 @@ export default function OperationsJobWorkspace({
     typeof jobScope.groupTitle === "string" &&
     typeof jobScope.subgroupTitle === "string"
       ? `${jobScope.sectionTitle} / ${jobScope.groupTitle} / ${jobScope.subgroupTitle}`
-      : "Ambito da completare";
+      : "Categoria da completare";
+  const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
+  const nextStep = workspace.completion.ready
+    ? "Verifica finale e chiusura"
+    : workspace.sections.activities.count === 0
+      ? "Aggiungi la prima attività"
+      : workspace.sections.planning.count === 0
+        ? "Prepara il programma di lavoro"
+        : workspace.sections.evidence.count === 0
+          ? "Raccogli la prima evidenza"
+          : "Completa i dati della commessa";
   const contactLabel =
     payloadText("clientContact") ||
     payloadText("clientEmail") ||
@@ -834,7 +877,7 @@ export default function OperationsJobWorkspace({
                 COMMESSE / SCHEDA
               </p>
               <p className="mt-1 truncate text-[11px] text-slate-500">
-                Tutto il lavoro della commessa, in un unico posto
+                Scheda operativa della commessa
               </p>
             </div>
           </div>
@@ -874,7 +917,7 @@ export default function OperationsJobWorkspace({
                   )}
                 </div>
                 <h1 className="mt-4 max-w-4xl break-words text-3xl font-semibold tracking-[-0.055em] text-lime-100 sm:text-[42px]">
-                  {job.title}
+                  {displayTitle}
                 </h1>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <p className="flex items-center gap-2 text-xs text-slate-400">
@@ -888,12 +931,12 @@ export default function OperationsJobWorkspace({
                   )}
                 </div>
                 <p className="mt-4 line-clamp-4 max-w-3xl text-sm leading-6 text-slate-300/85">
-                  {jobSummary}
+                  {heroSummary}
                 </p>
               </div>
               <div className="shrink-0 text-left sm:text-right">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-                  Stato attuale
+                  Stato della commessa
                 </p>
                 <span
                   className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(job.status)}`}
@@ -919,21 +962,21 @@ export default function OperationsJobWorkspace({
                   Scadenza
                 </p>
                 <p className="mt-2 truncate text-xs font-medium text-slate-200">
-                  {valueOr(jobData.dueDate ?? job.meta, "Da pianificare")}
+                  {dueDateLabel}
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Data da confermare
+                  Termine previsto
                 </p>
               </div>
               <div className="rounded-2xl border border-lime-300/15 bg-lime-300/[0.045] p-3.5">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-lime-300/65">
-                  Ambito della commessa
+                  Categoria lavori
                 </p>
                 <p className="mt-2 line-clamp-2 text-xs font-medium text-lime-100/90">
                   {scopeLabel}
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Classificazione confermata
+                  Categoria lavori
                 </p>
               </div>
             </div>
@@ -961,7 +1004,7 @@ export default function OperationsJobWorkspace({
                   onClick={openDetails}
                 >
                   <BriefcaseBusiness className="size-3.5" />
-                  Modifica scheda
+                  Modifica dati
                 </Button>
                 {nextStatusAction && (
                   <Button
@@ -994,7 +1037,7 @@ export default function OperationsJobWorkspace({
                   Quadro commessa
                 </p>
                 <h2 className="mt-1 text-[17px] font-semibold text-slate-100">
-                  Stato operativo
+                  Situazione attuale
                 </h2>
               </div>
               <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200">
@@ -1011,21 +1054,21 @@ export default function OperationsJobWorkspace({
               <div>
                 <p className="text-xs font-medium text-slate-200">
                   {workspace.completion.ready
-                    ? "Pronta per la verifica"
-                    : "Costruzione in corso"}
+                    ? "Pronta per la chiusura"
+                    : "In lavorazione"}
                 </p>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  Una vista unica per dati, attività e prossimi passaggi.
+                  Una vista chiara per seguire il lavoro e decidere il prossimo passo.
                 </p>
               </div>
             </div>
             <div className="mt-6 space-y-3">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Preparata con</span>
+                <span className="text-slate-500">Origine</span>
                 <span className="text-cyan-100">{sourceMode}</span>
               </div>
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Pronta per la chiusura</span>
+                <span className="text-slate-500">Prossimo passo</span>
                 <span
                   className={
                     workspace.completion.ready
@@ -1033,7 +1076,7 @@ export default function OperationsJobWorkspace({
                       : "text-amber-200"
                   }
                 >
-                  {workspace.completion.ready ? "PRONTA" : "DA COMPLETARE"}
+                  {workspace.completion.ready ? "CHIUSURA" : nextStep}
                 </span>
               </div>
             </div>
@@ -1041,10 +1084,10 @@ export default function OperationsJobWorkspace({
               <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
                 <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100/75">
                   <Sparkles className="size-3.5" />
-                  Analisi del preventivo collegata
+                  Preventivo collegato
                 </div>
                 <p className="mt-2 text-[10px] leading-4 text-slate-500">
-                  I dati rilevati dal preventivo sono disponibili nelle lavorazioni e nell’ambito della commessa.
+                  Le lavorazioni rilevate dal preventivo sono disponibili nella scheda e possono essere completate dal team.
                 </p>
               </div>
             )}
@@ -1117,17 +1160,17 @@ export default function OperationsJobWorkspace({
                   </span>
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">
-                      Centro operativo
+                  Gestione commessa
                     </p>
                     <h2 className="mt-1 text-[15px] font-semibold">
-                      Azioni sulla commessa
+                      Cosa vuoi fare?
                     </h2>
                   </div>
                 </div>
                 <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.05] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">
                   {canWriteOperations
-                    ? "Modifiche abilitate"
-                    : "lettura autorizzata"}
+                    ? "Gestione disponibile"
+                    : "Solo consultazione"}
                 </span>
               </div>
               <div
@@ -1141,7 +1184,7 @@ export default function OperationsJobWorkspace({
                       onClick={() => setActionOpen("activity")}
                     >
                       <Plus className="size-3.5" />
-                      Attività
+                      Nuova attività
                     </Button>
                     <Button
                       variant="outline"
@@ -1149,7 +1192,7 @@ export default function OperationsJobWorkspace({
                       onClick={() => setActionOpen("assign")}
                     >
                       <Users className="size-3.5" />
-                      Assegna
+                      Assegna risorse
                     </Button>
                     <Button
                       variant="outline"
@@ -1157,7 +1200,7 @@ export default function OperationsJobWorkspace({
                       onClick={() => setActionOpen("evidence")}
                     >
                       <MapPin className="size-3.5" />
-                      Evidenza
+                      Aggiungi evidenza
                     </Button>
                     <Button
                       variant="outline"
@@ -1165,7 +1208,7 @@ export default function OperationsJobWorkspace({
                       onClick={() => setActionOpen("report")}
                     >
                       <FileText className="size-3.5" />
-                      Rapportino
+                      Apri rapportino
                     </Button>
                   </>
                 )}
@@ -1175,7 +1218,7 @@ export default function OperationsJobWorkspace({
                   onClick={() => void refresh()}
                 >
                   <RefreshCw className="size-3.5" />
-                  Rileggi
+                  Aggiorna dati
                 </Button>
               </div>
             </section>
@@ -1232,10 +1275,10 @@ export default function OperationsJobWorkspace({
                 </span>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                    Riepilogo commessa
+                    In breve
                   </p>
                   <h2 className="mt-1 text-[15px] font-semibold">
-                    Dati di riferimento
+                    Dati principali
                   </h2>
                 </div>
               </div>
@@ -1254,7 +1297,7 @@ export default function OperationsJobWorkspace({
                 <InfoRow
                   icon={CalendarClock}
                   label="Scadenza"
-                  value={valueOr(jobData.dueDate ?? job.meta, "Da pianificare")}
+                  value={dueDateLabel}
                 />
                 <InfoRow
                   icon={Flag}
@@ -1271,23 +1314,23 @@ export default function OperationsJobWorkspace({
                 </span>
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">
-                    Controllo operativo
+                    Dati protetti
                   </p>
                   <h2 className="mt-1 text-[14px] font-semibold">
-                    Modifiche verificate
+                    Tutto sotto controllo
                   </h2>
                 </div>
               </div>
               <p className="mt-4 text-[11px] leading-5 text-slate-500">
-                Ogni azione viene verificata prima di essere confermata. Le aree
-                ancora da completare restano visibili nel percorso operativo.
+                Le modifiche vengono controllate prima del salvataggio. Il percorso
+                della commessa mostra sempre ciò che è già pronto e ciò che manca.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-2.5 py-1 text-[9px] text-lime-200">
-                  ACCESSO AUTORIZZATO
+                  DATI AGGIORNATI
                 </span>
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-2.5 py-1 text-[9px] text-cyan-100">
-                  AUDITABLE
+                  STATO TRACCIATO
                 </span>
               </div>
             </section>
@@ -1298,7 +1341,7 @@ export default function OperationsJobWorkspace({
           <span>ZEROW · SCHEDA COMMESSA</span>
           <span className="flex items-center gap-2">
             <CheckCircle2 className="size-3.5 text-lime-300" />
-            Scheda completa · attività collegate · stato verificato
+            Dati aggiornati · attività collegate · stato verificato
           </span>
         </footer>
       </div>
