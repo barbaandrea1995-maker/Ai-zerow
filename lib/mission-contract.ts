@@ -1,3 +1,5 @@
+import { missionPodEvidenceComplete, missionPodEvidenceLabel } from "@/lib/mission-pod-contract";
+
 export type MissionReportStatus = "EMPTY" | "DRAFT" | "SUBMITTED";
 export type MissionReportFieldStatus = "known" | "missing" | "optional";
 
@@ -162,12 +164,15 @@ export function buildMissionReportReadback(
   const missingDeliveryProofStops = deliveryStops.filter((stop) => {
     const stopProof = proofEntries.find((entry) => text(entry.stopId) === stop.id)
       ?? (deliveryStops.length === 1 ? latestProof : null);
-    return !stopProof || text(stopProof.recipient).length < 2 || text(stopProof.deliveredAt).length < 10;
+    return !stopProof
+      || text(stopProof.recipient).length < 2
+      || text(stopProof.deliveredAt).length < 10
+      || !missionPodEvidenceComplete(stopProof.evidence);
   });
   if (missingDeliveryProofStops.length) {
     for (const stop of missingDeliveryProofStops) {
       missing.push(`delivery_evidence_${stop.sequence}`);
-      questions.push(`Chi ha ricevuto la consegna alla tappa ${stop.sequence}: ${stop.label} e quale evidenza operativa la conferma?`);
+      questions.push(`Chi ha ricevuto la consegna alla tappa ${stop.sequence}: ${stop.label} e quale evidenza operativa la conferma? Registra DDT, firma, foto, QR oppure conferma autista.`);
     }
   }
   if (deliveryStops.length && !timeline.some((event) => text(event.type).toUpperCase() === "DELIVERY_CONFIRMED")) {
@@ -211,7 +216,7 @@ export function buildMissionReportReadback(
     { key: "route", label: "Tappe", value: routeLines.join(" · ") || "Nessuna tappa", status: stops.length ? "known" : "missing", source: "Route server-side" },
     { key: "actions", label: "Azioni registrate", value: timelineLines.join(" · ") || "Nessuna azione", status: timeline.length ? "known" : "missing", source: "Timeline server-side" },
     { key: "warehouse", label: "Riconciliazione magazzino", value: warehouseRequired ? (warehouseStatus || "Da completare") : "Non richiesta", status: !warehouseRequired || warehouseStatus === "DELIVERED" ? "known" : "missing", source: "Ledger Magazzino" },
-    { key: "delivery", label: "Prova di consegna", value: proofEntries.length ? `${proofEntries.length} tappa/e con ricevente registrato` : "Da completare", status: !deliveryStops.length || !missingDeliveryProofStops.length ? "known" : "missing", source: "POD / Autista" },
+    { key: "delivery", label: "Prova di consegna", value: proofEntries.length ? proofEntries.map((entry) => `${text(entry.recipient, "Ricevente non indicato")} · ${missionPodEvidenceLabel(isRecord(entry.evidence) ? entry.evidence.type : null)}`).join(" | ") : "Da completare", status: !deliveryStops.length || !missingDeliveryProofStops.length ? "known" : "missing", source: "POD / Autista" },
     { key: "narrative", label: "Esito e anomalie", value: reportText || "Da completare", status: reportText.length >= 30 && !reportText.includes("[da completare]") ? "known" : "missing", source: "Company AI / Autista" },
   ];
 

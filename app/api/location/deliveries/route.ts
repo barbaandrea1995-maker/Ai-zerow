@@ -1,10 +1,11 @@
 import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { deliveryEvents, locationEvents, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { deliveryEvents, locationEvents, operationalDocuments, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { canReadAllLocations, canReadAllMissions, payloadMatchesContext } from "@/lib/operational-scope";
+import { documentCanDownload } from "@/lib/document-security";
 import { auditLocationAccess } from "@/lib/location-intelligence/repository";
-import { DELIVERY_EVIDENCE_TYPES } from "@/lib/location-intelligence/types";
+import { normalizeMissionPodEvidence } from "@/lib/mission-pod-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -70,9 +71,9 @@ export async function POST(request: Request) {
   const routeStopId = bounded(input.routeStopId, 160);
   const evidenceType = bounded(input.evidenceType, 48).toUpperCase();
   const evidenceReference = bounded(input.evidenceReference ?? input.evidenceId, 240);
+  const documentId = bounded(input.documentId, 160);
   const idempotencyKey = bounded(input.idempotencyKey, 160);
   if (!routeStopId || !evidenceType || idempotencyKey.length < 8) return Response.json({ error: "route_stop_evidence_idempotency_required" }, { status: 400 });
-  if (!(DELIVERY_EVIDENCE_TYPES as readonly string[]).includes(evidenceType)) return Response.json({ error: "unsupported_delivery_evidence", allowed: DELIVERY_EVIDENCE_TYPES }, { status: 400 });
 
   try {
     const db = getDb();
@@ -82,6 +83,28 @@ export async function POST(request: Request) {
     if (!stop) return Response.json({ error: "route_stop_not_found" }, { status: 404 });
     const [plan] = await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, stop.routePlanId))).limit(1);
     if (!plan) return Response.json({ error: "route_plan_not_found" }, { status: 404 });
+    const now = new Date().toISOString();
+    const evidenceResult = normalizeMissionPodEvidence({ evidenceType, evidenceReference, documentId }, now, context.actorId);
+    if (!evidenceResult.evidence) {
+      return Response.json({
+        error: evidenceResult.error,
+        message: evidenceResult.error === "pod_evidence_document_required"
+          ? "Questa evidenza richiede un documento già verificato."
+          : evidenceResult.error === "pod_evidence_reference_required"
+            ? "Questa evidenza richiede un riferimento leggibile."
+            : "Tipologia di evidenza non supportata.",
+      }, { status: 400 });
+    }
+    const normalizedEvidence = evidenceResult.evidence;
+    if (normalizedEvidence.documentId) {
+      const [document] = await db.select().from(operationalDocuments).where(and(
+        eq(operationalDocuments.tenantId, context.tenantId),
+        eq(operationalDocuments.jobId, plan.jobId ?? ""),
+        eq(operationalDocuments.id, normalizedEvidence.documentId),
+      )).limit(1);
+      if (!document) return Response.json({ error: "pod_document_not_found" }, { status: 404 });
+      if (!documentCanDownload(document.scanStatus, document.status)) return Response.json({ error: "pod_document_not_verified" }, { status: 422 });
+    }
     const metadata = parseJsonObject(stop.evidenceJson);
     if (metadata.kind !== "DELIVERY") return Response.json({ error: "route_stop_not_delivery" }, { status: 409 });
     if (!["ARRIVED", "DEPARTED", "COMPLETED"].includes(stop.status) || !stop.arrivedAt) {
@@ -110,13 +133,12 @@ export async function POST(request: Request) {
     )).orderBy(desc(locationEvents.occurredAt)).limit(1);
     if (!arrivals[0]) return Response.json({ error: "confirmed_geofence_arrival_required", message: "La presenza GPS non conferma da sola la consegna: prima serve un arrivo geofence confermato sul mezzo pianificato." }, { status: 409 });
 
-    const now = new Date().toISOString();
     const deliveryId = `DELIVERY-EVENT-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
     const locationEventId = `LOCATION-EVENT-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
     const eventId = crypto.randomUUID();
-    const evidence = JSON.stringify({ evidenceType, evidenceReference, arrivalEventId: arrivals[0].id, confirmedBy: context.actorId, rule: "GPS_ARRIVAL_NEVER_EQUALS_DELIVERY" });
+    const evidence = JSON.stringify({ evidenceType: normalizedEvidence.type, evidenceReference: normalizedEvidence.reference, documentId: normalizedEvidence.documentId, arrivalEventId: arrivals[0].id, confirmedBy: context.actorId, rule: "GPS_ARRIVAL_NEVER_EQUALS_DELIVERY" });
     await db.batch([
-      db.insert(deliveryEvents).values({ id: deliveryId, tenantId: context.tenantId, routeStopId, missionId: plan.missionId, jobId: plan.jobId, eventType: "DELIVERY_CONFIRMED", evidenceType, evidenceReference, occurredAt: bounded(input.occurredAt, 40) || now, confirmedBy: context.actorId, idempotencyKey, createdAt: now }),
+      db.insert(deliveryEvents).values({ id: deliveryId, tenantId: context.tenantId, routeStopId, missionId: plan.missionId, jobId: plan.jobId, eventType: "DELIVERY_CONFIRMED", evidenceType: normalizedEvidence.type, evidenceReference: normalizedEvidence.reference ?? "", occurredAt: bounded(input.occurredAt, 40) || now, confirmedBy: context.actorId, idempotencyKey, createdAt: now }),
       db.insert(locationEvents).values({ id: locationEventId, tenantId: context.tenantId, eventType: "DELIVERY_CONFIRMED", occurredAt: bounded(input.occurredAt, 40) || now, trackingSessionId: arrivals[0].trackingSessionId, employeeId: arrivals[0].employeeId, vehicleId: plan.vehicleId, locationId: stop.locationId, geofenceId: arrivals[0].geofenceId, source: "HUMAN_EVIDENCE_WITH_DETERMINISTIC_ARRIVAL", confidenceMilli: 1000, evidenceJson: evidence, correlationId: crypto.randomUUID(), dedupeKey: `delivery-confirmed:${context.tenantId}:${idempotencyKey}`, createdAt: now }),
       db.update(routeStops).set({ status: "COMPLETED", deliveryStatus: "CONFIRMED", arrivedAt: stop.arrivedAt ?? arrivals[0].occurredAt, departedAt: stop.departedAt, evidenceJson: evidence, updatedAt: now }).where(and(eq(routeStops.tenantId, context.tenantId), eq(routeStops.id, routeStopId))),
       db.insert(s06Events).values({ eventId, tenantId: context.tenantId, eventType: "location.delivery.confirmed", schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-location-intelligence", occurredAt: now, observedAt: now, aggregateType: "delivery.event", aggregateId: deliveryId, aggregateVersion: 1, payloadJson: evidence, correlationId: crypto.randomUUID(), causationId: null, idempotencyKey, status: "COMMITTED_SITES_READBACK", createdAt: now }),

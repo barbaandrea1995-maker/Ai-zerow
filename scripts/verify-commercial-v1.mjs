@@ -13,6 +13,11 @@ import {
 import { RELEASE_BUILD_ID } from "../lib/release.ts";
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot } from "../lib/planning-contract.ts";
 import { documentCanDownload, transitionDocumentSecurity } from "../lib/document-security.ts";
+import {
+  MISSION_POD_EVIDENCE_TYPES,
+  missionPodEvidenceComplete,
+  normalizeMissionPodEvidence,
+} from "../lib/mission-pod-contract.ts";
 import { transitionOutbox } from "../lib/outbox-contract.ts";
 import { transitionW10Workflow, w10ExternalStatus, w10Progress } from "../lib/w10-contract.ts";
 import {
@@ -81,6 +86,13 @@ assert.throws(() => transitionDocumentSecurity({
   documentStatus: "AVAILABLE_UNSCANNED",
   action: "release",
 }), /document_release_requires_provider_clean/, "Manual release must not bypass provider evidence");
+
+assert.equal(MISSION_POD_EVIDENCE_TYPES.length, 6, "Mission POD must expose the canonical six evidence types");
+const driverEvidence = normalizeMissionPodEvidence({ evidenceType: "AUTHORIZED_DRIVER_CONFIRMATION" }, "2026-10-05T12:00:00.000Z", "actor-1");
+assert(driverEvidence.evidence && missionPodEvidenceComplete(driverEvidence.evidence), "Authorized driver confirmation must normalize into a complete POD evidence");
+assert.equal(normalizeMissionPodEvidence({ evidenceType: "BARCODE_OR_QR_CONFIRMATION" }, "2026-10-05T12:00:00.000Z", "actor-1").error, "pod_evidence_reference_required", "Barcode/QR POD must carry a reference");
+assert.equal(normalizeMissionPodEvidence({ evidenceType: "DELIVERY_PHOTO" }, "2026-10-05T12:00:00.000Z", "actor-1").error, "pod_evidence_document_required", "Photo POD must link a document");
+assert.equal(normalizeMissionPodEvidence({ evidenceType: "DDT_SCANNED", evidenceReference: "DDT-42", documentId: "DOC-42" }, "2026-10-05T12:00:00.000Z", "actor-1").evidence?.type, "DDT_SCANNED", "DDT evidence must preserve its canonical type");
 
 const procurementReview = transitionW10Workflow({ module: "procurement", status: "REQUESTED", action: "submit_review" });
 assert.equal(procurementReview.nextStatus, "REVIEW", "Procurement must move into review before approval");
@@ -333,9 +345,13 @@ assert(journeyRoute.includes("resolvePlanningResources") && journeyRoute.include
 assert(!journeyRoute.includes('responsible: boundedText(input.responsible'), "Journey planning must not persist free-text responsibility");
 assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
+assert(journeyRoute.includes("normalizeMissionPodEvidence") && journeyRoute.includes("pod_document_not_verified"), "Delivery must validate typed POD evidence and clean document state");
+assert(journeyRoute.includes("mission_pod_evidence_required") && journeyRoute.includes("storedMissionPodEvidence"), "POD verification must block incomplete evidence with a server-side readback");
 assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
 assert(journeyRoute.includes("mission_reconcile"), "Mission journey must reconcile before close");
 assert(journeyRoute.includes("mission_close"), "Mission journey must expose a governed close state");
+const locationDeliveryRoute = await readFile(join(root, "app", "api", "location", "deliveries", "route.ts"), "utf8");
+assert(locationDeliveryRoute.includes("normalizeMissionPodEvidence") && locationDeliveryRoute.includes("pod_document_not_verified"), "Location delivery ledger must share the POD evidence and document security contract");
 const missionControlRoute = await readFile(join(root, "app", "api", "mission", "control", "route.ts"), "utf8");
 assert(missionControlRoute.includes('module: "mission"') && missionControlRoute.includes('source: "mission-standalone"') && missionControlRoute.includes("allocateServerName"), "Transport-only tenants must be able to create a server-named standalone mission");
 assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") && missionControlRoute.includes("assertMissionResourceSelection"), "Standalone mission creation must keep the same real-resource contract");

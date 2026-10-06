@@ -51,15 +51,8 @@ export const LOCATION_EVENT_TYPES = [
 ] as const;
 export type LocationEventType = (typeof LOCATION_EVENT_TYPES)[number];
 
-export const DELIVERY_EVIDENCE_TYPES = [
-  "DDT_SCANNED",
-  "ORDER_MARKED_DELIVERED",
-  "RECIPIENT_SIGNATURE",
-  "DELIVERY_PHOTO",
-  "AUTHORIZED_DRIVER_CONFIRMATION",
-  "BARCODE_OR_QR_CONFIRMATION",
-] as const;
-export type DeliveryEvidenceType = (typeof DELIVERY_EVIDENCE_TYPES)[number];
+export { MISSION_POD_EVIDENCE_TYPES as DELIVERY_EVIDENCE_TYPES };
+export type DeliveryEvidenceType = MissionPodEvidenceType;
 
 export type Coordinate = { latitude: number; longitude: number };
 export type PolygonPoint = Coordinate;
@@ -107,3 +100,4 @@ export function isGeofenceShape(value: unknown): value is GeofenceShape {
 export function isTrackingSource(value: unknown): value is TrackingSource {
   return typeof value === "string" && (TRACKING_SOURCES as readonly string[]).includes(value);
 }
+import { MISSION_POD_EVIDENCE_TYPES, type MissionPodEvidenceType } from "../mission-pod-contract";

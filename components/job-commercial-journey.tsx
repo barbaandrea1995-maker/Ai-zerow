@@ -295,7 +295,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       }
       await mutate("mission_create", { title: field(form, "title"), pickup: field(form, "pickup"), dropoff: field(form, "dropoff"), plannedAt: field(form, "plannedAt"), plannedEndAt: field(form, "plannedEndAt"), driverId: field(form, "driverId"), vehicleId: field(form, "vehicleId"), cargoAssetId: field(form, "cargoAssetId"), transportMode: field(form, "transportMode"), materialRequestId: requestId, notes: field(form, "notes") });
     }
-    if (modal === "delivery" && selected) await mutate("mission_deliver", { recordId: selected.id, expectedVersion: selected.version, recipient: field(form, "recipient"), deliveredAt: field(form, "deliveredAt"), note: field(form, "note") });
+    if (modal === "delivery" && selected) await mutate("mission_deliver", { recordId: selected.id, expectedVersion: selected.version, recipient: field(form, "recipient"), deliveredAt: field(form, "deliveredAt"), evidenceType: field(form, "evidenceType") || "AUTHORIZED_DRIVER_CONFIRMATION", evidenceReference: field(form, "evidenceReference"), documentId: field(form, "documentId"), note: field(form, "note") });
     if (modal === "document") {
       const file = form.get("file");
       if (!(file instanceof File) || !file.size) { notify("Seleziona un file."); return; }

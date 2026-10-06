@@ -25,6 +25,7 @@ import { buildMissionWarehouseReadback, missionMaterialLines, type MissionWareho
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
 import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
+import { missionPodEvidenceComplete, normalizeMissionPodEvidence, storedMissionPodEvidence } from "@/lib/mission-pod-contract";
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
 import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
@@ -99,6 +100,19 @@ function upsertDeliveryProof(payload: JsonObject, entry: JsonObject) {
     ? [...entries.filter((candidate) => boundedText(candidate.stopId, 160) !== stopId), entry]
     : [...entries, entry];
   return next.slice(-100);
+}
+
+async function verifiedMissionPodDocument(tenantId: string, jobId: string, documentId: string) {
+  const normalizedId = boundedText(documentId, 160);
+  if (!normalizedId) return { error: "pod_document_required" as const };
+  const [document] = await getDb().select().from(operationalDocuments).where(and(
+    eq(operationalDocuments.tenantId, tenantId),
+    eq(operationalDocuments.jobId, jobId),
+    eq(operationalDocuments.id, normalizedId),
+  )).limit(1);
+  if (!document) return { error: "pod_document_not_found" as const };
+  if (!documentCanDownload(document.scanStatus, document.status)) return { error: "pod_document_not_verified" as const };
+  return { document };
 }
 
 function parseJson(value: string) {
@@ -1088,6 +1102,35 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const recipient = boundedText(input.recipient, 160);
         if (recipient.length < 2) return Response.json({ error: "proof_of_delivery_recipient_required" }, { status: 400 });
+        const evidenceResult = normalizeMissionPodEvidence({
+          evidenceType: input.evidenceType,
+          evidenceReference: input.evidenceReference,
+          documentId: input.documentId,
+        }, now, context.actorId);
+        if (!evidenceResult.evidence) {
+          return Response.json({
+            error: evidenceResult.error,
+            allowed: evidenceResult.error === "unsupported_mission_pod_evidence" ? ["DDT_SCANNED", "ORDER_MARKED_DELIVERED", "RECIPIENT_SIGNATURE", "DELIVERY_PHOTO", "AUTHORIZED_DRIVER_CONFIRMATION", "BARCODE_OR_QR_CONFIRMATION"] : undefined,
+            message: evidenceResult.error === "pod_evidence_document_required"
+              ? "Per questa evidenza devi collegare un documento già scansionato e verificato."
+              : evidenceResult.error === "pod_evidence_reference_required"
+                ? "Inserisci il riferimento della prova: DDT, ordine oppure barcode/QR."
+                : "Seleziona una tipologia di evidenza di consegna valida.",
+          }, { status: 400 });
+        }
+        const podEvidence = evidenceResult.evidence;
+        if (podEvidence.documentId) {
+          const verifiedDocument = await verifiedMissionPodDocument(context.tenantId, job.id, podEvidence.documentId);
+          if (verifiedDocument.error) {
+            return Response.json({
+              error: verifiedDocument.error,
+              documentId: podEvidence.documentId,
+              message: verifiedDocument.error === "pod_document_not_verified"
+                ? "Il documento non è ancora disponibile: completa prima la scansione di sicurezza."
+                : "Il documento non appartiene alla commessa corrente o non è stato trovato.",
+            }, { status: verifiedDocument.error === "pod_document_not_verified" ? 422 : 404 });
+          }
+        }
         const route = isRecord(payload.route) ? payload.route : {};
         missionActionRoutePlanId = boundedText(route.routePlanId, 160);
         missionActionStopId = boundedText(input.stopId, 160);
@@ -1134,7 +1177,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
           stopId: missionActionStopId || null,
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           recipient,
-          documentId: boundedText(input.documentId, 120) || null,
+          evidenceType: podEvidence.type,
+          evidenceReference: podEvidence.reference,
+          documentId: podEvidence.documentId,
           note: boundedText(input.note, 2_000),
           source: "mission-driver-action",
         };
@@ -1150,7 +1195,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
           recordedAt: now,
           clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
           note: boundedText(input.note, 2_000),
-          documentId: boundedText(input.documentId, 120) || null,
+          documentId: podEvidence.documentId,
+          evidence: podEvidence,
           recordedBy: context.actorId,
         };
         const proofOfDeliveries = upsertDeliveryProof(payload, proofEntry);
@@ -1170,26 +1216,77 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DELIVERED") {
           return Response.json({ error: "invalid_pod_verification_transition" }, { status: 409 });
         }
-        const proofEntries = deliveryProofEntries(payload);
+        let proofEntries = deliveryProofEntries(payload);
         const proof = proofEntries.at(-1) ?? {};
-        if (typeof proof.recipient !== "string" || proof.recipient.trim().length < 2 || typeof proof.deliveredAt !== "string" || !validDateTime(proof.deliveredAt)) {
-          return Response.json({ error: "delivery_proof_readback_required" }, { status: 400 });
-        }
+        if (!proofEntries.length) return Response.json({ error: "delivery_proof_readback_required" }, { status: 400 });
         const route = isRecord(payload.route) ? payload.route : {};
         const routePlanId = boundedText(route.routePlanId, 160);
+        let deliveryStopIds: string[] = [];
         if (routePlanId) {
           const missionRouteStops = await db.select().from(routeStops).where(and(
             eq(routeStops.tenantId, context.tenantId),
             eq(routeStops.routePlanId, routePlanId),
           )).orderBy(routeStops.sequence).limit(100);
-          const deliveryStopIds = missionRouteStops.filter((stop) => routeStopKind(stop) === "DELIVERY").map((stop) => stop.id);
+          deliveryStopIds = missionRouteStops.filter((stop) => routeStopKind(stop) === "DELIVERY").map((stop) => stop.id);
           const proofStopIds = new Set(proofEntries.map((entry) => boundedText(entry.stopId, 160)).filter(Boolean));
           const missingStopIds = deliveryStopIds.filter((stopId) => !proofStopIds.has(stopId));
           if (missingStopIds.length > 0) {
             return Response.json({ error: "mission_stop_proof_required", missingStopIds, message: "Ogni tappa di consegna deve avere il proprio ricevente e la propria prova prima della verifica POD." }, { status: 422 });
           }
         }
-        const verifiedProofEntries = proofEntries.map((entry) => ({ ...entry, verifiedAt: now, verifiedBy: context.actorId }));
+        const missingEvidenceIndexes = proofEntries.flatMap((entry, index) => missionPodEvidenceComplete(entry.evidence) ? [] : [index]);
+        if (missingEvidenceIndexes.length > 0) {
+          if (missingEvidenceIndexes.length !== 1 || !boundedText(input.evidenceType, 48)) {
+            const missingEvidenceStopIds = missingEvidenceIndexes.map((index) => boundedText(proofEntries[index]?.stopId, 160) || `proof-${index + 1}`);
+            return Response.json({
+              error: "mission_pod_evidence_required",
+              missingStopIds: missingEvidenceStopIds,
+              message: "Ogni tappa deve avere una prova di consegna tipizzata. Riapri la consegna e registra DDT, firma, foto, QR oppure conferma autista.",
+            }, { status: 422 });
+          }
+          const index = missingEvidenceIndexes[0];
+          const legacy = proofEntries[index] ?? {};
+          const legacyEvidence = normalizeMissionPodEvidence({
+            evidenceType: input.evidenceType,
+            evidenceReference: input.evidenceReference,
+            documentId: boundedText(input.documentId, 160) || boundedText(legacy.documentId, 160),
+          }, now, context.actorId);
+          if (!legacyEvidence.evidence) {
+            return Response.json({
+              error: legacyEvidence.error,
+              message: legacyEvidence.error === "pod_evidence_document_required"
+                ? "Per questa evidenza devi collegare un documento già scansionato e verificato."
+                : "Completa il riferimento richiesto per la prova di consegna.",
+            }, { status: 400 });
+          }
+          proofEntries = proofEntries.map((entry, entryIndex) => entryIndex === index
+            ? { ...entry, documentId: legacyEvidence.evidence.documentId, evidence: legacyEvidence.evidence }
+            : entry);
+        }
+        for (const entry of proofEntries) {
+          if (typeof entry.recipient !== "string" || entry.recipient.trim().length < 2 || typeof entry.deliveredAt !== "string" || !validDateTime(entry.deliveredAt)) {
+            return Response.json({ error: "delivery_proof_readback_required" }, { status: 400 });
+          }
+          const evidence = storedMissionPodEvidence(entry.evidence);
+          if (!evidence) return Response.json({ error: "mission_pod_evidence_required", message: "La prova di consegna non è leggibile o non rispetta il contratto server-side." }, { status: 422 });
+          if (evidence.documentId) {
+            const verifiedDocument = await verifiedMissionPodDocument(context.tenantId, job.id, evidence.documentId);
+            if (verifiedDocument.error) {
+              return Response.json({
+                error: verifiedDocument.error,
+                documentId: evidence.documentId,
+                message: verifiedDocument.error === "pod_document_not_verified"
+                  ? "Il documento della prova non è ancora stato rilasciato dal controllo di sicurezza."
+                  : "Il documento della prova non appartiene alla commessa corrente.",
+              }, { status: verifiedDocument.error === "pod_document_not_verified" ? 422 : 404 });
+            }
+          }
+        }
+        const verifiedProofEntries: JsonObject[] = proofEntries.map((entry) => ({ ...entry, verifiedAt: now, verifiedBy: context.actorId }));
+        const verifiedEvidenceDocuments = verifiedProofEntries.flatMap((entry) => {
+          const evidence = storedMissionPodEvidence(entry.evidence);
+          return evidence?.documentId ? [evidence.documentId] : [];
+        });
         status = "POD_VERIFIED";
         payload = {
           ...payload,
@@ -1197,7 +1294,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           proofOfDeliveries: verifiedProofEntries,
           podVerifiedAt: now,
           podVerifiedBy: context.actorId,
-          podEvidenceDocumentId: boundedText(input.documentId, 120) || boundedText(proof.documentId, 120) || null,
+          podEvidenceDocumentId: verifiedEvidenceDocuments.at(-1) ?? null,
         };
         eventType = "mission.transport.pod_verified";
       } else if (action === "mission_reconcile") {

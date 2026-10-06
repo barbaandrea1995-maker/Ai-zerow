@@ -80,7 +80,7 @@ export default function MissionControl() {
       if (jobId === "__standalone__") await createStandalone(body);
       else await mutate(jobId, "mission_create", body);
     }
-    if (modal === "deliver" && selected) await mutate(selected.jobId, "mission_deliver", { recordId: selected.id, expectedVersion: selected.version, recipient: field(form, "recipient"), deliveredAt: field(form, "deliveredAt"), note: field(form, "note") });
+    if (modal === "deliver" && selected) await mutate(selected.jobId, "mission_deliver", { recordId: selected.id, expectedVersion: selected.version, recipient: field(form, "recipient"), deliveredAt: field(form, "deliveredAt"), evidenceType: field(form, "evidenceType") || "AUTHORIZED_DRIVER_CONFIRMATION", evidenceReference: field(form, "evidenceReference"), documentId: field(form, "documentId"), note: field(form, "note") });
   };
 
   if (state === "loading") return <main className="grid min-h-screen place-items-center bg-[#030504] text-xs text-slate-500"><LoaderCircle className="mr-2 inline size-4 animate-spin text-lime-300" />Caricamento trasporti…</main>;
