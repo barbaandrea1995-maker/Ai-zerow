@@ -50,6 +50,13 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import {
+  MISSION_EXCEPTION_LABELS,
+  MISSION_EXCEPTION_TYPES,
+  missionExceptionLabel,
+  storedMissionException,
+  type MissionExceptionType,
+} from "@/lib/mission-exception-contract";
 import type { MissionReportReadback } from "@/lib/mission-contract";
 import type { MissionWarehouseReadback } from "@/lib/mission-inventory-contract";
 import {
@@ -64,8 +71,8 @@ import { TRANSPORT_MODE_CATALOG, type TransportMode } from "@/lib/tenant-operati
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
-type MissionStatus = "PLANNED" | "DISPATCHED" | "DELIVERED" | "POD_VERIFIED" | "RECONCILED" | "CLOSED" | string;
-type Modal = "create" | "delivery" | "pod" | "reconcile" | "report" | null;
+type MissionStatus = "PLANNED" | "DISPATCHED" | "DELIVERED" | "POD_VERIFIED" | "RECONCILED" | "CLOSED" | "DELAYED" | "BLOCKED" | "VEHICLE_FAULT" | "PARTIAL_DELIVERY" | "REFUSED" | "LOST" | "RECONCILE_REQUIRED" | "CANCELLED" | string;
+type Modal = "create" | "delivery" | "pod" | "reconcile" | "report" | "exception" | null;
 
 type Mission = {
   id: string;
@@ -79,6 +86,7 @@ type Mission = {
   payload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  viewerCanManage?: boolean;
 };
 
 type MissionJob = {
@@ -240,8 +248,8 @@ function statusTone(status: string): Tone {
   if (status === "CLOSED" || status === "POD_VERIFIED" || status === "RECONCILED") return "lime";
   if (status === "DISPATCHED") return "cyan";
   if (status === "DELIVERED") return "lime";
-  if (status === "BLOCKED" || status === "REFUSED" || status === "CANCELLED") return "red";
-  if (status === "DELAYED" || status === "RECONCILE_REQUIRED") return "amber";
+  if (["BLOCKED", "VEHICLE_FAULT", "REFUSED", "LOST", "CANCELLED"].includes(status)) return "red";
+  if (["DELAYED", "PARTIAL_DELIVERY", "RECONCILE_REQUIRED"].includes(status)) return "amber";
   return "muted";
 }
 
@@ -255,6 +263,12 @@ function statusLabel(status: string) {
     CLOSED: "CHIUSA",
     BLOCKED: "BLOCCATA",
     DELAYED: "IN RITARDO",
+    VEHICLE_FAULT: "GUASTO MEZZO",
+    PARTIAL_DELIVERY: "CONSEGNA PARZIALE",
+    REFUSED: "RIFIUTATA",
+    LOST: "CARICO NON REPERIBILE",
+    RECONCILE_REQUIRED: "DA RICONCILIARE",
+    CANCELLED: "ANNULLATA",
   };
   return labels[status] ?? status.replaceAll("_", " ");
 }
@@ -362,6 +376,10 @@ function missionWarehouseReadback(payload: Record<string, unknown>) {
     : null;
 }
 
+function missionExceptionReadback(payload: Record<string, unknown>) {
+  return storedMissionException(payload.missionException);
+}
+
 function warehouseStatusLabel(status: string) {
   return ({
     NOT_REQUIRED: "NON RICHIESTO",
@@ -403,7 +421,7 @@ function MissionPodEvidenceFields({ defaultType = "AUTHORIZED_DRIVER_CONFIRMATIO
   </section>;
 }
 
-type MissionAction = "mission_load" | "mission_unload";
+type MissionAction = "mission_load" | "mission_unload" | "mission_deliver" | "mission_exception" | "mission_resume";
 
 function MissionActionPanel({
   mission,
@@ -412,6 +430,7 @@ function MissionActionPanel({
   selectedStopId,
   note,
   canRecord,
+  canManage: canManageProp,
   busy,
   onStopChange,
   onNoteChange,
@@ -423,15 +442,18 @@ function MissionActionPanel({
   selectedStopId: string;
   note: string;
   canRecord: boolean;
+  canManage?: boolean;
   busy: boolean;
   onStopChange: (value: string) => void;
   onNoteChange: (value: string) => void;
   onRecord: (action: MissionAction, stop: MissionStopView | null) => void;
 }) {
+  const canManage = canManageProp ?? mission.viewerCanManage === true;
   const selectedStop = stops.find((stop) => stop.id === selectedStopId) ?? stops[0] ?? null;
   const actions = selectedStop?.cargoActions ?? [];
   const canLoad = canRecord && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
-  const canUnload = canRecord && mission.status === "DISPATCHED" && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
+  const canUnload = canRecord && ["DISPATCHED", "PARTIAL_DELIVERY"].includes(mission.status) && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
+  const canOpenDelivery = canRecord && mission.status === "PARTIAL_DELIVERY" && selectedStop?.kind === "DELIVERY";
   const warehouseReadback = missionWarehouseReadback(mission.payload);
   const completedStops = stops.filter((stop) => stop.status === "COMPLETED" || stop.deliveryStatus === "CONFIRMED").length;
   return <><section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
@@ -446,10 +468,13 @@ function MissionActionPanel({
           {stops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}
         </select>
       </label>
-      <div className="flex items-end gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         {canLoad && <Button className="h-10 bg-cyan-300 px-3 text-[10px] font-semibold text-[#041012] hover:bg-cyan-200" disabled={busy} onClick={() => onRecord("mission_load", selectedStop)} type="button"><Package className="size-3.5" />Carico effettuato</Button>}
         {canUnload && <Button className="h-10 bg-lime-300 px-3 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy} onClick={() => onRecord("mission_unload", selectedStop)} type="button"><BadgeCheck className="size-3.5" />Scarico effettuato</Button>}
-        {!canLoad && !canUnload && <span className="rounded-xl border border-white/10 px-3 py-2 text-[10px] text-slate-600">Azione non disponibile nello stato corrente</span>}
+        {canOpenDelivery && <Button className="h-10 border-lime-300/25 bg-lime-300/[.06] px-3 text-[10px] font-semibold text-lime-100 hover:bg-lime-300/10" disabled={busy} onClick={() => onRecord("mission_deliver", selectedStop)} type="button"><BadgeCheck className="size-3.5" />Completa tappa</Button>}
+        {canRecord && !["CLOSED", "CANCELLED", "RECONCILE_REQUIRED"].includes(mission.status) && <Button className="h-10 border-rose-300/25 bg-rose-300/[.06] px-3 text-[10px] font-semibold text-rose-100 hover:bg-rose-300/10" disabled={busy} onClick={() => onRecord("mission_exception", selectedStop)} type="button"><CircleAlert className="size-3.5" />Segnala eccezione</Button>}
+        {canManage && ["DELAYED", "BLOCKED", "VEHICLE_FAULT", "PARTIAL_DELIVERY", "REFUSED", "LOST"].includes(mission.status) && <Button className="h-10 border-lime-300/25 bg-lime-300/[.06] px-3 text-[10px] font-semibold text-lime-100 hover:bg-lime-300/10" disabled={busy} onClick={() => onRecord("mission_resume", selectedStop)} type="button"><Route className="size-3.5" />Riprendi missione</Button>}
+        {!canLoad && !canUnload && !canRecord && <span className="rounded-xl border border-white/10 px-3 py-2 text-[10px] text-slate-600">Azione non disponibile nello stato corrente</span>}
       </div>
     </div>
     <Input aria-label="Nota azione di carico o scarico" className="mt-3 h-10 border-white/10 bg-black/25 text-xs" disabled={!canRecord || busy} onChange={(event) => onNoteChange(event.target.value)} placeholder="Nota opzionale: quantità, riserva, anomalia…" value={note} />
@@ -457,7 +482,7 @@ function MissionActionPanel({
       <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
       {timeline.length ? <div className="mt-2 space-y-2">{timeline.map((entry, index) => <div className="flex items-start gap-2" key={text(entry.id, `event-${index}`)}><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(89,217,255,.75)]" /><div className="min-w-0"><p className="text-[10px] font-semibold text-slate-300">{text(entry.type, "EVENTO").replaceAll("_", " ")} <span className="font-normal text-slate-600">· {formatDate(entry.recordedAt ?? entry.occurredAt)}</span></p><p className="truncate text-[9px] text-slate-600">{text(entry.note, "Registrato dal flusso missione")}</p></div></div>)}</div> : <p className="mt-2 text-[10px] text-slate-600">Nessun carico o scarico confermato su questa missione.</p>}
     </div>
-  </section><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /></>;
+  </section><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /><MissionExceptionReadbackPanel payload={mission.payload} /></>;
 }
 
 function MissionWarehousePanel({ readback }: { readback: MissionWarehouseReadback | null }) {
@@ -475,6 +500,13 @@ function MissionPodReadbackPanel({ payload }: { payload: Record<string, unknown>
   const entries = rawEntries.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)));
   if (!entries.length) return null;
   return <section className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.03] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">PROOF OF DELIVERY</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Evidenze registrate per tappa</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">Ogni evidenza conserva tipo, autore e timestamp ufficiale. La posizione resta solo una prova di arrivo.</p></div><StatusPill label={`${entries.length} PROVE`} tone="lime" /></div><div className="mt-3 space-y-2">{entries.map((entry, index) => { const evidence = entry.evidence && typeof entry.evidence === "object" && !Array.isArray(entry.evidence) ? entry.evidence as Record<string, unknown> : {}; return <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={text(entry.stopId, `proof-${index}`)}><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-200">{text(entry.recipient, "Ricevente non indicato")}</p><StatusPill label={missionPodEvidenceLabel(evidence.type)} tone="cyan" /></div><p className="mt-1 text-[10px] text-slate-600">{text(entry.stopId, "Tappa missione")} · registrata {formatDate(evidence.capturedAt ?? entry.recordedAt)} · da {text(evidence.capturedBy ?? entry.recordedBy, "autore server")}</p>{text(evidence.reference, "") && <p className="mt-2 font-mono text-[10px] text-cyan-100/80">Rif. {text(evidence.reference, "")}</p>}</div>; })}</div></section>;
+}
+
+function MissionExceptionReadbackPanel({ payload }: { payload: Record<string, unknown> }) {
+  const exception = missionExceptionReadback(payload);
+  if (!exception) return null;
+  const resolved = exception.recoveryStatus === "RESOLVED";
+  return <section className={cn("mt-4 rounded-2xl border p-4", resolved ? "border-lime-300/15 bg-lime-300/[.025]" : "border-rose-300/20 bg-rose-300/[.035]")}><div className="flex items-start gap-3"><span className={cn("grid size-9 shrink-0 place-items-center rounded-xl border", resolved ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : "border-rose-300/25 bg-rose-300/10 text-rose-200")}><CircleAlert className="size-4" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className={cn("text-[10px] font-semibold uppercase tracking-[.18em]", resolved ? "text-lime-300/75" : "text-rose-200/80")}>ECCEZIONE MISSIONE</p><StatusPill label={resolved ? "RISOLTA" : "APERTA"} tone={resolved ? "lime" : "red"} /></div><h3 className="mt-1 text-sm font-semibold text-slate-100">{missionExceptionLabel(exception.type)}</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">{exception.note}</p><p className="mt-2 text-[9px] text-slate-600">Segnalata {formatDate(exception.reportedAt)} · da {text(exception.reportedBy, "autore server")}{exception.stopId ? ` · tappa ${exception.stopId}` : ""}</p>{resolved && <p className="mt-1 text-[9px] text-lime-200/70">Risolta {formatDate(exception.resolvedAt)} · {text(exception.resolutionNote, "ripresa autorizzata")}</p>}</div></div></section>;
 }
 
 function MissionCard({ mission, selected, canWrite, onSelect, onDispatch, onDeliver }: { mission: Mission; selected: boolean; canWrite: boolean; onSelect: () => void; onDispatch: () => void; onDeliver: () => void }) {
@@ -610,6 +642,9 @@ export default function MissionCommandDeck() {
   const [routeStops, setRouteStops] = useState<RouteStopDraft[]>([]);
   const [actionStopId, setActionStopId] = useState("");
   const [actionNote, setActionNote] = useState("");
+  const [exceptionType, setExceptionType] = useState<MissionExceptionType>("DELAYED");
+  const [exceptionStopId, setExceptionStopId] = useState("");
+  const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -646,7 +681,7 @@ export default function MissionCommandDeck() {
   const capabilities = useMemo(() => context?.capabilities ?? ["mission.read"], [context]);
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => allowedNavigation.includes(item.id) || capabilities.includes(item.capability)), [allowedNavigation, capabilities]);
-  const missions = useMemo(() => payload?.missions ?? [], [payload?.missions]);
+  const missions = useMemo(() => (payload?.missions ?? []).map((mission) => ({ ...mission, viewerCanManage: capabilities.includes("mission.manage") })), [capabilities, payload?.missions]);
   const jobs = useMemo(() => payload?.jobs ?? [], [payload?.jobs]);
   const materialRequests = useMemo(() => payload?.materialRequests ?? [], [payload?.materialRequests]);
   const locations = useMemo(() => payload?.locations ?? [], [payload?.locations]);
@@ -749,6 +784,17 @@ export default function MissionCommandDeck() {
   }
 
   const mutateJourney = useCallback(async (mission: Mission, action: string, body: Record<string, unknown> = {}) => {
+    if (action === "mission_deliver" && typeof body.recipient !== "string") {
+      setDeliveryStopId(typeof body.stopId === "string" ? body.stopId : activeActionStopId);
+      setModal("delivery");
+      return;
+    }
+    if (action === "mission_exception") {
+      setExceptionType("DELAYED");
+      setExceptionStopId(typeof body.stopId === "string" ? body.stopId : activeActionStopId);
+      setExceptionModalOpen(true);
+      return;
+    }
     setBusy(true);
     try {
       const response = await fetch("/api/operations/jobs/" + encodeURIComponent(mission.jobId) + "/journey", {
@@ -773,13 +819,14 @@ export default function MissionCommandDeck() {
       setMissionReportQuestions([]);
       await refresh();
       setModal(null);
+      setExceptionModalOpen(false);
       notify("Journey aggiornata e riletta dal ledger.");
     } catch {
       notify("Connessione non disponibile: nessuna modifica confermata.");
     } finally {
       setBusy(false);
     }
-  }, [notify, refresh]);
+  }, [activeActionStopId, notify, refresh]);
 
   const createMission = useCallback(async (jobId: string, body: Record<string, unknown>) => {
     setBusy(true);
@@ -812,6 +859,18 @@ export default function MissionCommandDeck() {
       setBusy(false);
     }
   }, [notify, refresh]);
+
+  async function submitException(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const form = new FormData(event.currentTarget);
+    await mutateJourney(selected, "mission_exception", {
+      exceptionType,
+      stopId: exceptionStopId,
+      reference: field(form, "exceptionReference"),
+      note: field(form, "exceptionNote"),
+    });
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -905,6 +964,14 @@ export default function MissionCommandDeck() {
       const reportAction = field(form, "reportAction") === "save" ? "mission_report_save" : "mission_report_submit";
       await mutateJourney(selected, reportAction, { text: missionReportText });
     }
+    if (modal === "exception") {
+      await mutateJourney(selected, "mission_exception", {
+        exceptionType,
+        stopId: exceptionStopId,
+        reference: field(form, "exceptionReference"),
+        note: field(form, "exceptionNote"),
+      });
+    }
   }
 
   if (state === "loading" && !payload) return <main className="grid min-h-screen place-items-center bg-[#030504] text-sm text-slate-500"><span className="flex items-center gap-3"><LoaderCircle className="size-4 animate-spin text-lime-300" />Caricamento mission control…</span></main>;
@@ -945,6 +1012,7 @@ export default function MissionCommandDeck() {
   </div><CommandMobileNav active="mission" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />
 
     <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "create" ? "Nuova missione" : modal === "delivery" ? "Consegna e POD" : modal === "pod" ? "Verifica prova di consegna" : modal === "reconcile" ? "Riconcilia e chiudi la missione" : "Rapportino missione con Company AI"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "create" ? "Il percorso può collegarsi a una commessa reale o nascere autonomo. Ogni tappa usa una location canonica oppure un indirizzo temporaneo verificato dal server; autista, mezzo e asset arrivano esclusivamente dal registro disponibile." : modal === "delivery" ? "Registra il ricevente e la tappa. L’orario ufficiale viene scritto dal server al momento della conferma." : modal === "pod" ? "Verifica il readback della prova di consegna prima di passare alla riconciliazione." : modal === "reconcile" ? "La riconciliazione richiede una nota operativa e chiude il passaggio tra consegnato, documento e quantità." : "Company AI prepara il consuntivo dai dati della missione e raccoglie solo le informazioni che mancano."}</DialogDescription></DialogHeader>{modal === "create" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Commessa o trasporto autonomo<select aria-label="Commessa o trasporto autonomo" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="jobId" onChange={(event) => handleJobSelection(event.target.value)} required><option value="">Seleziona collegamento</option>{<option value="__standalone__">Missione autonoma · nessuna commessa</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Titolo missione<Input autoFocus className="mt-2 border-white/10 bg-black/30" defaultValue="Missione di trasporto" name="title" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{enabledTransportModes.map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode]?.label ?? mode}</option>)}</select></label><RouteStopsEditor locations={locations} onChange={setRouteStops} stops={routeStops} /><input name="pickup" type="hidden" value={locations.find((location) => location.id === routeStops[0]?.locationId)?.formattedAddress ?? ""} readOnly /><input name="dropoff" type="hidden" value={locations.find((location) => location.id === routeStops.at(-1)?.locationId)?.formattedAddress ?? ""} readOnly /><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" onChange={(event) => setPlannedAt(event.target.value)} required type="datetime-local" value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" onChange={(event) => setPlannedEndAt(event.target.value)} type="datetime-local" value={plannedEndAt} /></label><MissionResourceFields cargoAssetId={cargoAssetId} driverId={driverId} onCargoAssetChange={setCargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} plannedAt={plannedAt} plannedEndAt={plannedEndAt} vehicleId={vehicleId} /><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" placeholder="Vincoli, riferimento o consegna particolare…" /></label></div> : modal === "delivery" ? <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">MISSIONE SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-600">{selected ? text(selected.payload.pickup) + " → " + text(selected.payload.dropoff) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Tappa di consegna<select aria-label="Tappa di consegna" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="stopId" onChange={(event) => setDeliveryStopId(event.target.value)} value={deliveryStopId}><option value="">Seleziona tappa</option>{selectedStops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Ricevente / referente<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="recipient" placeholder="Nome o organizzazione" required /></label><div className="sm:col-span-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100"><Clock3 className="size-3.5" />Timestamp ufficiale server</div><p className="mt-1 text-[10px] leading-5 text-slate-500">L’orario della consegna viene assegnato dal server al momento della conferma. L’orologio del dispositivo non può alterare il dato ufficiale.</p></div><MissionPodEvidenceFields /><label className="text-xs text-slate-400 sm:col-span-2">Nota consegna<Textarea className="mt-2 border-white/10 bg-black/30" name="note" placeholder="Quantità, riserva o anomalia…" /></label></div>: modal === "pod" ? <div className="grid gap-4"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-lime-300/70">READBACK POD</p><p className="mt-2 text-sm text-slate-200">Ricevente: {text((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.recipient)}</p><p className="mt-1 text-[10px] text-slate-500">Consegna registrata dal server: {formatDate((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.deliveredAt)}</p></div><MissionPodEvidenceFields /></div>: modal === "reconcile" ? <div className="grid gap-4"><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-amber-200/70">RICONCILIAZIONE</p><p className="mt-2 text-sm text-slate-200">La chiusura richiede una nota tracciabile.</p><p className="mt-1 text-[10px] text-slate-500">Dopo questo passaggio la journey potrà essere chiusa con un secondo readback.</p></div><label className="text-xs text-slate-400">Nota di riconciliazione<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30" name="note" placeholder="Confronto quantità, POD e riferimenti di commessa…" required /></label></div>: <div className="grid gap-4"><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">READBACK GUIDATO</p><p className="mt-2 text-sm font-semibold text-slate-100">Company AI ha già preparato ciò che la missione sa.</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Carichi, scarichi, consegna e timestamp provengono dal registro server-side. Completa solo ciò che manca davvero.</p></div><StatusPill label={selectedReport?.status === "SUBMITTED" ? "INVIATO" : selectedReport?.completeness.ready ? "PRONTO" : "DA COMPLETARE"} tone={selectedReport?.status === "SUBMITTED" ? "lime" : selectedReport?.completeness.ready ? "cyan" : "amber"} /></div></div><div className="grid gap-2 sm:grid-cols-2">{selectedReport?.fields.map((reportField) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={reportField.key}><div className="flex items-center justify-between gap-2"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-600">{reportField.label}</p><span className={cn("text-[9px] uppercase tracking-[.12em]", reportField.status === "known" ? "text-lime-200" : reportField.status === "missing" ? "text-amber-200" : "text-slate-600")}>{reportField.status === "known" ? "OK" : reportField.status === "missing" ? "Manca" : "Opzionale"}</span></div><p className="mt-2 line-clamp-3 whitespace-pre-wrap text-[10px] leading-5 text-slate-300">{reportField.value}</p><p className="mt-1 text-[9px] text-slate-700">{reportField.source}</p></div>)}</div>{(missionReportQuestions.length > 0 || (selectedReport?.completeness.questions.length ?? 0) > 0) && <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75">DOMANDE ANCORA APERTE</p><div className="mt-2 space-y-1.5">{(missionReportQuestions.length ? missionReportQuestions : selectedReport?.completeness.questions ?? []).slice(0, 5).map((question) => <p className="flex items-start gap-2 text-[10px] leading-5 text-amber-100/80" key={question}><CircleAlert className="mt-0.5 size-3 shrink-0" />{question}</p>)}</div></div>}<label className="text-xs text-slate-400">Rapportino operativo<Textarea className="mt-2 min-h-56 border-white/10 bg-black/30 font-mono text-xs leading-5" name="missionReport" onChange={(event) => setMissionReportText(event.target.value)} value={missionReportText} placeholder="Esito, anomalie, rientri, danni, riserve o note per l’ufficio…" required /></label><p className="text-[10px] leading-5 text-slate-600">Per l’invio servono tutte le azioni obbligatorie e una descrizione finale completa. Se manca un dato importante Company AI mantiene la missione in bozza.</p></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose>{modal === "report" ? <><Button className="border-cyan-300/25 bg-cyan-300/[.06] text-cyan-100 hover:bg-cyan-300/10" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="save" variant="outline">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}Salva bozza</Button><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}Invia in ufficio</Button></> : <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (modal === "delivery" ? !canDispatchMission : !canManageMission)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "create" ? "Crea e rileggi" : modal === "delivery" ? "Registra consegna" : modal === "pod" ? "Verifica POD" : "Riconcilia"}</Button>}</DialogFooter></form></DialogContent></Dialog>
+    <Dialog open={exceptionModalOpen} onOpenChange={setExceptionModalOpen}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-rose-300/20 bg-[#080c09] text-slate-100 sm:max-w-[620px]"><form className="space-y-4" onSubmit={submitException}><DialogHeader><DialogTitle>Segnala eccezione missione</DialogTitle><DialogDescription className="text-slate-500">L’anomalia resta nel registro della missione con timestamp e autore server-side. Una missione bloccata non può essere chiusa senza una ripresa o una riconciliazione autorizzata.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><div className="rounded-2xl border border-rose-300/15 bg-rose-300/[.035] p-4 sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-rose-200/75">CONTROLLO OPERATIVO</p><p className="mt-2 text-sm font-semibold text-slate-100">{selected?.title ?? "Missione selezionata"}</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Il GPS o il ritardo possono spiegare l’evento, ma la causa deve essere dichiarata dall’operatore autorizzato.</p></div><label className="text-xs text-slate-400">Tipo di eccezione<select aria-label="Tipo di eccezione missione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-rose-300/40" name="exceptionType" onChange={(event) => setExceptionType(event.target.value as MissionExceptionType)} value={exceptionType}>{MISSION_EXCEPTION_TYPES.map((type) => <option key={type} value={type}>{MISSION_EXCEPTION_LABELS[type]}</option>)}</select></label><label className="text-xs text-slate-400">Tappa interessata <select aria-label="Tappa interessata" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-rose-300/40" name="exceptionStopId" onChange={(event) => setExceptionStopId(event.target.value)} value={exceptionStopId}><option value="">Missione intera</option>{selectedStops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Riferimento <span className="text-slate-700">· opzionale</span><Input className="mt-2 border-white/10 bg-black/30 text-xs" name="exceptionReference" placeholder="Numero pratica, assistenza, foto o nota esterna" /></label><label className="text-xs text-slate-400 sm:col-span-2">Descrizione obbligatoria<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30 text-xs leading-5" name="exceptionNote" placeholder="Cosa è successo? Quale carico o tappa è coinvolto?" required /></label></div><DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-rose-300 text-[#160507] hover:bg-rose-200" disabled={busy || !canRecordDeliveryAction} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleAlert className="size-3.5" />}Registra eccezione</Button></DialogFooter></form></DialogContent></Dialog>
     {notice && <button aria-label="Chiudi messaggio" className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_34px_rgba(200,255,34,.16)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CheckCircle2 className="size-4 shrink-0 text-lime-300" />{notice}</button>}
   </main>;
 }

@@ -1,4 +1,5 @@
 import { missionPodEvidenceComplete, missionPodEvidenceLabel } from "@/lib/mission-pod-contract";
+import { missionExceptionIsOpen, missionExceptionLabel, storedMissionException } from "@/lib/mission-exception-contract";
 
 export type MissionReportStatus = "EMPTY" | "DRAFT" | "SUBMITTED";
 export type MissionReportFieldStatus = "known" | "missing" | "optional";
@@ -139,6 +140,7 @@ export function buildMissionReportReadback(
   const timeline = operationalTimeline(payload);
   const proofEntries = deliveryProofEntries(payload);
   const latestProof = proofEntries.at(-1) ?? {};
+  const missionException = storedMissionException(payload.missionException);
   const missing: string[] = [];
   const questions: string[] = [];
 
@@ -186,6 +188,10 @@ export function buildMissionReportReadback(
     missing.push("warehouse_reconciliation");
     questions.push("Riconcilia nel registro del magazzino il prelievo, il carico e lo scarico di tutte le righe prima dell’invio.");
   }
+  if (missionExceptionIsOpen(payload.missionException)) {
+    missing.push("mission_exception_resolution");
+    questions.push(`Risolvi l’eccezione “${missionExceptionLabel(missionException?.type)}”${missionException?.note ? `: ${missionException.note}` : ""} prima di inviare il rapportino.`);
+  }
   if (reportText.length < 30 || reportText.includes("[da completare]")) {
     missing.push("narrative");
     questions.push("Descrivi l’esito della missione, eventuali anomalie e ciò che deve sapere l’ufficio.");
@@ -204,6 +210,7 @@ export function buildMissionReportReadback(
     `Tappe: ${routeLines.join(" | ") || "[da completare]"}`,
     `Eventi server: ${timelineLines.join(" | ") || "[da completare]"}`,
     ...(warehouseRequired ? [`Riconciliazione magazzino: ${warehouseStatus || "[da completare]"}`] : []),
+    ...(missionException ? [`Eccezione missione: ${missionExceptionLabel(missionException.type)} · ${missionException.recoveryStatus}${missionException.note ? ` · ${missionException.note}` : ""}`] : []),
     `Ricevente: ${text(latestProof.recipient, "[da completare]")}`,
     "Esito e anomalie: [da completare]",
   ].join("\n");
@@ -217,6 +224,7 @@ export function buildMissionReportReadback(
     { key: "actions", label: "Azioni registrate", value: timelineLines.join(" · ") || "Nessuna azione", status: timeline.length ? "known" : "missing", source: "Timeline server-side" },
     { key: "warehouse", label: "Riconciliazione magazzino", value: warehouseRequired ? (warehouseStatus || "Da completare") : "Non richiesta", status: !warehouseRequired || warehouseStatus === "DELIVERED" ? "known" : "missing", source: "Ledger Magazzino" },
     { key: "delivery", label: "Prova di consegna", value: proofEntries.length ? proofEntries.map((entry) => `${text(entry.recipient, "Ricevente non indicato")} · ${missionPodEvidenceLabel(isRecord(entry.evidence) ? entry.evidence.type : null)}`).join(" | ") : "Da completare", status: !deliveryStops.length || !missingDeliveryProofStops.length ? "known" : "missing", source: "POD / Autista" },
+    { key: "exception", label: "Eccezioni e recupero", value: missionException ? `${missionExceptionLabel(missionException.type)} · ${missionException.recoveryStatus}` : "Nessuna eccezione aperta", status: !missionException || missionException.recoveryStatus === "RESOLVED" ? "known" : "missing", source: "Timeline missione" },
     { key: "narrative", label: "Esito e anomalie", value: reportText || "Da completare", status: reportText.length >= 30 && !reportText.includes("[da completare]") ? "known" : "missing", source: "Company AI / Autista" },
   ];
 

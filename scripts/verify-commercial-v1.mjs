@@ -18,6 +18,11 @@ import {
   missionPodEvidenceComplete,
   normalizeMissionPodEvidence,
 } from "../lib/mission-pod-contract.ts";
+import {
+  MISSION_EXCEPTION_TYPES,
+  missionExceptionIsOpen,
+  normalizeMissionException,
+} from "../lib/mission-exception-contract.ts";
 import { transitionOutbox } from "../lib/outbox-contract.ts";
 import { transitionW10Workflow, w10ExternalStatus, w10Progress } from "../lib/w10-contract.ts";
 import {
@@ -93,6 +98,10 @@ assert(driverEvidence.evidence && missionPodEvidenceComplete(driverEvidence.evid
 assert.equal(normalizeMissionPodEvidence({ evidenceType: "BARCODE_OR_QR_CONFIRMATION" }, "2026-10-05T12:00:00.000Z", "actor-1").error, "pod_evidence_reference_required", "Barcode/QR POD must carry a reference");
 assert.equal(normalizeMissionPodEvidence({ evidenceType: "DELIVERY_PHOTO" }, "2026-10-05T12:00:00.000Z", "actor-1").error, "pod_evidence_document_required", "Photo POD must link a document");
 assert.equal(normalizeMissionPodEvidence({ evidenceType: "DDT_SCANNED", evidenceReference: "DDT-42", documentId: "DOC-42" }, "2026-10-05T12:00:00.000Z", "actor-1").evidence?.type, "DDT_SCANNED", "DDT evidence must preserve its canonical type");
+assert.equal(MISSION_EXCEPTION_TYPES.length, 8, "Mission exceptions must expose the canonical recovery set");
+const delayException = normalizeMissionException({ exceptionType: "DELAYED", note: "Traffico intenso" }, "2026-10-05T12:01:00.000Z", "actor-1");
+assert(delayException.exception && missionExceptionIsOpen(delayException.exception), "Mission exception must be server-normalized as open evidence");
+assert.equal(normalizeMissionException({ exceptionType: "BLOCKED" }, "2026-10-05T12:01:00.000Z", "actor-1").error, "mission_exception_note_required", "Mission exception must require an operational note");
 
 const procurementReview = transitionW10Workflow({ module: "procurement", status: "REQUESTED", action: "submit_review" });
 assert.equal(procurementReview.nextStatus, "REVIEW", "Procurement must move into review before approval");
@@ -350,6 +359,8 @@ assert(journeyRoute.includes("mission_pod_evidence_required") && journeyRoute.in
 assert(journeyRoute.includes("mission_verify_pod"), "Mission journey must verify POD before reconciliation");
 assert(journeyRoute.includes("mission_reconcile"), "Mission journey must reconcile before close");
 assert(journeyRoute.includes("mission_close"), "Mission journey must expose a governed close state");
+assert(journeyRoute.includes("mission_exception") && journeyRoute.includes("mission_resume"), "Mission journey must expose exception reporting and controlled recovery");
+assert(journeyRoute.includes("mission_exception_manager_required") && journeyRoute.includes("mission_exception_already_open"), "Mission exceptions must preserve role and open-incident guards");
 const locationDeliveryRoute = await readFile(join(root, "app", "api", "location", "deliveries", "route.ts"), "utf8");
 assert(locationDeliveryRoute.includes("normalizeMissionPodEvidence") && locationDeliveryRoute.includes("pod_document_not_verified"), "Location delivery ledger must share the POD evidence and document security contract");
 const missionControlRoute = await readFile(join(root, "app", "api", "mission", "control", "route.ts"), "utf8");
@@ -527,6 +538,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "ui_alignment_audit", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "ui_alignment_audit", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "mission_exception_recovery", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

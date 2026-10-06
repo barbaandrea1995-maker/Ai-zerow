@@ -25,6 +25,7 @@ import { buildMissionWarehouseReadback, missionMaterialLines, type MissionWareho
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
 import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
+import { normalizeMissionException, storedMissionException, type MissionExceptionType } from "@/lib/mission-exception-contract";
 import { missionPodEvidenceComplete, normalizeMissionPodEvidence, storedMissionPodEvidence } from "@/lib/mission-pod-contract";
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
 import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -56,6 +57,8 @@ const ACTION_CAPABILITY = {
   mission_load: "mission.delivery.execute",
   mission_unload: "mission.delivery.execute",
   mission_deliver: "mission.execute",
+  mission_exception: "mission.delivery.execute",
+  mission_resume: "mission.manage",
   mission_verify_pod: "mission.manage",
   mission_reconcile: "mission.manage",
   mission_report_save: "mission.report.write",
@@ -645,7 +648,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const capability = ACTION_CAPABILITY[action];
   const managementReportBypass = ["mission_report_save", "mission_report_submit"].includes(action)
     && hasCapability(context, "mission.manage");
-  if (!hasCapability(context, capability) && !managementReportBypass) {
+  const managementExceptionBypass = action === "mission_exception" && hasCapability(context, "mission.manage");
+  if (!hasCapability(context, capability) && !managementReportBypass && !managementExceptionBypass) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
   if (action === "mission_create" && !hasCapability(context, "mission.resources.read")) {
@@ -927,7 +931,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       title = row.title;
       payload = parseJson(row.payloadJson);
 
-      if (["mission_dispatch", "mission_load", "mission_unload", "mission_deliver"].includes(action) && !(await canRecordAssignedMissionAction(context, row))) {
+      if (["mission_dispatch", "mission_load", "mission_unload", "mission_deliver", "mission_exception"].includes(action) && !(await canRecordAssignedMissionAction(context, row))) {
         return Response.json({ error: "assigned_delivery_driver_required" }, { status: 403 });
       }
       if (["mission_report_save", "mission_report_submit"].includes(action) && !(await canWriteAssignedMissionReport(context, row))) {
@@ -1003,6 +1007,127 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = "FULFILLED";
         payload = { ...payload, fulfilledAt: now, fulfilledBy: context.actorId, missionId };
         eventType = "warehouse.material_request.fulfilled";
+      } else if (action === "mission_exception") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT") {
+          return Response.json({ error: "invalid_mission_exception_target" }, { status: 409 });
+        }
+        const exceptionResult = normalizeMissionException({
+          exceptionType: input.exceptionType,
+          note: input.note,
+          reference: input.reference,
+          stopId: input.stopId,
+        }, now, context.actorId);
+        if (!exceptionResult.exception) {
+          return Response.json({
+            error: exceptionResult.error,
+            allowed: ["DELAYED", "BLOCKED", "VEHICLE_FAULT", "PARTIAL_DELIVERY", "REFUSED", "LOST", "RECONCILE_REQUIRED", "CANCELLED"],
+            message: exceptionResult.error === "mission_exception_note_required"
+              ? "Descrivi l’anomalia: il testo viene registrato nel diario operativo."
+              : "Seleziona un tipo di eccezione missione valido.",
+          }, { status: 400 });
+        }
+        const missionException = exceptionResult.exception;
+        const previousException = storedMissionException(payload.missionException);
+        if (previousException?.recoveryStatus === "OPEN") {
+          return Response.json({ error: "mission_exception_already_open", type: previousException.type }, { status: 409 });
+        }
+        if (["CANCELLED", "RECONCILE_REQUIRED"].includes(missionException.type) && !hasCapability(context, "mission.manage")) {
+          return Response.json({ error: "mission_exception_manager_required", type: missionException.type }, { status: 403 });
+        }
+        const allowedExceptionStates: Record<MissionExceptionType, string[]> = {
+          DELAYED: ["PLANNED", "DISPATCHED"],
+          BLOCKED: ["DISPATCHED"],
+          VEHICLE_FAULT: ["DISPATCHED"],
+          PARTIAL_DELIVERY: ["DISPATCHED"],
+          REFUSED: ["DISPATCHED"],
+          LOST: ["DISPATCHED"],
+          RECONCILE_REQUIRED: ["POD_VERIFIED", "RECONCILED"],
+          CANCELLED: ["PLANNED", "DISPATCHED", "DELAYED", "BLOCKED", "VEHICLE_FAULT", "PARTIAL_DELIVERY", "REFUSED", "LOST"],
+        };
+        if (!allowedExceptionStates[missionException.type].includes(row.status)) {
+          return Response.json({ error: "mission_exception_not_allowed_in_state", type: missionException.type, currentStatus: row.status }, { status: 409 });
+        }
+        if (missionException.stopId) {
+          const route = isRecord(payload.route) ? payload.route : {};
+          const routePlanId = boundedText(route.routePlanId, 160);
+          if (routePlanId) {
+            const [stop] = await db.select().from(routeStops).where(and(
+              eq(routeStops.tenantId, context.tenantId),
+              eq(routeStops.routePlanId, routePlanId),
+              eq(routeStops.id, missionException.stopId),
+            )).limit(1);
+            if (!stop) return Response.json({ error: "mission_exception_stop_not_found" }, { status: 404 });
+          }
+        }
+        const timeline = Array.isArray(payload.operationalTimeline)
+          ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        const exceptionEvent = {
+          id: crypto.randomUUID(),
+          type: `MISSION_EXCEPTION_${missionException.type}`,
+          recordedAt: now,
+          occurredAt: now,
+          recordedBy: context.actorId,
+          exceptionType: missionException.type,
+          stopId: missionException.stopId,
+          reference: missionException.reference,
+          note: missionException.note,
+          source: "mission-driver-action",
+        };
+        missionActionEvent = exceptionEvent;
+        status = missionException.type;
+        const history = Array.isArray(payload.missionExceptionHistory)
+          ? payload.missionExceptionHistory.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        payload = {
+          ...payload,
+          missionException,
+          missionExceptionHistory: [...history, missionException].slice(-50),
+          operationalTimeline: [...timeline, exceptionEvent].slice(-500),
+          lastOperationalEvent: exceptionEvent,
+        };
+        eventType = `mission.transport.exception.${missionException.type.toLowerCase()}`;
+      } else if (action === "mission_resume") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT") {
+          return Response.json({ error: "invalid_mission_resume_target" }, { status: 409 });
+        }
+        const openException = storedMissionException(payload.missionException);
+        if (!openException || openException.recoveryStatus !== "OPEN") {
+          return Response.json({ error: "mission_open_exception_required" }, { status: 409 });
+        }
+        if (!["DELAYED", "BLOCKED", "VEHICLE_FAULT", "PARTIAL_DELIVERY", "REFUSED", "LOST"].includes(openException.type)) {
+          return Response.json({ error: "mission_exception_not_resumable", type: openException.type }, { status: 409 });
+        }
+        const resolutionNote = boundedText(input.note, 2_000) || "Ripresa autorizzata dal responsabile missioni.";
+        const resolvedException = {
+          ...openException,
+          recoveryStatus: "RESOLVED" as const,
+          resolvedAt: now,
+          resolvedBy: context.actorId,
+          resolutionNote,
+        };
+        const timeline = Array.isArray(payload.operationalTimeline)
+          ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        const resumeEvent = {
+          id: crypto.randomUUID(),
+          type: "MISSION_RESUMED",
+          recordedAt: now,
+          occurredAt: now,
+          recordedBy: context.actorId,
+          resolvedExceptionType: openException.type,
+          note: resolutionNote,
+          source: "mission-management",
+        };
+        missionActionEvent = resumeEvent;
+        status = "DISPATCHED";
+        payload = {
+          ...payload,
+          missionException: resolvedException,
+          operationalTimeline: [...timeline, resumeEvent].slice(-500),
+          lastOperationalEvent: resumeEvent,
+        };
+        eventType = "mission.transport.resumed";
       } else if (action === "mission_dispatch") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "PLANNED") {
           return Response.json({ error: "invalid_mission_transition" }, { status: 409 });
@@ -1030,10 +1155,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
         };
         eventType = "mission.transport.dispatched";
       } else if (action === "mission_load" || action === "mission_unload") {
-        if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["PLANNED", "DISPATCHED"].includes(row.status)) {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["PLANNED", "DISPATCHED", "PARTIAL_DELIVERY"].includes(row.status)) {
           return Response.json({ error: "invalid_mission_loading_transition" }, { status: 409 });
         }
-        if (action === "mission_unload" && row.status !== "DISPATCHED") {
+        if (action === "mission_unload" && !["DISPATCHED", "PARTIAL_DELIVERY"].includes(row.status)) {
           return Response.json({ error: "mission_must_be_in_transit_before_unload" }, { status: 409 });
         }
         const route = isRecord(payload.route) ? payload.route : {};
@@ -1097,7 +1222,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         };
         eventType = action === "mission_load" ? "mission.transport.loaded" : "mission.transport.unloaded";
       } else if (action === "mission_deliver") {
-        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DISPATCHED") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["DISPATCHED", "PARTIAL_DELIVERY"].includes(row.status)) {
           return Response.json({ error: "invalid_mission_transition" }, { status: 409 });
         }
         const recipient = boundedText(input.recipient, 160);
@@ -1200,7 +1325,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           recordedBy: context.actorId,
         };
         const proofOfDeliveries = upsertDeliveryProof(payload, proofEntry);
-        status = allDeliveryStopsComplete ? "DELIVERED" : "DISPATCHED";
+        status = allDeliveryStopsComplete ? "DELIVERED" : row.status === "PARTIAL_DELIVERY" ? "PARTIAL_DELIVERY" : "DISPATCHED";
         payload = {
           ...payload,
           warehouseReadback,
@@ -1298,7 +1423,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         };
         eventType = "mission.transport.pod_verified";
       } else if (action === "mission_reconcile") {
-        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "POD_VERIFIED") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["POD_VERIFIED", "RECONCILE_REQUIRED"].includes(row.status)) {
           return Response.json({ error: "invalid_mission_reconciliation_transition" }, { status: 409 });
         }
         const reconciliationNote = boundedText(input.note, 2_000);
@@ -1312,7 +1437,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
           }, { status: 422 });
         }
         status = "RECONCILED";
-        payload = { ...payload, warehouseReadback, reconciliation: { reconciledAt: now, reconciledBy: context.actorId, note: reconciliationNote } };
+        const openException = storedMissionException(payload.missionException);
+        const resolvedException = openException?.recoveryStatus === "OPEN"
+          ? { ...openException, recoveryStatus: "RESOLVED" as const, resolvedAt: now, resolvedBy: context.actorId, resolutionNote: reconciliationNote }
+          : openException;
+        payload = { ...payload, warehouseReadback, ...(resolvedException ? { missionException: resolvedException } : {}), reconciliation: { reconciledAt: now, reconciledBy: context.actorId, note: reconciliationNote } };
         eventType = "mission.transport.reconciled";
       } else if (action === "mission_report_save" || action === "mission_report_submit") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status === "CLOSED") {
