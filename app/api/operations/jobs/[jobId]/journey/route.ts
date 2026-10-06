@@ -20,6 +20,7 @@ import { documentCanDownload } from "@/lib/document-security";
 import { inventoryMovementForResponse, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
+import { buildMissionReportReadback } from "@/lib/mission-contract";
 import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
 import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
@@ -55,6 +56,8 @@ const ACTION_CAPABILITY = {
   mission_deliver: "mission.execute",
   mission_verify_pod: "mission.manage",
   mission_reconcile: "mission.manage",
+  mission_report_save: "mission.report.write",
+  mission_report_submit: "mission.report.write",
   mission_close: "mission.manage",
 } as const;
 
@@ -184,6 +187,23 @@ async function canRecordAssignedMissionAction(context: AuthorityContext, row: ty
     || boundedText(driverPayload.authorityMembershipId, 200) === context.membershipId;
 }
 
+async function canWriteAssignedMissionReport(context: AuthorityContext, row: typeof jobJourneyRecords.$inferSelect) {
+  if (hasCapability(context, "mission.manage")) return true;
+  if (!hasCapability(context, "mission.report.write")) return false;
+  const payload = parseJson(row.payloadJson);
+  const driverId = boundedText(payload.driverId, 160);
+  if (!driverId) return false;
+  const [driver] = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+    eq(s04Records.id, driverId),
+  )).limit(1);
+  if (!driver) return false;
+  const driverPayload = parseJson(driver.payloadJson);
+  return boundedText(driverPayload.actorId, 200) === context.actorId
+    || boundedText(driverPayload.authorityMembershipId, 200) === context.membershipId;
+}
+
 function recordForResponse(row: typeof jobJourneyRecords.$inferSelect) {
   return {
     id: row.id,
@@ -276,6 +296,13 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
     return { access: allowed ? "granted" : "restricted", count: domainRecords.length, records: domainRecords };
   };
   const payload = parseJobPayload(job.payloadJson);
+  const missionReports = visibleRecords
+    .filter((record) => record.domain === "mission" && record.recordType === "TRANSPORT")
+    .map((record) => ({
+      missionId: record.id,
+      status: record.status,
+      readback: buildMissionReportReadback(parseJson(record.payloadJson)),
+    }));
 
   return {
     context: publicAuthorityContext(context),
@@ -309,6 +336,7 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
         records: documents.map(documentForResponse),
       },
     },
+    missionReports,
     can: actionAccess(context),
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   };
@@ -379,7 +407,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
     return Response.json({ error: "unsupported_journey_action", allowed: Object.keys(ACTION_CAPABILITY) }, { status: 400 });
   }
   const capability = ACTION_CAPABILITY[action];
-  if (!hasCapability(context, capability)) {
+  const managementReportBypass = ["mission_report_save", "mission_report_submit"].includes(action)
+    && hasCapability(context, "mission.manage");
+  if (!hasCapability(context, capability) && !managementReportBypass) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
   if (action === "mission_create" && !hasCapability(context, "mission.resources.read")) {
@@ -663,6 +693,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (["mission_dispatch", "mission_load", "mission_unload", "mission_deliver"].includes(action) && !(await canRecordAssignedMissionAction(context, row))) {
         return Response.json({ error: "assigned_delivery_driver_required" }, { status: 403 });
       }
+      if (["mission_report_save", "mission_report_submit"].includes(action) && !(await canWriteAssignedMissionReport(context, row))) {
+        return Response.json({ error: "assigned_delivery_driver_report_required" }, { status: 403 });
+      }
 
       if (action === "planning_publish") {
         if (domain !== "planning" || row.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition" }, { status: 409 });
@@ -738,7 +771,26 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "invalid_mission_transition" }, { status: 409 });
         }
         status = "DISPATCHED";
-        payload = { ...payload, dispatchedAt: boundedText(input.dispatchedAt, 40, now), dispatchedBy: context.actorId };
+        const timeline = Array.isArray(payload.operationalTimeline)
+          ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        const dispatchEvent = {
+          id: crypto.randomUUID(),
+          type: "MISSION_DISPATCHED",
+          recordedAt: now,
+          occurredAt: now,
+          recordedBy: context.actorId,
+          source: "mission-driver-action",
+        };
+        missionActionEvent = dispatchEvent;
+        payload = {
+          ...payload,
+          dispatchedAt: now,
+          dispatchedBy: context.actorId,
+          clientObservedDispatchAt: validDateTime(boundedText(input.dispatchedAt, 40)) ? boundedText(input.dispatchedAt, 40) : null,
+          operationalTimeline: [...timeline, dispatchEvent].slice(-500),
+          lastOperationalEvent: dispatchEvent,
+        };
         eventType = "mission.transport.dispatched";
       } else if (action === "mission_load" || action === "mission_unload") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || !["PLANNED", "DISPATCHED"].includes(row.status)) {
@@ -791,18 +843,49 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const recipient = boundedText(input.recipient, 160);
         if (recipient.length < 2) return Response.json({ error: "proof_of_delivery_recipient_required" }, { status: 400 });
-        const deliveredAt = boundedText(input.deliveredAt, 40, now);
-        if (!validDateTime(deliveredAt)) return Response.json({ error: "valid_delivery_date_required" }, { status: 400 });
+        const route = isRecord(payload.route) ? payload.route : {};
+        missionActionRoutePlanId = boundedText(route.routePlanId, 160);
+        missionActionStopId = boundedText(input.stopId, 160);
+        if (missionActionStopId) {
+          if (!missionActionRoutePlanId) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+          const [stop] = await db.select({ id: routeStops.id }).from(routeStops).where(and(
+            eq(routeStops.tenantId, context.tenantId),
+            eq(routeStops.routePlanId, missionActionRoutePlanId),
+            eq(routeStops.id, missionActionStopId),
+          )).limit(1);
+          if (!stop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+        }
+        const timeline = Array.isArray(payload.operationalTimeline)
+          ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
+          : [];
+        const deliveryEvent = {
+          id: crypto.randomUUID(),
+          type: "DELIVERY_CONFIRMED",
+          recordedAt: now,
+          occurredAt: now,
+          recordedBy: context.actorId,
+          stopId: missionActionStopId || null,
+          sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
+          recipient,
+          documentId: boundedText(input.documentId, 120) || null,
+          note: boundedText(input.note, 2_000),
+          source: "mission-driver-action",
+        };
+        missionActionEvent = deliveryEvent;
         status = "DELIVERED";
         payload = {
           ...payload,
           proofOfDelivery: {
             recipient,
-            deliveredAt,
+            deliveredAt: now,
+            recordedAt: now,
+            clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
             note: boundedText(input.note, 2_000),
             documentId: boundedText(input.documentId, 120) || null,
             recordedBy: context.actorId,
           },
+          operationalTimeline: [...timeline, deliveryEvent].slice(-500),
+          lastOperationalEvent: deliveryEvent,
         };
         eventType = "mission.transport.delivered";
       } else if (action === "mission_verify_pod") {
@@ -829,12 +912,59 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = "RECONCILED";
         payload = { ...payload, reconciliation: { reconciledAt: now, reconciledBy: context.actorId, note: reconciliationNote } };
         eventType = "mission.transport.reconciled";
+      } else if (action === "mission_report_save" || action === "mission_report_submit") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status === "CLOSED") {
+          return Response.json({ error: "invalid_mission_report_transition" }, { status: 409 });
+        }
+        const reportText = boundedText(input.text, 4_000);
+        if (reportText.length < 2) return Response.json({ error: "mission_report_text_required" }, { status: 400 });
+        const reportReadback = buildMissionReportReadback(payload, { textOverride: reportText });
+        if (action === "mission_report_submit" && !reportReadback.completeness.ready) {
+          return Response.json({
+            error: "mission_report_completeness_unmet",
+            completeness: reportReadback.completeness,
+            questions: reportReadback.completeness.questions,
+            message: "Il rapportino missione resta in bozza: completa le evidenze importanti prima dell’invio in ufficio.",
+          }, { status: 422 });
+        }
+        const reportStatus = action === "mission_report_submit" ? "SUBMITTED" : "DRAFT";
+        payload = {
+          ...payload,
+          missionReport: {
+            status: reportStatus,
+            text: reportText,
+            ...(action === "mission_report_submit" ? {
+              submittedAt: now,
+              submittedBy: context.actorId,
+              completeness: reportReadback.completeness,
+            } : {}),
+            updatedAt: now,
+            updatedBy: context.actorId,
+          },
+        };
+        status = row.status;
+        eventType = action === "mission_report_submit" ? "mission.transport.report_submitted" : "mission.transport.report_saved";
       } else if (action === "mission_close") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "RECONCILED") {
           return Response.json({ error: "invalid_mission_close_transition" }, { status: 409 });
         }
+        const reportReadback = buildMissionReportReadback(payload);
+        const savedReport = isRecord(payload.missionReport) ? payload.missionReport : {};
+        if (boundedText(savedReport.status, 24).toUpperCase() !== "SUBMITTED" || !reportReadback.completeness.ready) {
+          return Response.json({
+            error: "mission_report_required_before_close",
+            completeness: reportReadback.completeness,
+            questions: reportReadback.completeness.questions,
+            message: "La missione non può essere chiusa senza rapportino missione inviato e completo.",
+          }, { status: 422 });
+        }
         status = "CLOSED";
-        payload = { ...payload, closedAt: now, closedBy: context.actorId };
+        payload = {
+          ...payload,
+          closedAt: now,
+          closedBy: context.actorId,
+          missionReport: { ...savedReport, closedReadbackAt: now },
+        };
         eventType = "mission.transport.closed";
       }
     }
@@ -953,11 +1083,29 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const route = isRecord(payload.route) ? payload.route : {};
       const routePlanId = boundedText(route.routePlanId, 160);
       if (routePlanId) {
-        statements.push(db.update(routePlans).set({ status: "DISPATCHED", updatedAt: now }).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, routePlanId))) as never);
+        statements.push(db.update(routePlans).set({ status: "DISPATCHED", startedAt: now, updatedAt: now }).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, routePlanId))) as never);
       }
+    }
+    if (existing && missionActionRoutePlanId && missionActionStopId && ["mission_load", "mission_unload", "mission_deliver"].includes(action)) {
+      const isDelivery = action === "mission_deliver";
+      statements.push(db.update(routeStops).set({
+        status: isDelivery ? "COMPLETED" : action === "mission_load" ? "LOADED" : "UNLOADED",
+        deliveryStatus: isDelivery ? "CONFIRMED" : action === "mission_load" ? "LOADED" : "UNLOADED",
+        arrivedAt: now,
+        departedAt: isDelivery ? now : null,
+        updatedAt: now,
+      }).where(and(
+        eq(routeStops.tenantId, context.tenantId),
+        eq(routeStops.routePlanId, missionActionRoutePlanId),
+        eq(routeStops.id, missionActionStopId),
+      )) as never);
     }
     if (existing && action === "mission_close") {
       const route = isRecord(payload.route) ? payload.route : {};
+      const routePlanId = boundedText(route.routePlanId, 160);
+      if (routePlanId) {
+        statements.push(db.update(routePlans).set({ status: "COMPLETED", endedAt: now, updatedAt: now }).where(and(eq(routePlans.tenantId, context.tenantId), eq(routePlans.id, routePlanId))) as never);
+      }
       const routeSummaryStops = Array.isArray(route.stops) ? route.stops : [];
       const temporaryLocationIds = routeSummaryStops.flatMap((stop) => {
         if (!isRecord(stop) || stop.temporary !== true) return [];

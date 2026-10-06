@@ -6,6 +6,7 @@ import { assertMissionResourceSelection, MissionResourceError } from "@/lib/miss
 import { geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { parseJobPayload } from "@/lib/operations-contract";
+import { buildMissionReportReadback } from "@/lib/mission-contract";
 import { allocateServerName } from "@/lib/server-naming";
 import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
 import {
@@ -143,6 +144,25 @@ export async function GET() {
       const job = jobById.get(mission.jobId);
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
       const routePlan = routePlanByMission.get(mission.id);
+      const storedPayload = parseJson(mission.payloadJson);
+      const routeReadback = routePlan ? {
+        id: routePlan.id,
+        status: routePlan.status,
+        plannedStartAt: routePlan.plannedStartAt,
+        startedAt: routePlan.startedAt,
+        endedAt: routePlan.endedAt,
+        stops: (routeStopsByPlan.get(routePlan.id) ?? []).map((stop) => ({
+          id: stop.id,
+          sequence: stop.sequence,
+          locationId: stop.locationId,
+          status: stop.status,
+          deliveryStatus: stop.deliveryStatus,
+          arrivedAt: stop.arrivedAt,
+          departedAt: stop.departedAt,
+          metadata: parseJson(stop.evidenceJson),
+        })),
+      } : null;
+      const effectivePayload = { ...storedPayload, routeReadback };
       return {
         id: mission.id,
         jobId: mission.jobId,
@@ -153,24 +173,8 @@ export async function GET() {
         status: mission.status,
         version: mission.version,
         payload: {
-          ...parseJson(mission.payloadJson),
-          routeReadback: routePlan ? {
-            id: routePlan.id,
-            status: routePlan.status,
-            plannedStartAt: routePlan.plannedStartAt,
-            startedAt: routePlan.startedAt,
-            endedAt: routePlan.endedAt,
-            stops: (routeStopsByPlan.get(routePlan.id) ?? []).map((stop) => ({
-              id: stop.id,
-              sequence: stop.sequence,
-              locationId: stop.locationId,
-              status: stop.status,
-              deliveryStatus: stop.deliveryStatus,
-              arrivedAt: stop.arrivedAt,
-              departedAt: stop.departedAt,
-              metadata: parseJson(stop.evidenceJson),
-            })),
-          } : null,
+          ...effectivePayload,
+          missionReport: buildMissionReportReadback(effectivePayload),
         },
         createdAt: mission.createdAt,
         updatedAt: mission.updatedAt,

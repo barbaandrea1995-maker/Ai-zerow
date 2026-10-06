@@ -18,7 +18,7 @@ const WAREHOUSE_REGISTER = [...WAREHOUSE_WRITE, "warehouse.register"];
 const MISSION_READ = ["mission.read"];
 // Scheduling a mission is a dispatch capability. Reading or executing an
 // assigned mission must not expose the entire driver/vehicle registry.
-const MISSION_MANAGE = ["mission.read", "mission.write", "mission.manage", "mission.resources.read", "mission.execute"];
+const MISSION_MANAGE = ["mission.read", "mission.write", "mission.manage", "mission.resources.read", "mission.execute", "mission.report.write"];
 const MISSION_EXECUTE = ["mission.read", "mission.execute"];
 // Delivery execution is deliberately narrower than mission management. The
 // dispatcher creates and assigns the mission; this role only performs the
