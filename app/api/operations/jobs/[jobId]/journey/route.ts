@@ -167,7 +167,7 @@ async function canAccessJourneyJob(context: AuthorityContext, job: typeof s04Rec
   return missionRows.some((row) => rowMatchesContext(row, context));
 }
 
-async function canRecordDriverMissionAction(context: AuthorityContext, row: typeof jobJourneyRecords.$inferSelect) {
+async function canRecordAssignedMissionAction(context: AuthorityContext, row: typeof jobJourneyRecords.$inferSelect) {
   if (hasCapability(context, "mission.manage")) return true;
   if (!hasCapability(context, "mission.delivery.execute")) return false;
   const payload = parseJson(row.payloadJson);
@@ -660,7 +660,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       title = row.title;
       payload = parseJson(row.payloadJson);
 
-      if ((action === "mission_load" || action === "mission_unload") && !(await canRecordDriverMissionAction(context, row))) {
+      if (["mission_dispatch", "mission_load", "mission_unload", "mission_deliver"].includes(action) && !(await canRecordAssignedMissionAction(context, row))) {
         return Response.json({ error: "assigned_delivery_driver_required" }, { status: 403 });
       }
 
