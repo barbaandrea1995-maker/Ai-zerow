@@ -10,6 +10,7 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import {
   canTransitionJob,
   clampJobProgress,
+  buildRapportinoReadback,
   jobCompletionRequirements,
   jobStatusLabel,
   normalizeJobStatus,
@@ -17,6 +18,8 @@ import {
   type JobActivity,
   type JobEvidence,
   type JobPayload,
+  type RapportinoContext,
+  type RapportinoReadback,
 } from "@/lib/operations-contract";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -184,6 +187,72 @@ function journeyWorkspaceRecord(row: typeof jobJourneyRecords.$inferSelect) {
   };
 }
 
+type ReportSourceRecord = {
+  title: string;
+  detail?: string;
+  status?: string;
+  meta?: string;
+};
+
+function reportContextFromVisibleRecords(input: {
+  attendance: ReportSourceRecord[];
+  resources: ReportSourceRecord[];
+  materials: ReportSourceRecord[];
+  field: ReportSourceRecord[];
+}): RapportinoContext {
+  return {
+    attendance: input.attendance,
+    resources: input.resources,
+    materials: input.materials,
+    field: input.field,
+  };
+}
+
+function reportContextFromJourneyAndRelated(
+  journeyRows: (typeof jobJourneyRecords.$inferSelect)[],
+  related: ReturnType<typeof relatedRecords>,
+): RapportinoContext {
+  const journeyRecords = journeyRows.map(journeyWorkspaceRecord);
+  return reportContextFromVisibleRecords({
+    attendance: journeyRows
+      .filter((row) => row.domain === "field" && row.recordType.toUpperCase() === "ATTENDANCE")
+      .map(journeyWorkspaceRecord),
+    resources: [
+      ...journeyRecords.filter((record) => ["plan", "asset_assignment"].includes(record.recordType)),
+      ...related.filter((record) => ["assets", "workforce", "mission", "planning"].includes(record.module)),
+    ],
+    materials: [
+      ...journeyRecords.filter((record) => ["material_request", "material_movement"].includes(record.recordType)),
+      ...related.filter((record) => record.module === "warehouse"),
+    ],
+    field: [
+      ...journeyRows
+        .filter((row) => row.domain === "field" && row.recordType.toUpperCase() !== "ATTENDANCE")
+        .map(journeyWorkspaceRecord),
+    ],
+  });
+}
+
+function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback) {
+  const statusLabel = readback.status === "SUBMITTED" ? "INVIATO IN UFFICIO" : "BOZZA";
+  return {
+    id: `${jobKey}:rapportino`,
+    module: "operations" as const,
+    recordType: "rapportino",
+    title: "Rapportino giornaliero",
+    detail: readback.completeness.ready
+      ? "Controllo Company AI superato"
+      : `${readback.completeness.missing.length} dati da completare`,
+    meta: statusLabel,
+    status: readback.status,
+    tone: readback.completeness.ready ? "lime" as const : "amber" as const,
+    progress: readback.completeness.ready ? 100 : 0,
+    payload: { status: readback.status, missing: readback.completeness.missing },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 async function workspaceResponse(
   context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
   jobRow: typeof s04Records.$inferSelect,
@@ -234,6 +303,16 @@ async function workspaceResponse(
   const resourceRecords = canReadAssets ? byModule("assets") : [];
   const materialRecords = canReadWarehouse ? byModule("warehouse") : [];
   const fieldRecords = canReadField ? [...evidence, ...attendanceJourney] : [];
+  const rapportino = buildRapportinoReadback(payload, reportContextFromVisibleRecords({
+    attendance: canReadField ? attendanceJourney : [],
+    resources: [
+      ...(canReadPlanning ? planningRecords : []),
+      ...(canReadAssets ? resourceRecords : []),
+    ],
+    materials: canReadWarehouse ? materialRecords : [],
+    field: canReadField ? fieldRecords.filter((record) => record.recordType !== "attendance" && record.recordType !== "evidence") : [],
+  }));
+  const completionRequirements = jobCompletionRequirements(payload);
 
   return {
     context: publicAuthorityContext(context),
@@ -242,9 +321,10 @@ async function workspaceResponse(
       source: "sites-d1-w03-commessa-read-write",
       authority: "server-context",
       completion: {
-        ready: jobCompletionRequirements(payload).every((requirement) => requirement.complete),
-        requirements: jobCompletionRequirements(payload),
+        ready: completionRequirements.every((requirement) => requirement.complete),
+        requirements: completionRequirements,
       },
+      rapportino,
       requestedJobId,
       sections: {
         activities: section(activities.length ? "readback" : "empty", activities),
@@ -252,7 +332,10 @@ async function workspaceResponse(
         resources: section(canReadAssets ? (resourceRecords.length ? "readback" : "empty") : "deferred", resourceRecords),
         materials: section(canReadWarehouse ? (materialRecords.length ? "readback" : "empty") : "deferred", materialRecords),
         field: section(fieldRecords.length ? "readback" : "deferred", fieldRecords),
-        rapportino: section(payload.rapportino ? "readback" : "deferred", []),
+        rapportino: section(
+          rapportino.status === "EMPTY" ? "empty" : "readback",
+          rapportino.status === "EMPTY" ? [] : [rapportinoSectionRecord(jobKey, rapportino)],
+        ),
         control: section("readback", []),
         evidence: section(evidence.length ? "readback" : "empty", evidence),
       },
@@ -391,6 +474,21 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       return Response.json({ error: "version_conflict", expectedVersion, currentVersion: current.version }, { status: 409 });
     }
 
+    let rapportinoContext: RapportinoContext | undefined;
+    if (action === "submit_rapportino") {
+      const jobVariants = new Set([
+        ...keyVariants(requestedJobId),
+        ...keyVariants(jobRow.id),
+        ...keyVariants(jobRow.canonicalCode ?? ""),
+      ]);
+      const related = relatedRecords(rows, jobVariants);
+      const journeyRows = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.jobId, jobRow.id),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+      rapportinoContext = reportContextFromJourneyAndRelated(journeyRows, related);
+    }
+
     const next: JobPayload = { ...current, version: current.version + 1 };
     const now = new Date().toISOString();
     let eventType = "operations.job.updated";
@@ -481,6 +579,29 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       next.rapportino = { status: "DRAFT", text, updatedAt: now, updatedBy: context.actorId };
       eventType = "operations.job.rapportino_saved";
       change = { status: "DRAFT" };
+    } else if (action === "submit_rapportino") {
+      const reportText = boundedText(input.text, 4_000);
+      if (reportText.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
+      const reportReadback = buildRapportinoReadback(current, rapportinoContext ?? {}, { textOverride: reportText });
+      if (!reportReadback.completeness.ready) {
+        return Response.json({
+          error: "rapportino_completeness_unmet",
+          completeness: reportReadback.completeness,
+          questions: reportReadback.completeness.questions,
+          message: "Il rapportino resta in bozza: Company AI deve ricevere tutti i dati importanti prima dell’invio in ufficio.",
+        }, { status: 422 });
+      }
+      next.rapportino = {
+        status: "SUBMITTED",
+        text: reportText,
+        submittedAt: now,
+        submittedBy: context.actorId,
+        updatedAt: now,
+        updatedBy: context.actorId,
+        completeness: reportReadback.completeness,
+      };
+      eventType = "operations.job.rapportino_submitted";
+      change = { status: "SUBMITTED", missing: 0 };
     } else if (action === "update_job") {
       const fields = isRecord(input.fields) ? input.fields : input;
       if (typeof fields.title === "string") {

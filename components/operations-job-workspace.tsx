@@ -74,6 +74,23 @@ type CompletionRequirement = {
   detail: string;
 };
 
+type RapportinoReadback = {
+  status: "EMPTY" | "DRAFT" | "SUBMITTED";
+  draft: string;
+  fields: Array<{
+    key: string;
+    label: string;
+    value: string;
+    status: "known" | "missing" | "optional";
+    source: string;
+  }>;
+  completeness: {
+    ready: boolean;
+    missing: string[];
+    questions: string[];
+  };
+};
+
 type WorkspacePayload = {
   job: WorkspaceRecord & { payload?: Record<string, unknown> };
   workspace: {
@@ -93,6 +110,7 @@ type WorkspacePayload = {
       status: "readback" | "empty" | "deferred";
     }>;
     completion: { ready: boolean; requirements: CompletionRequirement[] };
+    rapportino: RapportinoReadback;
   };
   readback?: { version?: number };
   mutation?: { action: string; version?: number; readback?: string };
@@ -134,6 +152,7 @@ function statusTone(status: string) {
       "CHIUSA",
       "VERIFIED_SITES_READBACK",
       "ASSIGNED",
+      "SUBMITTED",
     ].includes(value)
   )
     return "border-lime-300/25 bg-lime-300/10 text-lime-200";
@@ -167,6 +186,7 @@ const STATUS_LABELS: Record<string, string> = {
   PROPOSED: "IN PROPOSTA",
   PROPOSTA: "IN PROPOSTA",
   REQUESTED: "RICHIESTO",
+  SUBMITTED: "INVIATO",
   VERIFIED_SITES_READBACK: "VERIFICATO",
 };
 
@@ -206,6 +226,8 @@ const ACTION_LABELS: Record<string, string> = {
   add_activity: "Attività aggiunta",
   add_evidence: "Evidenza aggiunta",
   add_report: "Rapportino aggiunto",
+  save_rapportino: "Bozza rapportino salvata",
+  submit_rapportino: "Rapportino inviato in ufficio",
   assign: "Risorse assegnate",
   set_status: "Stato aggiornato",
   update_details: "Scheda aggiornata",
@@ -614,6 +636,8 @@ export default function OperationsJobWorkspace({
         const nextPayload = (await response.json()) as WorkspacePayload & {
           error?: string;
           requirements?: CompletionRequirement[];
+          completeness?: RapportinoReadback["completeness"];
+          questions?: string[];
         };
         if (!response.ok) {
           if (
@@ -626,6 +650,13 @@ export default function OperationsJobWorkspace({
               .join(", ");
             notify(
               `Completamento bloccato: ${missing || "requisiti mancanti"}`,
+            );
+          } else if (
+            nextPayload.error === "rapportino_completeness_unmet" &&
+            (nextPayload.questions?.length || nextPayload.completeness?.missing?.length)
+          ) {
+            notify(
+              `Invio bloccato: ${nextPayload.questions?.[0] ?? "completa i dati mancanti"}`,
             );
           } else
             notify(
@@ -722,6 +753,18 @@ export default function OperationsJobWorkspace({
         : payload.job.meta,
     );
     setActionOpen("details");
+  };
+
+  const openReport = () => {
+    if (!payload) return;
+    setReportText(payload.workspace.rapportino.draft);
+    setActionOpen("report");
+  };
+
+  const submitReport = (intent: "DRAFT" | "SUBMIT") => {
+    void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", {
+      text: reportText,
+    });
   };
 
   if (state === "loading")
@@ -1205,10 +1248,10 @@ export default function OperationsJobWorkspace({
                     <Button
                       variant="outline"
                       className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                      onClick={() => setActionOpen("report")}
+                      onClick={openReport}
                     >
                       <FileText className="size-3.5" />
-                      Apri rapportino
+                      Crea rapportino con Company AI
                     </Button>
                   </>
                 )}
@@ -1514,15 +1557,62 @@ export default function OperationsJobWorkspace({
                 </div>
               )}
               {actionOpen === "report" && (
-                <label className="space-y-2 text-xs text-slate-400">
-                  Rapportino
-                  <Textarea
-                    className="mt-2 min-h-[160px] border-white/10 bg-black/30 text-slate-100"
-                    onChange={(event) => setReportText(event.target.value)}
-                    placeholder="Attività svolte, criticità, materiali e prossimi passi"
-                    value={reportText}
-                  />
-                </label>
+                <div className="space-y-4">
+                  <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.045] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
+                          <Sparkles className="size-3.5" />
+                        </span>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/80">
+                            Company AI · precompilazione governata
+                          </p>
+                          <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                            Ho raccolto ciò che il sistema già conosce da commessa, presenze, planning, asset e magazzino. Tu confermi solo ciò che manca.
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] ${statusTone(payload.workspace.rapportino.status)}`}>
+                        {payload.workspace.rapportino.status === "SUBMITTED" ? "INVIATO" : payload.workspace.rapportino.status === "DRAFT" ? "BOZZA" : "NUOVO"}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      {payload.workspace.rapportino.fields.map((field) => (
+                        <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3" key={field.key}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">{field.label}</span>
+                            <span className={`size-1.5 rounded-full ${field.status === "known" ? "bg-lime-300" : field.status === "missing" ? "bg-amber-300" : "bg-cyan-300"}`} />
+                          </div>
+                          <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-200">{field.value}</p>
+                          <p className="mt-1 text-[9px] text-slate-600">{field.source}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {payload.workspace.rapportino.completeness.questions.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">Dati richiesti prima dell’invio</p>
+                        <ul className="mt-2 space-y-1.5 text-[11px] leading-4 text-amber-100/80">
+                          {payload.workspace.rapportino.completeness.questions.map((question) => (
+                            <li className="flex gap-2" key={question}>
+                              <span className="mt-1.5 size-1 shrink-0 rounded-full bg-amber-300" />
+                              <span>{question}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </section>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Consuntivo del turno
+                    <Textarea
+                      className="mt-2 min-h-[220px] border-white/10 bg-black/30 text-slate-100"
+                      onChange={(event) => setReportText(event.target.value)}
+                      placeholder="Company AI precompila qui. Completa criticità, materiali e prossimi passi; poi salva la bozza o invia in ufficio."
+                      value={reportText}
+                    />
+                  </label>
+                </div>
               )}
               {actionOpen === "progress" && (
                 <div className="space-y-4">
@@ -1557,13 +1647,34 @@ export default function OperationsJobWorkspace({
                     Annulla
                   </Button>
                 </DialogClose>
-                <Button
-                  type="submit"
-                  className="bg-lime-300 text-[#060806] hover:bg-lime-200"
-                >
-                  <Send className="size-3.5" />
-                  Salva e rileggi
-                </Button>
+                {actionOpen === "report" ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-cyan-300/25 bg-cyan-300/[0.05] text-cyan-100 hover:bg-cyan-300/[0.1]"
+                      onClick={() => submitReport("DRAFT")}
+                    >
+                      Salva bozza
+                    </Button>
+                    <Button
+                      type="button"
+                      className="bg-lime-300 text-[#060806] hover:bg-lime-200"
+                      onClick={() => submitReport("SUBMIT")}
+                    >
+                      <Send className="size-3.5" />
+                      {payload.workspace.rapportino.status === "SUBMITTED" ? "Invia revisione" : "Invia in ufficio"}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="submit"
+                    className="bg-lime-300 text-[#060806] hover:bg-lime-200"
+                  >
+                    <Send className="size-3.5" />
+                    Salva e rileggi
+                  </Button>
+                )}
               </DialogFooter>
             </form>
           </DialogContent>

@@ -191,8 +191,180 @@ export type JobCompletionRequirement = {
   detail: string;
 };
 
+export type RapportinoContextRecord = {
+  title: string;
+  detail?: string;
+  status?: string;
+  meta?: string;
+};
+
+export type RapportinoContext = {
+  attendance?: RapportinoContextRecord[];
+  resources?: RapportinoContextRecord[];
+  materials?: RapportinoContextRecord[];
+  field?: RapportinoContextRecord[];
+};
+
+export type RapportinoField = {
+  key: string;
+  label: string;
+  value: string;
+  status: "known" | "missing" | "optional";
+  source: string;
+};
+
+export type RapportinoCompleteness = {
+  ready: boolean;
+  missing: string[];
+  questions: string[];
+};
+
+export type RapportinoReadback = {
+  status: "EMPTY" | "DRAFT" | "SUBMITTED";
+  draft: string;
+  fields: RapportinoField[];
+  completeness: RapportinoCompleteness;
+};
+
+function uniqueReportRecords(records: RapportinoContextRecord[] = []) {
+  const seen = new Set<string>();
+  return records.filter((record) => {
+    const key = `${text(record.title).toLocaleLowerCase("it-IT")}::${text(record.detail).toLocaleLowerCase("it-IT")}::${text(record.meta)}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 80);
+}
+
+function reportRecordsSummary(records: RapportinoContextRecord[], emptyLabel: string) {
+  if (!records.length) return emptyLabel;
+  return records
+    .slice(0, 8)
+    .map((record) => text(record.title, "Record operativo"))
+    .join(", ");
+}
+
+function reportRecordLines(records: RapportinoContextRecord[], emptyLabel: string) {
+  if (!records.length) return `- ${emptyLabel}`;
+  return records
+    .slice(0, 12)
+    .map((record) => {
+      const detail = text(record.detail);
+      const status = text(record.status);
+      return `- ${text(record.title, "Record operativo")}${detail ? ` · ${detail}` : ""}${status ? ` · ${status}` : ""}`;
+    })
+    .join("\n");
+}
+
+function reportStatus(value: unknown): RapportinoReadback["status"] {
+  const normalized = text(value).toUpperCase();
+  if (normalized === "SUBMITTED") return "SUBMITTED";
+  if (normalized === "DRAFT") return "DRAFT";
+  return "EMPTY";
+}
+
+export function buildRapportinoReadback(
+  payload: JobPayload,
+  context: RapportinoContext = {},
+  options: { textOverride?: string } = {},
+): RapportinoReadback {
+  const report = isRecord(payload.rapportino) ? payload.rapportino : null;
+  const attendance = uniqueReportRecords(context.attendance);
+  const resources = uniqueReportRecords(context.resources);
+  const materials = uniqueReportRecords(context.materials);
+  const field = uniqueReportRecords(context.field);
+  const savedText = text(options.textOverride ?? report?.text);
+  const hasPlaceholder = /\[(?:da completare|da confermare|da indicare|da descrivere)\]/i.test(savedText);
+  const narrativeComplete = savedText.length >= 40 && !hasPlaceholder;
+  const doneActivities = payload.activities.filter((activity) => activity.state === "done").length;
+  const openActivities = payload.activities.length - doneActivities;
+  const attendanceClosed = attendance.some((record) => ["CHECKED_OUT", "APPROVED", "CLOSED"].includes(text(record.status).toUpperCase()));
+  const assignmentLabel = payload.assignment
+    ? [payload.assignment.responsible, payload.assignment.team].filter(Boolean).join(" · ")
+    : "Da assegnare";
+
+  const missing: string[] = [];
+  const questions: string[] = [];
+  if (!payload.activities.length) {
+    missing.push("activities");
+    questions.push("Quali attività sono state svolte durante il turno?");
+  } else if (openActivities > 0) {
+    missing.push("activities_status");
+    questions.push("Ci sono attività ancora aperte: conferma cosa resta da fare o chiudi le attività completate.");
+  }
+  if (!payload.assignment) {
+    missing.push("assignment");
+    questions.push("Chi è il responsabile della squadra o dell’attività?");
+  }
+  if (!attendance.length) {
+    missing.push("attendance");
+    questions.push("Non trovo una timbratura collegata: verifica presenza e turno prima di inviare il rapportino.");
+  } else if (!attendanceClosed) {
+    missing.push("attendance_exit");
+    questions.push("La presenza risulta ancora aperta: registra l’uscita prima di inviare il rapportino.");
+  }
+  if (!payload.evidence.length && !field.length) {
+    missing.push("evidence");
+    questions.push("Aggiungi almeno un’evidenza verificabile: nota, foto, file o rilievo operativo.");
+  }
+  if (!narrativeComplete) {
+    missing.push("narrative");
+    questions.push("Completa il consuntivo con attività svolte, criticità, materiali e prossimi passi.");
+  }
+
+  const fields: RapportinoField[] = [
+    { key: "job", label: "Commessa", value: text(payload.title, "Da completare"), status: text(payload.title).length >= 2 ? "known" : "missing", source: "Anagrafica commessa" },
+    { key: "worksite", label: "Luogo", value: text(payload.location, "Da verificare"), status: text(payload.location).length >= 2 ? "known" : "missing", source: "Location server-side" },
+    { key: "assignment", label: "Responsabile / squadra", value: assignmentLabel, status: payload.assignment ? "known" : "missing", source: "Assegnazione operativa" },
+    { key: "activities", label: "Attività", value: payload.activities.length ? `${doneActivities}/${payload.activities.length} completate` : "Nessuna attività registrata", status: payload.activities.length && openActivities === 0 ? "known" : "missing", source: "Attività della commessa" },
+    { key: "attendance", label: "Presenze e timbrature", value: attendance.length ? `${attendance.length} record · ${attendanceClosed ? "uscita registrata" : "uscita da registrare"}` : "Da registrare", status: attendanceClosed ? "known" : "missing", source: "Presenze / geofence" },
+    { key: "resources", label: "Persone, mezzi e asset", value: reportRecordsSummary(resources, "Nessuna risorsa collegata"), status: resources.length ? "known" : "optional", source: "Planning / Asset" },
+    { key: "materials", label: "Materiali", value: reportRecordsSummary(materials, "Nessun movimento collegato"), status: materials.length ? "known" : "optional", source: "Magazzino" },
+    { key: "evidence", label: "Evidenze", value: `${payload.evidence.length + field.length} record verificabili`, status: payload.evidence.length || field.length ? "known" : "missing", source: "Field / documenti" },
+    { key: "narrative", label: "Consuntivo", value: narrativeComplete ? "Pronto per l’invio" : "Da completare", status: narrativeComplete ? "known" : "missing", source: "Company AI · risposta responsabile" },
+  ];
+
+  const generatedDraft = [
+    `RAPPORTINO COMMESSA · ${new Date().toISOString().slice(0, 10)}`,
+    `Commessa: ${text(payload.title, "[da completare]")}`,
+    `Luogo: ${text(payload.location, "[da confermare]")}`,
+    `Responsabile / squadra: ${assignmentLabel}`,
+    "",
+    "ATTIVITÀ",
+    reportRecordsSummary(payload.activities.map((activity) => ({ title: activity.title, detail: activity.detail, status: activity.state })), "[da completare]"),
+    "",
+    "PRESENZE E RISORSE",
+    reportRecordLines(attendance, "Presenza da verificare"),
+    reportRecordLines(resources, "Nessuna risorsa collegata"),
+    "",
+    "MATERIALI",
+    reportRecordLines(materials, "Nessun movimento materiale collegato"),
+    "",
+    "EVIDENZE",
+    reportRecordLines([
+      ...payload.evidence.map((item) => ({ title: item.title, detail: item.detail, status: item.kind })),
+      ...field,
+    ], "[da indicare]"),
+    "",
+    "CRITICITÀ / NOTE",
+    "[da descrivere]",
+    "",
+    "PROSSIMI PASSI",
+    "[da descrivere]",
+  ].join("\n");
+
+  return {
+    status: reportStatus(report?.status),
+    draft: savedText || generatedDraft,
+    fields,
+    completeness: { ready: missing.length === 0, missing, questions },
+  };
+}
+
 export function jobCompletionRequirements(payload: JobPayload): JobCompletionRequirement[] {
-  const rapportino = isRecord(payload.rapportino) && text(payload.rapportino.text).length >= 2;
+  const rapportino = isRecord(payload.rapportino)
+    && text(payload.rapportino.text).length >= 2
+    && (text(payload.rapportino.status).toUpperCase() === "SUBMITTED" || !("status" in payload.rapportino));
   const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
   const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));
   const location = text(payload.location);
@@ -207,7 +379,7 @@ export function jobCompletionRequirements(payload: JobPayload): JobCompletionReq
     { key: "assignment", label: "Assegnazione", complete: assignmentComplete, detail: "Responsabile o squadra operativa" },
     { key: "activities", label: "Attività completate", complete: activitiesComplete, detail: payload.activities.length ? "Tutte le attività devono essere chiuse" : "Inserisci almeno un’attività operativa" },
     { key: "evidence", label: "Evidenza operativa", complete: payload.evidence.length > 0, detail: "Almeno una evidenza verificabile" },
-    { key: "rapportino", label: "Rapportino", complete: rapportino, detail: "Rapportino salvato con il consuntivo" },
+    { key: "rapportino", label: "Rapportino inviato", complete: rapportino, detail: "Il consuntivo deve essere verificato e inviato in ufficio" },
     { key: "progress", label: "Avanzamento", complete: clampJobProgress(payload.progress) >= 100, detail: "Porta l’avanzamento al 100% manualmente" },
   ];
 }
