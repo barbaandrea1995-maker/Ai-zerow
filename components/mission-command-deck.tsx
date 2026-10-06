@@ -95,6 +95,17 @@ type RouteStopDraft = {
   temporaryLocation?: GeocodeCandidate | null;
 };
 
+type MissionStopView = {
+  id: string;
+  sequence: number;
+  kind: string;
+  label: string;
+  status: string;
+  deliveryStatus: string;
+  locationId: string;
+  cargoActions: string[];
+};
+
 type MaterialRequest = {
   id: string;
   jobId: string;
@@ -292,6 +303,47 @@ function routeStopLabels(payload: Record<string, unknown>) {
   });
 }
 
+function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
+  const route = payload.route && typeof payload.route === "object" && !Array.isArray(payload.route)
+    ? payload.route as Record<string, unknown>
+    : null;
+  const readback = payload.routeReadback && typeof payload.routeReadback === "object" && !Array.isArray(payload.routeReadback)
+    ? payload.routeReadback as Record<string, unknown>
+    : null;
+  const plannedStops = Array.isArray(route?.stops) ? route.stops : [];
+  const observedStops = Array.isArray(readback?.stops) ? readback.stops : [];
+  const source = observedStops.length > 0 ? observedStops : plannedStops;
+  return source.flatMap((candidate, index) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const value = candidate as Record<string, unknown>;
+    const planned = plannedStops.find((item) => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).id === value.id);
+    const plannedValue = planned && typeof planned === "object" && !Array.isArray(planned) ? planned as Record<string, unknown> : {};
+    const metadata = value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata as Record<string, unknown> : {};
+    const cargoActions = (Array.isArray(plannedValue.cargoActions) ? plannedValue.cargoActions : Array.isArray(metadata.cargoActions) ? metadata.cargoActions : []).flatMap((action) => {
+      if (typeof action === "string") return [action.toUpperCase()];
+      if (!action || typeof action !== "object" || Array.isArray(action)) return [];
+      const actionValue = (action as Record<string, unknown>).action;
+      return typeof actionValue === "string" ? [actionValue.toUpperCase()] : [];
+    });
+    return [{
+      id: text(value.id ?? plannedValue.id, `STOP-${index + 1}`),
+      sequence: typeof value.sequence === "number" ? value.sequence : typeof plannedValue.sequence === "number" ? plannedValue.sequence : index + 1,
+      kind: text(plannedValue.kind ?? metadata.kind, "TRANSFER").toUpperCase(),
+      label: text(plannedValue.label ?? metadata.label, `Tappa ${index + 1}`),
+      status: text(value.status, "PLANNED").toUpperCase(),
+      deliveryStatus: text(value.deliveryStatus, "PLANNED").toUpperCase(),
+      locationId: text(value.locationId ?? plannedValue.locationId, ""),
+      cargoActions,
+    }];
+  });
+}
+
+function operationalTimeline(payload: Record<string, unknown>) {
+  return Array.isArray(payload.operationalTimeline)
+    ? payload.operationalTimeline.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry))).slice(-8).reverse()
+    : [];
+}
+
 function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
   return <button aria-label={label} className={cn("grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300", className)} onClick={onClick} type="button">{children}</button>;
 }
@@ -302,6 +354,61 @@ function StatusPill({ label, tone }: { label: string; tone: Tone }) {
 
 function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; value: number | string; detail: string; icon: LucideIcon; tone: Tone }) {
   return <article className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><span className={cn("grid size-10 place-items-center rounded-xl border border-current/20 bg-current/10", toneStyles[tone].icon)}><Icon className="size-[18px]" /></span><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.8)]" /></div><p className="mt-5 text-[11px] font-semibold uppercase tracking-[.16em] text-slate-600">{label}</p><p className="mt-2 font-mono text-[32px] font-semibold leading-none tracking-[-.07em] text-slate-50">{value}</p><p className="mt-4 text-[11px] text-slate-600">{detail}</p></article>;
+}
+
+type MissionAction = "mission_load" | "mission_unload";
+
+function MissionActionPanel({
+  mission,
+  stops,
+  timeline,
+  selectedStopId,
+  note,
+  canRecord,
+  busy,
+  onStopChange,
+  onNoteChange,
+  onRecord,
+}: {
+  mission: Mission;
+  stops: MissionStopView[];
+  timeline: Record<string, unknown>[];
+  selectedStopId: string;
+  note: string;
+  canRecord: boolean;
+  busy: boolean;
+  onStopChange: (value: string) => void;
+  onNoteChange: (value: string) => void;
+  onRecord: (action: MissionAction, stop: MissionStopView | null) => void;
+}) {
+  const selectedStop = stops.find((stop) => stop.id === selectedStopId) ?? stops[0] ?? null;
+  const actions = selectedStop?.cargoActions ?? [];
+  const canLoad = canRecord && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
+  const canUnload = canRecord && mission.status === "DISPATCHED" && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
+  return <section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
+    <div className="flex items-start gap-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><Package className="size-4" /></span>
+      <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">AZIONI IN CAMPO</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Carico e scarico verificati</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">L’autista conferma l’azione sulla tappa reale. Il server registra timestamp, autore, tappa e asset senza usare l’orologio del dispositivo.</p></div>
+    </div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <label className="text-[10px] text-slate-500">Tappa operativa
+        <select aria-label="Tappa operativa per carico o scarico" className="mt-1 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-200 outline-none focus:border-cyan-300/40" disabled={!stops.length} onChange={(event) => onStopChange(event.target.value)} value={selectedStop?.id ?? ""}>
+          {!stops.length && <option value="">Tappa non dettagliata</option>}
+          {stops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}
+        </select>
+      </label>
+      <div className="flex items-end gap-2">
+        {canLoad && <Button className="h-10 bg-cyan-300 px-3 text-[10px] font-semibold text-[#041012] hover:bg-cyan-200" disabled={busy} onClick={() => onRecord("mission_load", selectedStop)} type="button"><Package className="size-3.5" />Carico effettuato</Button>}
+        {canUnload && <Button className="h-10 bg-lime-300 px-3 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy} onClick={() => onRecord("mission_unload", selectedStop)} type="button"><BadgeCheck className="size-3.5" />Scarico effettuato</Button>}
+        {!canLoad && !canUnload && <span className="rounded-xl border border-white/10 px-3 py-2 text-[10px] text-slate-600">Azione non disponibile nello stato corrente</span>}
+      </div>
+    </div>
+    <Input aria-label="Nota azione di carico o scarico" className="mt-3 h-10 border-white/10 bg-black/25 text-xs" disabled={!canRecord || busy} onChange={(event) => onNoteChange(event.target.value)} placeholder="Nota opzionale: quantità, riserva, anomalia…" value={note} />
+    <div className="mt-4 rounded-xl border border-white/[.08] bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
+      {timeline.length ? <div className="mt-2 space-y-2">{timeline.map((entry, index) => <div className="flex items-start gap-2" key={text(entry.id, `event-${index}`)}><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(89,217,255,.75)]" /><div className="min-w-0"><p className="text-[10px] font-semibold text-slate-300">{text(entry.type, "EVENTO").replaceAll("_", " ")} <span className="font-normal text-slate-600">· {formatDate(entry.recordedAt ?? entry.occurredAt)}</span></p><p className="truncate text-[9px] text-slate-600">{text(entry.note, "Registrato dal flusso missione")}</p></div></div>)}</div> : <p className="mt-2 text-[10px] text-slate-600">Nessun carico o scarico confermato su questa missione.</p>}
+    </div>
+  </section>;
 }
 
 function MissionCard({ mission, selected, canWrite, onSelect, onDispatch, onDeliver }: { mission: Mission; selected: boolean; canWrite: boolean; onSelect: () => void; onDispatch: () => void; onDeliver: () => void }) {
@@ -433,6 +540,8 @@ export default function MissionCommandDeck() {
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [deliveredAt, setDeliveredAt] = useState("");
   const [routeStops, setRouteStops] = useState<RouteStopDraft[]>([]);
+  const [actionStopId, setActionStopId] = useState("");
+  const [actionNote, setActionNote] = useState("");
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -502,6 +611,10 @@ export default function MissionCommandDeck() {
   }, [missions, query, statusFilter]);
   const selected = missions.find((mission) => mission.id === selectedId) ?? filteredMissions[0] ?? null;
   const canWrite = capabilities.includes("mission.manage") || capabilities.includes("mission.execute");
+  const canRecordDeliveryAction = canWrite || capabilities.includes("mission.delivery.execute");
+  const selectedStops = useMemo(() => selected ? routeStopViews(selected.payload) : [], [selected]);
+  const selectedTimeline = useMemo(() => selected ? operationalTimeline(selected.payload) : [], [selected]);
+  const activeActionStopId = selectedStops.some((stop) => stop.id === actionStopId) ? actionStopId : selectedStops[0]?.id ?? "";
   const enabledTransportModes = context?.operatingTransportModes ?? [];
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
   const counts = useMemo(() => ({
@@ -724,7 +837,7 @@ export default function MissionCommandDeck() {
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,.92fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">JOURNEY QUEUE</p><h2 className="mt-1 text-base font-semibold text-slate-100">Missioni operative</h2></div><IconButton label="Aggiorna registro missioni" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div><div className="mt-4 space-y-3">{filteredMissions.map((mission) => <MissionCard canWrite={canWrite} key={mission.id} mission={mission} onDeliver={() => { setSelectedId(mission.id); openDelivery(); }} onDispatch={() => void mutateJourney(mission, "mission_dispatch")} onSelect={() => setSelectedId(mission.id)} selected={mission.id === selected?.id} />)}{filteredMissions.length === 0 && <div className="rounded-2xl border border-dashed border-lime-300/15 bg-black/15 p-12 text-center"><Truck className="mx-auto size-9 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessuna missione nel perimetro</p><p className="mt-1 text-xs text-slate-600">Crea una missione oppure rimuovi i filtri.</p><Button className="mt-5 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canWrite || enabledTransportModes.length === 0} onClick={() => openCreate()}><Truck className="size-3.5" />Nuova missione</Button></div>}</div></section>
 
-          <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">MISSION INSPECTOR</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{selected?.title ?? "Nessuna missione selezionata"}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected ? (selected.jobCode ?? selected.jobId) + " · v" + selected.version : "Seleziona una missione dal registro"}</p></div>{selected && <StatusPill label={statusLabel(selected.status)} tone={statusTone(selected.status)} />}</div>{selected ? <><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Tratta</p><p className="mt-2 truncate text-sm text-slate-200">{text(selected.payload.pickup)}</p><p className="mt-1 truncate text-[10px] text-lime-200">→ {text(selected.payload.dropoff)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Finestra</p><p className="mt-2 text-sm text-slate-200">{formatDate(selected.payload.plannedAt)}</p><p className="mt-1 text-[10px] text-slate-600">fino a {formatDate(selected.payload.plannedEndAt)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Autista canonico</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "driver")}</p><p className="mt-1 font-mono text-[10px] text-slate-600">{text(selected.payload.driverId)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Mezzo canonico</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "vehicle")}</p><p className="mt-1 font-mono text-[10px] text-slate-600">{text(selected.payload.vehicleId)}</p></div><div className="carbon-inset rounded-xl p-3 sm:col-span-2"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Asset / materiale associato</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "cargoAsset")}</p><p className="mt-1 text-[10px] text-slate-600">{modeLabel(selected.payload.transportMode)} · selezione salvata come snapshot storico</p></div></div><div className="mt-5"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-slate-600">JOURNEY STATE</p><div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-2">{lifecycle.map((step, index) => { const currentIndex = lifecycle.findIndex((item) => item.value === selected.status); const active = index <= currentIndex; return <div className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", active ? "border-lime-300/20 bg-lime-300/[.06]" : "border-white/[.07] bg-black/15")} key={step.value}><span className={cn("grid size-6 place-items-center rounded-lg border text-[10px]", active ? "border-lime-300/35 bg-lime-300/10 text-lime-200" : "border-white/10 text-slate-700")}>{active ? <CheckCircle2 className="size-3.5" /> : index + 1}</span><span className={cn("text-[10px]", active ? "text-lime-100" : "text-slate-600")}>{step.label}</span></div>; })}</div></div><div className="mt-5 flex flex-wrap gap-2">{canWrite && selected.status === "PLANNED" && <Button className="bg-cyan-300 text-[#041012] hover:bg-cyan-200" onClick={() => void mutateJourney(selected, "mission_dispatch")}><Send className="size-3.5" />Registra partenza</Button>}{canWrite && selected.status === "DISPATCHED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={openDelivery}><BadgeCheck className="size-3.5" />Registra consegna</Button>}{canWrite && selected.status === "DELIVERED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => setModal("pod")}><FileCheck2 className="size-3.5" />Verifica POD</Button>}{canWrite && selected.status === "POD_VERIFIED" && <Button className="bg-amber-300 text-[#130b02] hover:bg-amber-200" onClick={() => setModal("reconcile")}><ClipboardCheck className="size-3.5" />Riconcilia</Button>}{canWrite && selected.status === "RECONCILED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => void mutateJourney(selected, "mission_close")}><CheckCircle2 className="size-3.5" />Chiudi journey</Button>}{selected.jobModule === "operations" && <Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href={"/operations/" + encodeURIComponent(selected.jobId)}>Apri commessa <ArrowRight className="size-3.5" /></Link>}</div></> : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-600">Seleziona una missione per vedere journey, risorse e controlli.</div>}</section>
+          <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">MISSION INSPECTOR</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{selected?.title ?? "Nessuna missione selezionata"}</h2><p className="mt-1 font-mono text-[10px] text-slate-600">{selected ? (selected.jobCode ?? selected.jobId) + " · v" + selected.version : "Seleziona una missione dal registro"}</p></div>{selected && <StatusPill label={statusLabel(selected.status)} tone={statusTone(selected.status)} />}</div>{selected ? <><div className="mt-4 grid gap-2 sm:grid-cols-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Tratta</p><p className="mt-2 truncate text-sm text-slate-200">{text(selected.payload.pickup)}</p><p className="mt-1 truncate text-[10px] text-lime-200">→ {text(selected.payload.dropoff)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Finestra</p><p className="mt-2 text-sm text-slate-200">{formatDate(selected.payload.plannedAt)}</p><p className="mt-1 text-[10px] text-slate-600">fino a {formatDate(selected.payload.plannedEndAt)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Autista canonico</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "driver")}</p><p className="mt-1 font-mono text-[10px] text-slate-600">{text(selected.payload.driverId)}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Mezzo canonico</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "vehicle")}</p><p className="mt-1 font-mono text-[10px] text-slate-600">{text(selected.payload.vehicleId)}</p></div><div className="carbon-inset rounded-xl p-3 sm:col-span-2"><p className="text-[10px] uppercase tracking-[.14em] text-slate-600">Asset / materiale associato</p><p className="mt-2 truncate text-sm text-slate-200">{snapshotLabel(selected.payload, "cargoAsset")}</p><p className="mt-1 text-[10px] text-slate-600">{modeLabel(selected.payload.transportMode)} · selezione salvata come snapshot storico</p></div></div><div className="mt-5"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-slate-600">JOURNEY STATE</p><div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-2">{lifecycle.map((step, index) => { const currentIndex = lifecycle.findIndex((item) => item.value === selected.status); const active = index <= currentIndex; return <div className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", active ? "border-lime-300/20 bg-lime-300/[.06]" : "border-white/[.07] bg-black/15")} key={step.value}><span className={cn("grid size-6 place-items-center rounded-lg border text-[10px]", active ? "border-lime-300/35 bg-lime-300/10 text-lime-200" : "border-white/10 text-slate-700")}>{active ? <CheckCircle2 className="size-3.5" /> : index + 1}</span><span className={cn("text-[10px]", active ? "text-lime-100" : "text-slate-600")}>{step.label}</span></div>; })}</div></div><MissionActionPanel busy={busy} canRecord={canRecordDeliveryAction} mission={selected} note={actionNote} onNoteChange={setActionNote} onRecord={(action, stop) => void mutateJourney(selected, action, { stopId: stop?.id ?? "", sequence: stop?.sequence ?? null, note: actionNote, assetId: String(selected.payload.cargoAssetId ?? "") || undefined })} onStopChange={setActionStopId} selectedStopId={activeActionStopId} stops={selectedStops} timeline={selectedTimeline} /><div className="mt-5 flex flex-wrap gap-2">{canWrite && selected.status === "PLANNED" && <Button className="bg-cyan-300 text-[#041012] hover:bg-cyan-200" onClick={() => void mutateJourney(selected, "mission_dispatch")}><Send className="size-3.5" />Registra partenza</Button>}{canWrite && selected.status === "DISPATCHED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={openDelivery}><BadgeCheck className="size-3.5" />Registra consegna</Button>}{canWrite && selected.status === "DELIVERED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => setModal("pod")}><FileCheck2 className="size-3.5" />Verifica POD</Button>}{canWrite && selected.status === "POD_VERIFIED" && <Button className="bg-amber-300 text-[#130b02] hover:bg-amber-200" onClick={() => setModal("reconcile")}><ClipboardCheck className="size-3.5" />Riconcilia</Button>}{canWrite && selected.status === "RECONCILED" && <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => void mutateJourney(selected, "mission_close")}><CheckCircle2 className="size-3.5" />Chiudi journey</Button>}{selected.jobModule === "operations" && <Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href={"/operations/" + encodeURIComponent(selected.jobId)}>Apri commessa <ArrowRight className="size-3.5" /></Link>}</div></> : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-8 text-center text-xs text-slate-600">Seleziona una missione per vedere journey, risorse e controlli.</div>}</section>
 
             <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><Gauge className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-cyan-200/70">ROUTE OBSERVATION</p><h2 className="mt-1 text-base font-semibold text-slate-100">Osservazione senza finzioni</h2></div></div><div className="mt-4 rounded-xl border border-white/[.08] bg-black/25 p-4"><div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[.15em]"><span className="text-cyan-200/70">Origine</span><span className="text-lime-200/70">Destinazione</span></div><div className="relative my-6 h-2 rounded-full bg-white/[.06]"><div className="absolute left-0 top-1/2 size-3 -translate-y-1/2 rounded-full bg-cyan-200 shadow-[0_0_14px_rgba(89,217,255,.75)]" /><div className="absolute right-0 top-1/2 size-3 -translate-y-1/2 rounded-full bg-lime-300 shadow-[0_0_14px_rgba(200,255,34,.75)]" /><div className="absolute inset-x-3 top-1/2 border-t border-dashed border-lime-300/35" /></div><div className="grid gap-2 sm:grid-cols-2"><div className="truncate text-xs text-slate-300">{selected ? text(selected.payload.pickup) : "—"}</div><div className="truncate text-right text-xs text-slate-300">{selected ? text(selected.payload.dropoff) : "—"}</div></div></div><p className="mt-3 text-[10px] leading-5 text-slate-500">La superficie è pronta per il provider cartografico e telematico, ma il GPS reale non è ancora collegato. Nessuna posizione viene inventata o mostrata come live.</p><Link className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-lime-200 hover:text-lime-100" href="/command#operational-map">Apri Command map surface <ArrowRight className="size-3.5" /></Link></section></aside>
         </section>
