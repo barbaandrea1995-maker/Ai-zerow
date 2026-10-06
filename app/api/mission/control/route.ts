@@ -1,12 +1,13 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { geofences, geoLocations, jobJourneyRecords, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { geofences, geoLocations, inventoryItems, inventoryMovements, jobJourneyRecords, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { buildMissionReportReadback } from "@/lib/mission-contract";
+import { buildMissionWarehouseReadback } from "@/lib/mission-inventory-contract";
 import { allocateServerName } from "@/lib/server-naming";
 import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
 import {
@@ -131,6 +132,18 @@ export async function GET() {
       inArray(s04Records.id, jobIds),
     )) : [];
     const jobById = new Map(jobs.map((job) => [job.id, job]));
+    const inventoryMovementRows = jobIds.length
+      ? await db.select().from(inventoryMovements).where(and(
+        eq(inventoryMovements.tenantId, context.tenantId),
+        inArray(inventoryMovements.jobId, jobIds),
+      )).orderBy(inventoryMovements.createdAt).limit(1_000)
+      : [];
+    const inventoryItemIds = [...new Set(inventoryMovementRows.map((movement) => movement.itemId))];
+    const inventoryItemRows = inventoryItemIds.length
+      ? await db.select({ id: inventoryItems.id, sku: inventoryItems.sku, name: inventoryItems.name, unit: inventoryItems.unit, warehouseId: inventoryItems.warehouseId })
+        .from(inventoryItems)
+        .where(and(eq(inventoryItems.tenantId, context.tenantId), inArray(inventoryItems.id, inventoryItemIds)))
+      : [];
     const routePlanRows = visibleMissionRows.length
       ? await db.select().from(routePlans).where(and(eq(routePlans.tenantId, context.tenantId), inArray(routePlans.missionId, visibleMissionRows.map((mission) => mission.id)))).limit(500)
       : [];
@@ -162,7 +175,17 @@ export async function GET() {
           metadata: parseJson(stop.evidenceJson),
         })),
       } : null;
-      const effectivePayload = { ...storedPayload, routeReadback };
+      const warehouseReadback = buildMissionWarehouseReadback(
+        storedPayload,
+        inventoryMovementRows.filter((movement) => movement.jobId === mission.jobId && (!movement.missionId || movement.missionId === mission.id)).map((movement) => ({
+          itemId: movement.itemId,
+          movementType: movement.movementType,
+          quantityMilli: movement.quantityMilli,
+          createdAt: movement.createdAt,
+        })),
+        inventoryItemRows,
+      );
+      const effectivePayload = { ...storedPayload, routeReadback, warehouseReadback };
       return {
         id: mission.id,
         jobId: mission.jobId,

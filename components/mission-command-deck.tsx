@@ -51,6 +51,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import type { MissionReportReadback } from "@/lib/mission-contract";
+import type { MissionWarehouseReadback } from "@/lib/mission-inventory-contract";
 import { TRANSPORT_MODE_CATALOG, type TransportMode } from "@/lib/tenant-operating-model";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
@@ -346,6 +347,25 @@ function missionReport(payload: Record<string, unknown>) {
     : null;
 }
 
+function missionWarehouseReadback(payload: Record<string, unknown>) {
+  const value = payload.warehouseReadback;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as MissionWarehouseReadback
+    : null;
+}
+
+function warehouseStatusLabel(status: string) {
+  return ({
+    NOT_REQUIRED: "NON RICHIESTO",
+    PENDING_PICK: "IN ATTESA DI PRELIEVO",
+    PICKED: "PRELEVATO",
+    LOADED: "CARICATO",
+    DELIVERED: "SCARICATO / CONSEGNATO",
+    PARTIAL: "PARZIALE",
+    RECONCILE: "DA RICONCILIARE",
+  } as Record<string, string>)[status] ?? status.replaceAll("_", " ");
+}
+
 function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
   return <button aria-label={label} className={cn("grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300", className)} onClick={onClick} type="button">{children}</button>;
 }
@@ -387,7 +407,8 @@ function MissionActionPanel({
   const actions = selectedStop?.cargoActions ?? [];
   const canLoad = canRecord && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
   const canUnload = canRecord && mission.status === "DISPATCHED" && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
-  return <section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
+  const warehouseReadback = missionWarehouseReadback(mission.payload);
+  return <><section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
     <div className="flex items-start gap-3">
       <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><Package className="size-4" /></span>
       <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">AZIONI IN CAMPO</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Carico e scarico verificati</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">L’autista conferma l’azione sulla tappa reale. Il server registra timestamp, autore, tappa e asset senza usare l’orologio del dispositivo.</p></div>
@@ -410,7 +431,13 @@ function MissionActionPanel({
       <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
       {timeline.length ? <div className="mt-2 space-y-2">{timeline.map((entry, index) => <div className="flex items-start gap-2" key={text(entry.id, `event-${index}`)}><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(89,217,255,.75)]" /><div className="min-w-0"><p className="text-[10px] font-semibold text-slate-300">{text(entry.type, "EVENTO").replaceAll("_", " ")} <span className="font-normal text-slate-600">· {formatDate(entry.recordedAt ?? entry.occurredAt)}</span></p><p className="truncate text-[9px] text-slate-600">{text(entry.note, "Registrato dal flusso missione")}</p></div></div>)}</div> : <p className="mt-2 text-[10px] text-slate-600">Nessun carico o scarico confermato su questa missione.</p>}
     </div>
-  </section>;
+  </section><MissionWarehousePanel readback={warehouseReadback} /></>;
+}
+
+function MissionWarehousePanel({ readback }: { readback: MissionWarehouseReadback | null }) {
+  if (!readback || !readback.required) return null;
+  const tone: Tone = readback.status === "DELIVERED" ? "lime" : readback.status === "RECONCILE" || readback.status === "PENDING_PICK" ? "amber" : "cyan";
+  return <section className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/[.035] p-4"><div className="flex items-start gap-3"><span className={cn("grid size-9 shrink-0 place-items-center rounded-xl border border-current/25 bg-current/10", toneStyles[tone].icon)}><Layers3 className="size-4" /></span><div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/75">RICONCILIAZIONE MAGAZZINO</p><h3 className="mt-1 text-sm font-semibold text-slate-100">{readback.warehouse?.name ?? "Magazzino sorgente"}</h3><p className="mt-1 truncate text-[10px] text-slate-500">{readback.warehouse?.locationLabel ?? "Ubicazione non disponibile"}</p></div><StatusPill label={warehouseStatusLabel(readback.status)} tone={tone} /></div><div className="mt-4 space-y-2">{readback.lines.map((line) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={line.lineId}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{line.name}</p><p className="mt-1 font-mono text-[10px] text-slate-600">{line.sku} · richiesto {line.required} {line.unit}</p></div><span className={cn("shrink-0 text-[9px] uppercase tracking-[.12em]", line.status === "DELIVERED" ? "text-lime-200" : line.status === "RECONCILE" || line.status === "PENDING_PICK" ? "text-amber-200" : "text-cyan-100")}>{warehouseStatusLabel(line.status)}</span></div><div className="mt-3 grid grid-cols-3 gap-2 text-[10px]"><div><p className="text-slate-600">Prelevato</p><p className="mt-1 font-mono text-slate-200">{line.picked} {line.unit}</p></div><div><p className="text-slate-600">Caricato</p><p className="mt-1 font-mono text-cyan-100">{line.loaded} {line.unit}</p></div><div><p className="text-slate-600">Scaricato</p><p className="mt-1 font-mono text-lime-100">{line.delivered} {line.unit}</p></div></div></div>)}</div>{readback.missing.length > 0 && <div className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75">BLOCCO OPERATIVO</p>{readback.missing.slice(0, 3).map((item) => <p className="mt-1 text-[10px] leading-5 text-amber-100/80" key={item}>{item}</p>)}</div>}<p className="mt-3 text-[9px] text-slate-600">Il saldo resta di proprietà del magazzino sorgente; Missioni conserva solo la catena di custodia e il readback.</p></section>;
 }
 
 function MissionCard({ mission, selected, canWrite, onSelect, onDispatch, onDeliver }: { mission: Mission; selected: boolean; canWrite: boolean; onSelect: () => void; onDispatch: () => void; onDeliver: () => void }) {

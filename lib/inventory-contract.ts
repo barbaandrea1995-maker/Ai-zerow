@@ -53,6 +53,7 @@ export const INVENTORY_MOVEMENT_TYPES = [
   "RELEASE",
   "PICK",
   "LOAD",
+  "DELIVER",
   "CONSUME",
   "RETURN",
   "ADJUST",

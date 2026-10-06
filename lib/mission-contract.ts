@@ -158,6 +158,13 @@ export function buildMissionReportReadback(
     missing.push("delivery_event");
     questions.push("Registra la conferma di consegna dalla tappa corretta prima di inviare il rapportino.");
   }
+  const warehouseReadback = isRecord(payload.warehouseReadback) ? payload.warehouseReadback : null;
+  const warehouseRequired = warehouseReadback?.required === true;
+  const warehouseStatus = text(warehouseReadback?.status).toUpperCase();
+  if (warehouseRequired && warehouseStatus !== "DELIVERED") {
+    missing.push("warehouse_reconciliation");
+    questions.push("Riconcilia nel registro del magazzino il prelievo, il carico e lo scarico di tutte le righe prima dell’invio.");
+  }
   if (reportText.length < 30 || reportText.includes("[da completare]")) {
     missing.push("narrative");
     questions.push("Descrivi l’esito della missione, eventuali anomalie e ciò che deve sapere l’ufficio.");
@@ -175,6 +182,7 @@ export function buildMissionReportReadback(
     `Asset/materiale: ${text(recordAt(cargoAsset, "label") ?? recordAt(cargoAsset, "code") ?? payload.cargoAssetId, "nessun asset associato")}`,
     `Tappe: ${routeLines.join(" | ") || "[da completare]"}`,
     `Eventi server: ${timelineLines.join(" | ") || "[da completare]"}`,
+    ...(warehouseRequired ? [`Riconciliazione magazzino: ${warehouseStatus || "[da completare]"}`] : []),
     `Ricevente: ${text(proof.recipient, "[da completare]")}`,
     "Esito e anomalie: [da completare]",
   ].join("\n");
@@ -186,6 +194,7 @@ export function buildMissionReportReadback(
     { key: "cargo", label: "Asset o materiale", value: text(recordAt(cargoAsset, "label") ?? recordAt(cargoAsset, "code") ?? payload.cargoAssetId, "Nessun asset associato"), status: cargoAsset || text(payload.cargoAssetId) ? "known" : "optional", source: "Asset / Magazzino" },
     { key: "route", label: "Tappe", value: routeLines.join(" · ") || "Nessuna tappa", status: stops.length ? "known" : "missing", source: "Route server-side" },
     { key: "actions", label: "Azioni registrate", value: timelineLines.join(" · ") || "Nessuna azione", status: timeline.length ? "known" : "missing", source: "Timeline server-side" },
+    { key: "warehouse", label: "Riconciliazione magazzino", value: warehouseRequired ? (warehouseStatus || "Da completare") : "Non richiesta", status: !warehouseRequired || warehouseStatus === "DELIVERED" ? "known" : "missing", source: "Ledger Magazzino" },
     { key: "delivery", label: "Prova di consegna", value: hasDeliveryProof ? `${text(proof.recipient)} · ${text(proof.deliveredAt)}` : "Da completare", status: hasDeliveryProof ? "known" : deliveryStops.length ? "missing" : "optional", source: "POD / Autista" },
     { key: "narrative", label: "Esito e anomalie", value: reportText || "Da completare", status: reportText.length >= 30 && !reportText.includes("[da completare]") ? "known" : "missing", source: "Company AI / Autista" },
   ];

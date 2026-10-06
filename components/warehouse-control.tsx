@@ -191,6 +191,7 @@ const movementLabels: Record<string, string> = {
   RELEASE: "RILASCIO",
   PICK: "PRELIEVO",
   LOAD: "CARICO MISSIONE",
+  DELIVER: "SCARICO / CONSEGNA",
   CONSUME: "CONSUMO",
   RETURN: "RESO",
   ADJUST: "RETTIFICA",
