@@ -197,17 +197,17 @@ export default function LoginClient({
             </span>
             <div>
               <p className="text-sm font-bold tracking-[0.22em] text-slate-50">AI-ZEROW</p>
-              <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">command / identity plane</p>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">centrale operativa</p>
             </div>
           </div>
-          <p className="mt-16 text-[11px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">PWA AUTH · OWNER CONTEXT</p>
+          <p className="mt-16 text-[11px] font-semibold uppercase tracking-[0.24em] text-lime-300/70">ACCESSO AZIENDALE</p>
           <h2 id="login-rail-title" className="mt-4 max-w-xl text-5xl font-semibold leading-[1.02] tracking-[-0.06em] text-slate-50 xl:text-6xl">Una sola soglia per ogni decisione operativa.</h2>
-          <p className="mt-6 max-w-lg text-base leading-7 text-slate-400">Accedi al command center e ritrova lavori, asset e persone nello stesso perimetro governato. L’identità arriva da Neon Auth; tenant, ruolo e capability vengono verificati server-side.</p>
+          <p className="mt-6 max-w-lg text-base leading-7 text-slate-400">Accedi alla tua centrale operativa e ritrova lavori, asset e persone nello stesso spazio aziendale. Ogni accesso segue il ruolo e le responsabilità assegnate.</p>
           <div className="mt-10 grid max-w-lg grid-cols-3 gap-3">
             {[
-              ["D1", "readback verificato"],
-              ["AUTHORITY", "scope server-side"],
-              ["NO FAKE DATA", "stato dichiarato"],
+              ["DATI", "stato verificato"],
+              ["ACCESSI", "ruoli verificati"],
+              ["DATI REALI", "nessun segnaposto"],
             ].map(([label, detail]) => <div className="carbon-inset rounded-xl p-3" key={label}><p className="font-mono text-xs font-semibold text-lime-200">{label}</p><p className="mt-2 text-[11px] leading-4 text-slate-500">{detail}</p></div>)}
           </div>
         </section>
@@ -215,11 +215,11 @@ export default function LoginClient({
         <section className="login-card carbon-card w-full rounded-2xl border border-lime-300/20 p-6 shadow-[0_0_52px_rgba(190,255,60,0.08)] sm:p-8" aria-labelledby="login-title">
           <div className="flex items-center gap-3 lg:hidden">
             <span className="neon-pulse grid size-11 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={44} height={44} className="size-full object-cover" /></span>
-            <div><p className="text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</p><p className="text-[10px] uppercase tracking-[0.2em] text-lime-300/70">command / auth</p></div>
+            <div><p className="text-sm font-bold tracking-[0.18em] text-slate-50">AI-ZEROW</p><p className="text-[10px] uppercase tracking-[0.2em] text-lime-300/70">centrale / accesso</p></div>
           </div>
-          <p className="mt-7 text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70 lg:mt-0">AI-ZEROW / PWA AUTH</p>
+          <p className="mt-7 text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70 lg:mt-0">AI-ZEROW / ACCESSO</p>
           <h1 id="login-title" className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-50">{title}</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-400">Neon Auth gestisce la sessione. Tenant, ruolo e capability vengono verificati dal server tramite Cloudflare D1.</p>
+          <p className="mt-3 text-sm leading-6 text-slate-400">Accedi per entrare nello spazio aziendale. Il sistema applica automaticamente ruoli, responsabilità e permessi.</p>
 
           {initialState === "authenticated" && actor ? (
             <div className="mt-7 space-y-4">
@@ -280,8 +280,8 @@ export default function LoginClient({
 
           {message ? <p className="mt-5 rounded-lg border border-rose-300/20 bg-rose-300/5 px-3 py-3 text-sm leading-5 text-rose-100" role="alert" aria-live="polite">{message}</p> : null}
           <div className="mt-8 border-t border-white/10 pt-4">
-            <p className="text-xs leading-5 text-slate-500">Dopo il login l’accesso ai tenant viene deciso esclusivamente dalla membership D1.</p>
-            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-slate-700">session boundary · server owned</p>
+            <p className="text-xs leading-5 text-slate-500">Dopo il login vedrai soltanto le aziende e le funzioni abilitate per il tuo profilo.</p>
+            <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-slate-700">accesso protetto · dati aziendali separati</p>
           </div>
         </section>
       </div>
