@@ -185,7 +185,7 @@ function displayJourneyStep(key: string, fallback: string) {
     job: "Commessa",
     planning: "Pianificazione",
     rapportino: "Rapportino",
-    "work-context": "Contesto operativo",
+    "work-context": "Luogo e lavoro",
   };
   return labels[key] ?? fallback;
 }
@@ -260,6 +260,11 @@ function CompletionGate({
   const missing = completion.requirements.filter(
     (requirement) => !requirement.complete,
   ).length;
+  const requirementLabels: Record<string, string> = {
+    classification: "Ambito della commessa",
+    description: "Descrizione del lavoro",
+    worksite: "Luogo di intervento",
+  };
   return (
     <section className="relative overflow-hidden rounded-[24px] border border-amber-300/15 bg-[linear-gradient(145deg,rgba(38,31,18,0.7),rgba(11,14,13,0.94)_62%,rgba(22,29,20,0.78))] p-5 shadow-[0_20px_55px_rgba(0,0,0,0.18)] sm:p-6">
       <div className="pointer-events-none absolute -right-20 -top-24 size-56 rounded-full bg-amber-300/[0.055] blur-3xl" />
@@ -307,7 +312,7 @@ function CompletionGate({
                 )}
               </span>
               <span className="text-[11px] font-medium text-slate-200">
-                {requirement.label}
+                {requirementLabels[requirement.key] ?? requirement.label}
               </span>
             </div>
             <p className="mt-1.5 pl-7 text-[10px] leading-4 text-slate-500">
@@ -467,7 +472,7 @@ function WorkspaceSectionCard({
                 : "Nessun record collegato alla commessa."}
             </p>
             <p className="mt-1 text-[10px] text-slate-700">
-              In attesa di dati operativi
+              I dati compariranno qui quando il passaggio sarà attivo.
             </p>
           </div>
         )}
@@ -702,25 +707,25 @@ export default function OperationsJobWorkspace({
       <main className="zw-command-ultra grid min-h-screen place-items-center text-slate-100">
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <LoaderCircle className="size-4 animate-spin text-lime-300" />
-          Caricamento dossier commessa…
+          Caricamento scheda commessa…
         </div>
       </main>
     );
   if (state !== "ready" || !payload) {
     const message =
       state === "unauthenticated"
-        ? "Accedi per leggere il dossier della commessa."
+        ? "Accedi per leggere la scheda della commessa."
         : state === "forbidden"
-          ? "Il ruolo corrente non dispone di operations.read."
+          ? "Il tuo profilo non ha accesso a questa commessa."
           : state === "missing"
-            ? "La commessa non è presente nel workspace autorizzato."
-            : "Il dossier non è momentaneamente disponibile.";
+            ? "La commessa non è disponibile per il tuo profilo."
+            : "La scheda non è momentaneamente disponibile.";
     return (
       <main className="zw-command-ultra grid min-h-screen place-items-center px-5 text-slate-100">
         <section className="carbon-card w-full max-w-lg rounded-2xl p-6 text-center">
           <ShieldCheck className="mx-auto size-8 text-amber-200" />
           <h1 className="mt-4 text-lg font-semibold">
-            Dossier non disponibile
+            Scheda non disponibile
           </h1>
           <p className="mt-2 text-xs leading-5 text-slate-500">{message}</p>
           <div className="mt-5 flex justify-center gap-2">
@@ -758,6 +763,17 @@ export default function OperationsJobWorkspace({
     jobData.client ?? jobData.clientName,
     "Cliente da definire",
   );
+  const locationLabel = valueOr(
+    jobData.worksite ?? jobData.location ?? job.detail,
+    "Luogo da definire",
+  );
+  const worksiteLocation =
+    jobData.worksiteLocation &&
+    typeof jobData.worksiteLocation === "object" &&
+    !Array.isArray(jobData.worksiteLocation)
+      ? (jobData.worksiteLocation as Record<string, unknown>)
+      : null;
+  const locationVerified = worksiteLocation?.status === "SERVER_VERIFIED";
   const jobDescription = valueOr(
     jobData.description,
     "Descrizione operativa da completare.",
@@ -769,7 +785,7 @@ export default function OperationsJobWorkspace({
       : "Nuova commessa";
   const sourceMode =
     payloadText("sourceMode") === "COMPANY_AI"
-      ? "Analizzata da Company AI"
+      ? "Preparata con Company AI"
       : "Inserimento guidato";
   const priority = payloadText("priority", "STANDARD");
   const rawScope = jobData.scope;
@@ -783,7 +799,7 @@ export default function OperationsJobWorkspace({
     typeof jobScope.groupTitle === "string" &&
     typeof jobScope.subgroupTitle === "string"
       ? `${jobScope.sectionTitle} / ${jobScope.groupTitle} / ${jobScope.subgroupTitle}`
-      : "Scope da definire fino al sottogruppo";
+      : "Ambito da completare";
   const contactLabel =
     payloadText("clientContact") ||
     payloadText("clientEmail") ||
@@ -815,10 +831,10 @@ export default function OperationsJobWorkspace({
             </Button>
             <div className="min-w-0">
               <p className="truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                AI-ZEROW / OPERATIONS
+                COMMESSE / SCHEDA
               </p>
               <p className="mt-1 truncate text-[11px] text-slate-500">
-                Workspace commessa · quadro operativo
+                Tutto il lavoro della commessa, in un unico posto
               </p>
             </div>
           </div>
@@ -828,7 +844,7 @@ export default function OperationsJobWorkspace({
               Scheda aggiornata
             </span>
             <button
-              aria-label="Rileggi dossier commessa"
+              aria-label="Aggiorna scheda commessa"
               className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200"
               onClick={() => void refresh()}
               type="button"
@@ -860,10 +876,17 @@ export default function OperationsJobWorkspace({
                 <h1 className="mt-4 max-w-4xl break-words text-3xl font-semibold tracking-[-0.055em] text-lime-100 sm:text-[42px]">
                   {job.title}
                 </h1>
-                <p className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-                  <MapPin className="size-3.5 shrink-0 text-cyan-200" />
-                  {valueOr(jobData.location ?? job.detail, "Luogo da definire")}
-                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <p className="flex items-center gap-2 text-xs text-slate-400">
+                    <MapPin className="size-3.5 shrink-0 text-cyan-200" />
+                    {locationLabel}
+                  </p>
+                  {locationVerified && (
+                    <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.07] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-200">
+                      Luogo verificato
+                    </span>
+                  )}
+                </div>
                 <p className="mt-4 line-clamp-4 max-w-3xl text-sm leading-6 text-slate-300/85">
                   {jobSummary}
                 </p>
@@ -893,31 +916,31 @@ export default function OperationsJobWorkspace({
               </div>
               <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3.5">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-600">
-                  Scadenza operativa
+                  Scadenza
                 </p>
                 <p className="mt-2 truncate text-xs font-medium text-slate-200">
                   {valueOr(jobData.dueDate ?? job.meta, "Da pianificare")}
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Riferimento di commessa
+                  Data da confermare
                 </p>
               </div>
               <div className="rounded-2xl border border-lime-300/15 bg-lime-300/[0.045] p-3.5">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-lime-300/65">
-                  Scope operativo
+                  Ambito della commessa
                 </p>
                 <p className="mt-2 line-clamp-2 text-xs font-medium text-lime-100/90">
                   {scopeLabel}
                 </p>
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Livello: sottogruppo
+                  Classificazione confermata
                 </p>
               </div>
             </div>
             <div className="relative mt-6 border-t border-white/[0.08] pt-5">
               <div className="flex items-center justify-between gap-3 text-[10px] text-slate-500">
                 <span className="font-semibold uppercase tracking-[0.15em]">
-                  Avanzamento verificato
+                  Avanzamento
                 </span>
                 <span className="font-mono text-lg text-lime-200">
                   {job.progress}%
@@ -998,11 +1021,11 @@ export default function OperationsJobWorkspace({
             </div>
             <div className="mt-6 space-y-3">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Origine scheda</span>
+                <span className="text-slate-500">Preparata con</span>
                 <span className="text-cyan-100">{sourceMode}</span>
               </div>
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Stato chiusura</span>
+                <span className="text-slate-500">Pronta per la chiusura</span>
                 <span
                   className={
                     workspace.completion.ready
@@ -1010,7 +1033,7 @@ export default function OperationsJobWorkspace({
                       : "text-amber-200"
                   }
                 >
-                  {workspace.completion.ready ? "PRONTA" : "IN VERIFICA"}
+                  {workspace.completion.ready ? "PRONTA" : "DA COMPLETARE"}
                 </span>
               </div>
             </div>
@@ -1018,10 +1041,10 @@ export default function OperationsJobWorkspace({
               <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
                 <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100/75">
                   <Sparkles className="size-3.5" />
-                  Analisi Company AI collegata
+                  Analisi del preventivo collegata
                 </div>
                 <p className="mt-2 text-[10px] leading-4 text-slate-500">
-                  I dati rilevati dal preventivo sono disponibili nelle lavorazioni e nello scope operativo.
+                  I dati rilevati dal preventivo sono disponibili nelle lavorazioni e nell’ambito della commessa.
                 </p>
               </div>
             )}
@@ -1039,7 +1062,7 @@ export default function OperationsJobWorkspace({
                   Attività rilevate dal preventivo
                 </h2>
                 <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  Le lavorazioni restano organizzate e collegate allo scope, senza
+                  Le lavorazioni restano organizzate e collegate all’ambito, senza
                   riversare il testo integrale del documento nella scheda.
                 </p>
               </div>
@@ -1158,7 +1181,7 @@ export default function OperationsJobWorkspace({
             </section>
             <div className="grid gap-4 lg:grid-cols-2">
               <WorkspaceSectionCard
-                eyebrow="ACTIVITY"
+                eyebrow="LAVORO"
                 title="Attività collegate"
                 icon={ClipboardCheck}
                 section={workspace.sections.activities}
@@ -1170,31 +1193,31 @@ export default function OperationsJobWorkspace({
                 }
               />
               <WorkspaceSectionCard
-                eyebrow="PLANNING"
-                title="Pianificazione e assegnazioni"
+                eyebrow="PROGRAMMA"
+                title="Programma e assegnazioni"
                 icon={Users}
                 section={workspace.sections.planning}
               />
               <WorkspaceSectionCard
-                eyebrow="RESOURCES"
-                title="Risorse e mezzi"
+                eyebrow="RISORSE"
+                title="Persone, asset e mezzi"
                 icon={Truck}
                 section={workspace.sections.resources}
               />
               <WorkspaceSectionCard
-                eyebrow="MATERIALS"
-                title="Materiali e magazzino"
+                eyebrow="MATERIALI"
+                title="Materiali e richieste"
                 icon={Package}
                 section={workspace.sections.materials}
               />
               <WorkspaceSectionCard
-                eyebrow="FIELD / EVIDENCE"
-                title="Evidenze operative"
+                eyebrow="DOCUMENTAZIONE"
+                title="Evidenze del lavoro"
                 icon={MapPin}
                 section={workspace.sections.evidence}
               />
               <WorkspaceSectionCard
-                eyebrow="OUTPUT"
+                eyebrow="CONSUNTIVO"
                 title="Rapportino e controllo"
                 icon={FileText}
                 section={workspace.sections.rapportino}
@@ -1226,10 +1249,7 @@ export default function OperationsJobWorkspace({
                 <InfoRow
                   icon={MapPin}
                   label="Cantiere / luogo"
-                  value={valueOr(
-                    jobData.worksite ?? jobData.location ?? job.detail,
-                    "Luogo da definire",
-                  )}
+                  value={locationLabel}
                 />
                 <InfoRow
                   icon={CalendarClock}
@@ -1238,7 +1258,7 @@ export default function OperationsJobWorkspace({
                 />
                 <InfoRow
                   icon={Flag}
-                  label="Riferimento preventivo"
+                  label="Riferimento cliente"
                   value={valueOr(jobData.clientReference, "Non indicato")}
                 />
               </div>
@@ -1275,7 +1295,7 @@ export default function OperationsJobWorkspace({
         </section>
 
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-400">
-          <span>AI-ZEROW OPERATIONS · COMMESSA WORKSPACE</span>
+          <span>ZEROW · SCHEDA COMMESSA</span>
           <span className="flex items-center gap-2">
             <CheckCircle2 className="size-3.5 text-lime-300" />
             Scheda completa · attività collegate · stato verificato

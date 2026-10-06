@@ -352,7 +352,22 @@ function resourceKindLabel(value: string) {
 function jobsFromAdapter(records: OperationsAdapterRecord[]): OperationsJob[] {
   return records.map((record) => {
     const payload = record.payload ?? {};
-    const [location, team] = record.detail.split(" · ");
+    const detailParts = record.detail.split(" · ");
+    const location =
+      (typeof payload.worksite === "string" && payload.worksite.trim()) ||
+      (typeof payload.location === "string" && payload.location.trim()) ||
+      detailParts[0] ||
+      record.detail;
+    const assignment =
+      payload.assignment &&
+      typeof payload.assignment === "object" &&
+      !Array.isArray(payload.assignment)
+        ? (payload.assignment as Record<string, unknown>)
+        : null;
+    const team =
+      (typeof assignment?.team === "string" && assignment.team.trim()) ||
+      (typeof assignment?.responsible === "string" && assignment.responsible.trim()) ||
+      "Da assegnare";
     const statusCode = normalizeJobStatus(payload.statusCode ?? record.status);
     const statusLabel = jobStatusLabel(statusCode);
     const status: JobStatus =
@@ -711,7 +726,7 @@ export default function OperationsPage() {
             type="button"
             onClick={() =>
               notify(
-                `Workspace ZEROW · contesto ${ROLE_METADATA[authority.role].label}`,
+                `Azienda ZEROW · contesto ${ROLE_METADATA[authority.role].label}`,
               )
             }
           >
@@ -720,7 +735,7 @@ export default function OperationsPage() {
             </span>
             <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-slate-200">
-                ZEROW workspace
+                Azienda ZEROW
               </span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-600">
                 {ROLE_METADATA[authority.role].label} · profilo operativo
@@ -793,11 +808,11 @@ export default function OperationsPage() {
         <section className="min-w-0 flex-1">
           <header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7">
             <IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton>
-            <button aria-label="Apri Operations" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/operations")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">operations</span></span></button>
+            <button aria-label="Apri Commesse" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/operations")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">commesse</span></span></button>
             <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
-            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle Operations" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={query} /></div></div>
+            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle commesse" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca nome, cliente, luogo…" value={query} /></div></div>
             <div className="flex min-w-0 flex-1 items-center gap-2 md:hidden">
-              <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">OPERATIONS</span>
+              <span className="truncate text-xs font-semibold tracking-[0.14em] text-slate-200">COMMESSE</span>
               <span className="size-1 rounded-full bg-lime-300" />
             </div>
             <div className="ml-auto flex items-center gap-2">
@@ -817,13 +832,13 @@ export default function OperationsPage() {
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
                   <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-                  AI-ZEROW / OPERATIONS / COMMESSE
+                  COMMESSE / REGISTRO
                 </div>
                 <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50 sm:text-[28px]">
                   Commesse
                 </h1>
                 <p className="mt-1 text-xs text-slate-500">
-                  Creazione, scope, pianificazione e attività · {adapterOnline ? "dati operativi aggiornati" : "dati operativi in caricamento"}
+                  Clienti, cantieri, attività e avanzamento in un’unica vista · {adapterOnline ? "dati aggiornati" : "aggiornamento in corso"}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -869,7 +884,7 @@ export default function OperationsPage() {
                 label="Attività collegate"
                 value={String(activityCount)}
                 detail={adapterOnline ? "Per commessa" : "Nessun dato"}
-                footnote={adapterOnline ? "Attività già presenti nelle schede" : "Le attività nasceranno dal workspace"}
+                footnote={adapterOnline ? "Attività già presenti nelle schede" : "Le attività nasceranno dalla scheda"}
                 icon={ClipboardCheck}
                 tone="lime"
               />
@@ -877,7 +892,7 @@ export default function OperationsPage() {
                 label="Rapportini aperti"
                 value={String(openReports)}
                 detail={adapterOnline ? "Stato operativo" : "Nessun dato"}
-                footnote={adapterOnline ? "Commesse non ancora chiuse" : "Disponibile dal workspace"}
+                footnote={adapterOnline ? "Commesse non ancora chiuse" : "Disponibile dalla scheda"}
                 icon={FileText}
                 tone="amber"
               />
@@ -887,13 +902,13 @@ export default function OperationsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <SectionTitle
-                      eyebrow="COMMESSE / REGISTRO"
+                      eyebrow="REGISTRO OPERATIVO"
                       title="Registro commesse"
                     />
                     <p className="mt-1 text-[11px] text-slate-500">
                       {adapterOnline
-                        ? "Dati operativi aggiornati · area collegata"
-                        : "Nessun dato operativo disponibile al momento"}
+                        ? "Tutte le commesse dell’azienda, con stato e prossima azione."
+                        : "Le commesse compariranno qui appena disponibili."}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -962,7 +977,7 @@ export default function OperationsPage() {
                 <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08] bg-black/20">
                   <div className="hidden grid-cols-[1.15fr_0.85fr_0.7fr_0.45fr] gap-3 border-b border-white/[0.08] px-4 py-3 text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-600 md:grid">
                     <span>Commessa</span>
-                    <span>Squadra</span>
+                    <span>Responsabile</span>
                     <span>Stato</span>
                     <span>Avanzamento</span>
                   </div>
@@ -1053,7 +1068,7 @@ export default function OperationsPage() {
                     }
                     type="button"
                   >
-                    Apri workspace <ArrowUpRight className="size-3.5" />
+                    Apri scheda <ArrowUpRight className="size-3.5" />
                   </button>
                 </div>
                 <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -1077,7 +1092,7 @@ export default function OperationsPage() {
                   <div className="flex items-end justify-between gap-3">
                     <div>
                       <p className="text-[10px] uppercase tracking-[0.14em] text-slate-600">
-                        Avanzamento operativo
+                        Avanzamento
                       </p>
                       <p className="mt-1 font-mono text-3xl font-semibold tracking-[-0.07em] text-slate-50">
                         {selectedJob.progress}%
@@ -1161,7 +1176,7 @@ export default function OperationsPage() {
                 <SectionTitle
                   eyebrow="ATTIVITÀ"
                   title="Attività operative"
-                  action="Apri workspace"
+                  action="Apri scheda"
                   onAction={() => selectedJob.id === "EMPTY"
                     ? notify("Seleziona una commessa riletta prima di aprire le attività")
                     : router.push(`/operations/${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}#attivita`)}
@@ -1240,7 +1255,7 @@ export default function OperationsPage() {
                       <p className="mt-1 text-[11px] leading-5 text-slate-500">
                         {selectedJob.id === emptyJob.id
                           ? "Apri una commessa per preparare il rapportino."
-                          : "Completa il rapportino dal workspace della commessa."}
+                          : "Completa il rapportino nella scheda della commessa."}
                       </p>
                     </div>
                   </div>
@@ -1272,9 +1287,9 @@ export default function OperationsPage() {
             <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">PERCORSO OPERATIVO</p>
-                  <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Dalla commessa all’esecuzione</h2>
-                  <p className="mt-1 text-[11px] text-slate-500">Ogni passaggio apre il modulo autorizzato e resta collegato alla commessa.</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">PROSSIMI PASSI</p>
+                  <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Dalla commessa al lavoro</h2>
+                  <p className="mt-1 text-[11px] text-slate-500">Apri il passaggio che vuoi completare: tutto resta collegato alla commessa.</p>
                 </div>
                 <StatusBadge tone="lime">ACCESSO AUTORIZZATO</StatusBadge>
               </div>
@@ -1298,8 +1313,8 @@ export default function OperationsPage() {
                   </p>
                   <p className="mt-1 text-[11px] text-slate-500">
                     {adapterOnline
-                      ? "Commesse e attività sono aggiornate; pianificazione e rapportini restano disponibili nel workspace."
-                      : "Commesse, attività, pianificazione, risorse e rapportini saranno disponibili con i primi dati operativi."}
+                      ? "Commesse e attività sono aggiornate; pianificazione e rapportini restano disponibili nella scheda."
+                      : "Commesse, attività, pianificazione, risorse e rapportini saranno disponibili con i primi dati."}
                   </p>
                 </div>
               </div>
@@ -1324,14 +1339,14 @@ export default function OperationsPage() {
             <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600">
               <span>
                 {adapterOnline
-                  ? "AI-ZEROW OPERATIONS · workspace operativo"
-                  : "AI-ZEROW OPERATIONS · superficie operativa"}
+                  ? "ZEROW · registro commesse"
+                  : "ZEROW · area commesse"}
               </span>
               <span className="flex items-center gap-2">
-                <span>carbon command core</span>
+                <span>sistema operativo</span>
                 <span className="size-1 rounded-full bg-lime-300" />
                 <span>
-                  {adapterOnline ? "dati operativi verificati" : "in attesa di dati"}
+                  {adapterOnline ? "dati aggiornati" : "in attesa di dati"}
                 </span>
               </span>
             </footer>

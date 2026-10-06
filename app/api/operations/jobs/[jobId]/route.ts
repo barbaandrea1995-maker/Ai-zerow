@@ -84,6 +84,28 @@ function relatedRecords(rows: (typeof s04Records.$inferSelect)[], jobVariants: S
     .map(recordForResponse);
 }
 
+function isWarehouseRoleText(value: unknown) {
+  return typeof value === "string" && /magazzin|warehouse|deposito/i.test(value);
+}
+
+/**
+ * A commessa shows its execution team, not the people who govern or operate
+ * a warehouse. Warehouse ownership stays visible in the materials flow,
+ * where it can be linked to stock requests without polluting the job team.
+ */
+function isWarehouseStaffRecord(record: ReturnType<typeof recordForResponse>) {
+  return [
+    record.recordType,
+    record.title,
+    record.detail,
+    record.meta,
+    record.payload.role,
+    record.payload.authorityRole,
+    record.payload.profile,
+    record.payload.kind,
+  ].some(isWarehouseRoleText);
+}
+
 function section(status: WorkspaceSectionStatus, records: ReturnType<typeof recordForResponse>[]) {
   return { status, count: records.length, records };
 }
@@ -175,6 +197,7 @@ async function workspaceResponse(
   const activities = activityRecords(jobKey, payload.activities);
   const evidence = evidenceRecords(jobKey, payload.evidence);
   const assignment = payload.assignment ? assignmentRecord(jobKey, payload.assignment) : null;
+  const visibleAssignment = assignment && !isWarehouseStaffRecord(assignment) ? assignment : null;
   const job = {
     ...baseJob,
     title: payload.title || baseJob.title,
@@ -202,9 +225,9 @@ async function workspaceResponse(
   const canReadField = hasCapability(context, "field.read") || hasCapability(context, "attendance.read") || hasCapability(context, "attendance.self");
   const planningRecords = canReadPlanning
     ? [
-      ...(assignment ? [assignment] : []),
+      ...(visibleAssignment ? [visibleAssignment] : []),
       ...planningJourney,
-      ...(canReadWorkforce ? byModule("workforce") : []),
+      ...(canReadWorkforce ? byModule("workforce").filter((record) => !isWarehouseStaffRecord(record)) : []),
       ...(canReadMission ? byModule("mission") : []),
     ]
     : [];
@@ -237,7 +260,7 @@ async function workspaceResponse(
         { key: "job", label: "Job", status: "readback" },
         { key: "activity", label: "Activity", status: activities.length ? "readback" : "empty" },
         { key: "planning", label: "Planning", status: planningRecords.length ? "readback" : "empty" },
-        { key: "assignment", label: "Assignment", status: assignment ? "readback" : "empty" },
+        { key: "assignment", label: "Assignment", status: visibleAssignment ? "readback" : "empty" },
         { key: "attendance", label: "Attendance", status: attendanceJourney.length ? "readback" : "empty" },
         { key: "work-context", label: "Work context", status: "deferred" },
         { key: "field", label: "Field", status: fieldRecords.length ? "readback" : "deferred" },

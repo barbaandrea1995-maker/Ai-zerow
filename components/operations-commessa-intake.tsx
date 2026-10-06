@@ -281,11 +281,11 @@ function WorksiteLocationField({
         <div className="flex items-start gap-3 rounded-2xl border border-lime-300/25 bg-lime-300/[0.07] p-3.5 shadow-[0_0_24px_rgba(190,255,60,0.08)]">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><CircleCheck className="size-4" /></span>
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200">Indirizzo riconosciuto dal server</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-200">Luogo verificato</p>
             <p className="mt-1 text-xs leading-5 text-lime-50/90">{selected.formattedAddress}</p>
-            <p className="mt-1 text-[10px] text-lime-100/55">Coordinate e geofence verranno associate alla commessa al salvataggio.</p>
+            <p className="mt-1 text-[10px] text-lime-100/55">La posizione e il perimetro operativo verranno associati alla commessa al salvataggio.</p>
           </div>
-          <span className="shrink-0 rounded-full border border-lime-300/20 bg-black/20 px-2 py-1 font-mono text-[9px] text-lime-200/80">MAPBOX</span>
+          <span className="shrink-0 rounded-full border border-lime-300/20 bg-black/20 px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-lime-200/80">Confermato</span>
         </div>
       ) : candidates.length ? (
         <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.045] p-3.5">
@@ -303,7 +303,7 @@ function WorksiteLocationField({
                 type="button"
               >
                 <MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" />
-                <span className="min-w-0 flex-1"><span className="block text-xs leading-5 text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[10px] text-slate-500">Precisione del risultato: {Math.round(candidate.confidence * 100)}%</span></span>
+                <span className="min-w-0 flex-1"><span className="block text-xs leading-5 text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[10px] text-slate-500">Affidabilità della proposta: {Math.round(candidate.confidence * 100)}%</span></span>
               </button>
             ))}
           </div>
@@ -370,7 +370,7 @@ export function IntakeFields({
       </FormSection>
 
       <FormSection
-        description="La classificazione segue una gerarchia unica e si ferma al sottogruppo."
+        description="L’ambito della commessa segue una classificazione ordinata fino al livello più utile per il lavoro."
         eyebrow="02 / classificazione"
         icon={Flag}
         title="Profilo operativo"
@@ -383,7 +383,7 @@ export function IntakeFields({
           </Field>
           <ScopeSelectFields draft={draft} onChange={onChange} proposed={proposed} />
         </div>
-        <p className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px] leading-4 text-slate-500">Le voci puntuali della tariffa restano nel contesto Company AI e non diventano categorie della commessa.</p>
+        <p className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px] leading-4 text-slate-500">Le voci puntuali del preventivo restano collegate alle lavorazioni e non appesantiscono l’anagrafica della commessa.</p>
       </FormSection>
 
       <FormSection
@@ -399,7 +399,7 @@ export function IntakeFields({
 
       <FormSection
         badge={<span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200/80">Cantiere richiesto</span>}
-        description="Il cliente resta facoltativo. L’ubicazione del cantiere viene riconosciuta dal server e diventa il riferimento per geofence, presenze e missioni."
+        description="Il cliente resta facoltativo. L’ubicazione del cantiere viene verificata e diventa il riferimento per perimetro, presenze e missioni."
         eyebrow="04 / anagrafiche"
         icon={UserRound}
         title="Cliente e cantiere"
@@ -514,7 +514,7 @@ function CompanyAiPanel({ sourceText, sourceFileName, hasSourceFile, preview, bu
             <label className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-xl border border-white/[0.11] bg-black/25 px-3 py-2.5 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition hover:border-cyan-300/40 hover:bg-cyan-300/[0.06] hover:text-cyan-100"><Upload className="size-3.5 shrink-0 text-cyan-200" /><span className="truncate">{sourceFileName || "Carica originale · max 20 MB"}</span><input accept=".docx,.txt,.md,.csv,.json,.xls,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,image/*" className="sr-only" onChange={onFile} type="file" /></label>
             <Button aria-busy={busy} className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 font-semibold text-[#061012] shadow-[0_0_24px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_30px_rgba(190,255,60,0.28)] disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || (sourceText.trim().length < 2 && !hasSourceFile)} onClick={onAnalyze} type="button">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}Analizza con Company AI</Button>
           </div>
-          <p className="mt-3 text-[10px] leading-4 text-slate-600">Formati supportati: DOCX, XLS/XLSX, TXT, MD, CSV e JSON · massimo 20 MB. Excel viene letto server-side per fogli e righe prima dell’analisi Company AI.</p>
+          <p className="mt-3 text-[10px] leading-4 text-slate-600">Formati supportati: DOCX, XLS/XLSX, TXT, MD, CSV e JSON · massimo 20 MB. I fogli Excel vengono letti in modo protetto prima dell’analisi Company AI.</p>
           {notice && <p className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[0.04] px-3 py-2.5 text-[11px] leading-5 text-cyan-100/75">{notice}</p>}
         </div>
 
@@ -537,7 +537,7 @@ function CompanyAiPanel({ sourceText, sourceFileName, hasSourceFile, preview, bu
               </div>
             ))}
           </div>
-          {preview.workItems?.length ? <div className="relative mt-5 overflow-hidden rounded-[22px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(4,12,9,0.72))] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-200/80">Lavorazioni separate</p><p className="mt-1 text-xs text-slate-500">Le voci del preventivo diventano elementi operativi distinti, senza trasformarsi in scope.</p></div><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-2.5 py-1 font-mono text-[10px] text-lime-200">{preview.workItems.length} voci</span></div><div className="mt-3 grid gap-2 md:grid-cols-2">{preview.workItems.map((item, index) => <div className="rounded-2xl border border-white/[0.08] bg-black/25 p-3.5" key={item.id}><div className="flex items-start gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/[0.08] font-mono text-[9px] text-lime-200">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><p className="text-xs font-semibold leading-5 text-lime-100">{item.label}</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{item.detail}</p></div></div><div className="mt-3 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-[0.08em] text-slate-600"><span>{item.quantity ? `${item.quantity} ${item.unit}` : "quantità da verificare"}</span><span className="text-slate-700">·</span><span>Origine: {displaySuggestionSource(item.source)}</span></div></div>)}</div></div> : <div className="relative mt-5 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.035] px-3.5 py-3 text-[11px] leading-5 text-amber-100/70">Nessuna voce separata rilevata: controlla il testo sorgente oppure inserisci manualmente le lavorazioni nella descrizione.</div>}
+          {preview.workItems?.length ? <div className="relative mt-5 overflow-hidden rounded-[22px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(4,12,9,0.72))] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-200/80">Lavorazioni separate</p><p className="mt-1 text-xs text-slate-500">Le voci del preventivo diventano elementi operativi distinti, senza appesantire l’anagrafica.</p></div><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-2.5 py-1 font-mono text-[10px] text-lime-200">{preview.workItems.length} voci</span></div><div className="mt-3 grid gap-2 md:grid-cols-2">{preview.workItems.map((item, index) => <div className="rounded-2xl border border-white/[0.08] bg-black/25 p-3.5" key={item.id}><div className="flex items-start gap-3"><span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/[0.08] font-mono text-[9px] text-lime-200">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><p className="text-xs font-semibold leading-5 text-lime-100">{item.label}</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{item.detail}</p></div></div><div className="mt-3 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-[0.08em] text-slate-600"><span>{item.quantity ? `${item.quantity} ${item.unit}` : "quantità da verificare"}</span><span className="text-slate-700">·</span><span>Origine: {displaySuggestionSource(item.source)}</span></div></div>)}</div></div> : <div className="relative mt-5 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.035] px-3.5 py-3 text-[11px] leading-5 text-amber-100/70">Nessuna voce separata rilevata: controlla il testo sorgente oppure inserisci manualmente le lavorazioni nella descrizione.</div>}
           {preview.knowledgePack && (
             <div className="relative mt-5 overflow-hidden rounded-[22px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.08),rgba(6,16,13,0.68)_52%,rgba(34,211,238,0.04))] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.18)]">
               <div className="pointer-events-none absolute -right-12 -top-14 size-40 rounded-full bg-lime-300/[0.08] blur-3xl" />
@@ -545,8 +545,7 @@ function CompanyAiPanel({ sourceText, sourceFileName, hasSourceFile, preview, bu
                 <div className="relative flex items-start gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.1] text-lime-200"><BookOpen className="size-4" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-200/80">Base conoscitiva attiva</p><p className="mt-1 text-sm font-semibold text-lime-100">{preview.knowledgePack.name}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{preview.knowledgePack.entryCount.toLocaleString("it-IT")} voci · supporto alla classificazione</p></div></div>
                 <span className="rounded-full border border-amber-300/20 bg-amber-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-100/80">da confermare</span>
               </div>
-              {preview.scopeSuggestion?.selection ? <div className="relative mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.055] p-3.5 shadow-[inset_0_0_24px_rgba(34,211,238,0.04)]"><div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100/85">Scope proposto · fino al sottogruppo</p><span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.08] px-2 py-0.5 font-mono text-[10px] text-cyan-100">{Math.round(preview.scopeSuggestion.score * 100)}%</span></div><p className="mt-2 text-xs font-semibold text-lime-100">{preview.scopeSuggestion.selection.sectionTitle}</p><p className="mt-1 text-[11px] text-slate-400">{preview.scopeSuggestion.selection.groupTitle} <span className="text-slate-600">/</span> {preview.scopeSuggestion.selection.subgroupTitle}</p>{preview.scopeSuggestion.matchedSignals?.length ? <p className="mt-3 text-[10px] leading-4 text-cyan-100/60">Segnali rilevati: {preview.scopeSuggestion.matchedSignals.join(" · ")}</p> : null}</div> : <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-3 py-4 text-center text-[11px] text-slate-500">Nessun sottogruppo proposto dal testo. Selezionalo manualmente nella scheda.</p>}
-              {preview.knowledgeHints?.length ? <div className="relative mt-4"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-100/55">Indicazioni operative · non parte dello scope</p><div className="grid gap-2 md:grid-cols-2">{preview.knowledgeHints.map((hint) => <div className="rounded-2xl border border-white/[0.08] bg-black/25 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" key={hint.id}><div className="flex items-center justify-between gap-3"><span className="font-mono text-[10px] text-lime-200">{hint.part} · {hint.code}</span><span className="text-[10px] text-slate-500">{hint.unit || "unità da verificare"}</span></div><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-300">{hint.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-slate-600"><span className="truncate">{hint.partTitle}</span><span className="shrink-0 font-mono text-cyan-200/80">{new Intl.NumberFormat("it-IT", { style: "currency", currency: hint.currency }).format(hint.price)}</span></div></div>)}</div></div> : null}
+              {preview.knowledgeHints?.length ? <div className="relative mt-4"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-100/55">Indicazioni operative · fuori dall’anagrafica</p><div className="grid gap-2 md:grid-cols-2">{preview.knowledgeHints.map((hint) => <div className="rounded-2xl border border-white/[0.08] bg-black/25 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" key={hint.id}><div className="flex items-center justify-between gap-3"><span className="font-mono text-[10px] text-lime-200">{hint.part} · {hint.code}</span><span className="text-[10px] text-slate-500">{hint.unit || "unità da verificare"}</span></div><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-slate-300">{hint.description}</p><div className="mt-2 flex items-center justify-between gap-3 text-[9px] text-slate-600"><span className="truncate">{hint.partTitle}</span><span className="shrink-0 font-mono text-cyan-200/80">{new Intl.NumberFormat("it-IT", { style: "currency", currency: hint.currency }).format(hint.price)}</span></div></div>)}</div></div> : null}
               <p className="relative mt-4 flex items-start gap-2 rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5 text-[10px] leading-4 text-slate-500"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-lime-200/70" />Il pack aiuta Company AI a comprendere la lavorazione; non genera quantità, prezzo di vendita, ordine o chiusura della commessa.</p>
             </div>
           )}
@@ -572,7 +571,7 @@ function SummaryRail({ draft, mode, preview, worksiteLocation }: { draft: Intake
   const keyFields = [
     { label: "Nome commessa", value: draft.title.trim(), fallback: "Da inserire" },
     { label: "Tipo commessa", value: draft.openingType, fallback: "Da scegliere" },
-    { label: "Scope", value: selectedSubgroup ? `${selectedSection?.title} / ${selectedGroup?.title} / ${selectedSubgroup.title}` : "", fallback: "Da definire fino al sottogruppo" },
+    { label: "Ambito", value: selectedSubgroup ? `${selectedSection?.title} / ${selectedGroup?.title} / ${selectedSubgroup.title}` : "", fallback: "Da definire" },
     { label: "Cliente", value: draft.clientName.trim(), fallback: "Non ancora indicato" },
     { label: "Luogo intervento", value: worksiteLocation?.formattedAddress || draft.worksite.trim(), fallback: "Da riconoscere" },
     { label: "Scadenza", value: draft.dueDate.trim(), fallback: "Da pianificare" },
@@ -587,10 +586,10 @@ function SummaryRail({ draft, mode, preview, worksiteLocation }: { draft: Intake
       <div className="relative overflow-hidden rounded-[24px] border border-lime-300/15 bg-[linear-gradient(160deg,rgba(20,31,28,0.96),rgba(7,12,13,0.94)_62%,rgba(12,24,19,0.9))] p-4 shadow-[0_24px_58px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-5">
         <div className="pointer-events-none absolute -right-16 -top-16 size-44 rounded-full bg-lime-300/[0.07] blur-3xl" />
         <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/60 to-transparent" />
-        <div className="relative flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/80">Live summary</p><h2 className="mt-1 text-[15px] font-semibold tracking-[-0.015em] text-lime-100">Commessa in preparazione</h2></div><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-[linear-gradient(145deg,rgba(190,255,60,0.16),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_22px_rgba(190,255,60,0.08)]"><ClipboardCheck className="size-4" /></span></div>
+        <div className="relative flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/80">Riepilogo in tempo reale</p><h2 className="mt-1 text-[15px] font-semibold tracking-[-0.015em] text-lime-100">Commessa in preparazione</h2></div><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-[linear-gradient(145deg,rgba(190,255,60,0.16),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_22px_rgba(190,255,60,0.08)]"><ClipboardCheck className="size-4" /></span></div>
         <div className="relative mt-5 rounded-2xl border border-lime-300/15 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(0,0,0,0.2))] p-3.5"><div className="flex items-center justify-between gap-3"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-lime-100/65">Dati chiave</span><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.07] px-2 py-0.5 font-mono text-[10px] text-lime-200">{filledCount}/{keyFields.length}</span></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]"><span className="block h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-300 shadow-[0_0_12px_rgba(190,255,60,0.32)] transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-[10px] leading-4 text-slate-500">La classificazione si completa selezionando il sottogruppo.</p></div>
         <div className="relative mt-5 space-y-3 rounded-2xl border border-white/[0.07] bg-black/15 p-3.5">{keyFields.map((field) => <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-3 last:border-0 last:pb-0" key={field.label}><span className="text-[10px] text-slate-600">{field.label}</span><span className={`max-w-[58%] truncate text-right text-[11px] ${field.value ? "text-lime-100/85" : "text-slate-600"}`}>{field.value || field.fallback}</span></div>)}</div>
-        <div className="relative mt-5 rounded-2xl border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(34,211,238,0.055),rgba(0,0,0,0.2))] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100/70">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete={Boolean(selectedSubgroup)} label="Scope fino al sottogruppo" detail={selectedSubgroup ? "Classificazione pronta" : "Seleziona sezione, raggruppamento e sottogruppo"} /><CheckRow complete={Boolean(worksiteLocation)} label="Ubicazione riconosciuta" detail={worksiteLocation ? "Coordinate e geofence pronti al salvataggio" : "Verifica e seleziona l’indirizzo del cantiere"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
+        <div className="relative mt-5 rounded-2xl border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(34,211,238,0.055),rgba(0,0,0,0.2))] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-100/70">Controlli prima del salvataggio</p><div className="mt-4 space-y-3.5"><CheckRow complete label="Stato iniziale: Bozza" detail="La commessa non viene chiusa automaticamente" /><CheckRow complete={sourceReady} label={`Percorso: ${sourceLabel}`} detail={sourceReady ? "Origine registrata nella scheda" : "Avvia la preview per continuare"} /><CheckRow complete={Boolean(draft.title.trim())} label="Nome commessa" detail={draft.title.trim() ? "Dato pronto per la conferma" : "Campo richiesto"} /><CheckRow complete={Boolean(selectedSubgroup)} label="Ambito fino al sottogruppo" detail={selectedSubgroup ? "Classificazione pronta" : "Seleziona sezione, raggruppamento e sottogruppo"} /><CheckRow complete={Boolean(worksiteLocation)} label="Luogo verificato" detail={worksiteLocation ? "Posizione e perimetro pronti al salvataggio" : "Verifica e seleziona l’indirizzo del cantiere"} /><CheckRow complete label="Conferma umana" detail="Ultimo controllo prima della scrittura" /></div></div>
         <div className="relative mt-4 flex items-start gap-2 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3 text-[10px] leading-4 text-cyan-100/70"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-cyan-200" /><span>Il codice commessa viene assegnato dal sistema al salvataggio.</span></div>
       </div>
     </aside>
@@ -674,7 +673,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setWorksiteGeocodeBusy(true);
     setWorksiteLocation(null);
     setWorksiteCandidates([]);
-    setWorksiteGeocodeNotice("Il server sta riconoscendo l’indirizzo…");
+    setWorksiteGeocodeNotice("Stiamo verificando l’indirizzo…");
     setError("");
     try {
       const response = await fetch("/api/location/geocode", {
@@ -685,7 +684,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       const data = await response.json() as { candidates?: GeocodeCandidate[]; error?: string };
       if (!response.ok) {
         const message = data.error === "geocoder_not_configured"
-          ? "Il riconoscimento indirizzi non è configurato dal server."
+          ? "La verifica degli indirizzi non è ancora disponibile."
           : data.error === "geocoder_unavailable"
             ? "Il servizio di riconoscimento indirizzi non risponde. Riprova tra poco."
             : "Non è stato possibile riconoscere l’indirizzo.";
@@ -705,7 +704,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const selectWorksite = (candidate: GeocodeCandidate) => {
     setDraft((current) => ({ ...current, worksite: candidate.formattedAddress }));
     setWorksiteLocation(candidate);
-    setWorksiteGeocodeNotice("Indirizzo confermato. Il server lo verificherà nuovamente durante il salvataggio.");
+    setWorksiteGeocodeNotice("Indirizzo confermato. La posizione verrà verificata anche al salvataggio.");
     setError("");
   };
 
@@ -731,7 +730,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       if (isSpreadsheetFile(file)) {
         setSourceFile(file);
         setSourceText("");
-        setNotice("Excel acquisito. Il server leggerà fogli e righe quando avvii Analizza con Company AI.");
+        setNotice("Excel acquisito. I fogli e le righe verranno letti quando avvii Analizza con Company AI.");
       } else if (isDocxFile(file)) {
         const extractedText = await extractDocxText(file);
         if (extractedText.length < 2) throw new Error("Nel documento Word non è stato trovato testo analizzabile.");
@@ -817,7 +816,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       subgroupId: draft.scopeSubgroupId,
     });
     if (!scopeSelection) {
-      setError("Completa lo scope selezionando sezione, raggruppamento e sottogruppo.");
+      setError("Completa l’ambito selezionando sezione, raggruppamento e sottogruppo.");
       return;
     }
     setBusy(true);
@@ -831,7 +830,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
           : data.error === "worksite_location_candidate_mismatch"
             ? "L’indirizzo è cambiato: esegui di nuovo la verifica e seleziona un risultato."
             : data.error === "worksite_geocoder_unavailable" || data.error === "worksite_geocoder_not_configured"
-              ? "Il server non riesce a riconoscere l’indirizzo in questo momento."
+              ? "Non riusciamo a verificare l’indirizzo in questo momento."
               : "La commessa non è stata salvata.";
         throw new Error(message);
       }
@@ -859,7 +858,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
           <DialogHeader className="relative z-10 shrink-0 border-b border-white/[0.08] bg-black/10 px-4 pb-4 pt-5 text-left backdrop-blur-xl sm:px-8 sm:pb-5 sm:pt-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex min-w-0 items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-lime-300/30 bg-[linear-gradient(145deg,rgba(190,255,60,0.22),rgba(190,255,60,0.03))] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.12)]"><FolderKanban className="size-5" /></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-lime-300">COMMESSE / NUOVA</p><span className="rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">creazione guidata</span></div><h2 className="mt-2 text-2xl font-semibold tracking-[-0.045em] text-lime-200 sm:text-[31px]" id="new-commessa-title">{heading.title}</h2><p className="mt-2 max-w-2xl text-xs leading-5 text-slate-400" id="new-commessa-description">{heading.description}</p></div></div>
-              <div className="flex shrink-0 items-center gap-2"><span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80 sm:inline-flex">AI-ZEROW · GUIDATA</span>{mode !== "chooser" && <button aria-label="Torna alla scelta del percorso" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => { setMode("chooser"); setError(""); }} type="button"><ArrowLeft className="size-4" /></button>}<button aria-label="Chiudi nuova commessa" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button"><X className="size-4" /></button></div>
+              <div className="flex shrink-0 items-center gap-2"><span className="hidden rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80 sm:inline-flex">PERCORSO ASSISTITO</span>{mode !== "chooser" && <button aria-label="Torna alla scelta del percorso" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => { setMode("chooser"); setError(""); }} type="button"><ArrowLeft className="size-4" /></button>}<button aria-label="Chiudi nuova commessa" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-lime-300/45 hover:bg-lime-300/10 hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button"><X className="size-4" /></button></div>
             </div>
           </DialogHeader>
 
