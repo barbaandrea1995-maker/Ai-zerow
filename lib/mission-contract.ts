@@ -85,6 +85,15 @@ function operationalTimeline(payload: JsonObject) {
     : [];
 }
 
+function deliveryProofEntries(payload: JsonObject) {
+  const entries = Array.isArray(payload.proofOfDeliveries)
+    ? payload.proofOfDeliveries.filter((entry): entry is JsonObject => isRecord(entry))
+    : [];
+  if (entries.length) return entries;
+  const legacy = isRecord(payload.proofOfDelivery) ? payload.proofOfDelivery : null;
+  return legacy ? [legacy] : [];
+}
+
 function requiredEventTypes(action: string) {
   if (action === "LOAD") return ["LOAD_CONFIRMED"];
   if (action === "UNLOAD") return ["UNLOAD_CONFIRMED"];
@@ -126,7 +135,8 @@ export function buildMissionReportReadback(
   const reportText = text(options.textOverride ?? saved.text);
   const stops = routeStops(payload);
   const timeline = operationalTimeline(payload);
-  const proof = isRecord(payload.proofOfDelivery) ? payload.proofOfDelivery : {};
+  const proofEntries = deliveryProofEntries(payload);
+  const latestProof = proofEntries.at(-1) ?? {};
   const missing: string[] = [];
   const questions: string[] = [];
 
@@ -149,10 +159,16 @@ export function buildMissionReportReadback(
   }
 
   const deliveryStops = stops.filter((stop) => stop.deliveryEvidenceRequired || stop.kind === "DELIVERY");
-  const hasDeliveryProof = text(proof.recipient).length >= 2 && text(proof.deliveredAt).length >= 10;
-  if (deliveryStops.length && !hasDeliveryProof) {
-    missing.push("delivery_evidence");
-    questions.push("Chi ha ricevuto la consegna e quale evidenza operativa la conferma?");
+  const missingDeliveryProofStops = deliveryStops.filter((stop) => {
+    const stopProof = proofEntries.find((entry) => text(entry.stopId) === stop.id)
+      ?? (deliveryStops.length === 1 ? latestProof : null);
+    return !stopProof || text(stopProof.recipient).length < 2 || text(stopProof.deliveredAt).length < 10;
+  });
+  if (missingDeliveryProofStops.length) {
+    for (const stop of missingDeliveryProofStops) {
+      missing.push(`delivery_evidence_${stop.sequence}`);
+      questions.push(`Chi ha ricevuto la consegna alla tappa ${stop.sequence}: ${stop.label} e quale evidenza operativa la conferma?`);
+    }
   }
   if (deliveryStops.length && !timeline.some((event) => text(event.type).toUpperCase() === "DELIVERY_CONFIRMED")) {
     missing.push("delivery_event");
@@ -183,7 +199,7 @@ export function buildMissionReportReadback(
     `Tappe: ${routeLines.join(" | ") || "[da completare]"}`,
     `Eventi server: ${timelineLines.join(" | ") || "[da completare]"}`,
     ...(warehouseRequired ? [`Riconciliazione magazzino: ${warehouseStatus || "[da completare]"}`] : []),
-    `Ricevente: ${text(proof.recipient, "[da completare]")}`,
+    `Ricevente: ${text(latestProof.recipient, "[da completare]")}`,
     "Esito e anomalie: [da completare]",
   ].join("\n");
 
@@ -195,7 +211,7 @@ export function buildMissionReportReadback(
     { key: "route", label: "Tappe", value: routeLines.join(" · ") || "Nessuna tappa", status: stops.length ? "known" : "missing", source: "Route server-side" },
     { key: "actions", label: "Azioni registrate", value: timelineLines.join(" · ") || "Nessuna azione", status: timeline.length ? "known" : "missing", source: "Timeline server-side" },
     { key: "warehouse", label: "Riconciliazione magazzino", value: warehouseRequired ? (warehouseStatus || "Da completare") : "Non richiesta", status: !warehouseRequired || warehouseStatus === "DELIVERED" ? "known" : "missing", source: "Ledger Magazzino" },
-    { key: "delivery", label: "Prova di consegna", value: hasDeliveryProof ? `${text(proof.recipient)} · ${text(proof.deliveredAt)}` : "Da completare", status: hasDeliveryProof ? "known" : deliveryStops.length ? "missing" : "optional", source: "POD / Autista" },
+    { key: "delivery", label: "Prova di consegna", value: proofEntries.length ? `${proofEntries.length} tappa/e con ricevente registrato` : "Da completare", status: !deliveryStops.length || !missingDeliveryProofStops.length ? "known" : "missing", source: "POD / Autista" },
     { key: "narrative", label: "Esito e anomalie", value: reportText || "Da completare", status: reportText.length >= 30 && !reportText.includes("[da completare]") ? "known" : "missing", source: "Company AI / Autista" },
   ];
 

@@ -74,6 +74,33 @@ function validDateTime(value: string) {
   return value.length >= 10 && Number.isFinite(Date.parse(value));
 }
 
+function routeStopKind(row: typeof routeStops.$inferSelect) {
+  const metadata = parseJson(row.evidenceJson);
+  return boundedText(metadata.kind, 32).toUpperCase();
+}
+
+function routeStopCompleted(row: typeof routeStops.$inferSelect) {
+  return row.status === "COMPLETED" || row.deliveryStatus === "CONFIRMED";
+}
+
+function deliveryProofEntries(payload: JsonObject) {
+  const entries = Array.isArray(payload.proofOfDeliveries)
+    ? payload.proofOfDeliveries.filter((entry): entry is JsonObject => isRecord(entry))
+    : [];
+  if (entries.length) return entries;
+  const legacy = isRecord(payload.proofOfDelivery) ? payload.proofOfDelivery : null;
+  return legacy ? [legacy] : [];
+}
+
+function upsertDeliveryProof(payload: JsonObject, entry: JsonObject) {
+  const entries = deliveryProofEntries(payload);
+  const stopId = boundedText(entry.stopId, 160);
+  const next = stopId
+    ? [...entries.filter((candidate) => boundedText(candidate.stopId, 160) !== stopId), entry]
+    : [...entries, entry];
+  return next.slice(-100);
+}
+
 function parseJson(value: string) {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -998,14 +1025,24 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const route = isRecord(payload.route) ? payload.route : {};
         missionActionRoutePlanId = boundedText(route.routePlanId, 160);
         missionActionStopId = boundedText(input.stopId, 160);
-        if (missionActionStopId) {
-          if (!missionActionRoutePlanId) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
-          const [stop] = await db.select({ id: routeStops.id }).from(routeStops).where(and(
+        if (missionActionRoutePlanId) {
+          const missionRouteStops = await db.select().from(routeStops).where(and(
             eq(routeStops.tenantId, context.tenantId),
             eq(routeStops.routePlanId, missionActionRoutePlanId),
-            eq(routeStops.id, missionActionStopId),
-          )).limit(1);
-          if (!stop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+          )).orderBy(routeStops.sequence).limit(100);
+          if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+          if (!missionActionStopId) return Response.json({ error: "mission_stop_required" }, { status: 400 });
+          const selectedStop = missionRouteStops.find((stop) => stop.id === missionActionStopId);
+          if (!selectedStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+          if (routeStopCompleted(selectedStop)) {
+            return Response.json({ error: "mission_stop_already_completed", stopId: selectedStop.id }, { status: 409 });
+          }
+          if (action === "mission_load" && selectedStop.status === "LOADED") {
+            return Response.json({ error: "mission_stop_already_loaded", stopId: selectedStop.id }, { status: 409 });
+          }
+          if (action === "mission_unload" && selectedStop.status === "UNLOADED") {
+            return Response.json({ error: "mission_stop_already_unloaded", stopId: selectedStop.id }, { status: 409 });
+          }
         }
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
@@ -1054,14 +1091,28 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const route = isRecord(payload.route) ? payload.route : {};
         missionActionRoutePlanId = boundedText(route.routePlanId, 160);
         missionActionStopId = boundedText(input.stopId, 160);
-        if (missionActionStopId) {
-          if (!missionActionRoutePlanId) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
-          const [stop] = await db.select({ id: routeStops.id }).from(routeStops).where(and(
+        let missionRouteStops: (typeof routeStops.$inferSelect)[] = [];
+        let selectedMissionStop: typeof routeStops.$inferSelect | null = null;
+        if (missionActionRoutePlanId) {
+          missionRouteStops = await db.select().from(routeStops).where(and(
             eq(routeStops.tenantId, context.tenantId),
             eq(routeStops.routePlanId, missionActionRoutePlanId),
-            eq(routeStops.id, missionActionStopId),
-          )).limit(1);
-          if (!stop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+          )).orderBy(routeStops.sequence).limit(100);
+          if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+          selectedMissionStop = missionActionStopId
+            ? missionRouteStops.find((stop) => stop.id === missionActionStopId) ?? null
+            : missionRouteStops.find((stop) => routeStopKind(stop) === "DELIVERY" && !routeStopCompleted(stop)) ?? null;
+          if (!selectedMissionStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+          missionActionStopId = selectedMissionStop.id;
+          if (routeStopKind(selectedMissionStop) !== "DELIVERY") {
+            return Response.json({ error: "mission_delivery_stop_required", stopId: selectedMissionStop.id }, { status: 409 });
+          }
+          if (routeStopCompleted(selectedMissionStop)) {
+            return Response.json({ error: "mission_stop_already_completed", stopId: selectedMissionStop.id }, { status: 409 });
+          }
+          if (selectedMissionStop.status !== "UNLOADED" && selectedMissionStop.deliveryStatus !== "UNLOADED") {
+            return Response.json({ error: "mission_stop_unload_required", stopId: selectedMissionStop.id, message: "Registra prima lo scarico della tappa." }, { status: 409 });
+          }
         }
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
@@ -1088,36 +1139,65 @@ export async function POST(request: Request, routeContext: RouteContext) {
           source: "mission-driver-action",
         };
         missionActionEvent = deliveryEvent;
-        status = "DELIVERED";
+        const deliveryStops = missionRouteStops.filter((stop) => routeStopKind(stop) === "DELIVERY");
+        const allDeliveryStopsComplete = deliveryStops.length === 0
+          || deliveryStops.every((stop) => stop.id === selectedMissionStop?.id || routeStopCompleted(stop));
+        const proofEntry = {
+          stopId: missionActionStopId || null,
+          sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
+          recipient,
+          deliveredAt: now,
+          recordedAt: now,
+          clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
+          note: boundedText(input.note, 2_000),
+          documentId: boundedText(input.documentId, 120) || null,
+          recordedBy: context.actorId,
+        };
+        const proofOfDeliveries = upsertDeliveryProof(payload, proofEntry);
+        status = allDeliveryStopsComplete ? "DELIVERED" : "DISPATCHED";
         payload = {
           ...payload,
           warehouseReadback,
-          proofOfDelivery: {
-            recipient,
-            deliveredAt: now,
-            recordedAt: now,
-            clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
-            note: boundedText(input.note, 2_000),
-            documentId: boundedText(input.documentId, 120) || null,
-            recordedBy: context.actorId,
-          },
+          proofOfDelivery: proofEntry,
+          proofOfDeliveries,
+          completedDeliveryStops: proofOfDeliveries.filter((entry) => boundedText(entry.stopId, 160)).length,
+          remainingDeliveryStops: allDeliveryStopsComplete ? 0 : Math.max(0, deliveryStops.length - proofOfDeliveries.filter((entry) => boundedText(entry.stopId, 160)).length),
           operationalTimeline: [...timeline, deliveryEvent].slice(-500),
           lastOperationalEvent: deliveryEvent,
         };
-        eventType = "mission.transport.delivered";
+        eventType = allDeliveryStopsComplete ? "mission.transport.delivered" : "mission.transport.stop_delivered";
       } else if (action === "mission_verify_pod") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "DELIVERED") {
           return Response.json({ error: "invalid_pod_verification_transition" }, { status: 409 });
         }
-        const proof = isRecord(payload.proofOfDelivery) ? payload.proofOfDelivery : {};
+        const proofEntries = deliveryProofEntries(payload);
+        const proof = proofEntries.at(-1) ?? {};
         if (typeof proof.recipient !== "string" || proof.recipient.trim().length < 2 || typeof proof.deliveredAt !== "string" || !validDateTime(proof.deliveredAt)) {
           return Response.json({ error: "delivery_proof_readback_required" }, { status: 400 });
         }
+        const route = isRecord(payload.route) ? payload.route : {};
+        const routePlanId = boundedText(route.routePlanId, 160);
+        if (routePlanId) {
+          const missionRouteStops = await db.select().from(routeStops).where(and(
+            eq(routeStops.tenantId, context.tenantId),
+            eq(routeStops.routePlanId, routePlanId),
+          )).orderBy(routeStops.sequence).limit(100);
+          const deliveryStopIds = missionRouteStops.filter((stop) => routeStopKind(stop) === "DELIVERY").map((stop) => stop.id);
+          const proofStopIds = new Set(proofEntries.map((entry) => boundedText(entry.stopId, 160)).filter(Boolean));
+          const missingStopIds = deliveryStopIds.filter((stopId) => !proofStopIds.has(stopId));
+          if (missingStopIds.length > 0) {
+            return Response.json({ error: "mission_stop_proof_required", missingStopIds, message: "Ogni tappa di consegna deve avere il proprio ricevente e la propria prova prima della verifica POD." }, { status: 422 });
+          }
+        }
+        const verifiedProofEntries = proofEntries.map((entry) => ({ ...entry, verifiedAt: now, verifiedBy: context.actorId }));
         status = "POD_VERIFIED";
         payload = {
           ...payload,
-          proofOfDelivery: { ...proof, verifiedAt: now, verifiedBy: context.actorId },
-          podEvidenceDocumentId: boundedText(input.documentId, 120) || null,
+          proofOfDelivery: verifiedProofEntries.at(-1) ?? { ...proof, verifiedAt: now, verifiedBy: context.actorId },
+          proofOfDeliveries: verifiedProofEntries,
+          podVerifiedAt: now,
+          podVerifiedBy: context.actorId,
+          podEvidenceDocumentId: boundedText(input.documentId, 120) || boundedText(proof.documentId, 120) || null,
         };
         eventType = "mission.transport.pod_verified";
       } else if (action === "mission_reconcile") {

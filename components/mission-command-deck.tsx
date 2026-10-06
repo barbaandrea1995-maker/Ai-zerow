@@ -408,10 +408,11 @@ function MissionActionPanel({
   const canLoad = canRecord && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
   const canUnload = canRecord && mission.status === "DISPATCHED" && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
   const warehouseReadback = missionWarehouseReadback(mission.payload);
+  const completedStops = stops.filter((stop) => stop.status === "COMPLETED" || stop.deliveryStatus === "CONFIRMED").length;
   return <><section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
     <div className="flex items-start gap-3">
       <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-200"><Package className="size-4" /></span>
-      <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">AZIONI IN CAMPO</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Carico e scarico verificati</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">L’autista conferma l’azione sulla tappa reale. Il server registra timestamp, autore, tappa e asset senza usare l’orologio del dispositivo.</p></div>
+      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">AZIONI IN CAMPO</p>{stops.length > 1 && <StatusPill label={`${completedStops}/${stops.length} TAPPE CHIUSE`} tone={completedStops === stops.length ? "lime" : "cyan"} />}</div><h3 className="mt-1 text-sm font-semibold text-slate-100">Carico e scarico verificati</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">L’autista conferma l’azione sulla tappa reale. Il server registra timestamp, autore, tappa e asset senza usare l’orologio del dispositivo. La missione resta in viaggio finché tutte le tappe di consegna non sono chiuse.</p></div>
     </div>
     <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
       <label className="text-[10px] text-slate-500">Tappa operativa
@@ -699,7 +700,8 @@ export default function MissionCommandDeck() {
   }
 
   function openDelivery() {
-    setDeliveryStopId(activeActionStopId);
+    const nextDeliveryStop = selectedStops.find((stop) => stop.kind === "DELIVERY" && stop.status !== "COMPLETED" && stop.deliveryStatus !== "CONFIRMED");
+    setDeliveryStopId(nextDeliveryStop?.id ?? activeActionStopId);
     setModal("delivery");
   }
 
