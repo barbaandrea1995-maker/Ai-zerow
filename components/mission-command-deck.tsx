@@ -1015,6 +1015,7 @@ export default function MissionCommandDeck() {
       const selectedRouteStops = routeStops.map((stop) => {
         const location = locations.find((candidate) => candidate.id === stop.locationId);
         const temporary = stop.temporaryLocation;
+        const action = stop.kind === "DELIVERY" || stop.kind === "RETURN" ? "UNLOAD" : stop.kind === "TRANSFER" ? "TRANSFER" : "LOAD";
         return {
           kind: stop.kind,
           locationId: temporary ? "" : stop.locationId,
@@ -1022,7 +1023,7 @@ export default function MissionCommandDeck() {
           entityType: temporary ? "CUSTOM_LOCATION" : location?.entityType ?? "",
           entityId: temporary ? "" : location?.entityId ?? "",
           ...(temporary ? { temporaryAddress: stop.temporaryAddress || temporary.formattedAddress, temporaryLocation: temporary } : {}),
-          cargoActions: [{ action: stop.kind === "DELIVERY" ? "UNLOAD" : "LOAD", assetId: selectedCargo || null, materialRequestId: materialRequestId || null }],
+          cargoActions: [{ action, assetId: selectedCargo || null, materialRequestId: materialRequestId || null }],
         };
       });
       if (!jobId || !field(form, "driverId") || !field(form, "vehicleId")) {
@@ -1071,6 +1072,7 @@ export default function MissionCommandDeck() {
         evidenceType: field(form, "evidenceType") || (documentId ? "DELIVERY_PHOTO" : "AUTHORIZED_DRIVER_CONFIRMATION"),
         evidenceReference: field(form, "evidenceReference"),
         documentId,
+        assetId: text(selected.payload.cargoAssetId, ""),
         note: field(form, "note"),
       });
     }

@@ -50,6 +50,7 @@ assert(uiAudit.includes("commercial-modules.json") && uiAudit.includes("globalFa
 const missionJourneyRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "journey", "route.ts"), "utf8");
 assert(missionJourneyRoute.includes("mission_stop_not_current") && missionJourneyRoute.includes("mission_stop_arrival_required"), "Mission cargo actions must be constrained to the server-side current geofenced stop");
 assert(missionJourneyRoute.includes("mission_route_required_for_cargo_action") && missionJourneyRoute.includes("routeStopSupportsAction"), "Mission cargo actions must require a canonical route and compatible stop action");
+assert(missionJourneyRoute.includes("mission_stop_asset_mismatch") && missionJourneyRoute.includes("routeStopCargoAssetIds"), "Mission cargo actions must preserve the asset identity declared by the route stop");
 const missionLocationIngest = await readFile(join(root, "lib", "location-intelligence", "ingest.ts"), "utf8");
 assert(missionLocationIngest.includes("stop.status !== \"DEPARTED\" && !stop.departedAt") && missionLocationIngest.includes("Boolean(stop.departedAt)"), "Location ingestion must keep a delivered stop attached until physical departure is observed");
 const missionDeck = await readFile(join(root, "components", "mission-command-deck.tsx"), "utf8");

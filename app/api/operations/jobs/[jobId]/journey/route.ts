@@ -107,6 +107,17 @@ function routeStopCargoActions(row: typeof routeStops.$inferSelect) {
     : [];
 }
 
+function routeStopCargoAssetIds(row: typeof routeStops.$inferSelect) {
+  const metadata = parseJson(row.evidenceJson);
+  return Array.isArray(metadata.cargoActions)
+    ? metadata.cargoActions.flatMap((entry) => {
+        if (!isRecord(entry)) return [];
+        const assetId = boundedText(entry.assetId, 160);
+        return assetId ? [assetId] : [];
+      })
+    : [];
+}
+
 function routeStopSupportsAction(row: typeof routeStops.$inferSelect, action: "mission_load" | "mission_unload") {
   const actions = routeStopCargoActions(row);
   if (actions.length) {
@@ -1232,6 +1243,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (action === "mission_unload" && selectedStop.status === "UNLOADED") {
           return Response.json({ error: "mission_stop_already_unloaded", stopId: selectedStop.id }, { status: 409 });
         }
+        const plannedAssetIds = routeStopCargoAssetIds(selectedStop);
+        const requestedAssetId = boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160);
+        if (plannedAssetIds.length && !plannedAssetIds.includes(requestedAssetId)) {
+          return Response.json({ error: "mission_stop_asset_mismatch", stopId: selectedStop.id, plannedAssetIds }, { status: 409 });
+        }
+        const actionAssetId = requestedAssetId || plannedAssetIds[0] || null;
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
           : [];
@@ -1244,7 +1261,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           stopId: missionActionStopId || null,
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           note: boundedText(input.note, 2_000),
-          assetId: boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160) || null,
+          assetId: actionAssetId,
           source: "mission-driver-action",
         };
         missionActionEvent = actionEvent;
@@ -1343,6 +1360,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (selectedMissionStop.status !== "UNLOADED" && selectedMissionStop.deliveryStatus !== "UNLOADED") {
           return Response.json({ error: "mission_stop_unload_required", stopId: selectedMissionStop.id, message: "Registra prima lo scarico della tappa." }, { status: 409 });
         }
+        const plannedAssetIds = routeStopCargoAssetIds(selectedMissionStop);
+        const requestedAssetId = boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160);
+        if (plannedAssetIds.length && !plannedAssetIds.includes(requestedAssetId)) {
+          return Response.json({ error: "mission_stop_asset_mismatch", stopId: selectedMissionStop.id, plannedAssetIds }, { status: 409 });
+        }
+        const deliveryAssetId = requestedAssetId || plannedAssetIds[0] || null;
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
           return Response.json({
@@ -1363,6 +1386,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           stopId: missionActionStopId || null,
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           recipient,
+          assetId: deliveryAssetId,
           evidenceType: podEvidence.type,
           evidenceReference: podEvidence.reference,
           documentId: podEvidence.documentId,
@@ -1380,6 +1404,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           deliveredAt: now,
           recordedAt: now,
           clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
+          assetId: deliveryAssetId,
           note: boundedText(input.note, 2_000),
           documentId: podEvidence.documentId,
           evidence: podEvidence,
