@@ -731,6 +731,13 @@ export default function MissionCommandDeck() {
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
   const context = payload?.context;
   const capabilities = useMemo(() => context?.capabilities ?? ["mission.read"], [context]);
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
