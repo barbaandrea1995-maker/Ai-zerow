@@ -53,6 +53,18 @@ function sessionMissionId(session: typeof trackingSessions.$inferSelect) {
   return boundedText((context as Record<string, unknown>).missionId, 160);
 }
 
+function sessionRouteState(session: typeof trackingSessions.$inferSelect) {
+  const state = parseJson(session.engineStateJson);
+  const routeState = state.__routeState;
+  if (!routeState || typeof routeState !== "object" || Array.isArray(routeState)) return null;
+  const value = routeState as Record<string, unknown>;
+  return {
+    routeStopId: boundedText(value.routeStopId, 160) || null,
+    attachment: boundedText(value.attachment, 32) || null,
+    observedAt: boundedText(value.observedAt, 40) || null,
+  };
+}
+
 function locationReferences(value: unknown, output = new Set<string>(), depth = 0) {
   if (depth > 5 || !value || typeof value !== "object") return output;
   if (Array.isArray(value)) {
@@ -229,22 +241,50 @@ export async function GET() {
       const jobPayload = job ? parseJobPayload(job.payloadJson) : null;
       const routePlan = routePlanByMission.get(mission.id);
       const storedPayload = parseJson(mission.payloadJson);
+      const vehicleId = boundedText(storedPayload.vehicleId, 160);
+      const session = latestSessionByVehicle.get(vehicleId) ?? null;
+      const sessionContextMissionId = session ? sessionMissionId(session) : "";
+      const missionSession = session && (!sessionContextMissionId || sessionContextMissionId === mission.id) ? session : null;
+      const sample = missionSession ? latestSampleBySession.get(missionSession.id) ?? null : null;
+      const event = missionSession ? latestEventBySession.get(missionSession.id) ?? null : null;
+      const routeState = missionSession ? sessionRouteState(missionSession) : null;
+      const trackingEventsByLocation = new Map<string, typeof locationEvents.$inferSelect>();
+      if (missionSession) {
+        for (const trackingEvent of trackingEventRows) {
+          if (trackingEvent.trackingSessionId === missionSession.id && trackingEvent.locationId && !trackingEventsByLocation.has(trackingEvent.locationId)) {
+            trackingEventsByLocation.set(trackingEvent.locationId, trackingEvent);
+          }
+        }
+      }
       const routeReadback = routePlan ? {
         id: routePlan.id,
         status: routePlan.status,
         plannedStartAt: routePlan.plannedStartAt,
         startedAt: routePlan.startedAt,
         endedAt: routePlan.endedAt,
-        stops: (routeStopsByPlan.get(routePlan.id) ?? []).map((stop) => ({
-          id: stop.id,
-          sequence: stop.sequence,
-          locationId: stop.locationId,
-          status: stop.status,
-          deliveryStatus: stop.deliveryStatus,
-          arrivedAt: stop.arrivedAt,
-          departedAt: stop.departedAt,
-          metadata: parseJson(stop.evidenceJson),
-        })),
+        stops: (routeStopsByPlan.get(routePlan.id) ?? []).map((stop) => {
+          const metadata = parseJson(stop.evidenceJson);
+          const stopEvent = trackingEventsByLocation.get(stop.locationId) ?? null;
+          return {
+            id: stop.id,
+            sequence: stop.sequence,
+            locationId: stop.locationId,
+            kind: boundedText(metadata.kind, 24).toUpperCase() || null,
+            label: boundedText(metadata.label, 240) || null,
+            status: stop.status,
+            deliveryStatus: stop.deliveryStatus,
+            expectedArrivalAt: stop.expectedArrivalAt,
+            expectedDepartureAt: stop.expectedDepartureAt,
+            arrivedAt: stop.arrivedAt,
+            departedAt: stop.departedAt,
+            metadata,
+            lastLocationEvent: stopEvent ? {
+              type: stopEvent.eventType,
+              occurredAt: stopEvent.occurredAt,
+              confidence: stopEvent.confidenceMilli / 1_000,
+            } : null,
+          };
+        }),
       } : null;
       const warehouseReadback = buildMissionWarehouseReadback(
         storedPayload,
@@ -256,12 +296,6 @@ export async function GET() {
         })),
         inventoryItemRows,
       );
-      const vehicleId = boundedText(storedPayload.vehicleId, 160);
-      const session = latestSessionByVehicle.get(vehicleId) ?? null;
-      const sessionContextMissionId = session ? sessionMissionId(session) : "";
-      const missionSession = session && (!sessionContextMissionId || sessionContextMissionId === mission.id) ? session : null;
-      const sample = missionSession ? latestSampleBySession.get(missionSession.id) ?? null : null;
-      const event = missionSession ? latestEventBySession.get(missionSession.id) ?? null : null;
       const trackingReadback = !canReadMissionTracking
         ? { status: "RESTRICTED", reason: "location_capability_required", sessionId: null, position: null, lastEvent: null }
         : !missionSession
@@ -275,6 +309,9 @@ export async function GET() {
               trackingDeviceId: missionSession.trackingDeviceId,
               trackingSource: missionSession.trackingSource,
               startedAt: missionSession.startedAt,
+              currentStopId: routeState?.routeStopId ?? null,
+              attachment: routeState?.attachment ?? null,
+              routeStateObservedAt: routeState?.observedAt ?? null,
               position: sample ? {
                 latitude: roundedCoordinate(sample.latitudeE6),
                 longitude: roundedCoordinate(sample.longitudeE6),

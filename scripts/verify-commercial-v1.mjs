@@ -368,6 +368,7 @@ assert(missionControlRoute.includes('module: "mission"') && missionControlRoute.
 assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") && missionControlRoute.includes("assertMissionResourceSelection"), "Standalone mission creation must keep the same real-resource contract");
 assert(missionControlRoute.includes("transport_mode_not_enabled") && missionControlRoute.includes("operatingTransportModes"), "Standalone transport must respect tenant-enabled transport modes");
 assert(missionControlRoute.includes("trackingReadback") && missionControlRoute.includes("READ_MISSION_TRACKING") && missionControlRoute.includes("driver_check_in_required"), "Mission control must expose audited attendance-bound tracking readback");
+assert(missionControlRoute.includes("currentStopId") && missionControlRoute.includes("lastLocationEvent") && missionControlRoute.includes("routeStateObservedAt"), "Mission tracking must expose the current stop and server-side geofence evidence");
 const missionControl = await readFile(join(root, "components", "mission-control.tsx"), "utf8");
 assert(missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes('name="transportMode"') && missionControl.includes("operatingTransportModes"), "Standalone mission UI must expose only tenant-enabled transport modes");
 

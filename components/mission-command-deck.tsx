@@ -122,6 +122,11 @@ type MissionStopView = {
   deliveryStatus: string;
   locationId: string;
   cargoActions: string[];
+  expectedArrivalAt: string | null;
+  expectedDepartureAt: string | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
+  lastLocationEvent: { type: string; occurredAt: string; confidence: number } | null;
 };
 
 type MaterialRequest = {
@@ -337,6 +342,7 @@ function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
     const planned = plannedStops.find((item) => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).id === value.id);
     const plannedValue = planned && typeof planned === "object" && !Array.isArray(planned) ? planned as Record<string, unknown> : {};
     const metadata = value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata as Record<string, unknown> : {};
+    const locationEvent = value.lastLocationEvent && typeof value.lastLocationEvent === "object" && !Array.isArray(value.lastLocationEvent) ? value.lastLocationEvent as Record<string, unknown> : null;
     const cargoActions = (Array.isArray(plannedValue.cargoActions) ? plannedValue.cargoActions : Array.isArray(metadata.cargoActions) ? metadata.cargoActions : []).flatMap((action) => {
       if (typeof action === "string") return [action.toUpperCase()];
       if (!action || typeof action !== "object" || Array.isArray(action)) return [];
@@ -352,6 +358,15 @@ function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
       deliveryStatus: text(value.deliveryStatus, "PLANNED").toUpperCase(),
       locationId: text(value.locationId ?? plannedValue.locationId, ""),
       cargoActions,
+      expectedArrivalAt: text(value.expectedArrivalAt ?? plannedValue.expectedArrivalAt, "") || null,
+      expectedDepartureAt: text(value.expectedDepartureAt ?? plannedValue.expectedDepartureAt, "") || null,
+      arrivedAt: text(value.arrivedAt ?? plannedValue.arrivedAt, "") || null,
+      departedAt: text(value.departedAt ?? plannedValue.departedAt, "") || null,
+      lastLocationEvent: locationEvent ? {
+        type: text(locationEvent.type, "EVENTO"),
+        occurredAt: text(locationEvent.occurredAt, ""),
+        confidence: typeof locationEvent.confidence === "number" ? locationEvent.confidence : 0,
+      } : null,
     }];
   });
 }
@@ -402,6 +417,22 @@ function trackingStatusLabel(status: string) {
     NO_POSITION: "NESSUNA POSIZIONE",
     NOT_ACTIVE: "NON ATTIVO",
     RESTRICTED: "ACCESSO LIMITATO",
+  } as Record<string, string>)[status] ?? status.replaceAll("_", " ");
+}
+
+function stopStatusTone(status: string): Tone {
+  if (status === "ARRIVED" || status === "IN_PROGRESS") return "cyan";
+  if (status === "DEPARTED" || status === "COMPLETED") return "lime";
+  return "muted";
+}
+
+function stopStatusLabel(status: string) {
+  return ({
+    PLANNED: "PIANIFICATA",
+    ARRIVED: "ARRIVATA",
+    IN_PROGRESS: "IN CORSO",
+    DEPARTED: "PARTITA",
+    COMPLETED: "CHIUSA",
   } as Record<string, string>)[status] ?? status.replaceAll("_", " ");
 }
 
@@ -538,6 +569,8 @@ function MissionTrackingPanel({ payload }: { payload: Record<string, unknown> })
   const tracking = missionTrackingReadback(payload);
   if (!tracking) return null;
   const status = text(tracking.status, "NOT_ACTIVE").toUpperCase();
+  const stops = routeStopViews(payload);
+  const currentStopId = text(tracking.currentStopId, "");
   const position = tracking.position && typeof tracking.position === "object" && !Array.isArray(tracking.position)
     ? tracking.position as Record<string, unknown>
     : null;
@@ -559,6 +592,18 @@ function MissionTrackingPanel({ payload }: { payload: Record<string, unknown> })
     {!restricted && <div className="mt-4 grid gap-2 sm:grid-cols-2">
       <div className="rounded-xl border border-white/[.08] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Ultima posizione</p><p className="mt-2 font-mono text-xs text-slate-200">{position ? `${Number(position.latitude).toFixed(4)}, ${Number(position.longitude).toFixed(4)}` : "Nessuna posizione ricevuta"}</p><p className="mt-1 text-[10px] text-slate-600">{position ? `${formatDate(position.recordedAt)} · ricevuta ${formatDate(position.receivedAt)}` : "Il provider non ha ancora inviato campioni."}</p></div>
       <div className="rounded-xl border border-white/[.08] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Sorgente e qualità</p><p className="mt-2 text-xs text-slate-200">{text(tracking.trackingSource, "—")} · {position?.accuracyM !== null && position?.accuracyM !== undefined ? `${position.accuracyM} m` : "accuratezza n/d"}</p><p className="mt-1 text-[10px] text-slate-600">Avvio {formatDate(tracking.startedAt)}{event ? ` · ultimo evento ${text(event.type, "EVENTO").replaceAll("_", " ")}` : ""}</p></div>
+    </div>}
+    {stops.length > 0 && <div className="mt-4 rounded-xl border border-white/[.08] bg-black/20 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">REGISTRO TAPPE</p><p className="mt-1 text-[10px] text-slate-500">Stato, arrivo e partenza derivati dal registro server-side.</p></div>{currentStopId && <StatusPill label="TAPPA ATTIVA COLLEGATA" tone="cyan" />}</div>
+      <div className="mt-3 space-y-2">{stops.map((stop) => {
+        const active = currentStopId === stop.id;
+        const stopStatus = text(stop.status, "PLANNED").toUpperCase();
+        return <div className={cn("rounded-xl border p-3", active ? "border-cyan-300/30 bg-cyan-300/[.06]" : "border-white/[.07] bg-black/15")} key={stop.id}>
+          <div className="flex items-start gap-2"><span className={cn("grid size-7 shrink-0 place-items-center rounded-lg border text-[10px] font-mono", active ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-100" : "border-white/10 text-slate-500")}>{stop.sequence}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-xs font-semibold text-slate-200">{stop.label}</p><StatusPill label={stopStatusLabel(stopStatus)} tone={stopStatusTone(stopStatus)} /></div><p className="mt-1 text-[9px] uppercase tracking-[.12em] text-slate-600">{stop.kind.replaceAll("_", " ")}{active ? " · aggancio corrente" : ""}</p></div></div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]"><div><p className="text-slate-600">{stop.arrivedAt ? "Arrivo registrato" : "Arrivo previsto"}</p><p className="mt-1 font-mono text-slate-300">{formatDate(stop.arrivedAt ?? stop.expectedArrivalAt)}</p></div><div><p className="text-slate-600">{stop.departedAt ? "Partenza registrata" : "Partenza prevista"}</p><p className="mt-1 font-mono text-slate-300">{formatDate(stop.departedAt ?? stop.expectedDepartureAt)}</p></div></div>
+          {stop.lastLocationEvent && <p className="mt-2 text-[9px] text-cyan-100/70">Evento geofence: {stop.lastLocationEvent.type.replaceAll("_", " ")} · {formatDate(stop.lastLocationEvent.occurredAt)} · confidenza {Math.round(stop.lastLocationEvent.confidence * 100)}%</p>}
+        </div>;
+      })}</div>
     </div>}
   </section>;
 }
