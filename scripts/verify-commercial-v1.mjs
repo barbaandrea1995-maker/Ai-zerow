@@ -51,10 +51,13 @@ const missionJourneyRoute = await readFile(join(root, "app", "api", "operations"
 assert(missionJourneyRoute.includes("mission_stop_not_current") && missionJourneyRoute.includes("mission_stop_arrival_required"), "Mission cargo actions must be constrained to the server-side current geofenced stop");
 assert(missionJourneyRoute.includes("mission_route_required_for_cargo_action") && missionJourneyRoute.includes("routeStopSupportsAction"), "Mission cargo actions must require a canonical route and compatible stop action");
 assert(missionJourneyRoute.includes("mission_stop_asset_mismatch") && missionJourneyRoute.includes("routeStopCargoAssetIds"), "Mission cargo actions must preserve the asset identity declared by the route stop");
+assert(missionJourneyRoute.includes("missionMaterialLinesForRouteStop") && missionJourneyRoute.includes("routeStopMaterialActionEntries"), "Mission inventory effects must be scoped to the material lines declared by the current route stop");
+assert(missionJourneyRoute.includes("mission_material_line_not_reconcilable"), "Mission inventory effects must reject route-stop material lines that cannot be reconciled with the request snapshot");
 const missionLocationIngest = await readFile(join(root, "lib", "location-intelligence", "ingest.ts"), "utf8");
 assert(missionLocationIngest.includes("stop.status !== \"DEPARTED\" && !stop.departedAt") && missionLocationIngest.includes("Boolean(stop.departedAt)"), "Location ingestion must keep a delivered stop attached until physical departure is observed");
 const missionDeck = await readFile(join(root, "components", "mission-command-deck.tsx"), "utf8");
 assert(missionDeck.includes("currentRouteStopView") && missionDeck.includes("Tappa corrente server-side"), "Mission UI must expose and enforce the server-side current stop");
+assert(missionDeck.includes("requestMaterialLineActions") && missionDeck.includes("firstLoadStopIndex") && missionDeck.includes("lastUnloadStopIndex"), "Mission UI must assign material lines and cargo assets to the correct route legs");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");

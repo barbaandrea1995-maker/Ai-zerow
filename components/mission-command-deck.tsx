@@ -109,6 +109,7 @@ type MissionLocation = {
 type RouteStopDraft = {
   kind: "PICKUP" | "DELIVERY" | "TRANSFER" | "RETURN";
   locationId: string;
+  materialItemIds?: string[];
   temporaryAddress?: string;
   temporaryLocation?: GeocodeCandidate | null;
 };
@@ -1012,7 +1013,43 @@ export default function MissionCommandDeck() {
       const routeStopLabel = (stop: RouteStopDraft | undefined) => stop?.temporaryLocation?.formattedAddress ?? locations.find((location) => location.id === stop?.locationId)?.formattedAddress ?? "";
       const pickup = field(form, "pickup") || routeStopLabel(routeStops[0]) || requestPickup;
       const dropoff = field(form, "dropoff") || routeStopLabel(routeStops.at(-1)) || text(selectedRequest?.payload.deliveryPoint, "");
-      const selectedRouteStops = routeStops.map((stop) => {
+      const requestMaterialLineActions = Array.isArray(selectedRequest?.payload.lines)
+        ? selectedRequest.payload.lines.flatMap((line) => {
+          if (!line || typeof line !== "object" || Array.isArray(line)) return [];
+          const value = line as Record<string, unknown>;
+          const itemId = text(value.itemId, "");
+          if (!itemId) return [];
+          return [{
+            itemId,
+            quantity: typeof value.quantity === "number" || typeof value.quantity === "string" ? value.quantity : null,
+            materialRequestId: materialRequestId || null,
+          }];
+        })
+        : [];
+      const firstLoadStopIndex = Math.max(0, routeStops.findIndex((stop) => ["PICKUP", "TRANSFER"].includes(stop.kind)));
+      const lastUnloadStopIndex = (() => {
+        for (let index = routeStops.length - 1; index >= 0; index -= 1) {
+          if (["DELIVERY", "RETURN"].includes(routeStops[index]?.kind ?? "")) return index;
+        }
+        return Math.max(0, routeStops.length - 1);
+      })();
+      const hasExplicitMaterialAssignments = routeStops.some((stop) => Array.isArray(stop.materialItemIds));
+      const cargoActionsForStop = (action: string, stopIndex: number) => {
+        const isLoadLeg = action === "LOAD" || action === "TRANSFER";
+        const isUnloadLeg = action === "UNLOAD" || action === "RETURN";
+        const defaultMaterialLeg = (isLoadLeg && stopIndex === firstLoadStopIndex) || (isUnloadLeg && stopIndex === lastUnloadStopIndex);
+        const selectedItemIds = new Set(hasExplicitMaterialAssignments
+          ? routeStops[stopIndex]?.materialItemIds ?? []
+          : defaultMaterialLeg ? requestMaterialLineActions.map((line) => line.itemId) : []);
+        const actions: Array<Record<string, unknown>> = requestMaterialLineActions
+          .filter((line) => selectedItemIds.has(line.itemId))
+          .map((line) => ({ action, ...line, assetId: null }));
+        const assetLeg = (isLoadLeg && stopIndex === firstLoadStopIndex) || (isUnloadLeg && stopIndex === lastUnloadStopIndex);
+        if (selectedCargo && assetLeg) actions.push({ action, materialRequestId: null, assetId: selectedCargo });
+        if (!actions.length) actions.push({ action, materialRequestId: null, assetId: null });
+        return actions;
+      };
+      const selectedRouteStops = routeStops.map((stop, stopIndex) => {
         const location = locations.find((candidate) => candidate.id === stop.locationId);
         const temporary = stop.temporaryLocation;
         const action = stop.kind === "DELIVERY" || stop.kind === "RETURN" ? "UNLOAD" : stop.kind === "TRANSFER" ? "TRANSFER" : "LOAD";
@@ -1023,7 +1060,7 @@ export default function MissionCommandDeck() {
           entityType: temporary ? "CUSTOM_LOCATION" : location?.entityType ?? "",
           entityId: temporary ? "" : location?.entityId ?? "",
           ...(temporary ? { temporaryAddress: stop.temporaryAddress || temporary.formattedAddress, temporaryLocation: temporary } : {}),
-          cargoActions: [{ action, assetId: selectedCargo || null, materialRequestId: materialRequestId || null }],
+          cargoActions: cargoActionsForStop(action, stopIndex),
         };
       });
       if (!jobId || !field(form, "driverId") || !field(form, "vehicleId")) {

@@ -118,6 +118,10 @@ function routeStopCargoAssetIds(row: typeof routeStops.$inferSelect) {
     : [];
 }
 
+function routeStopHasExplicitCargoActions(row: typeof routeStops.$inferSelect) {
+  return Array.isArray(parseJson(row.evidenceJson).cargoActions);
+}
+
 function routeStopSupportsAction(row: typeof routeStops.$inferSelect, action: "mission_load" | "mission_unload") {
   const actions = routeStopCargoActions(row);
   if (actions.length) {
@@ -492,6 +496,58 @@ class MissionInventoryError extends Error {
 
 type MissionInventoryEffect = "LOAD" | "DELIVER";
 
+type RouteStopMaterialAction = {
+  itemId: string;
+  materialRequestId: string;
+  quantityMilli: number | null;
+};
+
+function routeStopMaterialActionEntries(row: typeof routeStops.$inferSelect, effect: MissionInventoryEffect): RouteStopMaterialAction[] {
+  const metadata = parseJson(row.evidenceJson);
+  if (!Array.isArray(metadata.cargoActions)) return [];
+  const allowed = effect === "LOAD" ? ["LOAD", "TRANSFER"] : ["UNLOAD", "RETURN", "TRANSFER"];
+  return metadata.cargoActions.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const action = boundedText(entry.action ?? entry.type, 24).toUpperCase();
+    if (!allowed.includes(action)) return [];
+    const itemId = boundedText(entry.itemId, 160);
+    const materialRequestId = boundedText(entry.materialRequestId, 160);
+    if (!itemId && !materialRequestId) return [];
+    return [{ itemId, materialRequestId, quantityMilli: quantityToMilli(entry.quantity) }];
+  });
+}
+
+function missionMaterialLinesForRouteStop(
+  payload: JsonObject,
+  routeStop: typeof routeStops.$inferSelect,
+  effect: MissionInventoryEffect,
+) {
+  const sourceLines = missionMaterialLines(payload);
+  if (!routeStopHasExplicitCargoActions(routeStop)) return sourceLines;
+  const actions = routeStopMaterialActionEntries(routeStop, effect);
+  if (!actions.length) return [];
+  const itemActions = actions.filter((entry) => entry.itemId);
+  if (!itemActions.length) return sourceLines;
+
+  const quantityByItem = new Map<string, number | null>();
+  for (const action of itemActions) {
+    const current = quantityByItem.get(action.itemId);
+    if (current === undefined) {
+      quantityByItem.set(action.itemId, action.quantityMilli);
+    } else if (current === null || action.quantityMilli === null) {
+      quantityByItem.set(action.itemId, null);
+    } else {
+      quantityByItem.set(action.itemId, current + action.quantityMilli);
+    }
+  }
+
+  return sourceLines.flatMap((line) => {
+    if (!line.itemId || !quantityByItem.has(line.itemId)) return [];
+    const scopedQuantity = quantityByItem.get(line.itemId);
+    return [{ ...line, quantityMilli: scopedQuantity && scopedQuantity > 0 ? scopedQuantity : line.quantityMilli }];
+  });
+}
+
 async function readMissionWarehouseReadback(
   tenantId: string,
   jobId: string,
@@ -526,6 +582,7 @@ async function prepareMissionInventoryEffects({
   jobId,
   missionId,
   payload,
+  routeStop,
   effect,
   actorId,
   idempotencyKey,
@@ -536,14 +593,25 @@ async function prepareMissionInventoryEffects({
   jobId: string;
   missionId: string;
   payload: JsonObject;
+  routeStop: typeof routeStops.$inferSelect;
   effect: MissionInventoryEffect;
   actorId: string;
   idempotencyKey: string;
   note: string;
   now: string;
 }) {
-  const sourceLines = missionMaterialLines(payload);
+  const plannedMaterialActions = routeStopMaterialActionEntries(routeStop, effect);
+  const allSourceLines = missionMaterialLines(payload);
+  const sourceItemIds = new Set(allSourceLines.flatMap((line) => line.itemId ? [line.itemId] : []));
+  const unknownItemIds = [...new Set(plannedMaterialActions.flatMap((action) => action.itemId && !sourceItemIds.has(action.itemId) ? [action.itemId] : []))];
+  if (unknownItemIds.length) {
+    throw new MissionInventoryError("mission_material_line_not_reconcilable", { itemIds: unknownItemIds });
+  }
+  const sourceLines = missionMaterialLinesForRouteStop(payload, routeStop, effect);
   if (!sourceLines.length) {
+    if (routeStopHasExplicitCargoActions(routeStop) && plannedMaterialActions.length === 0) {
+      return { statements: [] as never[], lineCount: 0 };
+    }
     if (boundedText(payload.materialRequestId, 120)) throw new MissionInventoryError("mission_material_lines_required");
     return { statements: [] as never[], lineCount: 0 };
   }
@@ -941,19 +1009,37 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const originWarehouseId = boundedText(requestPayload.warehouseId, 120) || boundedText(requestWarehouse?.id, 120);
       const destinationEntityId = boundedText(input.destinationEntityId ?? input.dropoffEntityId, 160);
       const destinationEntityType = boundedText(input.destinationEntityType ?? input.dropoffEntityType, 48).toUpperCase();
+      const requestMaterialActions = Array.isArray(requestPayload.lines)
+        ? requestPayload.lines.flatMap((line) => {
+          if (!isRecord(line)) return [];
+          const itemId = boundedText(line.itemId, 160);
+          if (!itemId) return [];
+          return [{
+            itemId,
+            quantity: typeof line.quantity === "number" || typeof line.quantity === "string" ? String(line.quantity).slice(0, 32) : null,
+            materialRequestId: materialRequest?.id ?? null,
+          }];
+        })
+        : [];
+      const cargoActionsForStop = (action: string) => {
+        const actions: Array<Record<string, unknown>> = requestMaterialActions.map((line) => ({ action, ...line, assetId: null }));
+        if (cargoAssetId) actions.push({ action, materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId });
+        if (!actions.length) actions.push({ action, materialRequestId: materialRequest?.id ?? null, assetId: null });
+        return actions;
+      };
       if (originWarehouseId) {
         routeFallbackStops.push({
           kind: "PICKUP",
           entityType: "MAGAZZINO",
           entityId: originWarehouseId,
           label: boundedText(requestWarehouse?.locationLabel, 240) || pickup,
-          cargoActions: [{ action: "LOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }],
+          cargoActions: cargoActionsForStop("LOAD"),
         });
       }
       if (destinationEntityId && destinationEntityType) {
-        routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: [{ action: "UNLOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }] });
+        routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: cargoActionsForStop("UNLOAD") });
       } else if (transportMode === "WAREHOUSE_TO_JOB" || transportMode === "ASSET_TRANSFER") {
-        routeFallbackStops.push({ kind: "DELIVERY", entityType: "CANTIERE", entityId: job.id, label: dropoff, cargoActions: [{ action: "UNLOAD", materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId || null }] });
+        routeFallbackStops.push({ kind: "DELIVERY", entityType: "CANTIERE", entityId: job.id, label: dropoff, cargoActions: cargoActionsForStop("UNLOAD") });
       }
       eventType = "mission.transport.created";
     } else {
@@ -1262,6 +1348,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           note: boundedText(input.note, 2_000),
           assetId: actionAssetId,
+          materialItemIds: routeStopMaterialActionEntries(selectedStop, action === "mission_load" ? "LOAD" : "DELIVER")
+            .flatMap((entry) => entry.itemId ? [entry.itemId] : []),
           source: "mission-driver-action",
         };
         missionActionEvent = actionEvent;
@@ -1270,6 +1358,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           jobId: job.id,
           missionId: row.id,
           payload,
+          routeStop: selectedStop,
           effect: action === "mission_load" ? "LOAD" : "DELIVER",
           actorId: context.actorId,
           idempotencyKey,
