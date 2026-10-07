@@ -371,6 +371,14 @@ function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
   });
 }
 
+function routeStopPhysicallyClosedView(stop: MissionStopView) {
+  return stop.status === "DEPARTED" || Boolean(stop.departedAt);
+}
+
+function currentRouteStopView(stops: MissionStopView[]) {
+  return stops.find((stop) => !routeStopPhysicallyClosedView(stop)) ?? null;
+}
+
 function operationalTimeline(payload: Record<string, unknown>) {
   return Array.isArray(payload.operationalTimeline)
     ? payload.operationalTimeline.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry))).slice(-8).reverse()
@@ -506,10 +514,16 @@ function MissionActionPanel({
 }) {
   const canManage = canManageProp ?? mission.viewerCanManage === true;
   const selectedStop = stops.find((stop) => stop.id === selectedStopId) ?? stops[0] ?? null;
+  const tracking = missionTrackingReadback(mission.payload);
+  const currentStopId = currentRouteStopView(stops)?.id ?? text(tracking?.currentStopId, "");
+  const currentStop = stops.find((stop) => stop.id === currentStopId) ?? null;
+  const selectedIsCurrent = Boolean(selectedStop && currentStop && selectedStop.id === currentStop.id);
+  const selectedIsAtLocation = Boolean(selectedStop && ["ARRIVED", "IN_PROGRESS", "LOADED", "UNLOADED"].includes(selectedStop.status));
+  const selectedStopReady = selectedIsCurrent && selectedIsAtLocation;
   const actions = selectedStop?.cargoActions ?? [];
-  const canLoad = canRecord && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
-  const canUnload = canRecord && ["DISPATCHED", "PARTIAL_DELIVERY"].includes(mission.status) && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN"].includes(action)));
-  const canOpenDelivery = canRecord && mission.status === "PARTIAL_DELIVERY" && selectedStop?.kind === "DELIVERY";
+  const canLoad = canRecord && selectedStopReady && selectedStop?.status !== "LOADED" && ["PLANNED", "DISPATCHED"].includes(mission.status) && (!actions.length || actions.some((action) => ["LOAD", "TRANSFER"].includes(action)));
+  const canUnload = canRecord && selectedStopReady && selectedStop?.status !== "UNLOADED" && ["DISPATCHED", "PARTIAL_DELIVERY"].includes(mission.status) && (!actions.length || actions.some((action) => ["UNLOAD", "RETURN", "TRANSFER"].includes(action)));
+  const canOpenDelivery = canRecord && selectedStopReady && mission.status === "PARTIAL_DELIVERY" && selectedStop?.kind === "DELIVERY";
   const warehouseReadback = missionWarehouseReadback(mission.payload);
   const completedStops = stops.filter((stop) => stop.status === "COMPLETED" || stop.deliveryStatus === "CONFIRMED").length;
   return <><section className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.035] p-4">
@@ -519,9 +533,10 @@ function MissionActionPanel({
     </div>
     <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
       <label className="text-[10px] text-slate-500">Tappa operativa
-        <select aria-label="Tappa operativa per carico o scarico" className="mt-1 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-200 outline-none focus:border-cyan-300/40" disabled={!stops.length} onChange={(event) => onStopChange(event.target.value)} value={selectedStop?.id ?? ""}>
+        <select aria-label="Tappa operativa per carico o scarico" className="mt-1 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-200 outline-none focus:border-cyan-300/40" disabled={!stops.length || !currentStopId} onChange={(event) => onStopChange(event.target.value)} value={selectedStop?.id ?? ""}>
           {!stops.length && <option value="">Tappa non dettagliata</option>}
-          {stops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}
+          {stops.length > 0 && !currentStopId && <option value="">In attesa dell’aggancio geofence</option>}
+          {stops.map((stop) => <option disabled={Boolean(currentStopId) && stop.id !== currentStopId} key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}{stop.id === currentStopId ? " · CORRENTE" : ""}</option>)}
         </select>
       </label>
       <div className="flex flex-wrap items-end gap-2">
@@ -530,9 +545,10 @@ function MissionActionPanel({
         {canOpenDelivery && <Button className="h-10 border-lime-300/25 bg-lime-300/[.06] px-3 text-[10px] font-semibold text-lime-100 hover:bg-lime-300/10" disabled={busy} onClick={() => onRecord("mission_deliver", selectedStop)} type="button"><BadgeCheck className="size-3.5" />Completa tappa</Button>}
         {canRecord && !["CLOSED", "CANCELLED", "RECONCILE_REQUIRED"].includes(mission.status) && <Button className="h-10 border-rose-300/25 bg-rose-300/[.06] px-3 text-[10px] font-semibold text-rose-100 hover:bg-rose-300/10" disabled={busy} onClick={() => onRecord("mission_exception", selectedStop)} type="button"><CircleAlert className="size-3.5" />Segnala eccezione</Button>}
         {canManage && ["DELAYED", "BLOCKED", "VEHICLE_FAULT", "PARTIAL_DELIVERY", "REFUSED", "LOST"].includes(mission.status) && <Button className="h-10 border-lime-300/25 bg-lime-300/[.06] px-3 text-[10px] font-semibold text-lime-100 hover:bg-lime-300/10" disabled={busy} onClick={() => onRecord("mission_resume", selectedStop)} type="button"><Route className="size-3.5" />Riprendi missione</Button>}
-        {!canLoad && !canUnload && !canRecord && <span className="rounded-xl border border-white/10 px-3 py-2 text-[10px] text-slate-600">Azione non disponibile nello stato corrente</span>}
+        {!canLoad && !canUnload && stops.length > 0 && <span className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2 text-[10px] text-amber-100/75">{currentStop ? (selectedIsAtLocation ? "Tappa corrente agganciata · nessuna azione compatibile" : "Attesa conferma arrivo geofence") : "Attesa aggancio server-side della tappa corrente"}</span>}
       </div>
     </div>
+    {currentStop && <p className="mt-3 text-[9px] text-cyan-100/65">Tappa corrente server-side: {currentStop.sequence}. {currentStop.label} · stato {currentStop.status.replaceAll("_", " ")}. Le azioni su tappe diverse restano bloccate.</p>}
     <Input aria-label="Nota azione di carico o scarico" className="mt-3 h-10 border-white/10 bg-black/25 text-xs" disabled={!canRecord || busy} onChange={(event) => onNoteChange(event.target.value)} placeholder="Nota opzionale: quantità, riserva, anomalia…" value={note} />
     <div className="mt-4 rounded-xl border border-white/[.08] bg-black/20 p-3">
       <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
@@ -824,9 +840,12 @@ export default function MissionCommandDeck() {
   const canRecordDeliveryAction = canManageMission || capabilities.includes("mission.delivery.execute");
   const canWriteMissionReport = canManageMission || capabilities.includes("mission.report.write");
   const selectedStops = useMemo(() => selected ? routeStopViews(selected.payload) : [], [selected]);
+  const selectedTracking = useMemo(() => selected ? missionTrackingReadback(selected.payload) : null, [selected]);
   const selectedTimeline = useMemo(() => selected ? operationalTimeline(selected.payload) : [], [selected]);
   const selectedReport = useMemo(() => selected ? missionReport(selected.payload) : null, [selected]);
-  const activeActionStopId = selectedStops.some((stop) => stop.id === actionStopId) ? actionStopId : selectedStops[0]?.id ?? "";
+  const routeCurrentStop = useMemo(() => currentRouteStopView(selectedStops), [selectedStops]);
+  const serverCurrentStopId = routeCurrentStop?.id ?? text(selectedTracking?.currentStopId, "");
+  const activeActionStopId = serverCurrentStopId || (selectedStops.some((stop) => stop.id === actionStopId) ? actionStopId : selectedStops[0]?.id ?? "");
   const enabledTransportModes = context?.operatingTransportModes ?? [];
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
   const counts = useMemo(() => ({

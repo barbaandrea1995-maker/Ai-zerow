@@ -47,6 +47,13 @@ const e2eAudit = await readFile(join(root, "scripts", "audit-e2e-contract.mjs"),
 assert(e2eAudit.includes("authenticatedE2E") && e2eAudit.includes("suspiciousButtons"), "E2E audit must keep authenticated gates and button inventory explicit");
 const uiAudit = await readFile(join(root, "scripts", "audit-ui-alignment.mjs"), "utf8");
 assert(uiAudit.includes("commercial-modules.json") && uiAudit.includes("globalFallbackContract"), "UI audit must cover the canonical module registry and global action fallback");
+const missionJourneyRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "journey", "route.ts"), "utf8");
+assert(missionJourneyRoute.includes("mission_stop_not_current") && missionJourneyRoute.includes("mission_stop_arrival_required"), "Mission cargo actions must be constrained to the server-side current geofenced stop");
+assert(missionJourneyRoute.includes("mission_route_required_for_cargo_action") && missionJourneyRoute.includes("routeStopSupportsAction"), "Mission cargo actions must require a canonical route and compatible stop action");
+const missionLocationIngest = await readFile(join(root, "lib", "location-intelligence", "ingest.ts"), "utf8");
+assert(missionLocationIngest.includes("stop.status !== \"DEPARTED\" && !stop.departedAt") && missionLocationIngest.includes("Boolean(stop.departedAt)"), "Location ingestion must keep a delivered stop attached until physical departure is observed");
+const missionDeck = await readFile(join(root, "components", "mission-command-deck.tsx"), "utf8");
+assert(missionDeck.includes("currentRouteStopView") && missionDeck.includes("Tappa corrente server-side"), "Mission UI must expose and enforce the server-side current stop");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");

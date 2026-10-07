@@ -87,6 +87,43 @@ function routeStopCompleted(row: typeof routeStops.$inferSelect) {
   return row.status === "COMPLETED" || row.deliveryStatus === "CONFIRMED";
 }
 
+function routeStopPhysicallyClosed(row: typeof routeStops.$inferSelect) {
+  return row.status === "DEPARTED" || Boolean(row.departedAt);
+}
+
+function currentRouteStop(rows: Array<typeof routeStops.$inferSelect>) {
+  return rows.find((row) => !routeStopPhysicallyClosed(row)) ?? null;
+}
+
+function routeStopCargoActions(row: typeof routeStops.$inferSelect) {
+  const metadata = parseJson(row.evidenceJson);
+  return Array.isArray(metadata.cargoActions)
+    ? metadata.cargoActions.flatMap((entry) => {
+        if (typeof entry === "string") return [entry.trim().toUpperCase()];
+        if (!isRecord(entry)) return [];
+        const action = boundedText(entry.action ?? entry.type, 24).toUpperCase();
+        return action ? [action] : [];
+      })
+    : [];
+}
+
+function routeStopSupportsAction(row: typeof routeStops.$inferSelect, action: "mission_load" | "mission_unload") {
+  const actions = routeStopCargoActions(row);
+  if (actions.length) {
+    return action === "mission_load"
+      ? actions.some((item) => ["LOAD", "TRANSFER"].includes(item))
+      : actions.some((item) => ["UNLOAD", "RETURN", "TRANSFER"].includes(item));
+  }
+  const kind = routeStopKind(row);
+  return action === "mission_load"
+    ? ["PICKUP", "TRANSFER"].includes(kind)
+    : ["DELIVERY", "TRANSFER", "RETURN"].includes(kind);
+}
+
+function routeStopArrivalConfirmed(row: typeof routeStops.$inferSelect) {
+  return ["ARRIVED", "IN_PROGRESS", "LOADED", "UNLOADED"].includes(row.status);
+}
+
 function deliveryProofEntries(payload: JsonObject) {
   const entries = Array.isArray(payload.proofOfDeliveries)
     ? payload.proofOfDeliveries.filter((entry): entry is JsonObject => isRecord(entry))
@@ -1163,25 +1200,37 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const route = isRecord(payload.route) ? payload.route : {};
         missionActionRoutePlanId = boundedText(route.routePlanId, 160);
+        if (!missionActionRoutePlanId) {
+          return Response.json({ error: "mission_route_required_for_cargo_action", message: "Il carico e lo scarico richiedono una tappa server-side con geofence." }, { status: 409 });
+        }
         missionActionStopId = boundedText(input.stopId, 160);
-        if (missionActionRoutePlanId) {
-          const missionRouteStops = await db.select().from(routeStops).where(and(
-            eq(routeStops.tenantId, context.tenantId),
-            eq(routeStops.routePlanId, missionActionRoutePlanId),
-          )).orderBy(routeStops.sequence).limit(100);
-          if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
-          if (!missionActionStopId) return Response.json({ error: "mission_stop_required" }, { status: 400 });
-          const selectedStop = missionRouteStops.find((stop) => stop.id === missionActionStopId);
-          if (!selectedStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
-          if (routeStopCompleted(selectedStop)) {
-            return Response.json({ error: "mission_stop_already_completed", stopId: selectedStop.id }, { status: 409 });
-          }
-          if (action === "mission_load" && selectedStop.status === "LOADED") {
-            return Response.json({ error: "mission_stop_already_loaded", stopId: selectedStop.id }, { status: 409 });
-          }
-          if (action === "mission_unload" && selectedStop.status === "UNLOADED") {
-            return Response.json({ error: "mission_stop_already_unloaded", stopId: selectedStop.id }, { status: 409 });
-          }
+        const missionRouteStops = await db.select().from(routeStops).where(and(
+          eq(routeStops.tenantId, context.tenantId),
+          eq(routeStops.routePlanId, missionActionRoutePlanId),
+        )).orderBy(routeStops.sequence).limit(100);
+        if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+        if (!missionActionStopId) return Response.json({ error: "mission_stop_required" }, { status: 400 });
+        const selectedStop = missionRouteStops.find((stop) => stop.id === missionActionStopId);
+        if (!selectedStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+        const activeStop = currentRouteStop(missionRouteStops);
+        if (!activeStop) return Response.json({ error: "mission_route_complete" }, { status: 409 });
+        if (selectedStop.id !== activeStop.id) {
+          return Response.json({ error: "mission_stop_not_current", stopId: selectedStop.id, currentStopId: activeStop.id, currentSequence: activeStop.sequence }, { status: 409 });
+        }
+        if (routeStopCompleted(selectedStop)) {
+          return Response.json({ error: "mission_stop_already_completed", stopId: selectedStop.id }, { status: 409 });
+        }
+        if (!routeStopSupportsAction(selectedStop, action)) {
+          return Response.json({ error: "mission_stop_action_not_allowed", stopId: selectedStop.id, action, cargoActions: routeStopCargoActions(selectedStop) }, { status: 409 });
+        }
+        if (!routeStopArrivalConfirmed(selectedStop)) {
+          return Response.json({ error: "mission_stop_arrival_required", stopId: selectedStop.id, message: "La tappa deve risultare agganciata dalla geofence prima di registrare il carico o lo scarico." }, { status: 409 });
+        }
+        if (action === "mission_load" && selectedStop.status === "LOADED") {
+          return Response.json({ error: "mission_stop_already_loaded", stopId: selectedStop.id }, { status: 409 });
+        }
+        if (action === "mission_unload" && selectedStop.status === "UNLOADED") {
+          return Response.json({ error: "mission_stop_already_unloaded", stopId: selectedStop.id }, { status: 409 });
         }
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
@@ -1258,29 +1307,41 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const route = isRecord(payload.route) ? payload.route : {};
         missionActionRoutePlanId = boundedText(route.routePlanId, 160);
+        if (!missionActionRoutePlanId) {
+          return Response.json({ error: "mission_route_required_for_delivery", message: "La consegna deve essere collegata a una tappa server-side con geofence." }, { status: 409 });
+        }
         missionActionStopId = boundedText(input.stopId, 160);
         let missionRouteStops: (typeof routeStops.$inferSelect)[] = [];
         let selectedMissionStop: typeof routeStops.$inferSelect | null = null;
-        if (missionActionRoutePlanId) {
-          missionRouteStops = await db.select().from(routeStops).where(and(
-            eq(routeStops.tenantId, context.tenantId),
-            eq(routeStops.routePlanId, missionActionRoutePlanId),
-          )).orderBy(routeStops.sequence).limit(100);
-          if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
-          selectedMissionStop = missionActionStopId
-            ? missionRouteStops.find((stop) => stop.id === missionActionStopId) ?? null
-            : missionRouteStops.find((stop) => routeStopKind(stop) === "DELIVERY" && !routeStopCompleted(stop)) ?? null;
-          if (!selectedMissionStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
-          missionActionStopId = selectedMissionStop.id;
-          if (routeStopKind(selectedMissionStop) !== "DELIVERY") {
-            return Response.json({ error: "mission_delivery_stop_required", stopId: selectedMissionStop.id }, { status: 409 });
-          }
-          if (routeStopCompleted(selectedMissionStop)) {
-            return Response.json({ error: "mission_stop_already_completed", stopId: selectedMissionStop.id }, { status: 409 });
-          }
-          if (selectedMissionStop.status !== "UNLOADED" && selectedMissionStop.deliveryStatus !== "UNLOADED") {
-            return Response.json({ error: "mission_stop_unload_required", stopId: selectedMissionStop.id, message: "Registra prima lo scarico della tappa." }, { status: 409 });
-          }
+        missionRouteStops = await db.select().from(routeStops).where(and(
+          eq(routeStops.tenantId, context.tenantId),
+          eq(routeStops.routePlanId, missionActionRoutePlanId),
+        )).orderBy(routeStops.sequence).limit(100);
+        if (!missionRouteStops.length) return Response.json({ error: "mission_route_not_available" }, { status: 409 });
+        const activeStop = currentRouteStop(missionRouteStops);
+        if (!activeStop) return Response.json({ error: "mission_route_complete" }, { status: 409 });
+        selectedMissionStop = missionActionStopId
+          ? missionRouteStops.find((stop) => stop.id === missionActionStopId) ?? null
+          : routeStopKind(activeStop) === "DELIVERY" ? activeStop : missionRouteStops.find((stop) => routeStopKind(stop) === "DELIVERY" && !routeStopCompleted(stop)) ?? null;
+        if (!selectedMissionStop) return Response.json({ error: "mission_stop_not_found" }, { status: 404 });
+        missionActionStopId = selectedMissionStop.id;
+        if (selectedMissionStop.id !== activeStop.id) {
+          return Response.json({ error: "mission_stop_not_current", stopId: selectedMissionStop.id, currentStopId: activeStop.id, currentSequence: activeStop.sequence }, { status: 409 });
+        }
+        if (routeStopKind(selectedMissionStop) !== "DELIVERY") {
+          return Response.json({ error: "mission_delivery_stop_required", stopId: selectedMissionStop.id }, { status: 409 });
+        }
+        if (routeStopCompleted(selectedMissionStop)) {
+          return Response.json({ error: "mission_stop_already_completed", stopId: selectedMissionStop.id }, { status: 409 });
+        }
+        if (!routeStopSupportsAction(selectedMissionStop, "mission_unload")) {
+          return Response.json({ error: "mission_stop_action_not_allowed", stopId: selectedMissionStop.id, action: "mission_unload", cargoActions: routeStopCargoActions(selectedMissionStop) }, { status: 409 });
+        }
+        if (!routeStopArrivalConfirmed(selectedMissionStop)) {
+          return Response.json({ error: "mission_stop_arrival_required", stopId: selectedMissionStop.id, message: "La tappa deve risultare agganciata dalla geofence prima della conferma." }, { status: 409 });
+        }
+        if (selectedMissionStop.status !== "UNLOADED" && selectedMissionStop.deliveryStatus !== "UNLOADED") {
+          return Response.json({ error: "mission_stop_unload_required", stopId: selectedMissionStop.id, message: "Registra prima lo scarico della tappa." }, { status: 409 });
         }
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
@@ -1631,13 +1692,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
     }
     if (existing && missionActionRoutePlanId && missionActionStopId && ["mission_load", "mission_unload", "mission_deliver"].includes(action)) {
       const isDelivery = action === "mission_deliver";
-      statements.push(db.update(routeStops).set({
+      const routeStopUpdate: Partial<typeof routeStops.$inferInsert> = {
         status: isDelivery ? "COMPLETED" : action === "mission_load" ? "LOADED" : "UNLOADED",
         deliveryStatus: isDelivery ? "CONFIRMED" : action === "mission_load" ? "LOADED" : "UNLOADED",
-        arrivedAt: now,
-        departedAt: isDelivery ? now : null,
         updatedAt: now,
-      }).where(and(
+      };
+      statements.push(db.update(routeStops).set(routeStopUpdate).where(and(
         eq(routeStops.tenantId, context.tenantId),
         eq(routeStops.routePlanId, missionActionRoutePlanId),
         eq(routeStops.id, missionActionStopId),

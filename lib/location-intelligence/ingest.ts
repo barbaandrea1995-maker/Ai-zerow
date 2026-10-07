@@ -78,7 +78,7 @@ export async function ingestLocationPosition({
   )).limit(500);
   const activeGeofences = geofenceRows.filter((row) => row.status === "ACTIVE" || expectedGeofenceIds.has(row.id));
   const engineState = parseEngineState(session.engineStateJson);
-  const activeRouteStop = routeStopRows.find((stop) => !["DEPARTED", "COMPLETED"].includes(stop.status)) ?? null;
+  const activeRouteStop = routeStopRows.find((stop) => stop.status !== "DEPARTED" && !stop.departedAt) ?? null;
   const sampleId = `LOCATION-SAMPLE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
   const now = new Date().toISOString();
   const derived = activeGeofences.flatMap((row) => {
@@ -191,7 +191,7 @@ export async function ingestLocationPosition({
     : rawEngineState.__routeState ?? null;
   const routeEnded = Boolean(routePlan && routeTransitions.size > 0 && routeStopRows.every((stop) => {
     const transition = routeTransitions.get(stop.id);
-    return stop.status === "DEPARTED" || stop.status === "COMPLETED" || Boolean(transition?.exitedAt);
+    return stop.status === "DEPARTED" || Boolean(stop.departedAt) || Boolean(transition?.exitedAt);
   }));
   if (routePlan && routeTransitions.size > 0) {
     routeStatements.push(db.update(routePlans).set({
