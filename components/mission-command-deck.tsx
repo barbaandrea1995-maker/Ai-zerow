@@ -380,6 +380,31 @@ function missionExceptionReadback(payload: Record<string, unknown>) {
   return storedMissionException(payload.missionException);
 }
 
+function missionTrackingReadback(payload: Record<string, unknown>) {
+  const value = payload.trackingReadback;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function trackingStatusTone(status: string): Tone {
+  if (status === "LIVE") return "lime";
+  if (status === "RECENT") return "cyan";
+  if (status === "STALE" || status === "NO_POSITION") return "amber";
+  return "muted";
+}
+
+function trackingStatusLabel(status: string) {
+  return ({
+    LIVE: "LIVE",
+    RECENT: "RECENTE",
+    STALE: "STALE",
+    NO_POSITION: "NESSUNA POSIZIONE",
+    NOT_ACTIVE: "NON ATTIVO",
+    RESTRICTED: "ACCESSO LIMITATO",
+  } as Record<string, string>)[status] ?? status.replaceAll("_", " ");
+}
+
 function warehouseStatusLabel(status: string) {
   return ({
     NOT_REQUIRED: "NON RICHIESTO",
@@ -482,7 +507,7 @@ function MissionActionPanel({
       <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
       {timeline.length ? <div className="mt-2 space-y-2">{timeline.map((entry, index) => <div className="flex items-start gap-2" key={text(entry.id, `event-${index}`)}><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(89,217,255,.75)]" /><div className="min-w-0"><p className="text-[10px] font-semibold text-slate-300">{text(entry.type, "EVENTO").replaceAll("_", " ")} <span className="font-normal text-slate-600">· {formatDate(entry.recordedAt ?? entry.occurredAt)}</span></p><p className="truncate text-[9px] text-slate-600">{text(entry.note, "Registrato dal flusso missione")}</p></div></div>)}</div> : <p className="mt-2 text-[10px] text-slate-600">Nessun carico o scarico confermato su questa missione.</p>}
     </div>
-  </section><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /><MissionExceptionReadbackPanel payload={mission.payload} /></>;
+  </section><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /><MissionExceptionReadbackPanel payload={mission.payload} /><MissionTrackingPanel payload={mission.payload} /></>;
 }
 
 function MissionWarehousePanel({ readback }: { readback: MissionWarehouseReadback | null }) {
@@ -507,6 +532,35 @@ function MissionExceptionReadbackPanel({ payload }: { payload: Record<string, un
   if (!exception) return null;
   const resolved = exception.recoveryStatus === "RESOLVED";
   return <section className={cn("mt-4 rounded-2xl border p-4", resolved ? "border-lime-300/15 bg-lime-300/[.025]" : "border-rose-300/20 bg-rose-300/[.035]")}><div className="flex items-start gap-3"><span className={cn("grid size-9 shrink-0 place-items-center rounded-xl border", resolved ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : "border-rose-300/25 bg-rose-300/10 text-rose-200")}><CircleAlert className="size-4" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className={cn("text-[10px] font-semibold uppercase tracking-[.18em]", resolved ? "text-lime-300/75" : "text-rose-200/80")}>ECCEZIONE MISSIONE</p><StatusPill label={resolved ? "RISOLTA" : "APERTA"} tone={resolved ? "lime" : "red"} /></div><h3 className="mt-1 text-sm font-semibold text-slate-100">{missionExceptionLabel(exception.type)}</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">{exception.note}</p><p className="mt-2 text-[9px] text-slate-600">Segnalata {formatDate(exception.reportedAt)} · da {text(exception.reportedBy, "autore server")}{exception.stopId ? ` · tappa ${exception.stopId}` : ""}</p>{resolved && <p className="mt-1 text-[9px] text-lime-200/70">Risolta {formatDate(exception.resolvedAt)} · {text(exception.resolutionNote, "ripresa autorizzata")}</p>}</div></div></section>;
+}
+
+function MissionTrackingPanel({ payload }: { payload: Record<string, unknown> }) {
+  const tracking = missionTrackingReadback(payload);
+  if (!tracking) return null;
+  const status = text(tracking.status, "NOT_ACTIVE").toUpperCase();
+  const position = tracking.position && typeof tracking.position === "object" && !Array.isArray(tracking.position)
+    ? tracking.position as Record<string, unknown>
+    : null;
+  const event = tracking.lastEvent && typeof tracking.lastEvent === "object" && !Array.isArray(tracking.lastEvent)
+    ? tracking.lastEvent as Record<string, unknown>
+    : null;
+  const restricted = status === "RESTRICTED";
+  const tone = trackingStatusTone(status);
+  return <section className={cn("mt-4 rounded-2xl border p-4", status === "LIVE" ? "border-lime-300/15 bg-lime-300/[.03]" : "border-cyan-300/15 bg-cyan-300/[.025]")}>
+    <div className="flex items-start gap-3">
+      <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl border border-current/25 bg-current/10", toneStyles[tone].icon)}><Gauge className="size-4" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">TRACKING MISSIONE</p><StatusPill label={trackingStatusLabel(status)} tone={tone} /></div>
+        <h3 className="mt-1 text-sm font-semibold text-slate-100">{restricted ? "Posizione non disponibile per questo ruolo" : status === "NOT_ACTIVE" ? "In attesa del check-in autista" : "Sessione autorizzata collegata"}</h3>
+        <p className="mt-1 text-[10px] leading-5 text-slate-500">{restricted ? "Il server conserva il confine privacy: serve una capability Location per leggere il dato." : "La posizione compare solo durante il turno autorizzato; il timestamp ufficiale arriva dal server/provider."}</p>
+      </div>
+      <Link className="hidden shrink-0 rounded-lg border border-cyan-300/20 px-2.5 py-2 text-[10px] text-cyan-100 hover:bg-cyan-300/10 sm:inline-flex" href="/command">Apri Control</Link>
+    </div>
+    {!restricted && <div className="mt-4 grid gap-2 sm:grid-cols-2">
+      <div className="rounded-xl border border-white/[.08] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Ultima posizione</p><p className="mt-2 font-mono text-xs text-slate-200">{position ? `${Number(position.latitude).toFixed(4)}, ${Number(position.longitude).toFixed(4)}` : "Nessuna posizione ricevuta"}</p><p className="mt-1 text-[10px] text-slate-600">{position ? `${formatDate(position.recordedAt)} · ricevuta ${formatDate(position.receivedAt)}` : "Il provider non ha ancora inviato campioni."}</p></div>
+      <div className="rounded-xl border border-white/[.08] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Sorgente e qualità</p><p className="mt-2 text-xs text-slate-200">{text(tracking.trackingSource, "—")} · {position?.accuracyM !== null && position?.accuracyM !== undefined ? `${position.accuracyM} m` : "accuratezza n/d"}</p><p className="mt-1 text-[10px] text-slate-600">Avvio {formatDate(tracking.startedAt)}{event ? ` · ultimo evento ${text(event.type, "EVENTO").replaceAll("_", " ")}` : ""}</p></div>
+    </div>}
+  </section>;
 }
 
 function MissionCard({ mission, selected, canWrite, onSelect, onDispatch, onDeliver }: { mission: Mission; selected: boolean; canWrite: boolean; onSelect: () => void; onDispatch: () => void; onDeliver: () => void }) {

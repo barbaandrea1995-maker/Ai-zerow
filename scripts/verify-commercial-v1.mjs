@@ -367,6 +367,7 @@ const missionControlRoute = await readFile(join(root, "app", "api", "mission", "
 assert(missionControlRoute.includes('module: "mission"') && missionControlRoute.includes('source: "mission-standalone"') && missionControlRoute.includes("allocateServerName"), "Transport-only tenants must be able to create a server-named standalone mission");
 assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") && missionControlRoute.includes("assertMissionResourceSelection"), "Standalone mission creation must keep the same real-resource contract");
 assert(missionControlRoute.includes("transport_mode_not_enabled") && missionControlRoute.includes("operatingTransportModes"), "Standalone transport must respect tenant-enabled transport modes");
+assert(missionControlRoute.includes("trackingReadback") && missionControlRoute.includes("READ_MISSION_TRACKING") && missionControlRoute.includes("driver_check_in_required"), "Mission control must expose audited attendance-bound tracking readback");
 const missionControl = await readFile(join(root, "components", "mission-control.tsx"), "utf8");
 assert(missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes('name="transportMode"') && missionControl.includes("operatingTransportModes"), "Standalone mission UI must expose only tenant-enabled transport modes");
 
@@ -538,6 +539,6 @@ console.log(JSON.stringify({
   migrations: 5,
   aiGuards: ["payload_limit", "rate_limit", "citation_allowlist", "no_direct_write"],
   commercialJourney: ["planning", "field", "inventory", "mission", "documents", "communications", "procurement", "finance"],
-  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "ui_alignment_audit", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "mission_exception_recovery", "w10_workflow_approval_reconcile"],
+  localHardening: ["openai_site_binding", "company_ai_readiness_control_plane", "security_privacy_dr_readiness", "release_certification_center", "ui_alignment_audit", "runtime_http_smoke", "full_surface_audit", "e2e_readback_roles_tenant", "outbox_retry_dlq", "document_security_hold", "mission_pod_reconciliation", "mission_exception_recovery", "mission_live_tracking_readback", "w10_workflow_approval_reconcile"],
   checks: "commercial-v1-static-contract",
 }));

@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { geofences, geoLocations, inventoryItems, inventoryMovements, jobJourneyRecords, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { geofences, geoLocations, inventoryItems, inventoryMovements, jobJourneyRecords, locationEvents, locationSamples, routePlans, routeStops, s04Records, s06Events, s06Outbox, s06Reconciliations, trackingSessions } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
-import { geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
+import { auditLocationAccess, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { buildMissionReportReadback } from "@/lib/mission-contract";
@@ -32,6 +32,25 @@ function boundedText(value: unknown, max: number, fallback = "") {
 
 function validDateTime(value: string) {
   return value.length >= 10 && Number.isFinite(Date.parse(value));
+}
+
+function trackingFreshness(recordedAt: string | null) {
+  if (!recordedAt || !validDateTime(recordedAt)) return "NO_POSITION" as const;
+  const ageSeconds = Math.max(0, (Date.now() - Date.parse(recordedAt)) / 1_000);
+  if (ageSeconds <= 5 * 60) return "LIVE" as const;
+  if (ageSeconds <= 30 * 60) return "RECENT" as const;
+  return "STALE" as const;
+}
+
+function roundedCoordinate(valueE6: number) {
+  return Math.round((valueE6 / 1_000_000) * 10000) / 10000;
+}
+
+function sessionMissionId(session: typeof trackingSessions.$inferSelect) {
+  const state = parseJson(session.engineStateJson);
+  const context = state.__operationalContext;
+  if (!context || typeof context !== "object" || Array.isArray(context)) return "";
+  return boundedText((context as Record<string, unknown>).missionId, 160);
 }
 
 function locationReferences(value: unknown, output = new Set<string>(), depth = 0) {
@@ -113,6 +132,58 @@ export async function GET() {
     const visibleMaterialRequestRows = materialRequestRows.filter((request) =>
       allMissionsVisible || visibleJobIds.has(request.jobId) || rowMatchesContext(request, context),
     );
+    const canReadMissionTracking = hasCapability(context, "location.read.current")
+      || hasCapability(context, "location.view.driver.timeline")
+      || hasCapability(context, "location.view.fleet")
+      || hasCapability(context, "location.audit.read");
+    const canViewMissionTrackingFleet = hasCapability(context, "location.view.fleet") || hasCapability(context, "location.audit.read");
+    const missionVehicleIds = canReadMissionTracking
+      ? [...new Set(visibleMissionRows.map((mission) => boundedText(parseJson(mission.payloadJson).vehicleId, 160)).filter(Boolean))]
+      : [];
+    const trackingSessionRows = canReadMissionTracking && missionVehicleIds.length
+      ? await db.select().from(trackingSessions).where(and(
+        eq(trackingSessions.tenantId, context.tenantId),
+        inArray(trackingSessions.vehicleId, missionVehicleIds),
+        inArray(trackingSessions.status, ["ACTIVE", "PAUSED"]),
+        ...(canViewMissionTrackingFleet ? [] : [eq(trackingSessions.employeeId, context.actorId)]),
+      )).orderBy(desc(trackingSessions.startedAt)).limit(500)
+      : [];
+    const trackingSessionIds = trackingSessionRows.map((session) => session.id);
+    const trackingSampleRows = canReadMissionTracking && trackingSessionIds.length
+      ? await db.select().from(locationSamples).where(and(
+        eq(locationSamples.tenantId, context.tenantId),
+        inArray(locationSamples.trackingSessionId, trackingSessionIds),
+      )).orderBy(desc(locationSamples.recordedAt)).limit(1_000)
+      : [];
+    const trackingEventRows = canReadMissionTracking && trackingSessionIds.length
+      ? await db.select().from(locationEvents).where(and(
+        eq(locationEvents.tenantId, context.tenantId),
+        inArray(locationEvents.trackingSessionId, trackingSessionIds),
+      )).orderBy(desc(locationEvents.occurredAt)).limit(1_000)
+      : [];
+    const latestSessionByVehicle = new Map<string, typeof trackingSessions.$inferSelect>();
+    for (const session of trackingSessionRows) if (!latestSessionByVehicle.has(session.vehicleId)) latestSessionByVehicle.set(session.vehicleId, session);
+    const latestSampleBySession = new Map<string, typeof locationSamples.$inferSelect>();
+    for (const sample of trackingSampleRows) if (!latestSampleBySession.has(sample.trackingSessionId)) latestSampleBySession.set(sample.trackingSessionId, sample);
+    const latestEventBySession = new Map<string, typeof locationEvents.$inferSelect>();
+    for (const event of trackingEventRows) if (!latestEventBySession.has(event.trackingSessionId)) latestEventBySession.set(event.trackingSessionId, event);
+    if (canReadMissionTracking) {
+      const trackingCapability = hasCapability(context, "location.view.fleet")
+        ? "location.view.fleet"
+        : hasCapability(context, "location.audit.read")
+          ? "location.audit.read"
+        : hasCapability(context, "location.view.driver.timeline")
+          ? "location.view.driver.timeline"
+          : "location.read.current";
+      await auditLocationAccess({
+        context,
+        capability: trackingCapability,
+        action: "READ_MISSION_TRACKING",
+        resourceType: "MISSION_TRACKING_READBACK",
+        purpose: "Lettura della sessione e dell’ultima posizione autorizzata della missione.",
+        metadata: { missionCount: visibleMissionRows.length, activeSessionCount: trackingSessionRows.length },
+      });
+    }
     const visibleLocationIds = new Set<string>();
     for (const mission of visibleMissionRows) locationReferences(parseJson(mission.payloadJson), visibleLocationIds);
     for (const job of visibleOperationJobs) locationReferences(parseJson(job.payloadJson), visibleLocationIds);
@@ -185,7 +256,43 @@ export async function GET() {
         })),
         inventoryItemRows,
       );
-      const effectivePayload = { ...storedPayload, routeReadback, warehouseReadback };
+      const vehicleId = boundedText(storedPayload.vehicleId, 160);
+      const session = latestSessionByVehicle.get(vehicleId) ?? null;
+      const sessionContextMissionId = session ? sessionMissionId(session) : "";
+      const missionSession = session && (!sessionContextMissionId || sessionContextMissionId === mission.id) ? session : null;
+      const sample = missionSession ? latestSampleBySession.get(missionSession.id) ?? null : null;
+      const event = missionSession ? latestEventBySession.get(missionSession.id) ?? null : null;
+      const trackingReadback = !canReadMissionTracking
+        ? { status: "RESTRICTED", reason: "location_capability_required", sessionId: null, position: null, lastEvent: null }
+        : !missionSession
+          ? { status: "NOT_ACTIVE", reason: "driver_check_in_required", sessionId: null, vehicleId: vehicleId || null, position: null, lastEvent: null }
+          : {
+              status: trackingFreshness(sample?.recordedAt ?? null),
+              sessionStatus: missionSession.status,
+              sessionId: missionSession.id,
+              employeeId: missionSession.employeeId,
+              vehicleId: missionSession.vehicleId,
+              trackingDeviceId: missionSession.trackingDeviceId,
+              trackingSource: missionSession.trackingSource,
+              startedAt: missionSession.startedAt,
+              position: sample ? {
+                latitude: roundedCoordinate(sample.latitudeE6),
+                longitude: roundedCoordinate(sample.longitudeE6),
+                recordedAt: sample.recordedAt,
+                receivedAt: sample.receivedAt,
+                accuracyM: sample.accuracyM,
+                speedKmh: sample.speedKmh,
+                heading: sample.heading,
+              } : null,
+              lastEvent: event ? {
+                type: event.eventType,
+                occurredAt: event.occurredAt,
+                locationId: event.locationId,
+                geofenceId: event.geofenceId,
+                confidence: event.confidenceMilli / 1_000,
+              } : null,
+            };
+      const effectivePayload = { ...storedPayload, routeReadback, warehouseReadback, trackingReadback };
       return {
         id: mission.id,
         jobId: mission.jobId,
