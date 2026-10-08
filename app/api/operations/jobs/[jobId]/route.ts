@@ -419,7 +419,9 @@ export async function GET(_request: Request, routeContext: RouteContext) {
 export async function PATCH(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "operations.write")) {
+  const canWriteOperations = hasCapability(context, "operations.write");
+  const canWriteField = hasCapability(context, "field.write");
+  if (!canWriteOperations && !canWriteField) {
     return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
   }
 
@@ -440,6 +442,10 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
   }
 
   const action = boundedText(input.action, 48, "update_job").toLowerCase();
+  const reportActions = new Set(["save_rapportino", "submit_rapportino"]);
+  if (!canWriteOperations && (!canWriteField || !reportActions.has(action))) {
+    return Response.json({ error: "forbidden", capability: "field.write", action }, { status: 403 });
+  }
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
   if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });

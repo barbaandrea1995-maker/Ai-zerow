@@ -528,9 +528,11 @@ function WorkspaceSectionCard({
 
 export default function OperationsJobWorkspace({
   canWriteOperations,
+  canWriteReport,
   jobId,
 }: {
   canWriteOperations: boolean;
+  canWriteReport: boolean;
   jobId: string;
 }) {
   const router = useRouter();
@@ -1256,16 +1258,16 @@ export default function OperationsJobWorkspace({
                       <MapPin className="size-3.5" />
                       Aggiungi evidenza
                     </Button>
-                    <Button
-                      variant="outline"
-                      className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                      onClick={openReport}
-                    >
-                      <FileText className="size-3.5" />
-                      Crea rapportino con Company AI
-                    </Button>
                   </>
                 )}
+                {canWriteReport && <Button
+                  variant="outline"
+                  className="h-11 border-cyan-300/25 bg-cyan-300/[.05] text-xs text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-300/[.1]"
+                  onClick={openReport}
+                >
+                  <FileText className="size-3.5" />
+                  Crea rapportino con Company AI
+                </Button>}
                 <Button
                   variant="outline"
                   className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
@@ -1402,7 +1404,7 @@ export default function OperationsJobWorkspace({
         </footer>
       </div>
 
-      {canWriteOperations && (
+      {(canWriteOperations || canWriteReport) && (
         <Dialog
           open={actionOpen !== null}
           onOpenChange={(open) => !open && setActionOpen(null)}
