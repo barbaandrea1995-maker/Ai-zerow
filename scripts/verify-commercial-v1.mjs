@@ -69,6 +69,7 @@ assert(missionJourneyRoute.includes('approvals.review') && missionJourneyRoute.i
 assert(missionJourneyRoute.includes("mission_report_pending_review") && missionDeck.includes("canEditMissionReport"), "Submitted mission reports must remain read-only until the office requests an integration");
 assert(missionDeck.includes("canReviewMissionReport") && missionDeck.includes("Richiedi integrazione") && missionDeck.includes("Approva rapportino") && missionDeck.includes("reviewNote"), "Mission UI must expose separate author and office-review controls");
 assert(missionDeck.includes("CHANGES_REQUESTED") && missionDeck.includes("APPROVED") && missionDeck.includes("INTEGRAZIONE RICHIESTA"), "Mission UI must distinguish pending, approved and integration-requested report states");
+assert(missionDeck.includes("MissionAttentionFilter") && missionDeck.includes("La coda che richiede attenzione") && missionDeck.includes("REPORT_REVIEW") && missionDeck.includes("REPORT_PENDING") && missionDeck.includes("attentionCounts"), "Mission UI must expose a cross-module attention queue without duplicating domain records");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
