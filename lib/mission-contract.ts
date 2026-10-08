@@ -1,7 +1,8 @@
 import { missionPodEvidenceComplete, missionPodEvidenceLabel } from "@/lib/mission-pod-contract";
 import { missionExceptionIsOpen, missionExceptionLabel, storedMissionException } from "@/lib/mission-exception-contract";
 
-export type MissionReportStatus = "EMPTY" | "DRAFT" | "SUBMITTED";
+export type MissionReportStatus = "EMPTY" | "DRAFT" | "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
+export type MissionReportReviewStatus = "PENDING" | "APPROVED" | "CHANGES_REQUESTED";
 export type MissionReportFieldStatus = "known" | "missing" | "optional";
 
 export type MissionReportField = {
@@ -18,12 +19,20 @@ export type MissionReportCompleteness = {
   questions: string[];
 };
 
+export type MissionReportReview = {
+  status: MissionReportReviewStatus;
+  note: string;
+  reviewedAt: string;
+  reviewedBy: string;
+};
+
 export type MissionReportReadback = {
   status: MissionReportStatus;
   draft: string;
   fields: MissionReportField[];
   timeline: Array<Record<string, unknown>>;
   completeness: MissionReportCompleteness;
+  review: MissionReportReview;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -38,7 +47,11 @@ function text(value: unknown, fallback = "") {
 
 function parseStatus(value: unknown): MissionReportStatus {
   const status = text(value).toUpperCase();
-  return status === "SUBMITTED" || status === "DRAFT" ? status : "EMPTY";
+  if (status === "APPROVED") return "APPROVED";
+  if (status === "CHANGES_REQUESTED") return "CHANGES_REQUESTED";
+  if (status === "SUBMITTED") return "SUBMITTED";
+  if (status === "DRAFT") return "DRAFT";
+  return "EMPTY";
 }
 
 function recordAt(value: unknown, key: string) {
@@ -248,11 +261,24 @@ export function buildMissionReportReadback(
     { key: "narrative", label: "Esito e anomalie", value: reportText || "Da completare", status: reportText.length >= 30 && !reportText.includes("[da completare]") ? "known" : "missing", source: "Company AI / Autista" },
   ];
 
+  const status = parseStatus(saved.status);
+  const reviewStatus: MissionReportReviewStatus = status === "APPROVED"
+    ? "APPROVED"
+    : status === "CHANGES_REQUESTED"
+      ? "CHANGES_REQUESTED"
+      : "PENDING";
+
   return {
-    status: parseStatus(saved.status),
+    status,
     draft,
     fields,
     timeline: timeline.slice(-20).reverse(),
     completeness: { ready: missing.length === 0, missing, questions },
+    review: {
+      status: reviewStatus,
+      note: text(saved.reviewNote),
+      reviewedAt: text(saved.reviewedAt),
+      reviewedBy: text(saved.reviewedBy),
+    },
   };
 }

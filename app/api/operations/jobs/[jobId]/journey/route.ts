@@ -63,6 +63,7 @@ const ACTION_CAPABILITY = {
   mission_reconcile: "mission.manage",
   mission_report_save: "mission.report.write",
   mission_report_submit: "mission.report.write",
+  mission_report_review: "approvals.review",
   mission_close: "mission.manage",
 } as const;
 
@@ -397,6 +398,7 @@ function actionAccess(context: AuthorityContext) {
       action,
       hasCapability(context, capability),
     ])),
+    mission_report_review: hasCapability(context, "approvals.review") || hasCapability(context, "mission.manage"),
     document_upload: hasCapability(context, "documents.write"),
     document_security: hasCapability(context, "documents.write"),
   };
@@ -818,8 +820,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const capability = ACTION_CAPABILITY[action];
   const managementReportBypass = ["mission_report_save", "mission_report_submit"].includes(action)
     && hasCapability(context, "mission.manage");
+  const managementReportReviewBypass = action === "mission_report_review" && hasCapability(context, "mission.manage");
   const managementExceptionBypass = action === "mission_exception" && hasCapability(context, "mission.manage");
-  if (!hasCapability(context, capability) && !managementReportBypass && !managementExceptionBypass) {
+  if (!hasCapability(context, capability) && !managementReportBypass && !managementReportReviewBypass && !managementExceptionBypass) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
   if (action === "mission_create" && !hasCapability(context, "mission.resources.read")) {
@@ -1731,6 +1734,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status === "CLOSED") {
           return Response.json({ error: "invalid_mission_report_transition" }, { status: 409 });
         }
+        const savedReport = isRecord(payload.missionReport) ? payload.missionReport : {};
+        if (boundedText(savedReport.status, 24).toUpperCase() === "APPROVED") {
+          return Response.json({ error: "mission_report_already_approved", message: "Il rapportino è già approvato dall’ufficio e non può essere modificato." }, { status: 409 });
+        }
         const reportText = boundedText(input.text, 4_000);
         if (reportText.length < 2) return Response.json({ error: "mission_report_text_required" }, { status: 400 });
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
@@ -1750,6 +1757,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
           missionReport: {
             status: reportStatus,
             text: reportText,
+            reviewNote: null,
+            reviewedAt: null,
+            reviewedBy: null,
+            approvedAt: null,
+            approvedBy: null,
             ...(action === "mission_report_submit" ? {
               submittedAt: now,
               submittedBy: context.actorId,
@@ -1761,6 +1773,49 @@ export async function POST(request: Request, routeContext: RouteContext) {
         };
         status = row.status;
         eventType = action === "mission_report_submit" ? "mission.transport.report_submitted" : "mission.transport.report_saved";
+      } else if (action === "mission_report_review") {
+        if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status === "CLOSED") {
+          return Response.json({ error: "invalid_mission_report_review_transition" }, { status: 409 });
+        }
+        const report = isRecord(payload.missionReport) ? payload.missionReport : null;
+        if (!report || boundedText(report.status, 24).toUpperCase() !== "SUBMITTED") {
+          return Response.json({ error: "mission_report_not_ready_for_review", message: "Il rapportino deve essere inviato dall’autista prima della revisione." }, { status: 409 });
+        }
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const reportReadback = buildMissionReportReadback({ ...payload, warehouseReadback });
+        if (!reportReadback.completeness.ready) {
+          return Response.json({
+            error: "mission_report_completeness_unmet",
+            completeness: reportReadback.completeness,
+            questions: reportReadback.completeness.questions,
+            message: "Il rapportino non può essere approvato finché mancano dati importanti.",
+          }, { status: 422 });
+        }
+        const decision = boundedText(input.decision, 32).toUpperCase();
+        if (decision !== "APPROVE" && decision !== "REQUEST_CHANGES") {
+          return Response.json({ error: "mission_report_review_decision_invalid" }, { status: 400 });
+        }
+        const reviewNote = boundedText(input.reviewNote ?? input.note, 1_000);
+        if (decision === "REQUEST_CHANGES" && reviewNote.length < 8) {
+          return Response.json({ error: "mission_report_review_note_required" }, { status: 400 });
+        }
+        const approved = decision === "APPROVE";
+        status = row.status;
+        payload = {
+          ...payload,
+          warehouseReadback,
+          missionReport: {
+            ...report,
+            status: approved ? "APPROVED" : "CHANGES_REQUESTED",
+            reviewNote: reviewNote || "Rapportino verificato dall’ufficio.",
+            reviewedAt: now,
+            reviewedBy: context.actorId,
+            updatedAt: now,
+            updatedBy: context.actorId,
+            ...(approved ? { approvedAt: now, approvedBy: context.actorId } : { approvedAt: null, approvedBy: null }),
+          },
+        };
+        eventType = approved ? "mission.transport.report_approved" : "mission.transport.report_changes_requested";
       } else if (action === "mission_close") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "RECONCILED") {
           return Response.json({ error: "invalid_mission_close_transition" }, { status: 409 });
@@ -1776,7 +1831,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         payload = { ...payload, warehouseReadback };
         const reportReadback = buildMissionReportReadback(payload);
         const savedReport = isRecord(payload.missionReport) ? payload.missionReport : {};
-        if (boundedText(savedReport.status, 24).toUpperCase() !== "SUBMITTED" || !reportReadback.completeness.ready) {
+        if (!["SUBMITTED", "APPROVED"].includes(boundedText(savedReport.status, 24).toUpperCase()) || !reportReadback.completeness.ready) {
           return Response.json({
             error: "mission_report_required_before_close",
             completeness: reportReadback.completeness,
@@ -1832,6 +1887,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
       materialRequestId: materialRequest?.id ?? null,
       planningPlanId: boundedText(payload.planningPlanId, 120) || null,
       ...(missionActionEvent ? { operationalEvent: missionActionEvent } : {}),
+      ...(action === "mission_report_review" && isRecord(payload.missionReport)
+        ? {
+            reviewStatus: boundedText(payload.missionReport.status, 24).toUpperCase(),
+            reviewNoteProvided: Boolean(boundedText(payload.missionReport.reviewNote, 1_000)),
+          }
+        : {}),
     });
     const mutation = existing
       ? db.update(jobJourneyRecords).set({

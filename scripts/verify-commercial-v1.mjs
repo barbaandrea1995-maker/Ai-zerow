@@ -64,6 +64,10 @@ assert(missionDeck.includes("AssetStopAssignmentList") && missionDeck.includes("
 assert(missionJourneyRoute.includes("cargoAssetIds") && missionJourneyRoute.includes("assetIds: actionAssetIds") && missionJourneyRoute.includes("assetIds: deliveryAssetIds"), "Mission actions must preserve multiple asset identities in server readback");
 assert(missionJourneyRoute.includes("planningPlanId") && missionJourneyRoute.includes("planning_plan_already_linked") && missionJourneyRoute.includes("mission_plan_resource_mismatch"), "Mission creation from planning must be server-linked, idempotent and resource-validated");
 assert(missionDeck.includes("useSearchParams") && missionDeck.includes("activePlanningPlanId") && missionDeck.includes("openCreate(null, handoff)"), "Mission UI must accept a published planning handoff and preserve its reference");
+assert(missionJourneyRoute.includes("mission_report_review") && missionJourneyRoute.includes("mission.transport.report_approved") && missionJourneyRoute.includes("mission.transport.report_changes_requested"), "Mission rapportino review must be capability-gated and append an auditable decision without changing the journey status");
+assert(missionJourneyRoute.includes('approvals.review') && missionJourneyRoute.includes("mission_report_already_approved") && missionJourneyRoute.includes("mission_report_not_ready_for_review"), "Mission report review must stay inside the office approval boundary and lock approved reports");
+assert(missionDeck.includes("canReviewMissionReport") && missionDeck.includes("Richiedi integrazione") && missionDeck.includes("Approva rapportino") && missionDeck.includes("reviewNote"), "Mission UI must expose separate author and office-review controls");
+assert(missionDeck.includes("CHANGES_REQUESTED") && missionDeck.includes("APPROVED") && missionDeck.includes("INTEGRAZIONE RICHIESTA"), "Mission UI must distinguish pending, approved and integration-requested report states");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
