@@ -58,6 +58,7 @@ assert(missionLocationIngest.includes("stop.status !== \"DEPARTED\" && !stop.dep
 const missionDeck = await readFile(join(root, "components", "mission-command-deck.tsx"), "utf8");
 assert(missionDeck.includes("currentRouteStopView") && missionDeck.includes("Tappa corrente server-side"), "Mission UI must expose and enforce the server-side current stop");
 assert(missionDeck.includes("requestMaterialLineActions") && missionDeck.includes("firstLoadStopIndex") && missionDeck.includes("lastUnloadStopIndex") && missionDeck.includes("MaterialStopAssignmentList") && missionDeck.includes("materialQuantities"), "Mission UI must assign material lines and cargo assets to the correct route legs");
+assert(missionDeck.includes("cargoManifest") && missionDeck.includes("MANIFESTO TAPPA CORRENTE") && missionDeck.includes("cargoManifestProgress"), "Mission UI must expose the server-side cargo manifest and its per-stop readback");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");

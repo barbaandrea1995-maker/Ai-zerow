@@ -116,6 +116,14 @@ type RouteStopDraft = {
   temporaryLocation?: GeocodeCandidate | null;
 };
 
+type MissionCargoManifestEntry = {
+  action: string;
+  itemId: string | null;
+  assetId: string | null;
+  materialRequestId: string | null;
+  quantity: string | null;
+};
+
 type MissionStopView = {
   id: string;
   sequence: number;
@@ -125,6 +133,7 @@ type MissionStopView = {
   deliveryStatus: string;
   locationId: string;
   cargoActions: string[];
+  cargoManifest: MissionCargoManifestEntry[];
   expectedArrivalAt: string | null;
   expectedDepartureAt: string | null;
   arrivedAt: string | null;
@@ -370,12 +379,21 @@ function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
     const plannedValue = planned && typeof planned === "object" && !Array.isArray(planned) ? planned as Record<string, unknown> : {};
     const metadata = value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata as Record<string, unknown> : {};
     const locationEvent = value.lastLocationEvent && typeof value.lastLocationEvent === "object" && !Array.isArray(value.lastLocationEvent) ? value.lastLocationEvent as Record<string, unknown> : null;
-    const cargoActions = (Array.isArray(plannedValue.cargoActions) ? plannedValue.cargoActions : Array.isArray(metadata.cargoActions) ? metadata.cargoActions : []).flatMap((action) => {
-      if (typeof action === "string") return [action.toUpperCase()];
+    const cargoManifest = (Array.isArray(plannedValue.cargoActions) ? plannedValue.cargoActions : Array.isArray(metadata.cargoActions) ? metadata.cargoActions : []).flatMap((action): MissionCargoManifestEntry[] => {
+      if (typeof action === "string") return [{ action: action.toUpperCase(), itemId: null, assetId: null, materialRequestId: null, quantity: null }];
       if (!action || typeof action !== "object" || Array.isArray(action)) return [];
-      const actionValue = (action as Record<string, unknown>).action;
-      return typeof actionValue === "string" ? [actionValue.toUpperCase()] : [];
+      const actionValue = action as Record<string, unknown>;
+      const normalizedAction = text(actionValue.action ?? actionValue.type, "").toUpperCase();
+      if (!normalizedAction) return [];
+      return [{
+        action: normalizedAction,
+        itemId: text(actionValue.itemId, "") || null,
+        assetId: text(actionValue.assetId, "") || null,
+        materialRequestId: text(actionValue.materialRequestId, "") || null,
+        quantity: typeof actionValue.quantity === "number" || typeof actionValue.quantity === "string" ? String(actionValue.quantity) : null,
+      }];
     });
+    const cargoActions = cargoManifest.map((entry) => entry.action);
     return [{
       id: text(value.id ?? plannedValue.id, `STOP-${index + 1}`),
       sequence: typeof value.sequence === "number" ? value.sequence : typeof plannedValue.sequence === "number" ? plannedValue.sequence : index + 1,
@@ -385,6 +403,7 @@ function routeStopViews(payload: Record<string, unknown>): MissionStopView[] {
       deliveryStatus: text(value.deliveryStatus, "PLANNED").toUpperCase(),
       locationId: text(value.locationId ?? plannedValue.locationId, ""),
       cargoActions,
+      cargoManifest,
       expectedArrivalAt: text(value.expectedArrivalAt ?? plannedValue.expectedArrivalAt, "") || null,
       expectedDepartureAt: text(value.expectedDepartureAt ?? plannedValue.expectedDepartureAt, "") || null,
       arrivedAt: text(value.arrivedAt ?? plannedValue.arrivedAt, "") || null,
@@ -435,6 +454,23 @@ function missionTrackingReadback(payload: Record<string, unknown>) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function cargoActionLabel(action: string) {
+  return ({
+    LOAD: "CARICO",
+    UNLOAD: "SCARICO",
+    TRANSFER: "TRASFERIMENTO",
+    RETURN: "RIENTRO",
+  } as Record<string, string>)[action] ?? action.replaceAll("_", " ");
+}
+
+function cargoManifestProgress(action: string, line: MissionWarehouseReadback["lines"][number] | null) {
+  if (!line) return { label: "AZIONE DA CONFERMARE", tone: "amber" as Tone };
+  const actual = ["LOAD", "TRANSFER"].includes(action) ? line.loaded : ["UNLOAD", "RETURN"].includes(action) ? line.delivered : 0;
+  if (actual >= line.required && line.required > 0) return { label: "REGISTRATO", tone: "lime" as Tone };
+  if (actual > 0) return { label: "PARZIALE", tone: "amber" as Tone };
+  return { label: "IN ATTESA", tone: "cyan" as Tone };
 }
 
 function trackingStatusTone(status: string): Tone {
@@ -581,7 +617,31 @@ function MissionActionPanel({
       <div className="flex items-center justify-between gap-3"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-600">TIMELINE OPERATIVA</p><span className="font-mono text-[9px] text-cyan-200/70">{timeline.length} EVENTI</span></div>
       {timeline.length ? <div className="mt-2 space-y-2">{timeline.map((entry, index) => <div className="flex items-start gap-2" key={text(entry.id, `event-${index}`)}><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(89,217,255,.75)]" /><div className="min-w-0"><p className="text-[10px] font-semibold text-slate-300">{text(entry.type, "EVENTO").replaceAll("_", " ")} <span className="font-normal text-slate-600">· {formatDate(entry.recordedAt ?? entry.occurredAt)}</span></p><p className="truncate text-[9px] text-slate-600">{text(entry.note, "Registrato dal flusso missione")}</p></div></div>)}</div> : <p className="mt-2 text-[10px] text-slate-600">Nessun carico o scarico confermato su questa missione.</p>}
     </div>
-  </section><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /><MissionExceptionReadbackPanel payload={mission.payload} /><MissionTrackingPanel payload={mission.payload} /></>;
+  </section><MissionStopCargoManifestPanel payload={mission.payload} readback={warehouseReadback} stop={selectedStop} /><MissionWarehousePanel readback={warehouseReadback} /><MissionPodReadbackPanel payload={mission.payload} /><MissionExceptionReadbackPanel payload={mission.payload} /><MissionTrackingPanel payload={mission.payload} /></>;
+}
+
+function MissionStopCargoManifestPanel({ payload, readback, stop }: { payload: Record<string, unknown>; readback: MissionWarehouseReadback | null; stop: MissionStopView | null }) {
+  if (!stop || !stop.cargoManifest.length) return null;
+  const cargoAssetId = text(payload.cargoAssetId, "");
+  return <section className="mt-4 rounded-2xl border border-lime-300/15 bg-lime-300/[.025] p-4">
+    <div className="flex items-start gap-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Package className="size-4" /></span>
+      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">MANIFESTO TAPPA CORRENTE</p><StatusPill label={stop.status.replaceAll("_", " ")} tone={stop.status === "COMPLETED" || stop.deliveryStatus === "CONFIRMED" ? "lime" : "cyan"} /></div><h3 className="mt-1 text-sm font-semibold text-slate-100">{stop.sequence}. {stop.label}</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">Questa è la distinta operativa letta dal piano server-side: cosa deve essere caricato, trasferito o scaricato in questa tappa.</p></div>
+    </div>
+    <div className="mt-4 space-y-2">{stop.cargoManifest.map((entry, index) => {
+      const line = entry.itemId && readback ? readback.lines.find((candidate) => candidate.itemId === entry.itemId) ?? null : null;
+      const progress = cargoManifestProgress(entry.action, line);
+      const isAsset = Boolean(entry.assetId);
+      const label = line?.name ?? (isAsset && entry.assetId === cargoAssetId ? snapshotLabel(payload, "cargoAsset") : isAsset ? `Asset ${entry.assetId}` : entry.materialRequestId ? `Richiesta ${entry.materialRequestId}` : "Movimento operativo");
+      const reference = line ? `${line.sku} · ${line.itemId ?? line.lineId}` : entry.assetId ?? entry.itemId ?? entry.materialRequestId ?? "Nessun identificativo associato";
+      const quantity = entry.quantity ?? (line ? String(line.required) : null);
+      return <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={`${entry.action}-${entry.itemId ?? entry.assetId ?? entry.materialRequestId ?? index}`}>
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{label}</p><p className="mt-1 truncate font-mono text-[9px] text-slate-600">{reference}</p></div><div className="flex shrink-0 flex-wrap justify-end gap-1.5"><StatusPill label={cargoActionLabel(entry.action)} tone={entry.action === "UNLOAD" || entry.action === "RETURN" ? "lime" : "cyan"} /><StatusPill label={progress.label} tone={progress.tone} /></div></div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]"><div><p className="text-slate-600">Quantità prevista</p><p className="mt-1 font-mono text-slate-200">{quantity ? `${quantity}${line?.unit ? ` ${line.unit}` : ""}` : "da confermare"}</p></div><div><p className="text-slate-600">Readback</p><p className="mt-1 font-mono text-slate-300">{line ? `${entry.action === "LOAD" || entry.action === "TRANSFER" ? line.loaded : line.delivered} ${line.unit}` : "evento tappa"}</p></div></div>
+      </div>;
+    })}</div>
+    <p className="mt-3 text-[9px] text-lime-100/60">Il pulsante di carico/scarico resta abilitato solo sulla tappa agganciata dal server e registra l’evento ufficiale con timestamp, autore e distinta associata.</p>
+  </section>;
 }
 
 function MissionWarehousePanel({ readback }: { readback: MissionWarehouseReadback | null }) {
