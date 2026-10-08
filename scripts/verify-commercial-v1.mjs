@@ -410,8 +410,8 @@ assert(planningSurface.includes("openMissionFromPlan") && planningSurface.includ
 const planningResourceFields = await readFile(join(root, "components", "planning-resource-fields.tsx"), "utf8");
 assert(planningResourceFields.includes("startsAt") && planningResourceFields.includes("endsAt") && planningResourceFields.includes("disabled={!available}"), "Planning UI must consume server-side availability and disable occupied resources");
 const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
-assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId") && planningIndexRoute.includes("linkedMissionByPlan"), "Central planning readback must be capability-gated, tenant-scoped and mission-linked");
-assert(planningIndexRoute.includes("jobModule"), "Planning readback must identify the owning operational domain for handoff rules");
+assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId") && planningIndexRoute.includes("linkedMissionByPlan") && planningIndexRoute.includes("missionExecutionStatus"), "Central planning readback must be capability-gated, tenant-scoped and expose mission execution state");
+assert(planningIndexRoute.includes("jobModule") && planningSurface.includes("Esecuzione") && planningSurface.includes("executionStatus"), "Planning readback must identify the owning operational domain and render linked mission execution state");
 
 const teamsRoute = await readFile(join(root, "app", "api", "authority", "teams", "route.ts"), "utf8");
 assert(teamsRoute.includes('hasCapability(context, "authority.manage")') && teamsRoute.includes("team_membership_not_active"), "Team creation must be capability-gated and limited to active tenant memberships");

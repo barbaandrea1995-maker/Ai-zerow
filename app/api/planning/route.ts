@@ -16,6 +16,28 @@ function parseJson(value: string) {
   }
 }
 
+const MISSION_EXCEPTION_STATUSES = new Set([
+  "DELAYED",
+  "BLOCKED",
+  "VEHICLE_FAULT",
+  "PARTIAL_DELIVERY",
+  "REFUSED",
+  "LOST",
+  "RECONCILE_REQUIRED",
+  "CANCELLED",
+]);
+
+function missionExecutionStatus(status: string) {
+  if (MISSION_EXCEPTION_STATUSES.has(status)) return "EXCEPTION";
+  if (status === "PLANNED") return "MISSION_PLANNED";
+  if (status === "DISPATCHED") return "IN_EXECUTION";
+  if (status === "DELIVERED") return "DELIVERED_AWAITING_POD";
+  if (status === "POD_VERIFIED") return "POD_VERIFIED";
+  if (status === "RECONCILED") return "RECONCILED";
+  if (status === "CLOSED") return "CLOSED";
+  return "UNKNOWN";
+}
+
 function firstSlotValue(payload: Record<string, unknown>, key: "startsAt" | "endsAt"): string | null {
   if (typeof payload[key] === "string" && payload[key]) return payload[key];
   const slots = Array.isArray(payload.slots) ? payload.slots : [];
@@ -86,7 +108,7 @@ export async function GET() {
     const allowedJobIds = new Set(visibleJobs.map((job) => job.id));
     const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
     const visiblePlanIds = new Set(visiblePlans.map((plan) => plan.id));
-    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; version: number; updatedAt: string }>();
+    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; executionStatus: string; version: number; updatedAt: string }>();
     for (const mission of missionRows) {
       if (!visiblePlanIds.size) break;
       const missionPayload = parseJson(mission.payloadJson);
@@ -96,6 +118,7 @@ export async function GET() {
           id: mission.id,
           title: mission.title,
           status: mission.status,
+          executionStatus: missionExecutionStatus(mission.status),
           version: mission.version,
           updatedAt: mission.updatedAt,
         });
