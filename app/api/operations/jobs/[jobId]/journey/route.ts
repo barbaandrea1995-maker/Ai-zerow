@@ -513,7 +513,10 @@ function routeStopMaterialActionEntries(row: typeof routeStops.$inferSelect, eff
     const itemId = boundedText(entry.itemId, 160);
     const materialRequestId = boundedText(entry.materialRequestId, 160);
     if (!itemId && !materialRequestId) return [];
-    return [{ itemId, materialRequestId, quantityMilli: quantityToMilli(entry.quantity) }];
+    const hasQuantity = entry.quantity !== undefined && entry.quantity !== null && String(entry.quantity).trim() !== "";
+    const quantityMilli = quantityToMilli(entry.quantity);
+    if (hasQuantity && quantityMilli === null) throw new MissionInventoryError("mission_material_quantity_invalid", { itemId: itemId || null, quantity: entry.quantity });
+    return [{ itemId, materialRequestId, quantityMilli }];
   });
 }
 

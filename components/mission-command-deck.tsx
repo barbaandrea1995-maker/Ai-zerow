@@ -110,6 +110,8 @@ type RouteStopDraft = {
   kind: "PICKUP" | "DELIVERY" | "TRANSFER" | "RETURN";
   locationId: string;
   materialItemIds?: string[];
+  materialLines?: MaterialLineDraft[];
+  materialQuantities?: Record<string, string>;
   temporaryAddress?: string;
   temporaryLocation?: GeocodeCandidate | null;
 };
@@ -142,6 +144,13 @@ type MaterialRequest = {
   scheduledMissionId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type MaterialLineDraft = {
+  itemId: string;
+  description: string;
+  quantity: string;
+  unit: string;
 };
 
 type MissionContext = {
@@ -231,6 +240,23 @@ function cn(...values: Array<string | false | null | undefined>) {
 
 function text(value: unknown, fallback = "—") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function materialRequestLineDrafts(request: MaterialRequest | null): MaterialLineDraft[] {
+  const lines = request?.payload.lines;
+  if (!Array.isArray(lines)) return [];
+  return lines.flatMap((line) => {
+    if (!line || typeof line !== "object" || Array.isArray(line)) return [];
+    const value = line as Record<string, unknown>;
+    const itemId = text(value.itemId, "");
+    if (!itemId) return [];
+    return [{
+      itemId,
+      description: text(value.description ?? value.name, "Materiale"),
+      quantity: typeof value.quantity === "number" || typeof value.quantity === "string" ? String(value.quantity) : "—",
+      unit: text(value.unit, "UNIT"),
+    }];
+  });
 }
 
 function formatDate(value: unknown) {
@@ -637,6 +663,39 @@ type RouteStopsEditorProps = {
   onChange: (next: RouteStopDraft[]) => void;
 };
 
+function MaterialStopAssignmentList({
+  materialLines,
+  stops,
+  onChange,
+}: { materialLines: MaterialLineDraft[]; stops: RouteStopDraft[]; onChange: (next: RouteStopDraft[]) => void }) {
+  if (!materialLines.length) return null;
+  return <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/[.035] p-4">
+    <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-amber-200/80">RIGHE MATERIALI · ASSEGNAZIONE PER TAPPA</p>
+    <p className="mt-1 text-[10px] leading-5 text-slate-500">Ogni riga viene registrata solo nelle tappe selezionate. Per una consegna standard assegna la riga a una tappa di carico e a una di consegna; per più destinatari puoi assegnare quantità e righe alla tappa corretta.</p>
+    <div className="mt-3 space-y-2">{stops.map((stop, stopIndex) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={`${stopIndex}-${stop.locationId}-${stop.temporaryAddress ?? ""}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold text-slate-200">Tappa {stopIndex + 1} · {stop.kind === "PICKUP" ? "Carico" : stop.kind === "DELIVERY" ? "Consegna" : stop.kind === "RETURN" ? "Rientro" : "Trasferimento"}</p>
+        <span className="text-[9px] uppercase tracking-[.12em] text-slate-600">{stop.materialItemIds?.length ?? 0} righe</span>
+      </div>
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">{materialLines.map((line) => {
+        const checked = stop.materialItemIds?.includes(line.itemId) ?? false;
+        return <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-white/[.07] px-2.5 py-2 text-[10px] text-slate-300 hover:border-amber-300/25" key={`${stopIndex}-${line.itemId}`}>
+          <input checked={checked} className="size-3.5 accent-lime-300" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => {
+            if (candidateIndex !== stopIndex) return candidate;
+            const nextIds = new Set(candidate.materialItemIds ?? []);
+            if (event.target.checked) nextIds.add(line.itemId);
+            else nextIds.delete(line.itemId);
+            return { ...candidate, materialItemIds: [...nextIds] };
+          }))} type="checkbox" />
+          <span className="min-w-0 flex-1 truncate">{line.description}</span>
+          {checked ? <input aria-label={`Quantità ${line.description} tappa ${stopIndex + 1}`} className="h-7 w-20 shrink-0 rounded-md border border-amber-300/20 bg-black/30 px-2 text-right font-mono text-[9px] text-amber-100 outline-none focus:border-amber-300/50" min="0.001" onChange={(event) => onChange(stops.map((candidate, candidateIndex) => candidateIndex === stopIndex ? { ...candidate, materialQuantities: { ...candidate.materialQuantities, [line.itemId]: event.target.value } } : candidate))} step="0.001" type="number" value={stop.materialQuantities?.[line.itemId] ?? (line.quantity === "—" ? "" : line.quantity)} /> : <span className="shrink-0 font-mono text-[9px] text-amber-100/70">{line.quantity} {line.unit}</span>}
+          {checked && <span className="shrink-0 text-[9px] text-slate-600">{line.unit}</span>}
+        </label>;
+      })}</div>
+    </div>)}</div>
+  </div>;
+}
+
 function RouteStopsEditor({
   locations,
   stops,
@@ -645,6 +704,7 @@ function RouteStopsEditor({
   const [temporaryCandidates, setTemporaryCandidates] = useState<Record<number, GeocodeCandidate[]>>({});
   const [temporaryBusyIndex, setTemporaryBusyIndex] = useState<number | null>(null);
   const eligibleLocations = locations.filter((location) => location.geofence?.status === "ACTIVE");
+  const materialLines = stops.find((stop) => (stop.materialLines?.length ?? 0) > 0)?.materialLines ?? [];
   const labelFor = (locationId: string) => {
     const location = eligibleLocations.find((candidate) => candidate.id === locationId);
     return location ? `${location.entityType} · ${location.formattedAddress}` : "Tappa da selezionare";
@@ -694,7 +754,7 @@ function RouteStopsEditor({
         <h3 className="mt-1 text-sm font-semibold text-slate-100">Tappe e agganci operativi</h3>
         <p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Ogni tappa può usare una location aziendale oppure un indirizzo temporaneo. Il server verifica l’indirizzo, crea una geofence solo per questa missione e non lo aggiunge alla rubrica canonica.</p>
       </div>
-      <button className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.05] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.1]" onClick={() => onChange([...stops, { kind: "TRANSFER", locationId: "" }])} type="button">+ Aggiungi tappa</button>
+      <button className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.05] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.1]" onClick={() => onChange([...stops, { kind: "TRANSFER", locationId: "", materialLines }])} type="button">+ Aggiungi tappa</button>
     </div>
     <div className="mt-4 space-y-2">
       {stops.map((stop, index) => {
@@ -726,6 +786,7 @@ function RouteStopsEditor({
           </div>}
         </div>;
       })}
+      <MaterialStopAssignmentList materialLines={materialLines} onChange={onChange} stops={stops} />
       {stops.length === 0 && <p className="rounded-xl border border-dashed border-cyan-300/15 p-4 text-center text-[10px] text-slate-600">Aggiungi almeno una tappa di carico e una di consegna.</p>}
     </div>
     {eligibleLocations.length === 0 && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.03] p-3 text-[10px] text-amber-100">Non ci sono location canoniche con geofence disponibili. Puoi comunque usare indirizzi temporanei verificati dal server.</p>}
@@ -892,7 +953,9 @@ export default function MissionCommandDeck() {
     const jobLocationId = request?.jobId
       ? locations.find((location) => location.entityId === request.jobId && ["CANTIERE", "COMMESSA"].includes(location.entityType))?.id ?? ""
       : "";
-    setRouteStops([{ kind: "PICKUP", locationId: warehouseLocationId }, { kind: "DELIVERY", locationId: jobLocationId }]);
+    const materialLines = materialRequestLineDrafts(request);
+    const materialItemIds = materialLines.map((line) => line.itemId);
+    setRouteStops([{ kind: "PICKUP", locationId: warehouseLocationId, materialLines, materialItemIds }, { kind: "DELIVERY", locationId: jobLocationId, materialLines, materialItemIds }]);
     setModal("create");
   }
 
@@ -1043,7 +1106,7 @@ export default function MissionCommandDeck() {
           : defaultMaterialLeg ? requestMaterialLineActions.map((line) => line.itemId) : []);
         const actions: Array<Record<string, unknown>> = requestMaterialLineActions
           .filter((line) => selectedItemIds.has(line.itemId))
-          .map((line) => ({ action, ...line, assetId: null }));
+          .map((line) => ({ action, ...line, quantity: routeStops[stopIndex]?.materialQuantities?.[line.itemId] || line.quantity, assetId: null }));
         const assetLeg = (isLoadLeg && stopIndex === firstLoadStopIndex) || (isUnloadLeg && stopIndex === lastUnloadStopIndex);
         if (selectedCargo && assetLeg) actions.push({ action, materialRequestId: null, assetId: selectedCargo });
         if (!actions.length) actions.push({ action, materialRequestId: null, assetId: null });
@@ -1063,6 +1126,24 @@ export default function MissionCommandDeck() {
           cargoActions: cargoActionsForStop(action, stopIndex),
         };
       });
+      if (mode === "WAREHOUSE_TO_JOB" && materialRequestId && selectedRequest && !requestMaterialLineActions.length) {
+        notify("La richiesta materiali selezionata non contiene righe riconciliabili con il registro del magazzino.");
+        return;
+      }
+      if (mode === "WAREHOUSE_TO_JOB" && hasExplicitMaterialAssignments && requestMaterialLineActions.length) {
+        const itemIdsForActions = (allowedActions: string[]) => new Set(selectedRouteStops.flatMap((stop) => stop.cargoActions.flatMap((entry) => {
+          const itemId = text(entry.itemId, "");
+          return itemId && allowedActions.includes(text(entry.action, "").toUpperCase()) ? [itemId] : [];
+        })));
+        const loadedItemIds = itemIdsForActions(["LOAD", "TRANSFER"]);
+        const unloadedItemIds = itemIdsForActions(["UNLOAD", "RETURN", "TRANSFER"]);
+        const missingLoad = requestMaterialLineActions.filter((line) => !loadedItemIds.has(line.itemId));
+        const missingUnload = requestMaterialLineActions.filter((line) => !unloadedItemIds.has(line.itemId));
+        if (missingLoad.length || missingUnload.length) {
+          notify(`Assegna ogni riga a una tappa di carico e a una di consegna. Mancano: ${[...new Set([...missingLoad, ...missingUnload].map((line) => line.itemId))].join(", ")}`);
+          return;
+        }
+      }
       if (!jobId || !field(form, "driverId") || !field(form, "vehicleId")) {
         notify("Seleziona il collegamento, un autista e un mezzo dal registro disponibile.");
         return;
