@@ -234,7 +234,13 @@ function reportContextFromJourneyAndRelated(
 }
 
 function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback) {
-  const statusLabel = readback.status === "SUBMITTED" ? "INVIATO IN UFFICIO" : "BOZZA";
+  const statusLabel = readback.status === "APPROVED"
+    ? "APPROVATO DALL’UFFICIO"
+    : readback.status === "CHANGES_REQUESTED"
+      ? "INTEGRAZIONE RICHIESTA"
+      : readback.status === "SUBMITTED"
+        ? "INVIATO IN UFFICIO"
+        : "BOZZA";
   return {
     id: `${jobKey}:rapportino`,
     module: "operations" as const,
@@ -245,7 +251,7 @@ function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback) {
       : `${readback.completeness.missing.length} dati da completare`,
     meta: statusLabel,
     status: readback.status,
-    tone: readback.completeness.ready ? "lime" as const : "amber" as const,
+    tone: readback.status === "CHANGES_REQUESTED" || !readback.completeness.ready ? "amber" as const : "lime" as const,
     progress: readback.completeness.ready ? 100 : 0,
     payload: { status: readback.status, missing: readback.completeness.missing },
     createdAt: new Date().toISOString(),
@@ -421,7 +427,8 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   const canWriteOperations = hasCapability(context, "operations.write");
   const canWriteField = hasCapability(context, "field.write");
-  if (!canWriteOperations && !canWriteField) {
+  const canReviewRapportino = canWriteOperations || hasCapability(context, "approvals.review") || hasCapability(context, "attendance.approve");
+  if (!canWriteOperations && !canWriteField && !canReviewRapportino) {
     return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
   }
 
@@ -443,7 +450,10 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
 
   const action = boundedText(input.action, 48, "update_job").toLowerCase();
   const reportActions = new Set(["save_rapportino", "submit_rapportino"]);
-  if (!canWriteOperations && (!canWriteField || !reportActions.has(action))) {
+  if (!canWriteOperations && action === "review_rapportino" && !canReviewRapportino) {
+    return Response.json({ error: "forbidden", capability: "approvals.review", action }, { status: 403 });
+  }
+  if (!canWriteOperations && action !== "review_rapportino" && (!canWriteField || !reportActions.has(action))) {
     return Response.json({ error: "forbidden", capability: "field.write", action }, { status: 403 });
   }
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
@@ -608,6 +618,32 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       };
       eventType = "operations.job.rapportino_submitted";
       change = { status: "SUBMITTED", missing: 0 };
+    } else if (action === "review_rapportino") {
+      const report = isRecord(current.rapportino) ? current.rapportino : null;
+      if (!report || safeText(report.status).toUpperCase() !== "SUBMITTED") {
+        return Response.json({ error: "rapportino_not_ready_for_review" }, { status: 409 });
+      }
+      const decision = boundedText(input.decision, 32).toUpperCase();
+      if (decision !== "APPROVE" && decision !== "REQUEST_CHANGES") {
+        return Response.json({ error: "rapportino_review_decision_invalid" }, { status: 400 });
+      }
+      const reviewNote = boundedText(input.reviewNote ?? input.note, 1_000);
+      if (decision === "REQUEST_CHANGES" && reviewNote.length < 8) {
+        return Response.json({ error: "rapportino_review_note_required" }, { status: 400 });
+      }
+      const approved = decision === "APPROVE";
+      next.rapportino = {
+        ...report,
+        status: approved ? "APPROVED" : "CHANGES_REQUESTED",
+        reviewNote: reviewNote || "Rapportino verificato dall’ufficio.",
+        reviewedAt: now,
+        reviewedBy: context.actorId,
+        updatedAt: now,
+        updatedBy: context.actorId,
+        ...(approved ? { approvedAt: now, approvedBy: context.actorId } : { approvedAt: null, approvedBy: null }),
+      };
+      eventType = approved ? "operations.job.rapportino_approved" : "operations.job.rapportino_changes_requested";
+      change = { status: approved ? "APPROVED" : "CHANGES_REQUESTED", reviewNote: Boolean(reviewNote) };
     } else if (action === "update_job") {
       const fields = isRecord(input.fields) ? input.fields : input;
       if (typeof fields.title === "string") {

@@ -219,11 +219,19 @@ export type RapportinoCompleteness = {
   questions: string[];
 };
 
+export type RapportinoReview = {
+  status: "PENDING" | "APPROVED" | "CHANGES_REQUESTED";
+  note: string;
+  reviewedAt: string;
+  reviewedBy: string;
+};
+
 export type RapportinoReadback = {
-  status: "EMPTY" | "DRAFT" | "SUBMITTED";
+  status: "EMPTY" | "DRAFT" | "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
   draft: string;
   fields: RapportinoField[];
   completeness: RapportinoCompleteness;
+  review: RapportinoReview;
 };
 
 function uniqueReportRecords(records: RapportinoContextRecord[] = []) {
@@ -258,6 +266,8 @@ function reportRecordLines(records: RapportinoContextRecord[], emptyLabel: strin
 
 function reportStatus(value: unknown): RapportinoReadback["status"] {
   const normalized = text(value).toUpperCase();
+  if (normalized === "APPROVED") return "APPROVED";
+  if (normalized === "CHANGES_REQUESTED") return "CHANGES_REQUESTED";
   if (normalized === "SUBMITTED") return "SUBMITTED";
   if (normalized === "DRAFT") return "DRAFT";
   return "EMPTY";
@@ -352,19 +362,31 @@ export function buildRapportinoReadback(
     "PROSSIMI PASSI",
     "[da descrivere]",
   ].join("\n");
+  const status = reportStatus(report?.status);
+  const reviewStatus: RapportinoReview["status"] = status === "APPROVED"
+    ? "APPROVED"
+    : status === "CHANGES_REQUESTED"
+      ? "CHANGES_REQUESTED"
+      : "PENDING";
 
   return {
-    status: reportStatus(report?.status),
+    status,
     draft: savedText || generatedDraft,
     fields,
     completeness: { ready: missing.length === 0, missing, questions },
+    review: {
+      status: reviewStatus,
+      note: text(report?.reviewNote),
+      reviewedAt: text(report?.reviewedAt),
+      reviewedBy: text(report?.reviewedBy),
+    },
   };
 }
 
 export function jobCompletionRequirements(payload: JobPayload): JobCompletionRequirement[] {
   const rapportino = isRecord(payload.rapportino)
     && text(payload.rapportino.text).length >= 2
-    && (text(payload.rapportino.status).toUpperCase() === "SUBMITTED" || !("status" in payload.rapportino));
+    && (["SUBMITTED", "APPROVED"].includes(text(payload.rapportino.status).toUpperCase()) || !("status" in payload.rapportino));
   const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
   const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));
   const location = text(payload.location);

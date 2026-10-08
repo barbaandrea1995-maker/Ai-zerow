@@ -11,6 +11,7 @@ export default async function OperationsJobPage({ params }: PageProps) {
     <OperationsJobWorkspace
       canWriteOperations={hasCapability(authority, "operations.write")}
       canWriteReport={hasCapability(authority, "operations.write") || hasCapability(authority, "field.write")}
+      canReviewReport={hasCapability(authority, "operations.write") || hasCapability(authority, "approvals.review") || hasCapability(authority, "attendance.approve")}
       jobId={decodeURIComponent(jobId)}
     />
   );

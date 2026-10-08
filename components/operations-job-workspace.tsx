@@ -76,7 +76,7 @@ type CompletionRequirement = {
 };
 
 type RapportinoReadback = {
-  status: "EMPTY" | "DRAFT" | "SUBMITTED";
+  status: "EMPTY" | "DRAFT" | "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
   draft: string;
   fields: Array<{
     key: string;
@@ -89,6 +89,12 @@ type RapportinoReadback = {
     ready: boolean;
     missing: string[];
     questions: string[];
+  };
+  review: {
+    status: "PENDING" | "APPROVED" | "CHANGES_REQUESTED";
+    note: string;
+    reviewedAt: string;
+    reviewedBy: string;
   };
 };
 
@@ -154,12 +160,13 @@ function statusTone(status: string) {
       "VERIFIED_SITES_READBACK",
       "ASSIGNED",
       "SUBMITTED",
+      "APPROVED",
     ].includes(value)
   )
     return "border-lime-300/25 bg-lime-300/10 text-lime-200";
   if (["BLOCKED", "BLOCCATA"].includes(value))
     return "border-rose-300/25 bg-rose-300/10 text-rose-200";
-  if (["DRAFT", "BOZZA", "QUEUED", "PROPOSTA", "DA PREPARARE"].includes(value))
+  if (["DRAFT", "BOZZA", "QUEUED", "PROPOSTA", "DA PREPARARE", "CHANGES_REQUESTED"].includes(value))
     return "border-amber-300/25 bg-amber-300/10 text-amber-200";
   return "border-cyan-300/25 bg-cyan-300/10 text-cyan-200";
 }
@@ -229,6 +236,7 @@ const ACTION_LABELS: Record<string, string> = {
   add_report: "Rapportino aggiunto",
   save_rapportino: "Bozza rapportino salvata",
   submit_rapportino: "Rapportino inviato in ufficio",
+  review_rapportino: "Revisione rapportino registrata",
   assign: "Risorse assegnate",
   set_status: "Stato aggiornato",
   update_details: "Scheda aggiornata",
@@ -237,6 +245,14 @@ const ACTION_LABELS: Record<string, string> = {
 
 function displayAction(value: string) {
   return ACTION_LABELS[value] ?? "Scheda aggiornata";
+}
+
+function rapportinoStatusLabel(status: RapportinoReadback["status"]) {
+  if (status === "SUBMITTED") return "INVIATO";
+  if (status === "APPROVED") return "APPROVATO";
+  if (status === "CHANGES_REQUESTED") return "INTEGRAZIONE RICHIESTA";
+  if (status === "DRAFT") return "BOZZA";
+  return "NUOVO";
 }
 
 function compactDescription(value: string, maxLength = 260) {
@@ -529,10 +545,12 @@ function WorkspaceSectionCard({
 export default function OperationsJobWorkspace({
   canWriteOperations,
   canWriteReport,
+  canReviewReport,
   jobId,
 }: {
   canWriteOperations: boolean;
   canWriteReport: boolean;
+  canReviewReport: boolean;
   jobId: string;
 }) {
   const router = useRouter();
@@ -560,6 +578,7 @@ export default function OperationsJobWorkspace({
   const [evidenceTitle, setEvidenceTitle] = useState("");
   const [evidenceDetail, setEvidenceDetail] = useState("");
   const [reportText, setReportText] = useState("");
+  const [reviewNote, setReviewNote] = useState("");
   const [progress, setProgress] = useState(0);
 
   const notify = useCallback((message: string) => {
@@ -764,6 +783,7 @@ export default function OperationsJobWorkspace({
   const openReport = () => {
     if (!payload) return;
     setReportText(payload.workspace.rapportino.draft);
+    setReviewNote(payload.workspace.rapportino.review.note);
     setActionOpen("report");
   };
 
@@ -771,13 +791,19 @@ export default function OperationsJobWorkspace({
     if (!openReportFromQuery || !payload || autoOpenedReportJobRef.current === jobId) return;
     autoOpenedReportJobRef.current = jobId;
     setReportText(payload.workspace.rapportino.draft);
+    setReviewNote(payload.workspace.rapportino.review.note);
     setActionOpen("report");
   }, [jobId, openReportFromQuery, payload]);
 
-  const submitReport = (intent: "DRAFT" | "SUBMIT") => {
-    void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", {
-      text: reportText,
-    });
+  const submitReport = (intent: "DRAFT" | "SUBMIT" | "APPROVE" | "REQUEST_CHANGES") => {
+    if (intent === "APPROVE" || intent === "REQUEST_CHANGES") {
+      void mutate("review_rapportino", {
+        decision: intent === "APPROVE" ? "APPROVE" : "REQUEST_CHANGES",
+        reviewNote,
+      });
+      return;
+    }
+    void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", { text: reportText });
   };
 
   if (state === "loading")
@@ -1226,7 +1252,11 @@ export default function OperationsJobWorkspace({
                 <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.05] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">
                   {canWriteOperations
                     ? "Gestione disponibile"
-                    : "Solo consultazione"}
+                    : canWriteReport
+                      ? "Rapportino disponibile"
+                      : canReviewReport
+                        ? "Revisione disponibile"
+                        : "Solo consultazione"}
                 </span>
               </div>
               <div
@@ -1260,13 +1290,13 @@ export default function OperationsJobWorkspace({
                     </Button>
                   </>
                 )}
-                {canWriteReport && <Button
+                {(canWriteReport || (canReviewReport && workspace.rapportino.status === "SUBMITTED")) && <Button
                   variant="outline"
                   className="h-11 border-cyan-300/25 bg-cyan-300/[.05] text-xs text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-300/[.1]"
                   onClick={openReport}
                 >
                   <FileText className="size-3.5" />
-                  Crea rapportino con Company AI
+                  {canWriteReport ? "Crea rapportino con Company AI" : "Rivedi rapportino"}
                 </Button>}
                 <Button
                   variant="outline"
@@ -1404,7 +1434,7 @@ export default function OperationsJobWorkspace({
         </footer>
       </div>
 
-      {(canWriteOperations || canWriteReport) && (
+      {(canWriteOperations || canWriteReport || canReviewReport) && (
         <Dialog
           open={actionOpen !== null}
           onOpenChange={(open) => !open && setActionOpen(null)}
@@ -1421,7 +1451,7 @@ export default function OperationsJobWorkspace({
                       : actionOpen === "evidence"
                         ? "Registra evidenza"
                         : actionOpen === "report"
-                          ? "Rapportino giornaliero"
+                          ? canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" ? "Revisione rapportino" : "Rapportino giornaliero"
                           : "Aggiorna avanzamento"}
               </DialogTitle>
               <DialogDescription className="text-slate-500">
@@ -1589,7 +1619,7 @@ export default function OperationsJobWorkspace({
                         </div>
                       </div>
                       <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] ${statusTone(payload.workspace.rapportino.status)}`}>
-                        {payload.workspace.rapportino.status === "SUBMITTED" ? "INVIATO" : payload.workspace.rapportino.status === "DRAFT" ? "BOZZA" : "NUOVO"}
+                        {rapportinoStatusLabel(payload.workspace.rapportino.status)}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -1617,6 +1647,7 @@ export default function OperationsJobWorkspace({
                         </ul>
                       </div>
                     )}
+                    {payload.workspace.rapportino.review.status === "CHANGES_REQUESTED" && payload.workspace.rapportino.review.note && <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">NOTA DELL’UFFICIO</p><p className="mt-2 text-[11px] leading-5 text-amber-100/85">{payload.workspace.rapportino.review.note}</p></div>}
                   </section>
                   <label className="space-y-2 text-xs text-slate-400">
                     Consuntivo del turno
@@ -1624,9 +1655,11 @@ export default function OperationsJobWorkspace({
                       className="mt-2 min-h-[220px] border-white/10 bg-black/30 text-slate-100"
                       onChange={(event) => setReportText(event.target.value)}
                       placeholder="Company AI precompila qui. Completa criticità, materiali e prossimi passi; poi salva la bozza o invia in ufficio."
+                      readOnly={!canWriteReport}
                       value={reportText}
                     />
                   </label>
+                  {canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" && <label className="space-y-2 text-xs text-slate-400"><span>Nota revisione <span className="text-slate-600">(obbligatoria per richiedere integrazioni)</span></span><Textarea className="mt-2 min-h-[90px] border-amber-300/20 bg-black/30 text-slate-100" onChange={(event) => setReviewNote(event.target.value)} placeholder="Conferma il rapportino oppure indica cosa deve essere integrato…" value={reviewNote} /></label>}
                 </div>
               )}
               {actionOpen === "progress" && (
@@ -1664,22 +1697,23 @@ export default function OperationsJobWorkspace({
                 </DialogClose>
                 {actionOpen === "report" ? (
                   <>
-                    <Button
+                    {canWriteReport && <Button
                       type="button"
                       variant="outline"
                       className="border-cyan-300/25 bg-cyan-300/[0.05] text-cyan-100 hover:bg-cyan-300/[0.1]"
                       onClick={() => submitReport("DRAFT")}
                     >
                       Salva bozza
-                    </Button>
-                    <Button
+                    </Button>}
+                    {canWriteReport && <Button
                       type="button"
                       className="bg-lime-300 text-[#060806] hover:bg-lime-200"
                       onClick={() => submitReport("SUBMIT")}
                     >
                       <Send className="size-3.5" />
                       {payload.workspace.rapportino.status === "SUBMITTED" ? "Invia revisione" : "Invia in ufficio"}
-                    </Button>
+                    </Button>}
+                    {canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" && <><Button type="button" variant="outline" className="border-amber-300/25 bg-amber-300/[0.05] text-amber-100 hover:bg-amber-300/[0.1]" onClick={() => submitReport("REQUEST_CHANGES")}><FileText className="size-3.5" />Richiedi integrazione</Button><Button type="button" className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => submitReport("APPROVE")}><CheckCircle2 className="size-3.5" />Approva rapportino</Button></>}
                   </>
                 ) : (
                   <Button
