@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -34,7 +35,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -533,6 +534,9 @@ export default function OperationsJobWorkspace({
   jobId: string;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const openReportFromQuery = searchParams.get("open") === "rapportino";
+  const autoOpenedReportJobRef = useRef("");
   const [payload, setPayload] = useState<WorkspacePayload | null>(null);
   const [state, setState] = useState<
     "loading" | "ready" | "unauthenticated" | "forbidden" | "missing" | "error"
@@ -760,6 +764,13 @@ export default function OperationsJobWorkspace({
     setReportText(payload.workspace.rapportino.draft);
     setActionOpen("report");
   };
+
+  useEffect(() => {
+    if (!openReportFromQuery || !payload || autoOpenedReportJobRef.current === jobId) return;
+    autoOpenedReportJobRef.current = jobId;
+    setReportText(payload.workspace.rapportino.draft);
+    setActionOpen("report");
+  }, [jobId, openReportFromQuery, payload]);
 
   const submitReport = (intent: "DRAFT" | "SUBMIT") => {
     void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", {
@@ -1302,12 +1313,14 @@ export default function OperationsJobWorkspace({
                 icon={MapPin}
                 section={workspace.sections.evidence}
               />
-              <WorkspaceSectionCard
-                eyebrow="CONSUNTIVO"
-                title="Rapportino e controllo"
-                icon={FileText}
-                section={workspace.sections.rapportino}
-              />
+              <div className="scroll-mt-24" id="rapportino">
+                <WorkspaceSectionCard
+                  eyebrow="CONSUNTIVO"
+                  title="Rapportino e controllo"
+                  icon={FileText}
+                  section={workspace.sections.rapportino}
+                />
+              </div>
             </div>
           </div>
           <aside className="min-w-0 space-y-4">

@@ -436,6 +436,11 @@ assert(attendanceRoute.includes("trackingSessionId") && attendanceRoute.includes
 assert(attendanceRoute.includes("attendance.self") && attendanceRoute.includes("attendance.approve"), "Attendance actions must expose dedicated capabilities with legacy aliases");
 const attendanceControl = await readFile(join(root, "components", "attendance-control.tsx"), "utf8");
 assert(attendanceControl.includes("navigator.geolocation") && attendanceControl.includes("/attendance") && attendanceControl.includes("check_in") && attendanceControl.includes("check_out") && attendanceControl.includes("consentire la posizione"), "Attendance UI must capture and require GPS for entry/exit");
+const operationalAttendanceDeck = await readFile(join(root, "components", "operational-attendance-deck.tsx"), "utf8");
+const operationsJobWorkspace = await readFile(join(root, "components", "operations-job-workspace.tsx"), "utf8");
+assert(attendanceControl.includes("reportHref") && attendanceControl.includes("CHIUSURA TURNO COMPLETATA") && attendanceControl.includes("Crea rapportino con Company AI"), "Commessa attendance must hand off a closed shift to the Company AI report flow");
+assert(operationalAttendanceDeck.includes('target.kind === "DRIVER" ? null') && operationalAttendanceDeck.includes("open=rapportino"), "Driver attendance must remain mission-owned while non-driver service attendance can open the Company AI report");
+assert(operationsJobWorkspace.includes("useSearchParams") && operationsJobWorkspace.includes('searchParams.get("open") === "rapportino"') && operationsJobWorkspace.includes('id="rapportino"'), "Operations workspace must open the Company AI report from the attendance handoff");
 const trackingSessionRoute = await readFile(join(root, "app", "api", "location", "sessions", "route.ts"), "utf8");
 assert(trackingSessionRoute.includes("valid_attendance_check_in_required") && trackingSessionRoute.includes("tracking_requires_driver_attendance"), "Direct tracking start must remain behind the attendance gate");
 const trackingDeviceRoute = await readFile(join(root, "app", "api", "location", "devices", "route.ts"), "utf8");

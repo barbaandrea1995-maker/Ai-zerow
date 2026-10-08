@@ -83,7 +83,7 @@ async function postAttendance(url: string, body: Record<string, unknown>) {
   throw lastError;
 }
 
-export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jobId: string; canApprove?: boolean; onChanged?: () => void | Promise<void> }) {
+export function AttendanceControl({ jobId, canApprove = false, reportHref, onChanged }: { jobId: string; canApprove?: boolean; reportHref?: string | null; onChanged?: () => void | Promise<void> }) {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState<AttendanceAction | "">("");
@@ -92,14 +92,19 @@ export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jo
   const [correctionAt, setCorrectionAt] = useState("");
   const [correctionNote, setCorrectionNote] = useState("");
   const [serverCanApprove, setServerCanApprove] = useState(false);
+  const [serverCanOpenReport, setServerCanOpenReport] = useState(false);
+  const [reportHandoffVisible, setReportHandoffVisible] = useState(false);
 
   const refresh = useCallback(async () => {
+    setReportHandoffVisible(false);
     try {
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/attendance`, { cache: "no-store" });
       const payload = await response.json() as AttendanceResponse;
       if (!response.ok) throw new Error("Le presenze non sono disponibili in questo momento.");
       setRecords(payload.records ?? []);
-      setServerCanApprove(Boolean(payload.context?.capabilities?.includes("attendance.approve") || payload.context?.capabilities?.includes("workforce.manage")));
+      const capabilities = payload.context?.capabilities ?? [];
+      setServerCanApprove(Boolean(capabilities.includes("attendance.approve") || capabilities.includes("workforce.manage")));
+      setServerCanOpenReport(Boolean(capabilities.includes("operations.write") || capabilities.includes("field.write")));
       setState("ready");
     } catch {
       setNotice("Le presenze non sono disponibili in questo momento.");
@@ -121,6 +126,7 @@ export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jo
   async function execute(action: AttendanceAction) {
     setBusy(action);
     setNotice("");
+    setReportHandoffVisible(false);
     if (action === "correction_request" && correctionNote.trim().length < 8) {
       setNotice("Inserisci il motivo della correzione prima di inviare la richiesta.");
       setBusy("");
@@ -153,8 +159,10 @@ export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jo
         if (payload.error === "correction_note_required") throw new Error("Inserisci il motivo della correzione.");
         throw new Error("La timbratura non è stata registrata.");
       }
+      const shouldOpenReport = (action === "check_out" || action === "correction_approve") && Boolean(reportHref && serverCanOpenReport);
       await refresh();
       await onChanged?.();
+      setReportHandoffVisible(shouldOpenReport);
       setNotice(action === "correction_request" ? "Richiesta di uscita correttiva registrata: serve l’approvazione autorizzata." : action === "correction_approve" ? "Uscita correttiva approvata e presenza chiusa." : payload.tracking?.status === "STARTED" ? "Ingresso registrato: tracking GPS attivo per la missione." : payload.tracking?.status === "CLOSED" ? "Uscita registrata: tracking GPS terminato." : "Presenza registrata con posizione osservata.");
     } catch (error) {
       setNotice(attendanceErrorMessage(error));
@@ -172,5 +180,6 @@ export function AttendanceControl({ jobId, canApprove = false, onChanged }: { jo
     {(status === "CHECKED_IN" || status === "PAUSED") && <div className="mt-3 grid gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[.035] p-4 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)]"><label className="text-[10px] text-amber-100/70">Ora effettiva (opzionale)<Input className="mt-1 h-9 border-amber-300/15 bg-black/25 text-[10px]" onChange={(event) => setCorrectionAt(event.target.value)} type="datetime-local" value={correctionAt} /></label><label className="text-[10px] text-amber-100/70">Motivo correzione uscita<Input className="mt-1 h-9 border-amber-300/15 bg-black/25 text-[10px]" onChange={(event) => setCorrectionNote(event.target.value)} placeholder="Ho dimenticato di timbrare l’uscita…" value={correctionNote} /></label><p className="text-[9px] leading-4 text-amber-100/60 sm:col-span-2">Se sei fuori geofence, l’uscita normale resta bloccata. La richiesta viene registrata con audit e si chiude solo dopo approvazione autorizzata.</p></div>}
     <div className="mt-3 flex items-center gap-2 text-[9px] text-slate-600"><ShieldCheck className="size-3.5 text-cyan-200/70" />La posizione viene letta solo quando effettui una timbratura. Entrata e uscita richiedono GPS e geofence; per un autista il tracking continua fino all’uscita.</div>
     {notice && <p className="mt-3 rounded-xl border border-white/[.08] bg-black/20 px-3 py-2 text-[10px] text-slate-400">{notice}</p>}
+    {reportHandoffVisible && reportHref && serverCanOpenReport && <div className="mt-3 rounded-2xl border border-lime-300/20 bg-lime-300/[.05] p-4"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-lime-200/80">CHIUSURA TURNO COMPLETATA</p><p className="mt-1 text-[11px] leading-5 text-slate-300">Presenza, orari, risorse e posizione sono già disponibili nella scheda commessa. Completa ora il rapportino con Company AI prima dell’invio in ufficio.</p><a className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl bg-lime-300 px-4 py-2 text-[10px] font-semibold text-[#050705] transition hover:bg-lime-200" href={reportHref}>Crea rapportino con Company AI</a></div>}
   </section>;
 }
