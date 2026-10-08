@@ -1738,6 +1738,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (boundedText(savedReport.status, 24).toUpperCase() === "APPROVED") {
           return Response.json({ error: "mission_report_already_approved", message: "Il rapportino è già approvato dall’ufficio e non può essere modificato." }, { status: 409 });
         }
+        if (boundedText(savedReport.status, 24).toUpperCase() === "SUBMITTED" && !hasCapability(context, "mission.manage")) {
+          return Response.json({ error: "mission_report_pending_review", message: "Il rapportino è in revisione: attendi l’ufficio oppure una richiesta di integrazione." }, { status: 409 });
+        }
         const reportText = boundedText(input.text, 4_000);
         if (reportText.length < 2) return Response.json({ error: "mission_report_text_required" }, { status: 400 });
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
