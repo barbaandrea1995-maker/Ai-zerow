@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records } from "@/db/schema";
+import { jobJourneyRecords, routePlans, routeStops, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -36,6 +36,33 @@ function missionExecutionStatus(status: string) {
   if (status === "RECONCILED") return "RECONCILED";
   if (status === "CLOSED") return "CLOSED";
   return "UNKNOWN";
+}
+
+function routeProgressForMission(
+  missionId: string,
+  plans: Array<typeof routePlans.$inferSelect>,
+  stops: Array<typeof routeStops.$inferSelect>,
+) {
+  const plan = plans.find((candidate) => candidate.missionId === missionId);
+  if (!plan) return null;
+  const routeStopsForMission = stops
+    .filter((stop) => stop.routePlanId === plan.id)
+    .sort((left, right) => left.sequence - right.sequence);
+  const physicallyClosed = (stop: typeof routeStops.$inferSelect) => stop.status === "DEPARTED" || Boolean(stop.departedAt);
+  const completed = (stop: typeof routeStops.$inferSelect) => stop.status === "COMPLETED" || stop.deliveryStatus === "CONFIRMED";
+  const current = routeStopsForMission.find((stop) => !physicallyClosed(stop)) ?? null;
+  const currentMetadata = current ? parseJson(current.evidenceJson) : {};
+  return {
+    routePlanId: plan.id,
+    status: plan.status,
+    totalStops: routeStopsForMission.length,
+    completedStops: routeStopsForMission.filter(completed).length,
+    physicallyClosedStops: routeStopsForMission.filter(physicallyClosed).length,
+    currentStopId: current?.id ?? null,
+    currentStopSequence: current?.sequence ?? null,
+    currentStopLabel: typeof currentMetadata.label === "string" ? currentMetadata.label : null,
+    currentStopKind: typeof currentMetadata.kind === "string" ? currentMetadata.kind : null,
+  };
 }
 
 function firstSlotValue(payload: Record<string, unknown>, key: "startsAt" | "endsAt"): string | null {
@@ -102,13 +129,26 @@ export async function GET() {
       )).limit(500),
       missionRowsQuery,
     ]);
+    const missionIds = missionRows.map((mission) => mission.id);
+    const routePlanRows = missionIds.length
+      ? await db.select().from(routePlans).where(and(
+        eq(routePlans.tenantId, context.tenantId),
+        inArray(routePlans.missionId, missionIds),
+      )).limit(500)
+      : [];
+    const routeStopRows = routePlanRows.length
+      ? await db.select().from(routeStops).where(and(
+        eq(routeStops.tenantId, context.tenantId),
+        inArray(routeStops.routePlanId, routePlanRows.map((plan) => plan.id)),
+      )).limit(1_000)
+      : [];
     const scopeTokens = teamScopeTokens(workforceRows, context);
     const broadRead = canReadAllOperations(context);
     const visibleJobs = jobs.filter((job) => job.recordType !== "adapter-contract" && (broadRead || rowMatchesContext(job, context, scopeTokens)));
     const allowedJobIds = new Set(visibleJobs.map((job) => job.id));
     const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
     const visiblePlanIds = new Set(visiblePlans.map((plan) => plan.id));
-    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; executionStatus: string; version: number; updatedAt: string }>();
+    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; executionStatus: string; routeProgress: ReturnType<typeof routeProgressForMission>; version: number; updatedAt: string }>();
     for (const mission of missionRows) {
       if (!visiblePlanIds.size) break;
       const missionPayload = parseJson(mission.payloadJson);
@@ -119,6 +159,7 @@ export async function GET() {
           title: mission.title,
           status: mission.status,
           executionStatus: missionExecutionStatus(mission.status),
+          routeProgress: routeProgressForMission(mission.id, routePlanRows, routeStopRows),
           version: mission.version,
           updatedAt: mission.updatedAt,
         });
