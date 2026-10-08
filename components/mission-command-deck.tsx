@@ -993,6 +993,7 @@ export default function MissionCommandDeck() {
   const searchParams = useSearchParams();
   const handoffPlanId = searchParams.get("planId") ?? "";
   const handoffJobId = searchParams.get("jobId") ?? "";
+  const openMissionId = searchParams.get("missionId") ?? "";
   const [payload, setPayload] = useState<MissionPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "forbidden" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -1044,7 +1045,11 @@ export default function MissionCommandDeck() {
       const next = await response.json() as MissionPayload & { error?: string };
       if (!response.ok) throw new Error(next.error ?? "mission_control_unavailable");
       setPayload(next);
-      setSelectedId((current) => current && next.missions.some((mission) => mission.id === current) ? current : next.missions[0]?.id ?? "");
+      setSelectedId((current) => current && next.missions.some((mission) => mission.id === current)
+        ? current
+        : openMissionId && next.missions.some((mission) => mission.id === openMissionId)
+          ? openMissionId
+          : next.missions[0]?.id ?? "");
       setState("ready");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Mission control non disponibile.");
@@ -1052,7 +1057,7 @@ export default function MissionCommandDeck() {
     } finally {
       setRefreshing(false);
     }
-  }, [notify]);
+  }, [notify, openMissionId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);

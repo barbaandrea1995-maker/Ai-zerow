@@ -59,7 +59,13 @@ export async function GET() {
 
   try {
     const db = getDb();
-    const [jobs, plans, workforceRows] = await Promise.all([
+    const missionRowsQuery = hasCapability(context, "mission.read")
+      ? db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.domain, "mission"),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500)
+      : Promise.resolve([]);
+    const [jobs, plans, workforceRows, missionRows] = await Promise.all([
       db.select().from(s04Records).where(and(
         eq(s04Records.tenantId, context.tenantId),
         inArray(s04Records.module, allowedModules),
@@ -72,12 +78,29 @@ export async function GET() {
         eq(s04Records.tenantId, context.tenantId),
         eq(s04Records.module, "workforce"),
       )).limit(500),
+      missionRowsQuery,
     ]);
     const scopeTokens = teamScopeTokens(workforceRows, context);
     const broadRead = canReadAllOperations(context);
     const visibleJobs = jobs.filter((job) => job.recordType !== "adapter-contract" && (broadRead || rowMatchesContext(job, context, scopeTokens)));
     const allowedJobIds = new Set(visibleJobs.map((job) => job.id));
     const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
+    const visiblePlanIds = new Set(visiblePlans.map((plan) => plan.id));
+    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; version: number; updatedAt: string }>();
+    for (const mission of missionRows) {
+      if (!visiblePlanIds.size) break;
+      const missionPayload = parseJson(mission.payloadJson);
+      const planningPlanId = typeof missionPayload.planningPlanId === "string" ? missionPayload.planningPlanId : "";
+      if (planningPlanId && visiblePlanIds.has(planningPlanId) && !linkedMissionByPlan.has(planningPlanId)) {
+        linkedMissionByPlan.set(planningPlanId, {
+          id: mission.id,
+          title: mission.title,
+          status: mission.status,
+          version: mission.version,
+          updatedAt: mission.updatedAt,
+        });
+      }
+    }
     const jobById = new Map(visibleJobs.map((job) => [job.id, job]));
     const jobViews = visibleJobs.map((job) => {
       const payload = parseJobPayload(job.payloadJson);
@@ -130,6 +153,7 @@ export async function GET() {
         resourceLabels: resources.map((resource) => typeof resource.label === "string" ? resource.label : "Risorsa").slice(0, 16),
         conflictCount: evaluation && Array.isArray(evaluation.conflicts) ? evaluation.conflicts.length : 0,
         feasible: evaluation?.feasible !== false,
+        linkedMission: linkedMissionByPlan.get(plan.id) ?? null,
         updatedAt: plan.updatedAt,
       };
     });
@@ -147,6 +171,7 @@ export async function GET() {
         conflicted: planViews.filter((plan) => !plan.feasible).length,
         scopeLinked: planViews.filter((plan) => Boolean(plan.scopeSubgroupTitle)).length,
         assignedResources: planViews.reduce((total, plan) => total + plan.resourceCount, 0),
+        linkedMissions: planViews.filter((plan) => Boolean(plan.linkedMission)).length,
       },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });

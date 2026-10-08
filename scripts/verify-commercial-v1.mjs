@@ -406,11 +406,11 @@ const planningResources = await readFile(join(root, "lib", "planning-resources.t
 assert(planningResources.includes("activePlanningAssignments") && planningResources.includes("DRAFT") && planningResources.includes("PUBLISHED") && planningResources.includes("availableForWindow"), "Planning resource registry must evaluate active tenant assignments server-side");
 const planningSurface = await readFile(join(root, "components", "planning-control.tsx"), "utf8");
 assert(planningSurface.includes("/api/planning") && planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: \"draft\"'), "Planning module must provide a central readback and canonical resource draft flow");
-assert(planningSurface.includes("openMissionFromPlan") && planningSurface.includes("Prepara missione"), "Published transport plans must expose the controlled handoff to Missioni");
+assert(planningSurface.includes("openMissionFromPlan") && planningSurface.includes("Prepara missione") && planningSurface.includes("Apri missione") && planningSurface.includes("linkedMission"), "Published transport plans must expose a controlled handoff and linked mission readback");
 const planningResourceFields = await readFile(join(root, "components", "planning-resource-fields.tsx"), "utf8");
 assert(planningResourceFields.includes("startsAt") && planningResourceFields.includes("endsAt") && planningResourceFields.includes("disabled={!available}"), "Planning UI must consume server-side availability and disable occupied resources");
 const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
-assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId"), "Central planning readback must be capability-gated and tenant-scoped");
+assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId") && planningIndexRoute.includes("linkedMissionByPlan"), "Central planning readback must be capability-gated, tenant-scoped and mission-linked");
 assert(planningIndexRoute.includes("jobModule"), "Planning readback must identify the owning operational domain for handoff rules");
 
 const teamsRoute = await readFile(join(root, "app", "api", "authority", "teams", "route.ts"), "utf8");
