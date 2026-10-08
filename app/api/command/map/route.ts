@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import {
   geofences,
   geoLocations,
+  jobJourneyRecords,
   locationEvents,
   locationSamples,
   s04Records,
@@ -12,6 +13,7 @@ import {
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { auditLocationAccess, eventForResponse } from "@/lib/location-intelligence/repository";
+import { storedMissionException } from "@/lib/mission-exception-contract";
 import { getLocationProviderStatus } from "@/lib/location-intelligence/providers";
 import { recordForResponse } from "@/lib/s04-adapter";
 import { canReadAllLocations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -24,6 +26,15 @@ function roundedCoordinate(valueE6: number) {
 
 function payloadText(payload: Record<string, unknown>, key: string) {
   return typeof payload[key] === "string" ? String(payload[key]).trim() : "";
+}
+
+function parseJson(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
 }
 
 function locationLabel(entityType: string, entityId: string, records: Map<string, ReturnType<typeof recordForResponse>>, warehouseById: Map<string, typeof tenantWarehouses.$inferSelect>) {
@@ -91,11 +102,12 @@ export async function GET() {
   if (!canReadCurrent) return Response.json({ error: "forbidden", capability: "location.read.current" }, { status: 403 });
 
   const canViewFleet = hasCapability(context, "location.view.fleet") || hasCapability(context, "location.audit.read");
+  const canReadMissions = hasCapability(context, "mission.read");
   const capability = canViewFleet ? "location.view.fleet" : "location.read.current";
 
   try {
     const db = getDb();
-    const [locationRows, fenceRows, warehouseRows, catalogRows, eventRows, sessionRows] = await Promise.all([
+    const [locationRows, fenceRows, warehouseRows, catalogRows, eventRows, sessionRows, missionRows] = await Promise.all([
       db.select().from(geoLocations)
         .where(and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE")))
         .orderBy(asc(geoLocations.entityType), asc(geoLocations.updatedAt))
@@ -127,6 +139,12 @@ export async function GET() {
         ))
         .orderBy(desc(trackingSessions.startedAt))
         .limit(500),
+      canReadMissions
+        ? db.select().from(jobJourneyRecords)
+          .where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.domain, "mission")))
+          .orderBy(desc(jobJourneyRecords.updatedAt))
+          .limit(500)
+        : Promise.resolve([]),
     ]);
 
     const allLocationsVisible = canReadAllLocations(context);
@@ -135,6 +153,9 @@ export async function GET() {
       ? catalogRows
       : catalogRows.filter((row) => rowMatchesContext(row, context, scopeTokens));
     const visibleCatalogIds = new Set(visibleCatalogRows.flatMap((row) => [row.id, row.canonicalCode].filter(Boolean)));
+    const visibleMissionRows = canReadMissions
+      ? missionRows.filter((mission) => canViewFleet || visibleCatalogIds.has(mission.jobId))
+      : [];
     const eventLocationIds = new Set(eventRows.map((event) => event.locationId).filter((value): value is string => Boolean(value)));
     const visibleLocationRows = allLocationsVisible
       ? locationRows
@@ -152,6 +173,29 @@ export async function GET() {
     }));
     const warehouseById = new Map(warehouseRows.map((warehouse) => [warehouse.id, warehouse] as const));
     const knownLocationEntities = new Set(visibleLocationRows.map((location) => `${location.entityType}:${location.entityId}`));
+    const missionExceptions = visibleMissionRows.flatMap((mission) => {
+      const exception = storedMissionException(parseJson(mission.payloadJson).missionException);
+      if (!exception) return [];
+      const linkedRecord = visibleCatalogRows.find((row) => row.id === mission.jobId);
+      return [{
+        missionId: mission.id,
+        jobId: mission.jobId,
+        title: mission.title,
+        jobTitle: linkedRecord?.title ?? null,
+        missionStatus: mission.status,
+        type: exception.type,
+        note: exception.note,
+        reference: exception.reference,
+        stopId: exception.stopId,
+        recoveryStatus: exception.recoveryStatus,
+        reportedAt: exception.reportedAt,
+        reportedBy: exception.reportedBy,
+        resolvedAt: exception.resolvedAt ?? null,
+        resolvedBy: exception.resolvedBy ?? null,
+        resolutionNote: exception.resolutionNote ?? null,
+        updatedAt: mission.updatedAt,
+      }];
+    });
 
     const locations = visibleLocationRows.map((location) => ({
       ...locationPresentation(location.entityType, location.entityId, records, warehouseById),
@@ -235,7 +279,7 @@ export async function GET() {
       action: "READ_CURRENT_MAP",
       resourceType: "COMMAND_OPERATIONAL_MAP",
       purpose: "Visualizzazione della mappa operativa con sedi canoniche e ultima posizione GPS autorizzata.",
-      metadata: { locationCount: mergedLocations.length, vehicleCount: vehicles.length, fleetVisible: canViewFleet },
+      metadata: { locationCount: mergedLocations.length, vehicleCount: vehicles.length, missionExceptionCount: missionExceptions.length, fleetVisible: canViewFleet },
     });
 
     return Response.json({
@@ -263,6 +307,7 @@ export async function GET() {
       })),
       vehicles: vehicles.map((vehicle) => ({ ...vehicle, latestEvent: latestEventByVehicle.get(vehicle.id) ? eventForResponse(latestEventByVehicle.get(vehicle.id)!) : null })),
       activeSessions: sessionRows.map((session) => ({ id: session.id, employeeId: session.employeeId, vehicleId: session.vehicleId, trackingDeviceId: session.trackingDeviceId, startedAt: session.startedAt, source: session.trackingSource })),
+      missionExceptions,
       derivedEvents: eventRows.slice(0, 80).map(eventForResponse),
       rawSamples: "CURRENT_POSITION_ONLY",
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },

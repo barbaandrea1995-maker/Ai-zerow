@@ -8,6 +8,7 @@ import {
   BriefcaseBusiness,
   CalendarClock,
   CheckCircle2,
+  CircleAlert,
   Crosshair,
   ExternalLink,
   LocateFixed,
@@ -22,6 +23,7 @@ import {
   ZoomOut,
   type LucideIcon,
 } from "lucide-react";
+import { missionExceptionLabel } from "@/lib/mission-exception-contract";
 import type { GeoJSONSource, Map as MapboxMap, StyleSpecification } from "mapbox-gl";
 import type { LayerGroup, Map as LeafletMap } from "leaflet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -99,6 +101,24 @@ export type OperationalMapLivePayload = {
     latestEvent?: { eventType?: string; occurredAt?: string } | null;
   }>;
   activeSessions: Array<{ id: string; employeeId: string; vehicleId: string; trackingDeviceId: string; startedAt: string; source: string }>;
+  missionExceptions: Array<{
+    missionId: string;
+    jobId: string;
+    title: string;
+    jobTitle: string | null;
+    missionStatus: string;
+    type: string;
+    note: string;
+    reference: string | null;
+    stopId: string | null;
+    recoveryStatus: "OPEN" | "RESOLVED";
+    reportedAt: string;
+    reportedBy: string;
+    resolvedAt: string | null;
+    resolvedBy: string | null;
+    resolutionNote: string | null;
+    updatedAt: string;
+  }>;
   derivedEvents: Array<{ id: string; eventType: string; occurredAt: string; vehicleId: string; locationId: string | null }>;
   rawSamples: string;
   readback?: { checkedAt?: string };
@@ -268,6 +288,15 @@ function locationStatusLabel(value: string | null | undefined) {
   if (normalized === "DRAFT" || normalized === "BOZZA") return "Bozza";
   if (normalized === "BLOCKED" || normalized === "BLOCCATA") return "Bloccata";
   return value || "Da verificare";
+}
+
+function MissionExceptionSignals({ exceptions }: { exceptions: OperationalMapLivePayload["missionExceptions"] }) {
+  if (!exceptions.length) return null;
+  const openCount = exceptions.filter((exception) => exception.recoveryStatus === "OPEN").length;
+  const visible = [...exceptions]
+    .sort((left, right) => Number(right.recoveryStatus === "OPEN") - Number(left.recoveryStatus === "OPEN") || Date.parse(right.reportedAt) - Date.parse(left.reportedAt))
+    .slice(0, 4);
+  return <section className="mt-3 rounded-xl border border-rose-300/20 bg-rose-300/[.035] p-3 sm:p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><CircleAlert className="size-4 text-rose-200" /><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-rose-200/80">MISSIONI / ECCEZIONI</p><p className="mt-1 text-[10px] text-slate-500">Readback operativo server-side, separato dalle coordinate GPS.</p></div></div><span className="rounded-full border border-rose-300/25 bg-rose-300/[.06] px-2 py-1 text-[9px] font-semibold uppercase tracking-[.1em] text-rose-100">{openCount} aperte</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{visible.map((exception) => <a className="rounded-lg border border-white/[.08] bg-black/20 p-3 transition hover:border-rose-300/30" href={`/mission?missionId=${encodeURIComponent(exception.missionId)}`} key={exception.missionId}><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-[11px] font-semibold text-slate-100">{exception.title}</p><p className="mt-1 truncate text-[9px] text-slate-600">{exception.jobTitle ?? "Missione autonoma"} · {missionExceptionLabel(exception.type)}</p></div><span className={`shrink-0 rounded-full border px-2 py-1 text-[8px] font-semibold uppercase ${exception.recoveryStatus === "OPEN" ? "border-rose-300/25 bg-rose-300/[.06] text-rose-100" : "border-lime-300/20 bg-lime-300/[.05] text-lime-100"}`}>{exception.recoveryStatus === "OPEN" ? "APERTA" : "RISOLTA"}</span></div><p className="mt-2 line-clamp-2 text-[10px] leading-4 text-slate-400">{exception.note}</p><p className="mt-2 text-[9px] text-slate-600">Segnalata {formatTime(exception.reportedAt)} · tappa {exception.stopId ?? "missione"}</p></a>)}</div>{exceptions.length > visible.length && <p className="mt-3 text-[9px] text-slate-600">+ {exceptions.length - visible.length} eccezioni nel registro Missioni.</p>}</section>;
 }
 
 type MapEntitySelection = { entityType: string; entityId: string; label: string };
@@ -447,6 +476,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
     <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/92 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/92 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
     </div>
     {selectedLocation && canManageGeofences && ["CANTIERE", "COMMESSA"].includes(selectedLocation.entityType) && selectedFence?.shapeType === "CIRCLE" && selectedFence.radiusMeters !== null && <GeofenceQuickAction entityType={selectedLocation.entityType} entityId={selectedLocation.entityId} label={selectedLocation.label} currentRadius={selectedFence.radiusMeters} version={selectedFence.version} onUpdated={() => loadMapData()} />}
+    <MissionExceptionSignals exceptions={liveData?.missionExceptions ?? []} />
   </div>;
 }
 
@@ -609,6 +639,7 @@ function MapboxLiveMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFil
     {selectedLocation && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-lime-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(200,255,34,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-lime-300/70">{selectedLocation.entityType}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedLocation.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedLocation.address || "Indirizzo non valorizzato"}</p></div><button aria-label="Chiudi dettaglio sede" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-lime-100/75">{selectedLocation.latestEvent?.eventType ? `${selectedLocation.latestEvent.eventType} · ${formatTime(selectedLocation.latestEvent.occurredAt)}` : selectedLocation.verified ? "Coordinate verificate" : "Coordinate da verificare"}</p></div>}
     {selectedVehicle && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-cyan-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(89,217,255,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">MEZZO · {selectedVehicle.state}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedVehicle.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedVehicle.deviceLabel} · ultimo segnale {formatTime(selectedVehicle.recordedAt)}</p></div><button aria-label="Chiudi dettaglio mezzo" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-cyan-100/75">{selectedVehicle.speedKmh !== null ? `${selectedVehicle.speedKmh} km/h` : "Velocità non disponibile"}{selectedVehicle.accuracyM !== null ? ` · precisione ${selectedVehicle.accuracyM} m` : ""}</p></div>}
     <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/90 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
+    <MissionExceptionSignals exceptions={liveData?.missionExceptions ?? []} />
   </div>;
 }
 

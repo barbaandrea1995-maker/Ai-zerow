@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, routePlans, routeStops, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { storedMissionException } from "@/lib/mission-exception-contract";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
@@ -36,6 +37,23 @@ function missionExecutionStatus(status: string) {
   if (status === "RECONCILED") return "RECONCILED";
   if (status === "CLOSED") return "CLOSED";
   return "UNKNOWN";
+}
+
+function missionExceptionReadback(payload: Record<string, unknown>) {
+  const exception = storedMissionException(payload.missionException);
+  if (!exception) return null;
+  return {
+    type: exception.type,
+    note: exception.note,
+    reference: exception.reference,
+    stopId: exception.stopId,
+    reportedAt: exception.reportedAt,
+    reportedBy: exception.reportedBy,
+    recoveryStatus: exception.recoveryStatus,
+    resolvedAt: exception.resolvedAt ?? null,
+    resolvedBy: exception.resolvedBy ?? null,
+    resolutionNote: exception.resolutionNote ?? null,
+  };
 }
 
 function routeProgressForMission(
@@ -217,6 +235,7 @@ export async function GET() {
       executionStatus: string;
       routeProgress: ReturnType<typeof routeProgressForMission>;
       schedule: ReturnType<typeof missionScheduleReadback>;
+      exception: ReturnType<typeof missionExceptionReadback>;
       version: number;
       updatedAt: string;
     }>();
@@ -232,6 +251,7 @@ export async function GET() {
           executionStatus: missionExecutionStatus(mission.status),
           routeProgress: routeProgressForMission(mission.id, routePlanRows, routeStopRows),
           schedule: missionScheduleReadback(missionPayload, planningPayloadById.get(planningPlanId) ?? {}, routePlanByMission.get(mission.id) ?? null, mission.status),
+          exception: missionExceptionReadback(missionPayload),
           version: mission.version,
           updatedAt: mission.updatedAt,
         });
@@ -308,6 +328,7 @@ export async function GET() {
         scopeLinked: planViews.filter((plan) => Boolean(plan.scopeSubgroupTitle)).length,
         assignedResources: planViews.reduce((total, plan) => total + plan.resourceCount, 0),
         linkedMissions: planViews.filter((plan) => Boolean(plan.linkedMission)).length,
+        exceptionsOpen: planViews.filter((plan) => plan.linkedMission?.exception?.recoveryStatus === "OPEN").length,
       },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
