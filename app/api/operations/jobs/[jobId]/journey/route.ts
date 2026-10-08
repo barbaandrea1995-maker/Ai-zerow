@@ -198,6 +198,38 @@ function parseJson(value: string) {
   }
 }
 
+function stringIds(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    : [];
+}
+
+function planningResourceIds(payload: JsonObject) {
+  const ids = stringIds(payload.resourceIds);
+  const resources = Array.isArray(payload.resources) ? payload.resources : [];
+  for (const resource of resources) {
+    if (isRecord(resource)) ids.push(...stringIds([resource.id]));
+  }
+  const slots = Array.isArray(payload.slots) ? payload.slots : [];
+  for (const slot of slots) {
+    if (isRecord(slot)) ids.push(...stringIds(slot.resourceIds));
+  }
+  return new Set(ids);
+}
+
+function planningWindow(payload: JsonObject) {
+  const startsAt = boundedText(payload.startsAt, 40);
+  const endsAt = boundedText(payload.endsAt, 40);
+  if (validDateTime(startsAt) && validDateTime(endsAt) && Date.parse(endsAt) > Date.parse(startsAt)) return { startsAt, endsAt };
+  const firstSlot = Array.isArray(payload.slots) ? payload.slots.find((slot) => isRecord(slot)) : null;
+  if (!isRecord(firstSlot)) return null;
+  const slotStartsAt = boundedText(firstSlot.startsAt, 40);
+  const slotEndsAt = boundedText(firstSlot.endsAt, 40);
+  return validDateTime(slotStartsAt) && validDateTime(slotEndsAt) && Date.parse(slotEndsAt) > Date.parse(slotStartsAt)
+    ? { startsAt: slotStartsAt, endsAt: slotEndsAt }
+    : null;
+}
+
 function planningData(row: typeof jobJourneyRecords.$inferSelect) {
   const payload = parseJson(row.payloadJson);
   const resources = Array.isArray(payload.resources)
@@ -934,6 +966,31 @@ export async function POST(request: Request, routeContext: RouteContext) {
       domain = "mission";
       recordType = "TRANSPORT";
       title = boundedText(input.title, 160, "Missione di trasporto");
+      const planningPlanId = boundedText(input.planningPlanId, 120);
+      let planningPlan: typeof jobJourneyRecords.$inferSelect | null = null;
+      let planningPlanPayload: JsonObject = {};
+      if (planningPlanId) {
+        const [candidatePlan] = await db.select().from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.jobId, job.id),
+          eq(jobJourneyRecords.id, planningPlanId),
+          eq(jobJourneyRecords.domain, "planning"),
+        )).limit(1);
+        if (!candidatePlan) return Response.json({ error: "planning_plan_not_found" }, { status: 404 });
+        if (candidatePlan.status !== "PUBLISHED") return Response.json({ error: "published_transport_plan_required", status: candidatePlan.status }, { status: 409 });
+        planningPlanPayload = parseJson(candidatePlan.payloadJson);
+        if (boundedText(planningPlanPayload.activityType, 24).toUpperCase() !== "TRANSPORT") {
+          return Response.json({ error: "transport_planning_plan_required" }, { status: 409 });
+        }
+        const linkedMissionRows = await db.select({ id: jobJourneyRecords.id, payloadJson: jobJourneyRecords.payloadJson }).from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.jobId, job.id),
+          eq(jobJourneyRecords.domain, "mission"),
+        )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(250);
+        const linkedMission = linkedMissionRows.find((row) => boundedText(parseJson(row.payloadJson).planningPlanId, 120) === planningPlanId);
+        if (linkedMission) return Response.json({ error: "planning_plan_already_linked", missionId: linkedMission.id }, { status: 409 });
+        planningPlan = candidatePlan;
+      }
       let pickup = boundedText(input.pickup, 240);
       const dropoff = boundedText(input.dropoff, 240);
       const plannedAt = boundedText(input.plannedAt, 40);
@@ -1002,6 +1059,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         throw error;
       }
+      if (planningPlan) {
+        const planResourceIds = planningResourceIds(planningPlanPayload);
+        const selectedResourceIds = [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)];
+        const missingResourceIds = selectedResourceIds.filter((resourceId) => !planResourceIds.has(resourceId));
+        if (missingResourceIds.length) {
+          return Response.json({ error: "mission_plan_resource_mismatch", planningPlanId: planningPlan.id, missingResourceIds }, { status: 409 });
+        }
+        const planWindow = planningWindow(planningPlanPayload);
+        if (planWindow && (Date.parse(resources.window.startsAt) < Date.parse(planWindow.startsAt) || Date.parse(resources.window.endsAt) > Date.parse(planWindow.endsAt))) {
+          return Response.json({ error: "mission_window_outside_planning_plan", planningPlanId: planningPlan.id, planWindow, missionWindow: resources.window }, { status: 409 });
+        }
+      }
       status = "PLANNED";
       payload = {
         pickup,
@@ -1014,6 +1083,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
         cargoAssetIds: resources.cargoAssets.map((asset) => asset.id),
         transportMode,
         resourceIds: [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)],
+        planningPlanId: planningPlan?.id ?? null,
+        planningPlanSnapshot: planningPlan ? { id: planningPlan.id, title: planningPlan.title, version: planningPlan.version, status: planningPlan.status } : null,
         materialRequestId: materialRequest?.id ?? null,
         materialRequestSnapshot: materialRequest
           ? (() => {
@@ -1759,6 +1830,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       status,
       version: nextVersion,
       materialRequestId: materialRequest?.id ?? null,
+      planningPlanId: boundedText(payload.planningPlanId, 120) || null,
       ...(missionActionEvent ? { operationalEvent: missionActionEvent } : {}),
     });
     const mutation = existing

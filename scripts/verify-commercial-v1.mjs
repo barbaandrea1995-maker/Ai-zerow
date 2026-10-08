@@ -62,6 +62,8 @@ assert(missionDeck.includes("cargoManifest") && missionDeck.includes("MANIFESTO 
 assert(missionDeck.includes("manifestEventForEntry") && missionDeck.includes("Evento effettivo"), "Mission UI must expose the timestamped action evidence for the selected route stop");
 assert(missionDeck.includes("AssetStopAssignmentList") && missionDeck.includes("selectedCargoAssetIds") && missionDeck.includes("cargoAssetIds"), "Mission UI must assign multiple real assets to individual route stops");
 assert(missionJourneyRoute.includes("cargoAssetIds") && missionJourneyRoute.includes("assetIds: actionAssetIds") && missionJourneyRoute.includes("assetIds: deliveryAssetIds"), "Mission actions must preserve multiple asset identities in server readback");
+assert(missionJourneyRoute.includes("planningPlanId") && missionJourneyRoute.includes("planning_plan_already_linked") && missionJourneyRoute.includes("mission_plan_resource_mismatch"), "Mission creation from planning must be server-linked, idempotent and resource-validated");
+assert(missionDeck.includes("useSearchParams") && missionDeck.includes("activePlanningPlanId") && missionDeck.includes("openCreate(null, handoff)"), "Mission UI must accept a published planning handoff and preserve its reference");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
@@ -404,10 +406,12 @@ const planningResources = await readFile(join(root, "lib", "planning-resources.t
 assert(planningResources.includes("activePlanningAssignments") && planningResources.includes("DRAFT") && planningResources.includes("PUBLISHED") && planningResources.includes("availableForWindow"), "Planning resource registry must evaluate active tenant assignments server-side");
 const planningSurface = await readFile(join(root, "components", "planning-control.tsx"), "utf8");
 assert(planningSurface.includes("/api/planning") && planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: \"draft\"'), "Planning module must provide a central readback and canonical resource draft flow");
+assert(planningSurface.includes("openMissionFromPlan") && planningSurface.includes("Prepara missione"), "Published transport plans must expose the controlled handoff to Missioni");
 const planningResourceFields = await readFile(join(root, "components", "planning-resource-fields.tsx"), "utf8");
 assert(planningResourceFields.includes("startsAt") && planningResourceFields.includes("endsAt") && planningResourceFields.includes("disabled={!available}"), "Planning UI must consume server-side availability and disable occupied resources");
 const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
 assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId"), "Central planning readback must be capability-gated and tenant-scoped");
+assert(planningIndexRoute.includes("jobModule"), "Planning readback must identify the owning operational domain for handoff rules");
 
 const teamsRoute = await readFile(join(root, "app", "api", "authority", "teams", "route.ts"), "utf8");
 assert(teamsRoute.includes('hasCapability(context, "authority.manage")') && teamsRoute.includes("team_membership_not_active"), "Team creation must be capability-gated and limited to active tenant memberships");

@@ -115,6 +115,7 @@ export async function GET() {
         id: plan.id,
         jobId: plan.jobId,
         jobTitle: jobById.get(plan.jobId)?.title ?? "Commessa non disponibile",
+        jobModule: jobById.get(plan.jobId)?.module ?? null,
         title: plan.title,
         status: plan.status,
         version: plan.version,

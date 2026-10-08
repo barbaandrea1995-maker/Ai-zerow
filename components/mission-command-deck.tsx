@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
@@ -188,6 +188,18 @@ type MissionPayload = {
   };
 };
 
+type PlanningHandoff = {
+  id: string;
+  jobId: string;
+  title: string;
+  status: string;
+  version: number;
+  startsAt: string | null;
+  endsAt: string | null;
+  location: string | null;
+  payload: Record<string, unknown>;
+};
+
 type NavItem = {
   id: CommandNavigationId;
   label: string;
@@ -281,6 +293,14 @@ function formatDate(value: unknown) {
   return Number.isNaN(date.getTime())
     ? "—"
     : date.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" });
+}
+
+function dateTimeLocalValue(value: unknown) {
+  if (typeof value !== "string" || !value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 function field(form: FormData, key: string) {
@@ -970,6 +990,9 @@ function RouteStopsEditor({
 
 export default function MissionCommandDeck() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const handoffPlanId = searchParams.get("planId") ?? "";
+  const handoffJobId = searchParams.get("jobId") ?? "";
   const [payload, setPayload] = useState<MissionPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "forbidden" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -999,6 +1022,11 @@ export default function MissionCommandDeck() {
   const [exceptionType, setExceptionType] = useState<MissionExceptionType>("DELAYED");
   const [exceptionStopId, setExceptionStopId] = useState("");
   const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
+  const [planningHandoff, setPlanningHandoff] = useState<PlanningHandoff | null>(null);
+  const [planningHandoffState, setPlanningHandoffState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [createJobId, setCreateJobId] = useState("");
+  const [missionTitle, setMissionTitle] = useState("Missione di trasporto");
+  const [activePlanningPlanId, setActivePlanningPlanId] = useState("");
 
   const notify = useCallback((message: string) => {
     setNotice(message);
@@ -1038,6 +1066,51 @@ export default function MissionCommandDeck() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    if (!handoffPlanId || !handoffJobId) {
+      return;
+    }
+    if (planningHandoff?.id === handoffPlanId && planningHandoffState === "ready") return;
+    let active = true;
+    void fetch(`/api/operations/jobs/${encodeURIComponent(handoffJobId)}/planning`, { cache: "no-store" })
+      .then(async (response) => {
+        const next = await response.json() as { plans?: Array<Record<string, unknown>>; error?: string };
+        if (!response.ok) throw new Error(next.error ?? "planning_handoff_unavailable");
+        const raw = next.plans?.find((plan) => text(plan.id, "") === handoffPlanId);
+        const planPayload = raw?.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload) ? raw.payload as Record<string, unknown> : {};
+        if (!raw || text(raw.status, "") !== "PUBLISHED" || text(planPayload.activityType, "").toUpperCase() !== "TRANSPORT") {
+          throw new Error("published_transport_plan_required");
+        }
+        if (!active) return;
+        const handoff: PlanningHandoff = {
+          id: handoffPlanId,
+          jobId: handoffJobId,
+          title: text(raw.title, "Piano trasporto"),
+          status: text(raw.status, "PUBLISHED"),
+          version: typeof raw.version === "number" ? raw.version : 1,
+          startsAt: typeof raw.startsAt === "string" ? raw.startsAt : null,
+          endsAt: typeof raw.endsAt === "string" ? raw.endsAt : null,
+          location: typeof raw.location === "string" ? raw.location : null,
+          payload: planPayload,
+        };
+        setPlanningHandoff(handoff);
+        setPlanningHandoffState("ready");
+        window.setTimeout(() => {
+          if (!active) return;
+          openCreate(null, handoff);
+          notify("Piano trasporto caricato: risorse e finestra sono precompilate e verranno riletti dal server.");
+        }, 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPlanningHandoff(null);
+        setPlanningHandoffState("error");
+      });
+    return () => { active = false; };
+  // The handoff effect intentionally runs only when the URL contract changes; openCreate is the local form hydrator.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoffJobId, handoffPlanId, notify, planningHandoff]);
+
   const context = payload?.context;
   const capabilities = useMemo(() => context?.capabilities ?? ["mission.read"], [context]);
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
@@ -1049,23 +1122,6 @@ export default function MissionCommandDeck() {
   const schedulableRequests = useMemo(() => materialRequests.filter((request) => request.status === "APPROVED" && !request.scheduledMissionId), [materialRequests]);
   const selectedRequest = materialRequests.find((request) => request.id === selectedRequestId) ?? null;
 
-  useEffect(() => {
-    if (modal !== "create" || !selectedRequest) return;
-    const timer = window.setTimeout(() => {
-      const setFormValue = (selector: string, value: string) => {
-        const element = document.querySelector<HTMLElement>(selector) as HTMLInputElement | HTMLSelectElement | null;
-        if (element && value) element.value = value;
-      };
-      setFormValue('select[name="jobId"]', selectedRequest.jobId);
-      setFormValue('input[name="title"]', `Consegna · ${selectedRequest.title}`);
-      const warehouse = selectedRequest.payload.warehouse;
-      if (warehouse && typeof warehouse === "object" && !Array.isArray(warehouse)) {
-        setFormValue('input[name="pickup"]', text((warehouse as Record<string, unknown>).locationLabel, ""));
-      }
-      setFormValue('input[name="dropoff"]', text(selectedRequest.payload.deliveryPoint, ""));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [modal, selectedRequest]);
   const filteredMissions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return missions.filter((mission) => {
@@ -1106,6 +1162,7 @@ export default function MissionCommandDeck() {
   }
 
   function handleJobSelection(jobId: string) {
+    setCreateJobId(jobId);
     setSelectedRequestId("");
     if (!jobId || jobId === "__standalone__") {
       setRouteStops([{ kind: "PICKUP", locationId: "" }, { kind: "DELIVERY", locationId: "" }]);
@@ -1116,22 +1173,43 @@ export default function MissionCommandDeck() {
     setRouteStops([{ kind: "PICKUP", locationId: "" }, { kind: "DELIVERY", locationId: jobLocationId }]);
   }
 
-  function openCreate(request: MaterialRequest | null = null) {
-    setPlannedAt("");
-    setPlannedEndAt("");
-    setDriverId("");
-    setVehicleId("");
-    setCargoAssetId("");
-    setCargoAssetIds([]);
+  function openCreate(request: MaterialRequest | null = null, handoff: PlanningHandoff | null = null) {
+    const planResources = Array.isArray(handoff?.payload.resources)
+      ? handoff.payload.resources.flatMap((resource) => resource && typeof resource === "object" && !Array.isArray(resource) ? [resource as Record<string, unknown>] : [])
+      : [];
+    const plannedDriverId = planResources.find((resource) => text(resource.kind, "").toLowerCase() === "person")?.id;
+    const plannedVehicleId = planResources.find((resource) => text(resource.kind, "").toLowerCase() === "vehicle")?.id;
+    const plannedCargoAssetIds = planResources
+      .filter((resource) => ["asset", "cargo"].includes(text(resource.kind, "").toLowerCase()))
+      .map((resource) => text(resource.id, ""))
+      .filter(Boolean);
+    const planMode = text(handoff?.payload.transportMode, "") as TransportMode;
+    const defaultMode = enabledTransportModes.includes(planMode)
+      ? planMode
+      : request?.jobId
+        ? "WAREHOUSE_TO_JOB"
+        : plannedCargoAssetIds.length && enabledTransportModes.includes("ASSET_TRANSFER")
+          ? "ASSET_TRANSFER"
+          : enabledTransportModes[0] ?? "";
+    const targetJobId = request?.jobId ?? handoff?.jobId ?? "";
+    setCreateJobId(targetJobId);
+    setActivePlanningPlanId(handoff?.id ?? "");
+    setMissionTitle(handoff?.title ? `Missione · ${handoff.title}` : request?.title ? `Consegna · ${request.title}` : "Missione di trasporto");
+    setPlannedAt(dateTimeLocalValue(handoff?.startsAt));
+    setPlannedEndAt(dateTimeLocalValue(handoff?.endsAt));
+    setDriverId(plannedDriverId ? text(plannedDriverId, "") : "");
+    setVehicleId(plannedVehicleId ? text(plannedVehicleId, "") : "");
+    setCargoAssetId(plannedCargoAssetIds.join(","));
+    setCargoAssetIds(plannedCargoAssetIds);
     setCargoOptions([]);
     setSelectedRequestId(request?.id ?? "");
-    setTransportMode((request?.jobId ? "WAREHOUSE_TO_JOB" : enabledTransportModes.includes("ASSET_TRANSFER") ? "ASSET_TRANSFER" : enabledTransportModes[0]) ?? "");
+    setTransportMode(defaultMode);
     const requestWarehouse = request?.payload.warehouse;
     const warehouseLocationId = requestWarehouse && typeof requestWarehouse === "object" && !Array.isArray(requestWarehouse)
       ? locations.find((location) => location.entityType === "MAGAZZINO" && location.entityId === String((requestWarehouse as Record<string, unknown>).id ?? ""))?.id ?? ""
       : "";
-    const jobLocationId = request?.jobId
-      ? locations.find((location) => location.entityId === request.jobId && ["CANTIERE", "COMMESSA"].includes(location.entityType))?.id ?? ""
+    const jobLocationId = targetJobId
+      ? locations.find((location) => location.entityId === targetJobId && ["CANTIERE", "COMMESSA"].includes(location.entityType))?.id ?? ""
       : "";
     const materialLines = materialRequestLineDrafts(request);
     const materialItemIds = materialLines.map((line) => line.itemId);
@@ -1216,7 +1294,13 @@ export default function MissionCommandDeck() {
       const result = await response.json() as { error?: string };
       if (!response.ok) {
         if (response.status === 409) await refresh();
-        notify("Missione non creata: " + (result.error ?? "errore"));
+        const errorLabels: Record<string, string> = {
+          planning_plan_already_linked: "questo piano è già collegato a una missione",
+          mission_plan_resource_mismatch: "autista, mezzo o asset non corrispondono al piano pubblicato",
+          mission_window_outside_planning_plan: "la finestra missione esce da quella pubblicata",
+          published_transport_plan_required: "serve un piano trasporto pubblicato",
+        };
+        notify("Missione non creata: " + (errorLabels[result.error ?? ""] ?? result.error ?? "errore"));
         return;
       }
       await refresh();
@@ -1245,7 +1329,7 @@ export default function MissionCommandDeck() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     if (modal === "create") {
-      const jobId = selectedRequest?.jobId || field(form, "jobId") || "";
+      const jobId = selectedRequest?.jobId || createJobId || field(form, "jobId") || "";
       const mode = field(form, "transportMode") as TransportMode;
       const selectedCargoAssetIds = [...new Set([
         ...cargoAssetIds,
@@ -1367,7 +1451,7 @@ export default function MissionCommandDeck() {
         return;
       }
       await createMission(jobId, {
-        title: field(form, "title"),
+        title: field(form, "title") || missionTitle,
         pickup,
         dropoff,
         plannedAt: field(form, "plannedAt"),
@@ -1377,6 +1461,7 @@ export default function MissionCommandDeck() {
         cargoAssetId: selectedCargo,
         cargoAssetIds: selectedCargoAssetIds,
         transportMode: mode,
+        planningPlanId: activePlanningPlanId || undefined,
         materialRequestId,
         routeStops: selectedRouteStops,
         notes: field(form, "notes"),
@@ -1462,7 +1547,7 @@ export default function MissionCommandDeck() {
     </section>
   </div><CommandMobileNav active="mission" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />
 
-    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "create" ? "Nuova missione" : modal === "delivery" ? "Consegna e POD" : modal === "pod" ? "Verifica prova di consegna" : modal === "reconcile" ? "Riconcilia e chiudi la missione" : "Rapportino missione con Company AI"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "create" ? "Il percorso può collegarsi a una commessa reale o nascere autonomo. Ogni tappa usa una location canonica oppure un indirizzo temporaneo verificato dal server; autista, mezzo e asset arrivano esclusivamente dal registro disponibile." : modal === "delivery" ? "Registra il ricevente e la tappa. L’orario ufficiale viene scritto dal server al momento della conferma." : modal === "pod" ? "Verifica il readback della prova di consegna prima di passare alla riconciliazione." : modal === "reconcile" ? "La riconciliazione richiede una nota operativa e chiude il passaggio tra consegnato, documento e quantità." : "Company AI prepara il consuntivo dai dati della missione e raccoglie solo le informazioni che mancano."}</DialogDescription></DialogHeader>{modal === "create" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Commessa o trasporto autonomo<select aria-label="Commessa o trasporto autonomo" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="jobId" onChange={(event) => handleJobSelection(event.target.value)} required><option value="">Seleziona collegamento</option>{<option value="__standalone__">Missione autonoma · nessuna commessa</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Titolo missione<Input autoFocus className="mt-2 border-white/10 bg-black/30" defaultValue="Missione di trasporto" name="title" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{enabledTransportModes.map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode]?.label ?? mode}</option>)}</select></label><RouteStopsEditor assetOptions={cargoOptions} locations={locations} onChange={setRouteStops} selectedAssetIds={cargoAssetIds} stops={routeStops} /><input name="pickup" type="hidden" value={locations.find((location) => location.id === routeStops[0]?.locationId)?.formattedAddress ?? ""} readOnly /><input name="dropoff" type="hidden" value={locations.find((location) => location.id === routeStops.at(-1)?.locationId)?.formattedAddress ?? ""} readOnly /><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" onChange={(event) => setPlannedAt(event.target.value)} required type="datetime-local" value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" onChange={(event) => setPlannedEndAt(event.target.value)} type="datetime-local" value={plannedEndAt} /></label><MissionResourceFields cargoAssetIds={cargoAssetIds} driverId={driverId} onCargoAssetsChange={(ids) => { setCargoAssetIds(ids); setCargoAssetId(ids.join(",")); }} onCargoOptionsChange={setCargoOptions} onDriverChange={setDriverId} onVehicleChange={setVehicleId} plannedAt={plannedAt} plannedEndAt={plannedEndAt} transportMode={transportMode} vehicleId={vehicleId} /><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" placeholder="Vincoli, riferimento o consegna particolare…" /></label></div> : modal === "delivery" ? <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">MISSIONE SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-600">{selected ? text(selected.payload.pickup) + " → " + text(selected.payload.dropoff) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Tappa di consegna<select aria-label="Tappa di consegna" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="stopId" onChange={(event) => setDeliveryStopId(event.target.value)} value={deliveryStopId}><option value="">Seleziona tappa</option>{selectedStops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Ricevente / referente<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="recipient" placeholder="Nome o organizzazione" required /></label><div className="sm:col-span-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100"><Clock3 className="size-3.5" />Timestamp ufficiale server</div><p className="mt-1 text-[10px] leading-5 text-slate-500">L’orario della consegna viene assegnato dal server al momento della conferma. L’orologio del dispositivo non può alterare il dato ufficiale.</p></div><MissionPodEvidenceFields /><label className="text-xs text-slate-400 sm:col-span-2">Nota consegna<Textarea className="mt-2 border-white/10 bg-black/30" name="note" placeholder="Quantità, riserva o anomalia…" /></label></div>: modal === "pod" ? <div className="grid gap-4"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-lime-300/70">READBACK POD</p><p className="mt-2 text-sm text-slate-200">Ricevente: {text((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.recipient)}</p><p className="mt-1 text-[10px] text-slate-500">Consegna registrata dal server: {formatDate((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.deliveredAt)}</p></div><MissionPodEvidenceFields /></div>: modal === "reconcile" ? <div className="grid gap-4"><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-amber-200/70">RICONCILIAZIONE</p><p className="mt-2 text-sm text-slate-200">La chiusura richiede una nota tracciabile.</p><p className="mt-1 text-[10px] text-slate-500">Dopo questo passaggio la journey potrà essere chiusa con un secondo readback.</p></div><label className="text-xs text-slate-400">Nota di riconciliazione<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30" name="note" placeholder="Confronto quantità, POD e riferimenti di commessa…" required /></label></div>: <div className="grid gap-4"><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">READBACK GUIDATO</p><p className="mt-2 text-sm font-semibold text-slate-100">Company AI ha già preparato ciò che la missione sa.</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Carichi, scarichi, consegna e timestamp provengono dal registro server-side. Completa solo ciò che manca davvero.</p></div><StatusPill label={selectedReport?.status === "SUBMITTED" ? "INVIATO" : selectedReport?.completeness.ready ? "PRONTO" : "DA COMPLETARE"} tone={selectedReport?.status === "SUBMITTED" ? "lime" : selectedReport?.completeness.ready ? "cyan" : "amber"} /></div></div><div className="grid gap-2 sm:grid-cols-2">{selectedReport?.fields.map((reportField) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={reportField.key}><div className="flex items-center justify-between gap-2"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-600">{reportField.label}</p><span className={cn("text-[9px] uppercase tracking-[.12em]", reportField.status === "known" ? "text-lime-200" : reportField.status === "missing" ? "text-amber-200" : "text-slate-600")}>{reportField.status === "known" ? "OK" : reportField.status === "missing" ? "Manca" : "Opzionale"}</span></div><p className="mt-2 line-clamp-3 whitespace-pre-wrap text-[10px] leading-5 text-slate-300">{reportField.value}</p><p className="mt-1 text-[9px] text-slate-700">{reportField.source}</p></div>)}</div>{(missionReportQuestions.length > 0 || (selectedReport?.completeness.questions.length ?? 0) > 0) && <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75">DOMANDE ANCORA APERTE</p><div className="mt-2 space-y-1.5">{(missionReportQuestions.length ? missionReportQuestions : selectedReport?.completeness.questions ?? []).slice(0, 5).map((question) => <p className="flex items-start gap-2 text-[10px] leading-5 text-amber-100/80" key={question}><CircleAlert className="mt-0.5 size-3 shrink-0" />{question}</p>)}</div></div>}<label className="text-xs text-slate-400">Rapportino operativo<Textarea className="mt-2 min-h-56 border-white/10 bg-black/30 font-mono text-xs leading-5" name="missionReport" onChange={(event) => setMissionReportText(event.target.value)} value={missionReportText} placeholder="Esito, anomalie, rientri, danni, riserve o note per l’ufficio…" required /></label><p className="text-[10px] leading-5 text-slate-600">Per l’invio servono tutte le azioni obbligatorie e una descrizione finale completa. Se manca un dato importante Company AI mantiene la missione in bozza.</p></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose>{modal === "report" ? <><Button className="border-cyan-300/25 bg-cyan-300/[.06] text-cyan-100 hover:bg-cyan-300/10" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="save" variant="outline">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}Salva bozza</Button><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}Invia in ufficio</Button></> : <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (modal === "delivery" ? !canDispatchMission : !canManageMission)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "create" ? "Crea e rileggi" : modal === "delivery" ? "Registra consegna" : modal === "pod" ? "Verifica POD" : "Riconcilia"}</Button>}</DialogFooter></form></DialogContent></Dialog>
+    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) setModal(null); }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]"><form className="space-y-4" onSubmit={submit}><DialogHeader><DialogTitle>{modal === "create" ? "Nuova missione" : modal === "delivery" ? "Consegna e POD" : modal === "pod" ? "Verifica prova di consegna" : modal === "reconcile" ? "Riconcilia e chiudi la missione" : "Rapportino missione con Company AI"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "create" ? "Il percorso può collegarsi a una commessa reale o nascere autonomo. Ogni tappa usa una location canonica oppure un indirizzo temporaneo verificato dal server; autista, mezzo e asset arrivano esclusivamente dal registro disponibile." : modal === "delivery" ? "Registra il ricevente e la tappa. L’orario ufficiale viene scritto dal server al momento della conferma." : modal === "pod" ? "Verifica il readback della prova di consegna prima di passare alla riconciliazione." : modal === "reconcile" ? "La riconciliazione richiede una nota operativa e chiude il passaggio tra consegnato, documento e quantità." : "Company AI prepara il consuntivo dai dati della missione e raccoglie solo le informazioni che mancano."}</DialogDescription></DialogHeader>{modal === "create" ? <div className="grid gap-4 sm:grid-cols-2"><label className="text-xs text-slate-400 sm:col-span-2">Commessa o trasporto autonomo<select aria-label="Commessa o trasporto autonomo" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="jobId" onChange={(event) => handleJobSelection(event.target.value)} required value={createJobId}><option value="">Seleziona collegamento</option>{<option value="__standalone__">Missione autonoma · nessuna commessa</option>}{jobs.map((job) => <option key={job.id} value={job.id}>{job.code ? job.code + " · " : ""}{job.title}{job.location ? " · " + job.location : ""}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Titolo missione<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="title" onChange={(event) => setMissionTitle(event.target.value)} required value={missionTitle} /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{enabledTransportModes.map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode]?.label ?? mode}</option>)}</select></label><RouteStopsEditor assetOptions={cargoOptions} locations={locations} onChange={setRouteStops} selectedAssetIds={cargoAssetIds} stops={routeStops} /><input name="pickup" type="hidden" value={locations.find((location) => location.id === routeStops[0]?.locationId)?.formattedAddress ?? ""} readOnly /><input name="dropoff" type="hidden" value={locations.find((location) => location.id === routeStops.at(-1)?.locationId)?.formattedAddress ?? ""} readOnly /><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" onChange={(event) => setPlannedAt(event.target.value)} required type="datetime-local" value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" onChange={(event) => setPlannedEndAt(event.target.value)} type="datetime-local" value={plannedEndAt} /></label><MissionResourceFields cargoAssetIds={cargoAssetIds} driverId={driverId} onCargoAssetsChange={(ids) => { setCargoAssetIds(ids); setCargoAssetId(ids.join(",")); }} onCargoOptionsChange={setCargoOptions} onDriverChange={setDriverId} onVehicleChange={setVehicleId} plannedAt={plannedAt} plannedEndAt={plannedEndAt} transportMode={transportMode} vehicleId={vehicleId} /><label className="text-xs text-slate-400 sm:col-span-2">Nota operativa<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" placeholder="Vincoli, riferimento o consegna particolare…" /></label></div> : modal === "delivery" ? <div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-3"><p className="text-[10px] uppercase tracking-[.15em] text-slate-600">MISSIONE SELEZIONATA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-600">{selected ? text(selected.payload.pickup) + " → " + text(selected.payload.dropoff) : "—"}</p></div><label className="text-xs text-slate-400 sm:col-span-2">Tappa di consegna<select aria-label="Tappa di consegna" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="stopId" onChange={(event) => setDeliveryStopId(event.target.value)} value={deliveryStopId}><option value="">Seleziona tappa</option>{selectedStops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label} · {stop.kind.replaceAll("_", " ")}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Ricevente / referente<Input autoFocus className="mt-2 border-white/10 bg-black/30" name="recipient" placeholder="Nome o organizzazione" required /></label><div className="sm:col-span-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100"><Clock3 className="size-3.5" />Timestamp ufficiale server</div><p className="mt-1 text-[10px] leading-5 text-slate-500">L’orario della consegna viene assegnato dal server al momento della conferma. L’orologio del dispositivo non può alterare il dato ufficiale.</p></div><MissionPodEvidenceFields /><label className="text-xs text-slate-400 sm:col-span-2">Nota consegna<Textarea className="mt-2 border-white/10 bg-black/30" name="note" placeholder="Quantità, riserva o anomalia…" /></label></div>: modal === "pod" ? <div className="grid gap-4"><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-lime-300/70">READBACK POD</p><p className="mt-2 text-sm text-slate-200">Ricevente: {text((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.recipient)}</p><p className="mt-1 text-[10px] text-slate-500">Consegna registrata dal server: {formatDate((selected?.payload.proofOfDelivery as Record<string, unknown> | undefined)?.deliveredAt)}</p></div><MissionPodEvidenceFields /></div>: modal === "reconcile" ? <div className="grid gap-4"><div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><p className="text-[10px] uppercase tracking-[.15em] text-amber-200/70">RICONCILIAZIONE</p><p className="mt-2 text-sm text-slate-200">La chiusura richiede una nota tracciabile.</p><p className="mt-1 text-[10px] text-slate-500">Dopo questo passaggio la journey potrà essere chiusa con un secondo readback.</p></div><label className="text-xs text-slate-400">Nota di riconciliazione<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30" name="note" placeholder="Confronto quantità, POD e riferimenti di commessa…" required /></label></div>: <div className="grid gap-4"><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.04] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">READBACK GUIDATO</p><p className="mt-2 text-sm font-semibold text-slate-100">Company AI ha già preparato ciò che la missione sa.</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Carichi, scarichi, consegna e timestamp provengono dal registro server-side. Completa solo ciò che manca davvero.</p></div><StatusPill label={selectedReport?.status === "SUBMITTED" ? "INVIATO" : selectedReport?.completeness.ready ? "PRONTO" : "DA COMPLETARE"} tone={selectedReport?.status === "SUBMITTED" ? "lime" : selectedReport?.completeness.ready ? "cyan" : "amber"} /></div></div><div className="grid gap-2 sm:grid-cols-2">{selectedReport?.fields.map((reportField) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={reportField.key}><div className="flex items-center justify-between gap-2"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-600">{reportField.label}</p><span className={cn("text-[9px] uppercase tracking-[.12em]", reportField.status === "known" ? "text-lime-200" : reportField.status === "missing" ? "text-amber-200" : "text-slate-600")}>{reportField.status === "known" ? "OK" : reportField.status === "missing" ? "Manca" : "Opzionale"}</span></div><p className="mt-2 line-clamp-3 whitespace-pre-wrap text-[10px] leading-5 text-slate-300">{reportField.value}</p><p className="mt-1 text-[9px] text-slate-700">{reportField.source}</p></div>)}</div>{(missionReportQuestions.length > 0 || (selectedReport?.completeness.questions.length ?? 0) > 0) && <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75">DOMANDE ANCORA APERTE</p><div className="mt-2 space-y-1.5">{(missionReportQuestions.length ? missionReportQuestions : selectedReport?.completeness.questions ?? []).slice(0, 5).map((question) => <p className="flex items-start gap-2 text-[10px] leading-5 text-amber-100/80" key={question}><CircleAlert className="mt-0.5 size-3 shrink-0" />{question}</p>)}</div></div>}<label className="text-xs text-slate-400">Rapportino operativo<Textarea className="mt-2 min-h-56 border-white/10 bg-black/30 font-mono text-xs leading-5" name="missionReport" onChange={(event) => setMissionReportText(event.target.value)} value={missionReportText} placeholder="Esito, anomalie, rientri, danni, riserve o note per l’ufficio…" required /></label><p className="text-[10px] leading-5 text-slate-600">Per l’invio servono tutte le azioni obbligatorie e una descrizione finale completa. Se manca un dato importante Company AI mantiene la missione in bozza.</p></div>}<DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose>{modal === "report" ? <><Button className="border-cyan-300/25 bg-cyan-300/[.06] text-cyan-100 hover:bg-cyan-300/10" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="save" variant="outline">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}Salva bozza</Button><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !canWriteMissionReport} name="reportAction" type="submit" value="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}Invia in ufficio</Button></> : <Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (modal === "delivery" ? !canDispatchMission : !canManageMission)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "create" ? "Crea e rileggi" : modal === "delivery" ? "Registra consegna" : modal === "pod" ? "Verifica POD" : "Riconcilia"}</Button>}</DialogFooter></form></DialogContent></Dialog>
     <Dialog open={exceptionModalOpen} onOpenChange={setExceptionModalOpen}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-rose-300/20 bg-[#080c09] text-slate-100 sm:max-w-[620px]"><form className="space-y-4" onSubmit={submitException}><DialogHeader><DialogTitle>Segnala eccezione missione</DialogTitle><DialogDescription className="text-slate-500">L’anomalia resta nel registro della missione con timestamp e autore server-side. Una missione bloccata non può essere chiusa senza una ripresa o una riconciliazione autorizzata.</DialogDescription></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><div className="rounded-2xl border border-rose-300/15 bg-rose-300/[.035] p-4 sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-rose-200/75">CONTROLLO OPERATIVO</p><p className="mt-2 text-sm font-semibold text-slate-100">{selected?.title ?? "Missione selezionata"}</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Il GPS o il ritardo possono spiegare l’evento, ma la causa deve essere dichiarata dall’operatore autorizzato.</p></div><label className="text-xs text-slate-400">Tipo di eccezione<select aria-label="Tipo di eccezione missione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-rose-300/40" name="exceptionType" onChange={(event) => setExceptionType(event.target.value as MissionExceptionType)} value={exceptionType}>{MISSION_EXCEPTION_TYPES.map((type) => <option key={type} value={type}>{MISSION_EXCEPTION_LABELS[type]}</option>)}</select></label><label className="text-xs text-slate-400">Tappa interessata <select aria-label="Tappa interessata" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-rose-300/40" name="exceptionStopId" onChange={(event) => setExceptionStopId(event.target.value)} value={exceptionStopId}><option value="">Missione intera</option>{selectedStops.map((stop) => <option key={stop.id} value={stop.id}>{stop.sequence}. {stop.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Riferimento <span className="text-slate-700">· opzionale</span><Input className="mt-2 border-white/10 bg-black/30 text-xs" name="exceptionReference" placeholder="Numero pratica, assistenza, foto o nota esterna" /></label><label className="text-xs text-slate-400 sm:col-span-2">Descrizione obbligatoria<Textarea autoFocus className="mt-2 min-h-28 border-white/10 bg-black/30 text-xs leading-5" name="exceptionNote" placeholder="Cosa è successo? Quale carico o tappa è coinvolto?" required /></label></div><DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-rose-300 text-[#160507] hover:bg-rose-200" disabled={busy || !canRecordDeliveryAction} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CircleAlert className="size-3.5" />}Registra eccezione</Button></DialogFooter></form></DialogContent></Dialog>
     {notice && <button aria-label="Chiudi messaggio" className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_34px_rgba(200,255,34,.16)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CheckCircle2 className="size-4 shrink-0 text-lime-300" />{notice}</button>}
   </main>;
