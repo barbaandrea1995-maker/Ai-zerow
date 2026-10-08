@@ -109,13 +109,32 @@ function routeStopCargoActions(row: typeof routeStops.$inferSelect) {
 
 function routeStopCargoAssetIds(row: typeof routeStops.$inferSelect) {
   const metadata = parseJson(row.evidenceJson);
-  return Array.isArray(metadata.cargoActions)
+  return Array.from(new Set(Array.isArray(metadata.cargoActions)
     ? metadata.cargoActions.flatMap((entry) => {
         if (!isRecord(entry)) return [];
         const assetId = boundedText(entry.assetId, 160);
         return assetId ? [assetId] : [];
       })
+    : []));
+}
+
+function requestedCargoAssetIds(input: JsonObject, payload: JsonObject = {}) {
+  const ids = Array.isArray(input.assetIds)
+    ? input.assetIds.flatMap((value) => {
+        const id = boundedText(value, 160);
+        return id ? [id] : [];
+      })
     : [];
+  const inputSingle = boundedText(input.assetId, 160);
+  if (ids.length || inputSingle) return [...new Set([...ids, ...(inputSingle ? [inputSingle] : [])])];
+  const payloadIds = Array.isArray(payload.cargoAssetIds)
+    ? payload.cargoAssetIds.flatMap((value) => {
+        const id = boundedText(value, 160);
+        return id ? [id] : [];
+      })
+    : [];
+  const payloadSingle = boundedText(payload.cargoAssetId, 160);
+  return [...new Set([...payloadIds, ...(payloadSingle ? [payloadSingle] : [])])];
 }
 
 function routeStopHasExplicitCargoActions(row: typeof routeStops.$inferSelect) {
@@ -922,12 +941,19 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const driverId = boundedText(input.driverId, 120);
       const vehicleId = boundedText(input.vehicleId, 120);
       const cargoAssetId = boundedText(input.cargoAssetId, 120);
+      const cargoAssetIds = [...new Set([
+        ...(Array.isArray(input.cargoAssetIds) ? input.cargoAssetIds.flatMap((value) => {
+          const id = boundedText(value, 120);
+          return id ? [id] : [];
+        }) : []),
+        ...(cargoAssetId ? [cargoAssetId] : []),
+      ])];
       const materialRequestId = boundedText(input.materialRequestId, 120);
       routeInputStops = input.routeStops ?? input.stops;
       const requestedTransportMode = boundedText(input.transportMode, 48);
       const transportMode: TransportMode = isTransportMode(requestedTransportMode)
         ? requestedTransportMode
-        : cargoAssetId ? "ASSET_TRANSFER" : "WAREHOUSE_TO_JOB";
+        : cargoAssetIds.length ? "ASSET_TRANSFER" : "WAREHOUSE_TO_JOB";
       if (materialRequestId) {
         const [requestRow] = await db.select().from(jobJourneyRecords).where(and(
           eq(jobJourneyRecords.tenantId, context.tenantId),
@@ -952,7 +978,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (!context.operatingTransportModes.includes(transportMode)) {
         return Response.json({ error: "transport_mode_not_enabled", transportMode, enabledModes: context.operatingTransportModes }, { status: 403 });
       }
-      if (transportMode === "ASSET_TRANSFER" && !cargoAssetId) {
+      if (transportMode === "ASSET_TRANSFER" && !cargoAssetIds.length) {
         return Response.json({ error: "cargo_asset_required_for_asset_transfer" }, { status: 400 });
       }
       if (Object.prototype.hasOwnProperty.call(input, "driver") || Object.prototype.hasOwnProperty.call(input, "vehicle")) {
@@ -965,6 +991,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           driverId,
           vehicleId,
           cargoAssetId: cargoAssetId || undefined,
+          cargoAssetIds,
           transportMode,
           plannedAt,
           plannedEndAt: plannedEndAtInput || undefined,
@@ -984,7 +1011,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         driverId: resources.driver.id,
         vehicleId: resources.vehicle.id,
         cargoAssetId: resources.cargoAsset?.id ?? null,
+        cargoAssetIds: resources.cargoAssets.map((asset) => asset.id),
         transportMode,
+        resourceIds: [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)],
         materialRequestId: materialRequest?.id ?? null,
         materialRequestSnapshot: materialRequest
           ? (() => {
@@ -1004,6 +1033,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           cargoAsset: resources.cargoAsset
             ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label }
             : null,
+          cargoAssets: resources.cargoAssets.map((asset) => ({ id: asset.id, code: asset.code, label: asset.label })),
         },
         notes: boundedText(input.notes, 2_000),
       };
@@ -1026,7 +1056,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         : [];
       const cargoActionsForStop = (action: string) => {
         const actions: Array<Record<string, unknown>> = requestMaterialActions.map((line) => ({ action, ...line, assetId: null }));
-        if (cargoAssetId) actions.push({ action, materialRequestId: materialRequest?.id ?? null, assetId: cargoAssetId });
+        for (const assetId of cargoAssetIds) actions.push({ action, materialRequestId: materialRequest?.id ?? null, assetId });
         if (!actions.length) actions.push({ action, materialRequestId: materialRequest?.id ?? null, assetId: null });
         return actions;
       };
@@ -1333,11 +1363,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "mission_stop_already_unloaded", stopId: selectedStop.id }, { status: 409 });
         }
         const plannedAssetIds = routeStopCargoAssetIds(selectedStop);
-        const requestedAssetId = boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160);
-        if (plannedAssetIds.length && !plannedAssetIds.includes(requestedAssetId)) {
-          return Response.json({ error: "mission_stop_asset_mismatch", stopId: selectedStop.id, plannedAssetIds }, { status: 409 });
+        const requestedAssetIds = requestedCargoAssetIds(input, payload);
+        const actionAssetIds = plannedAssetIds.length ? (requestedAssetIds.length ? requestedAssetIds : plannedAssetIds) : requestedAssetIds;
+        if (plannedAssetIds.some((assetId) => !actionAssetIds.includes(assetId)) || actionAssetIds.some((assetId) => !plannedAssetIds.includes(assetId))) {
+          return Response.json({ error: "mission_stop_asset_set_incomplete", stopId: selectedStop.id, plannedAssetIds, requestedAssetIds: actionAssetIds }, { status: 409 });
         }
-        const actionAssetId = requestedAssetId || plannedAssetIds[0] || null;
+        const actionAssetId = actionAssetIds[0] ?? null;
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
           : [];
@@ -1351,6 +1382,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           note: boundedText(input.note, 2_000),
           assetId: actionAssetId,
+          assetIds: actionAssetIds,
           materialItemIds: routeStopMaterialActionEntries(selectedStop, action === "mission_load" ? "LOAD" : "DELIVER")
             .flatMap((entry) => entry.itemId ? [entry.itemId] : []),
           source: "mission-driver-action",
@@ -1453,11 +1485,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "mission_stop_unload_required", stopId: selectedMissionStop.id, message: "Registra prima lo scarico della tappa." }, { status: 409 });
         }
         const plannedAssetIds = routeStopCargoAssetIds(selectedMissionStop);
-        const requestedAssetId = boundedText(input.assetId, 160) || boundedText(payload.cargoAssetId, 160);
-        if (plannedAssetIds.length && !plannedAssetIds.includes(requestedAssetId)) {
-          return Response.json({ error: "mission_stop_asset_mismatch", stopId: selectedMissionStop.id, plannedAssetIds }, { status: 409 });
+        const requestedAssetIds = requestedCargoAssetIds(input, payload);
+        const deliveryAssetIds = plannedAssetIds.length ? (requestedAssetIds.length ? requestedAssetIds : plannedAssetIds) : requestedAssetIds;
+        if (plannedAssetIds.some((assetId) => !deliveryAssetIds.includes(assetId)) || deliveryAssetIds.some((assetId) => !plannedAssetIds.includes(assetId))) {
+          return Response.json({ error: "mission_stop_asset_set_incomplete", stopId: selectedMissionStop.id, plannedAssetIds, requestedAssetIds: deliveryAssetIds }, { status: 409 });
         }
-        const deliveryAssetId = requestedAssetId || plannedAssetIds[0] || null;
+        const deliveryAssetId = deliveryAssetIds[0] ?? null;
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
           return Response.json({
@@ -1479,6 +1512,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           sequence: typeof input.sequence === "number" && Number.isInteger(input.sequence) ? input.sequence : null,
           recipient,
           assetId: deliveryAssetId,
+          assetIds: deliveryAssetIds,
           evidenceType: podEvidence.type,
           evidenceReference: podEvidence.reference,
           documentId: podEvidence.documentId,
@@ -1497,6 +1531,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           recordedAt: now,
           clientObservedAt: validDateTime(boundedText(input.deliveredAt, 40)) ? boundedText(input.deliveredAt, 40) : null,
           assetId: deliveryAssetId,
+          assetIds: deliveryAssetIds,
           note: boundedText(input.note, 2_000),
           documentId: podEvidence.documentId,
           evidence: podEvidence,
@@ -1704,6 +1739,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           stops: routeInputStops,
           fallbackStops: routeFallbackStops,
           cargoAssetId: boundedText(payload.cargoAssetId, 120) || null,
+          cargoAssetIds: Array.isArray(payload.cargoAssetIds) ? payload.cargoAssetIds.filter((value): value is string => typeof value === "string") : [],
           materialRequestId: materialRequest?.id ?? null,
         });
       } catch (error) {

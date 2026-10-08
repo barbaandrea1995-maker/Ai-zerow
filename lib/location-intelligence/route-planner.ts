@@ -78,11 +78,18 @@ function actions(value: unknown) {
   });
 }
 
-function defaultActions(kind: MissionStopKind, cargoAssetId: string, materialRequestId: string) {
+function defaultActions(kind: MissionStopKind, cargoAssetIds: string[], materialRequestId: string) {
   const action = kind === "PICKUP" ? "LOAD" : kind === "DELIVERY" ? "UNLOAD" : kind === "RETURN" ? "RETURN" : "TRANSFER";
-  return [{
+  const assetActions = cargoAssetIds.map((assetId) => ({
     action,
-    assetId: cargoAssetId || null,
+    assetId,
+    itemId: null,
+    materialRequestId: materialRequestId || null,
+    quantity: null,
+  }));
+  return assetActions.length ? assetActions : [{
+    action,
+    assetId: null,
     itemId: null,
     materialRequestId: materialRequestId || null,
     quantity: null,
@@ -169,6 +176,7 @@ export async function buildMissionRouteProjection({
   stops,
   fallbackStops,
   cargoAssetId,
+  cargoAssetIds,
   materialRequestId,
 }: {
   tenantId: string;
@@ -181,6 +189,7 @@ export async function buildMissionRouteProjection({
   stops: unknown;
   fallbackStops: MissionStopInput[];
   cargoAssetId?: string | null;
+  cargoAssetIds?: string[];
   materialRequestId?: string | null;
 }): Promise<MissionRouteProjection | null> {
   const rawStops = Array.isArray(stops) && stops.length ? stops : fallbackStops;
@@ -188,7 +197,10 @@ export async function buildMissionRouteProjection({
   if (rawStops.length < 2) throw new MissionRouteError("mission_route_min_stops", { minStops: 2 });
   if (rawStops.length > 12) throw new MissionRouteError("mission_route_stop_limit", { maxStops: 12 });
 
-  const normalizedCargoAssetId = text(cargoAssetId, 160);
+  const normalizedCargoAssetIds = [...new Set([
+    ...(Array.isArray(cargoAssetIds) ? cargoAssetIds.flatMap((value) => text(value, 160) ? [text(value, 160)] : []) : []),
+    ...(text(cargoAssetId, 160) ? [text(cargoAssetId, 160)] : []),
+  ])];
   const normalizedMaterialRequestId = text(materialRequestId, 160);
 
   const summary: MissionRouteProjection["summary"] = [];
@@ -270,7 +282,7 @@ export async function buildMissionRouteProjection({
       entityId: location.entityId,
       geofenceId: geofence.id,
       temporary: location.status === "TEMPORARY",
-      cargoActions: normalizedActions.length ? normalizedActions : defaultActions(kind, normalizedCargoAssetId, normalizedMaterialRequestId),
+      cargoActions: normalizedActions.length ? normalizedActions : defaultActions(kind, normalizedCargoAssetIds, normalizedMaterialRequestId),
       deliveryEvidenceRequired: input.deliveryEvidenceRequired !== false && kind === "DELIVERY",
     });
   }

@@ -45,6 +45,25 @@ function recordAt(value: unknown, key: string) {
   return isRecord(value) ? value[key] : undefined;
 }
 
+function cargoAssetRecords(payload: JsonObject) {
+  const snapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+  const records = Array.isArray(snapshot.cargoAssets)
+    ? snapshot.cargoAssets.filter((value): value is JsonObject => isRecord(value))
+    : [];
+  if (records.length) return records;
+  const legacy = recordAt(snapshot, "cargoAsset");
+  return isRecord(legacy) ? [legacy] : [];
+}
+
+function cargoAssetLabels(payload: JsonObject) {
+  const records = cargoAssetRecords(payload);
+  return records.map((record) => {
+    const code = text(record.code);
+    const label = text(record.label, "Asset");
+    return code && code !== label ? `${code} · ${label}` : label;
+  });
+}
+
 function routeStops(payload: JsonObject) {
   const route = isRecord(payload.route) ? payload.route : {};
   const readback = isRecord(payload.routeReadback) ? payload.routeReadback : {};
@@ -199,14 +218,15 @@ export function buildMissionReportReadback(
 
   const driver = recordAt(payload.resourceSnapshot, "driver");
   const vehicle = recordAt(payload.resourceSnapshot, "vehicle");
-  const cargoAsset = recordAt(payload.resourceSnapshot, "cargoAsset");
+  const cargoAssets = cargoAssetLabels(payload);
+  const cargoLabel = cargoAssets.join(" · ") || text(payload.cargoAssetId, "nessun asset associato");
   const routeLines = stopActionLines(stops);
   const timelineLines = eventLines(timeline);
   const draft = reportText || [
     `Missione: ${text(payload.title, "da identificare")}`,
     `Autista: ${text(recordAt(driver, "label") ?? recordAt(driver, "code") ?? payload.driverId, "da verificare")}`,
     `Mezzo: ${text(recordAt(vehicle, "label") ?? recordAt(vehicle, "code") ?? payload.vehicleId, "da verificare")}`,
-    `Asset/materiale: ${text(recordAt(cargoAsset, "label") ?? recordAt(cargoAsset, "code") ?? payload.cargoAssetId, "nessun asset associato")}`,
+    `Asset/materiale: ${cargoLabel}`,
     `Tappe: ${routeLines.join(" | ") || "[da completare]"}`,
     `Eventi server: ${timelineLines.join(" | ") || "[da completare]"}`,
     ...(warehouseRequired ? [`Riconciliazione magazzino: ${warehouseStatus || "[da completare]"}`] : []),
@@ -219,7 +239,7 @@ export function buildMissionReportReadback(
     { key: "mission", label: "Missione", value: text(payload.title, "Identità non disponibile"), status: text(payload.title) ? "known" : "missing", source: "Registro missioni" },
     { key: "driver", label: "Autista", value: text(recordAt(driver, "label") ?? recordAt(driver, "code") ?? payload.driverId, "Non disponibile"), status: (driver || text(payload.driverId)) ? "known" : "missing", source: "Workforce / Planning" },
     { key: "vehicle", label: "Mezzo", value: text(recordAt(vehicle, "label") ?? recordAt(vehicle, "code") ?? payload.vehicleId, "Non disponibile"), status: (vehicle || text(payload.vehicleId)) ? "known" : "missing", source: "Asset / Planning" },
-    { key: "cargo", label: "Asset o materiale", value: text(recordAt(cargoAsset, "label") ?? recordAt(cargoAsset, "code") ?? payload.cargoAssetId, "Nessun asset associato"), status: cargoAsset || text(payload.cargoAssetId) ? "known" : "optional", source: "Asset / Magazzino" },
+    { key: "cargo", label: "Asset o materiale", value: cargoAssets.length ? cargoLabel : "Nessun asset associato", status: cargoAssets.length || text(payload.cargoAssetId) ? "known" : "optional", source: "Asset / Magazzino" },
     { key: "route", label: "Tappe", value: routeLines.join(" · ") || "Nessuna tappa", status: stops.length ? "known" : "missing", source: "Route server-side" },
     { key: "actions", label: "Azioni registrate", value: timelineLines.join(" · ") || "Nessuna azione", status: timeline.length ? "known" : "missing", source: "Timeline server-side" },
     { key: "warehouse", label: "Riconciliazione magazzino", value: warehouseRequired ? (warehouseStatus || "Da completare") : "Non richiesta", status: !warehouseRequired || warehouseStatus === "DELIVERED" ? "known" : "missing", source: "Ledger Magazzino" },

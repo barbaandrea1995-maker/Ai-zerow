@@ -50,7 +50,7 @@ assert(uiAudit.includes("commercial-modules.json") && uiAudit.includes("globalFa
 const missionJourneyRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "journey", "route.ts"), "utf8");
 assert(missionJourneyRoute.includes("mission_stop_not_current") && missionJourneyRoute.includes("mission_stop_arrival_required"), "Mission cargo actions must be constrained to the server-side current geofenced stop");
 assert(missionJourneyRoute.includes("mission_route_required_for_cargo_action") && missionJourneyRoute.includes("routeStopSupportsAction"), "Mission cargo actions must require a canonical route and compatible stop action");
-assert(missionJourneyRoute.includes("mission_stop_asset_mismatch") && missionJourneyRoute.includes("routeStopCargoAssetIds"), "Mission cargo actions must preserve the asset identity declared by the route stop");
+assert(missionJourneyRoute.includes("mission_stop_asset_set_incomplete") && missionJourneyRoute.includes("routeStopCargoAssetIds") && missionJourneyRoute.includes("requestedCargoAssetIds"), "Mission cargo actions must preserve the complete asset set declared by the route stop");
 assert(missionJourneyRoute.includes("missionMaterialLinesForRouteStop") && missionJourneyRoute.includes("routeStopMaterialActionEntries"), "Mission inventory effects must be scoped to the material lines declared by the current route stop");
 assert(missionJourneyRoute.includes("mission_material_line_not_reconcilable") && missionJourneyRoute.includes("mission_material_quantity_invalid"), "Mission inventory effects must reject route-stop material lines or quantities that cannot be reconciled with the request snapshot");
 const missionLocationIngest = await readFile(join(root, "lib", "location-intelligence", "ingest.ts"), "utf8");
@@ -60,6 +60,8 @@ assert(missionDeck.includes("currentRouteStopView") && missionDeck.includes("Tap
 assert(missionDeck.includes("requestMaterialLineActions") && missionDeck.includes("firstLoadStopIndex") && missionDeck.includes("lastUnloadStopIndex") && missionDeck.includes("MaterialStopAssignmentList") && missionDeck.includes("materialQuantities"), "Mission UI must assign material lines and cargo assets to the correct route legs");
 assert(missionDeck.includes("cargoManifest") && missionDeck.includes("MANIFESTO TAPPA CORRENTE") && missionDeck.includes("cargoManifestProgress"), "Mission UI must expose the server-side cargo manifest and its per-stop readback");
 assert(missionDeck.includes("manifestEventForEntry") && missionDeck.includes("Evento effettivo"), "Mission UI must expose the timestamped action evidence for the selected route stop");
+assert(missionDeck.includes("AssetStopAssignmentList") && missionDeck.includes("selectedCargoAssetIds") && missionDeck.includes("cargoAssetIds"), "Mission UI must assign multiple real assets to individual route stops");
+assert(missionJourneyRoute.includes("cargoAssetIds") && missionJourneyRoute.includes("assetIds: actionAssetIds") && missionJourneyRoute.includes("assetIds: deliveryAssetIds"), "Mission actions must preserve multiple asset identities in server readback");
 
 assert.equal(AUTHORITY_ROLES.length, 14, "The canonical role catalog must contain 14 roles");
 assert.equal(new Set(AUTHORITY_ROLES).size, AUTHORITY_ROLES.length, "Role IDs must be unique");
@@ -453,6 +455,7 @@ assert(missionResourceRoute.includes("server_validated_ids_only") && missionReso
 const missionResourceFields = await readFile(join(root, "components", "mission-resource-fields.tsx"), "utf8");
 assert(missionResourceFields.includes("/api/mission/resources") && missionResourceFields.includes('name="driverId"') && missionResourceFields.includes('name="vehicleId"'), "Mission UI must select registered driver and vehicle IDs");
 assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
+assert(missionResourceFields.includes("onCargoAssetsChange") && missionResourceFields.includes("Seleziona uno o più asset reali"), "Mission resource selector must support multiple assets with readable identity");
 const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
 assert(planningJourney.includes("PlanningResourceFields") && planningJourney.includes("resourceIds: planningResourceIds") && planningJourney.includes("startsAt={planningStartsAt}") && planningJourney.includes("endsAt={planningEndsAt}"), "Planning UI must select canonical resource IDs and server-window availability");
 assert(!planningJourney.includes('name="responsible"') && planningJourney.includes("Attività della giornata"), "Planning UI must not reintroduce a free-text responsible field");

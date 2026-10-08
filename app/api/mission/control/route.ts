@@ -434,19 +434,26 @@ export async function POST(request: Request) {
   const driverId = boundedText(input.driverId, 120);
   const vehicleId = boundedText(input.vehicleId, 120);
   const cargoAssetId = boundedText(input.cargoAssetId, 120);
+  const cargoAssetIds = [...new Set([
+    ...(Array.isArray(input.cargoAssetIds) ? input.cargoAssetIds.flatMap((value) => {
+      const id = boundedText(value, 120);
+      return id ? [id] : [];
+    }) : []),
+    ...(cargoAssetId ? [cargoAssetId] : []),
+  ])];
   const materialRequestId = boundedText(input.materialRequestId, 120);
   const routeInputStops = input.routeStops ?? input.stops;
   const requestedTransportMode = boundedText(input.transportMode, 48);
   const transportMode: TransportMode = isTransportMode(requestedTransportMode)
     ? requestedTransportMode
-    : cargoAssetId ? "ASSET_TRANSFER" : "WAREHOUSE_TO_RECIPIENT";
+    : cargoAssetIds.length ? "ASSET_TRANSFER" : "WAREHOUSE_TO_RECIPIENT";
   if (!idempotencyKey) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
   if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
   if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });
   if (!context.operatingTransportModes.includes(transportMode)) {
     return Response.json({ error: "transport_mode_not_enabled", transportMode, enabledModes: context.operatingTransportModes.length ? context.operatingTransportModes : transportModesForProfile(context.operatingProfile) }, { status: 403 });
   }
-  if (transportMode === "ASSET_TRANSFER" && !cargoAssetId) {
+  if (transportMode === "ASSET_TRANSFER" && !cargoAssetIds.length) {
     return Response.json({ error: "cargo_asset_required_for_asset_transfer" }, { status: 400 });
   }
   if (transportMode === "WAREHOUSE_TO_JOB") {
@@ -462,6 +469,7 @@ export async function POST(request: Request) {
       driverId,
       vehicleId,
       cargoAssetId: cargoAssetId || undefined,
+      cargoAssetIds,
       transportMode,
       plannedAt,
       plannedEndAt: plannedEndAt || undefined,
@@ -496,8 +504,8 @@ export async function POST(request: Request) {
     const originEntityType = boundedText(input.originEntityType ?? input.pickupEntityType, 48).toUpperCase();
     const destinationEntityId = boundedText(input.destinationEntityId ?? input.dropoffEntityId, 160);
     const destinationEntityType = boundedText(input.destinationEntityType ?? input.dropoffEntityType, 48).toUpperCase();
-    if (originEntityId && originEntityType) routeFallbackStops.push({ kind: "PICKUP", entityType: originEntityType, entityId: originEntityId, label: pickup, cargoActions: [{ action: "LOAD", assetId: cargoAssetId || null }] });
-    if (destinationEntityId && destinationEntityType) routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: [{ action: "UNLOAD", assetId: cargoAssetId || null }] });
+    if (originEntityId && originEntityType) routeFallbackStops.push({ kind: "PICKUP", entityType: originEntityType, entityId: originEntityId, label: pickup, cargoActions: cargoAssetIds.length ? cargoAssetIds.map((assetId) => ({ action: "LOAD", assetId })) : [{ action: "LOAD", assetId: null }] });
+    if (destinationEntityId && destinationEntityType) routeFallbackStops.push({ kind: "DELIVERY", entityType: destinationEntityType, entityId: destinationEntityId, label: dropoff, cargoActions: cargoAssetIds.length ? cargoAssetIds.map((assetId) => ({ action: "UNLOAD", assetId })) : [{ action: "UNLOAD", assetId: null }] });
     let routeProjection: Awaited<ReturnType<typeof buildMissionRouteProjection>> = null;
     try {
       routeProjection = await buildMissionRouteProjection({
@@ -511,6 +519,7 @@ export async function POST(request: Request) {
         stops: routeInputStops,
         fallbackStops: routeFallbackStops,
         cargoAssetId: resources.cargoAsset?.id ?? null,
+        cargoAssetIds,
         materialRequestId: materialRequestId || null,
       });
     } catch (error) {
@@ -543,13 +552,16 @@ export async function POST(request: Request) {
       driverId: resources.driver.id,
       vehicleId: resources.vehicle.id,
       cargoAssetId: resources.cargoAsset?.id ?? null,
+      cargoAssetIds: resources.cargoAssets.map((asset) => asset.id),
       transportMode,
+      resourceIds: [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)],
       resourceSnapshot: {
         driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
         vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },
         cargoAsset: resources.cargoAsset
           ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label }
           : null,
+        cargoAssets: resources.cargoAssets.map((asset) => ({ id: asset.id, code: asset.code, label: asset.label })),
       },
       notes: boundedText(input.notes, 2_000),
       route: routeSummaryForPayload(routeProjection),

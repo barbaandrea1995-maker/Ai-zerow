@@ -167,6 +167,9 @@ function referencesForRecord(payload: JsonObject) {
   const ids = [payload.driverId, payload.vehicleId, payload.cargoAssetId]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .map((value) => value.trim());
+  if (Array.isArray(payload.cargoAssetIds)) {
+    ids.push(...payload.cargoAssetIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()));
+  }
   if (Array.isArray(payload.resourceIds)) {
     ids.push(...payload.resourceIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()));
   }
@@ -315,6 +318,7 @@ export async function assertMissionResourceSelection(args: {
   driverId: string;
   vehicleId: string;
   cargoAssetId?: string;
+  cargoAssetIds?: string[];
   transportMode?: string;
   plannedAt: string;
   plannedEndAt?: string;
@@ -323,11 +327,16 @@ export async function assertMissionResourceSelection(args: {
   const catalog = await getMissionResourceCatalog(args);
   const driver = catalog.drivers.find((resource) => resource.id === args.driverId);
   const vehicle = catalog.vehicles.find((resource) => resource.id === args.vehicleId);
-  const cargoAsset = args.cargoAssetId ? catalog.cargoAssets.find((resource) => resource.id === args.cargoAssetId) : null;
+  const selectedCargoAssetIds = [...new Set([
+    ...(Array.isArray(args.cargoAssetIds) ? args.cargoAssetIds.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()) : []),
+    ...(args.cargoAssetId ? [args.cargoAssetId] : []),
+  ])];
+  const cargoAssets = selectedCargoAssetIds.map((id) => catalog.cargoAssets.find((resource) => resource.id === id) ?? null);
+  const cargoAsset = cargoAssets[0] ?? null;
 
   if (!driver) throw new MissionResourceError("driver_not_found");
   if (!vehicle) throw new MissionResourceError("vehicle_not_found");
-  if (args.cargoAssetId && !cargoAsset) throw new MissionResourceError("cargo_asset_not_found");
+  if (cargoAssets.some((resource) => !resource)) throw new MissionResourceError("cargo_asset_not_found", { resourceIds: selectedCargoAssetIds });
   if (requiresDeliveryDriver(args.transportMode) && !driver.deliveryEligible) {
     throw new MissionResourceError("delivery_driver_capability_required", { resourceId: driver.id });
   }
@@ -343,7 +352,9 @@ export async function assertMissionResourceSelection(args: {
     });
   }
   if (!vehicle.available) throw new MissionResourceError(vehicle.conflict ? "mission_resource_conflict" : "vehicle_unavailable", { resourceId: vehicle.id, conflict: vehicle.conflict });
-  if (cargoAsset && !cargoAsset.available) throw new MissionResourceError(cargoAsset.conflict ? "mission_resource_conflict" : "cargo_asset_unavailable", { resourceId: cargoAsset.id, conflict: cargoAsset.conflict });
+  for (const selectedCargoAsset of cargoAssets) {
+    if (selectedCargoAsset && !selectedCargoAsset.available) throw new MissionResourceError(selectedCargoAsset.conflict ? "mission_resource_conflict" : "cargo_asset_unavailable", { resourceId: selectedCargoAsset.id, conflict: selectedCargoAsset.conflict });
+  }
 
-  return { driver, vehicle, cargoAsset, window: catalog.window! };
+  return { driver, vehicle, cargoAsset, cargoAssets: cargoAssets.filter((resource): resource is MissionResource => Boolean(resource)), window: catalog.window! };
 }
