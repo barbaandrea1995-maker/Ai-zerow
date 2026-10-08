@@ -70,6 +70,21 @@ type PlanningJob = {
   updatedAt: string;
 };
 
+type PlanningMissionSchedule = {
+  status: string;
+  toleranceMinutes: number;
+  plannedStartAt: string | null;
+  plannedEndAt: string | null;
+  planningWindow: { startsAt: string | null; endsAt: string | null };
+  missionWindow: { startsAt: string | null; endsAt: string | null };
+  windowAlignment: string;
+  actualStartAt: string | null;
+  actualEndAt: string | null;
+  startDeltaMinutes: number | null;
+  endDeltaMinutes: number | null;
+  checkedAt: string;
+};
+
 type PlanningPlan = {
   id: string;
   jobId: string;
@@ -105,6 +120,7 @@ type PlanningPlan = {
       currentStopLabel: string | null;
       currentStopKind: string | null;
     } | null;
+    schedule: PlanningMissionSchedule;
     version: number;
     updatedAt: string;
   } | null;
@@ -240,7 +256,26 @@ function statusLabel(status: string) {
   if (status === "RECONCILED") return "RICONCILIATA";
   if (status === "CLOSED") return "CHIUSA";
   if (status === "EXCEPTION") return "ECCEZIONE";
+  if (status === "NOT_SCHEDULED") return "FINESTRA NON DEFINITA";
+  if (status === "SCHEDULED") return "PROGRAMMATA";
+  if (status === "IN_PROGRESS") return "IN CORSO";
+  if (status === "STARTED_LATE") return "PARTITA IN RITARDO";
+  if (status === "COMPLETED") return "COMPLETATA";
+  if (status === "COMPLETED_LATE") return "CHIUSA IN RITARDO";
+  if (status === "OVERDUE") return "OLTRE FINESTRA";
   return status.replaceAll("_", " ");
+}
+
+function scheduleBadgeClass(status: string) {
+  if (status === "STARTED_LATE" || status === "COMPLETED_LATE" || status === "OVERDUE") return "border-amber-300/25 bg-amber-300/[.06] text-amber-100";
+  if (status === "IN_PROGRESS" || status === "COMPLETED") return "border-lime-300/20 bg-lime-300/[.05] text-lime-100";
+  return "border-white/10 text-slate-500";
+}
+
+function scheduleDeltaLabel(schedule: PlanningMissionSchedule) {
+  const delta = schedule.endDeltaMinutes ?? schedule.startDeltaMinutes;
+  if (delta === null || delta === 0) return "";
+  return ` · ${delta > 0 ? "+" : ""}${delta} min`;
 }
 
 function priorityLabel(priority: string) {
@@ -271,7 +306,7 @@ function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; va
 
 function PlanCard({ plan, busy, canPublish, onPublish, onOpenMission }: { plan: PlanningPlan; busy: boolean; canPublish: boolean; onPublish: () => void; onOpenMission: () => void }) {
   const canOpenMission = plan.jobModule === "operations" && plan.activityType === "TRANSPORT" && plan.status === "PUBLISHED" && (plan.feasible || Boolean(plan.linkedMission));
-  return <article className="carbon-inset rounded-2xl p-4 transition hover:border-lime-300/25"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${plan.feasible ? "bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.75)]" : "bg-rose-400 shadow-[0_0_10px_rgba(255,85,56,.6)]"}`} /><h3 className="truncate text-sm font-semibold text-slate-100">{plan.title}</h3></div><p className="mt-1 truncate text-[10px] text-slate-600">{plan.jobTitle} · aggiornato {formatDate(plan.updatedAt)}</p></div><StatusPill status={plan.status} tone={statusTone(plan.status, plan.feasible)} /></div><div className="mt-3 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-3"><span><CalendarClock className="mr-1 inline size-3 text-lime-200" />{formatDate(plan.startsAt)} → {formatDate(plan.endsAt)}</span><span><Users className="mr-1 inline size-3 text-cyan-200" />{plan.resourceCount} risorse</span><span className={plan.feasible ? "text-lime-200" : "text-rose-200"}>{plan.feasible ? "VERIFICA SUPERATA" : `${plan.conflictCount} conflitti`}</span></div><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">{plan.activityType === "TRANSPORT" ? "TRASPORTO" : "LAVORAZIONE"}</span><span className="rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">Priorità {priorityLabel(plan.priority)}</span>{plan.scopeSubgroupTitle && <span className="max-w-full truncate rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2 py-1 text-[9px] text-lime-100">Scope · {plan.scopeSubgroupTitle}</span>}{plan.linkedMission && <><span className="max-w-full truncate rounded-full border border-cyan-300/20 bg-cyan-300/[.04] px-2 py-1 text-[9px] text-cyan-100">Missione · {statusLabel(plan.linkedMission.status)}</span><span className={`max-w-full truncate rounded-full border px-2 py-1 text-[9px] ${plan.linkedMission.executionStatus === "EXCEPTION" ? "border-rose-300/25 bg-rose-300/[.05] text-rose-100" : plan.linkedMission.executionStatus === "IN_EXECUTION" ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-white/10 text-slate-500"}`}>Esecuzione · {statusLabel(plan.linkedMission.executionStatus)}</span>{plan.linkedMission.routeProgress && <span className="max-w-full truncate rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">Tappe · {plan.linkedMission.routeProgress.completedStops}/{plan.linkedMission.routeProgress.totalStops}{plan.linkedMission.routeProgress.currentStopLabel ? ` · corrente: ${plan.linkedMission.routeProgress.currentStopLabel}` : ""}</span>}</>}</div>{plan.resourceLabels.length > 0 && <p className="mt-3 truncate text-[10px] text-slate-600">Risorse: {plan.resourceLabels.join(" · ")}</p>}{plan.requiredQualifications.length > 0 && <p className="mt-1 truncate text-[10px] text-slate-600">Qualifiche: {plan.requiredQualifications.join(" · ")}</p>}<div className="mt-4 flex flex-wrap gap-2">{plan.status === "DRAFT" && <Button className="h-9 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy || !canPublish || !plan.feasible} onClick={onPublish}><Send className="size-3.5" />Pubblica piano</Button>}{canOpenMission && <Button className="h-9 border-cyan-300/25 bg-cyan-300/[.06] text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/10" onClick={onOpenMission}><Route className="size-3.5" />{plan.linkedMission ? "Apri missione" : "Prepara missione"}</Button>}</div></article>;
+  return <article className="carbon-inset rounded-2xl p-4 transition hover:border-lime-300/25"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${plan.feasible ? "bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.75)]" : "bg-rose-400 shadow-[0_0_10px_rgba(255,85,56,.6)]"}`} /><h3 className="truncate text-sm font-semibold text-slate-100">{plan.title}</h3></div><p className="mt-1 truncate text-[10px] text-slate-600">{plan.jobTitle} · aggiornato {formatDate(plan.updatedAt)}</p></div><StatusPill status={plan.status} tone={statusTone(plan.status, plan.feasible)} /></div><div className="mt-3 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-3"><span><CalendarClock className="mr-1 inline size-3 text-lime-200" />{formatDate(plan.startsAt)} → {formatDate(plan.endsAt)}</span><span><Users className="mr-1 inline size-3 text-cyan-200" />{plan.resourceCount} risorse</span><span className={plan.feasible ? "text-lime-200" : "text-rose-200"}>{plan.feasible ? "VERIFICA SUPERATA" : `${plan.conflictCount} conflitti`}</span></div><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">{plan.activityType === "TRANSPORT" ? "TRASPORTO" : "LAVORAZIONE"}</span><span className="rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">Priorità {priorityLabel(plan.priority)}</span>{plan.scopeSubgroupTitle && <span className="max-w-full truncate rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2 py-1 text-[9px] text-lime-100">Scope · {plan.scopeSubgroupTitle}</span>}{plan.linkedMission && <><span className="max-w-full truncate rounded-full border border-cyan-300/20 bg-cyan-300/[.04] px-2 py-1 text-[9px] text-cyan-100">Missione · {statusLabel(plan.linkedMission.status)}</span><span className={`max-w-full truncate rounded-full border px-2 py-1 text-[9px] ${plan.linkedMission.executionStatus === "EXCEPTION" ? "border-rose-300/25 bg-rose-300/[.05] text-rose-100" : plan.linkedMission.executionStatus === "IN_EXECUTION" ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-white/10 text-slate-500"}`}>Esecuzione · {statusLabel(plan.linkedMission.executionStatus)}</span><span className={`max-w-full truncate rounded-full border px-2 py-1 text-[9px] ${scheduleBadgeClass(plan.linkedMission.schedule.status)}`} title={`Finestra pianificata: ${formatDate(plan.linkedMission.schedule.plannedStartAt)} → ${formatDate(plan.linkedMission.schedule.plannedEndAt)} · allineamento ${plan.linkedMission.schedule.windowAlignment}`}>Finestra · {statusLabel(plan.linkedMission.schedule.status)}{scheduleDeltaLabel(plan.linkedMission.schedule)}</span>{plan.linkedMission.routeProgress && <span className="max-w-full truncate rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500">Tappe · {plan.linkedMission.routeProgress.completedStops}/{plan.linkedMission.routeProgress.totalStops}{plan.linkedMission.routeProgress.currentStopLabel ? ` · corrente: ${plan.linkedMission.routeProgress.currentStopLabel}` : ""}</span>}</>}</div>{plan.resourceLabels.length > 0 && <p className="mt-3 truncate text-[10px] text-slate-600">Risorse: {plan.resourceLabels.join(" · ")}</p>}{plan.requiredQualifications.length > 0 && <p className="mt-1 truncate text-[10px] text-slate-600">Qualifiche: {plan.requiredQualifications.join(" · ")}</p>}<div className="mt-4 flex flex-wrap gap-2">{plan.status === "DRAFT" && <Button className="h-9 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy || !canPublish || !plan.feasible} onClick={onPublish}><Send className="size-3.5" />Pubblica piano</Button>}{canOpenMission && <Button className="h-9 border-cyan-300/25 bg-cyan-300/[.06] text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/10" onClick={onOpenMission}><Route className="size-3.5" />{plan.linkedMission ? "Apri missione" : "Prepara missione"}</Button>}</div></article>;
 }
 
 export default function PlanningControl() {

@@ -74,6 +74,66 @@ function firstSlotValue(payload: Record<string, unknown>, key: "startsAt" | "end
   return typeof value === "string" && value ? value : null;
 }
 
+function validDateValue(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null;
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function deltaMinutes(actualAt: string | null, plannedAt: string | null) {
+  if (!actualAt || !plannedAt) return null;
+  const actual = Date.parse(actualAt);
+  const planned = Date.parse(plannedAt);
+  if (!Number.isFinite(actual) || !Number.isFinite(planned)) return null;
+  return Math.round((actual - planned) / 60_000);
+}
+
+function missionScheduleReadback(
+  missionPayload: Record<string, unknown>,
+  planningPayload: Record<string, unknown>,
+  routePlan: typeof routePlans.$inferSelect | null,
+  missionStatus: string,
+) {
+  const planningStartAt = firstSlotValue(planningPayload, "startsAt");
+  const planningEndAt = firstSlotValue(planningPayload, "endsAt");
+  const missionStartAt = validDateValue(missionPayload.plannedAt);
+  const missionEndAt = validDateValue(missionPayload.plannedEndAt);
+  const plannedStartAt = planningStartAt ?? missionStartAt;
+  const plannedEndAt = planningEndAt ?? missionEndAt;
+  const actualStartAt = validDateValue(routePlan?.startedAt);
+  const actualEndAt = validDateValue(routePlan?.endedAt);
+  const planningStartMs = planningStartAt ? Date.parse(planningStartAt) : Number.NaN;
+  const planningEndMs = planningEndAt ? Date.parse(planningEndAt) : Number.NaN;
+  const missionStartMs = missionStartAt ? Date.parse(missionStartAt) : Number.NaN;
+  const missionEndMs = missionEndAt ? Date.parse(missionEndAt) : Number.NaN;
+  const windowAlignment = Number.isFinite(planningStartMs) && Number.isFinite(planningEndMs) && Number.isFinite(missionStartMs) && Number.isFinite(missionEndMs)
+    ? missionStartMs >= planningStartMs && missionEndMs <= planningEndMs ? "ALIGNED" : "OUTSIDE_PLANNING_WINDOW"
+    : "UNVERIFIED";
+  const startDeltaMinutes = deltaMinutes(actualStartAt, plannedStartAt);
+  const endDeltaMinutes = deltaMinutes(actualEndAt, plannedEndAt);
+  const toleranceMinutes = 15;
+  const closed = missionStatus === "CLOSED" || routePlan?.status === "COMPLETED" || Boolean(actualEndAt);
+  let status = "NOT_SCHEDULED";
+  if (closed) status = endDeltaMinutes !== null && endDeltaMinutes > toleranceMinutes ? "COMPLETED_LATE" : "COMPLETED";
+  else if (actualStartAt) status = startDeltaMinutes !== null && startDeltaMinutes > toleranceMinutes ? "STARTED_LATE" : "IN_PROGRESS";
+  else if (plannedEndAt && Date.parse(plannedEndAt) < Date.now()) status = "OVERDUE";
+  else if (plannedStartAt) status = "SCHEDULED";
+
+  return {
+    status,
+    toleranceMinutes,
+    plannedStartAt,
+    plannedEndAt,
+    planningWindow: { startsAt: planningStartAt, endsAt: planningEndAt },
+    missionWindow: { startsAt: missionStartAt, endsAt: missionEndAt },
+    windowAlignment,
+    actualStartAt,
+    actualEndAt,
+    startDeltaMinutes,
+    endDeltaMinutes,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 function currentDayOverlap(startsAt: string | null, endsAt: string | null) {
   if (!startsAt || !endsAt) return false;
   const starts = Date.parse(startsAt);
@@ -148,7 +208,18 @@ export async function GET() {
     const allowedJobIds = new Set(visibleJobs.map((job) => job.id));
     const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
     const visiblePlanIds = new Set(visiblePlans.map((plan) => plan.id));
-    const linkedMissionByPlan = new Map<string, { id: string; title: string; status: string; executionStatus: string; routeProgress: ReturnType<typeof routeProgressForMission>; version: number; updatedAt: string }>();
+    const planningPayloadById = new Map(visiblePlans.map((plan) => [plan.id, parseJson(plan.payloadJson)]));
+    const routePlanByMission = new Map(routePlanRows.filter((plan) => typeof plan.missionId === "string").map((plan) => [plan.missionId as string, plan]));
+    const linkedMissionByPlan = new Map<string, {
+      id: string;
+      title: string;
+      status: string;
+      executionStatus: string;
+      routeProgress: ReturnType<typeof routeProgressForMission>;
+      schedule: ReturnType<typeof missionScheduleReadback>;
+      version: number;
+      updatedAt: string;
+    }>();
     for (const mission of missionRows) {
       if (!visiblePlanIds.size) break;
       const missionPayload = parseJson(mission.payloadJson);
@@ -160,6 +231,7 @@ export async function GET() {
           status: mission.status,
           executionStatus: missionExecutionStatus(mission.status),
           routeProgress: routeProgressForMission(mission.id, routePlanRows, routeStopRows),
+          schedule: missionScheduleReadback(missionPayload, planningPayloadById.get(planningPlanId) ?? {}, routePlanByMission.get(mission.id) ?? null, mission.status),
           version: mission.version,
           updatedAt: mission.updatedAt,
         });
