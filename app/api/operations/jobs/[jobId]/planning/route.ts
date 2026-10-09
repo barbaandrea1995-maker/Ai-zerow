@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
+const NON_PLANNABLE_JOB_STATUSES = new Set(["COMPLETED", "CLOSED", "CANCELLED"]);
 
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -309,6 +310,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
+    const jobPayload = parseJson(job.payloadJson);
+    const jobStatus = bounded(jobPayload.statusCode, 32, job.status).toUpperCase();
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
       eq(s06Events.idempotencyKey, idempotencyKey),
@@ -320,6 +323,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       )).limit(1);
       if (!record) return Response.json({ error: "planning_idempotency_readback_unavailable" }, { status: 503 });
       return Response.json({ plan: recordForResponse(record), idempotent: true, eventId: existingEvent.eventId }, { headers: { "cache-control": "private, no-store" } });
+    }
+    if (NON_PLANNABLE_JOB_STATUSES.has(jobStatus)) {
+      return Response.json({ error: "planning_job_not_active", status: jobStatus }, { status: 409 });
     }
 
     const now = new Date().toISOString();
@@ -349,10 +355,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
         && !hasCapability(context, "asset.read")) {
         return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
       }
-      const jobPayload = parseJson(job.payloadJson);
       const jobScope = isRecord(jobPayload.scope) ? jobPayload.scope : {};
       const payload = planPayload({
         ...input,
+        activityType: job.module === "mission" ? "TRANSPORT" : input.activityType,
         resources: canonicalResources,
         scopeSubgroupId: input.scopeSubgroupId ?? jobPayload.scopeSubgroupId ?? jobScope.subgroupId,
         scopeSubgroupTitle: input.scopeSubgroupTitle ?? jobScope.subgroupTitle,

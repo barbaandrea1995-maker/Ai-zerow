@@ -146,14 +146,20 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
-    const records = await getDb().select().from(jobJourneyRecords).where(and(
+    const allRecords = await getDb().select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, job.id),
       eq(jobJourneyRecords.domain, "field"),
       eq(jobJourneyRecords.recordType, "ATTENDANCE"),
     )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(100);
+    const canApprove = hasAttendanceCapability(context, "attendance.approve");
+    const workerFor = (row: typeof jobJourneyRecords.$inferSelect) => bounded(parseJson(row.payloadJson).workerId, 120, row.createdBy);
+    const records = allRecords.filter((row) => canApprove || workerFor(row) === context.actorId);
+    const currentRecord = allRecords.find((row) => workerFor(row) === context.actorId) ?? null;
+    const canOpenReport = hasCapability(context, "operations.write")
+      || (hasCapability(context, "field.write") && hasCapability(context, "workforce.registry.read"));
     return Response.json({
-      context: publicAuthorityContext(context),
+      context: { ...publicAuthorityContext(context), canOpenReport, canApprove },
       contract: {
         source: "sites-d1-field-attendance",
         tracking: "ATTENDANCE_GATED_ON_DUTY_ONLY",
@@ -164,6 +170,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
         externalExecutor: "deferred",
       },
       records: records.map(attendanceForResponse),
+      currentRecord: currentRecord ? attendanceForResponse(currentRecord) : null,
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {
@@ -208,12 +215,20 @@ export async function POST(request: Request, routeContext: RouteContext) {
     }
 
     failureStage = "read_latest_attendance";
-    const [latest] = await db.select().from(jobJourneyRecords).where(and(
+    const targetWorkerId = action === "correction_approve"
+      ? bounded(input.workerId, 120)
+      : context.actorId;
+    if (!targetWorkerId) return Response.json({ error: "attendance_worker_required" }, { status: 400 });
+    if (action === "correction_approve" && targetWorkerId === context.actorId) {
+      return Response.json({ error: "attendance_correction_self_approval_forbidden" }, { status: 403 });
+    }
+    const attendanceRows = await db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, job.id),
       eq(jobJourneyRecords.domain, "field"),
       eq(jobJourneyRecords.recordType, "ATTENDANCE"),
-    )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1);
+    )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+    const latest = attendanceRows.find((row) => bounded(parseJson(row.payloadJson).workerId, 120, row.createdBy) === targetWorkerId);
     const now = new Date().toISOString();
     const clientObservedAt = bounded(input.clientObservedAt ?? input.at, 40);
     const correctionAt = bounded(input.correctionAt, 40);
@@ -228,7 +243,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       // A forgotten exit is requested while the shift is still open. The
       // request intentionally bypasses the live geofence check, but it does
       // not close the attendance until an authorised approver confirms it.
-      correction_request: ["CHECKED_IN", "PAUSED", "CHECKED_OUT"],
+      correction_request: ["CHECKED_IN", "PAUSED"],
       correction_approve: ["CORRECTION_REQUESTED"],
     };
     if (action !== "check_in" && (!previousStatus || !validTransitions[action].includes(previousStatus))) {
@@ -287,10 +302,15 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let trackingSessionId: string | null = null;
     let trackingOperation: "start" | "pause" | "resume" | "close" | null = null;
     failureStage = "resolve_tracking_context";
-    if (operational.mode === "DRIVER") {
+    const storedOperational = isRecord(currentPayload.operationalContext) ? currentPayload.operationalContext : {};
+    const targetIsDriver = action === "correction_approve"
+      ? bounded(storedOperational.mode, 16).toUpperCase() === "DRIVER"
+      : operational.mode === "DRIVER";
+    if (targetIsDriver) {
+      const trackingEmployeeId = action === "correction_approve" ? targetWorkerId : context.actorId;
       const sessionRows = await db.select().from(trackingSessions).where(and(
         eq(trackingSessions.tenantId, context.tenantId),
-        eq(trackingSessions.employeeId, context.actorId),
+        eq(trackingSessions.employeeId, trackingEmployeeId),
         inArray(trackingSessions.status, ["ACTIVE", "PAUSED"]),
       )).orderBy(desc(trackingSessions.startedAt)).limit(5);
       activeTrackingSession = sessionRows[0] ?? null;
@@ -298,6 +318,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (activeTrackingSession) return Response.json({ error: "driver_tracking_session_already_active", sessionId: activeTrackingSession.id }, { status: 409 });
         trackingOperation = "start";
         trackingSessionId = `TRACKING-SESSION-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+      } else if (action === "correction_approve") {
+        if (activeTrackingSession) {
+          trackingOperation = "close";
+          trackingSessionId = activeTrackingSession.id;
+        }
       } else if (action === "pause" || action === "resume" || action === "check_out" || action === "correction_approve") {
         if (!activeTrackingSession) return Response.json({ error: "driver_tracking_session_not_open", reason: "driver_tracking_is_opened_by_check_in_and_closed_by_check_out" }, { status: 409 });
         if (action === "pause" && activeTrackingSession.status !== "ACTIVE") return Response.json({ error: "driver_tracking_session_not_active" }, { status: 409 });
@@ -306,10 +331,20 @@ export async function POST(request: Request, routeContext: RouteContext) {
         trackingSessionId = activeTrackingSession.id;
       }
     }
+    const eventMissionId = action === "correction_approve"
+      ? bounded(storedOperational.missionId, 120) || null
+      : operational.mission?.id ?? null;
+    const eventVehicleId = action === "correction_approve"
+      ? activeTrackingSession?.vehicleId ?? (bounded(storedOperational.vehicleId, 120) || null)
+      : operational.vehicleId;
+    const eventTrackingDeviceId = action === "correction_approve"
+      ? activeTrackingSession?.trackingDeviceId ?? (bounded(storedOperational.trackingDeviceId, 120) || null)
+      : operational.trackingDeviceId;
+    const eventTrackingSource = action === "correction_approve"
+      ? activeTrackingSession?.trackingSource ?? (bounded(storedOperational.trackingSource, 40) || null)
+      : operational.trackingSource;
 
-    const workerId = hasCapability(context, "workforce.read.all") || hasCapability(context, "workforce.manage")
-      ? bounded(input.workerId, 120, context.actorId)
-      : context.actorId;
+    const workerId = targetWorkerId;
     const transition = {
       action,
       recordedAt: now,
@@ -318,20 +353,20 @@ export async function POST(request: Request, routeContext: RouteContext) {
       note: bounded(input.note, 1_000),
       correctionAt: effectiveCorrectionAt,
       location: locationWithGeofence,
-      dutyMode: operational.mode,
-      missionId: operational.mission?.id ?? null,
-      vehicleId: operational.vehicleId,
+      dutyMode: targetIsDriver ? "DRIVER" : operational.mode,
+      missionId: eventMissionId,
+      vehicleId: eventVehicleId,
       trackingSessionId,
     };
-    const trackingState = operational.mode === "DRIVER"
+    const trackingState = targetIsDriver
       ? {
         mode: "DRIVER",
-        status: trackingOperation === "start" ? "STARTED" : trackingOperation === "pause" ? "PAUSED" : trackingOperation === "resume" ? "ACTIVE" : trackingOperation === "close" ? "CLOSED" : "NOT_STARTED",
+        status: trackingOperation === "start" ? "STARTED" : trackingOperation === "pause" ? "PAUSED" : trackingOperation === "resume" ? "ACTIVE" : trackingOperation === "close" ? "CLOSED" : bounded(isRecord(currentPayload.tracking) ? currentPayload.tracking.status : "", 24, "DEGRADED"),
         sessionId: trackingSessionId,
-        missionId: operational.mission?.id ?? null,
-        vehicleId: operational.vehicleId,
-        trackingDeviceId: operational.trackingDeviceId,
-        source: operational.trackingSource,
+        missionId: eventMissionId,
+        vehicleId: eventVehicleId,
+        trackingDeviceId: eventTrackingDeviceId,
+        source: eventTrackingSource,
         updatedAt: now,
       }
       : { mode: "FIELD", status: "NOT_REQUIRED", sessionId: null, updatedAt: now };
@@ -340,7 +375,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       workerId,
       teamId: bounded(input.teamId, 120),
       privacy: { mode: "ON_DUTY_ONLY", locationOptional: false, precision: "4_DECIMAL_PLACES", retentionClass: "OPERATIONAL" },
-      operationalContext: persistedOperationalContext(operational),
+      operationalContext: action === "correction_approve" && Object.keys(storedOperational).length
+        ? storedOperational
+        : persistedOperationalContext(operational),
       tracking: trackingOperation === null && action !== "correction_request" && action !== "correction_approve"
         ? currentPayload.tracking ?? trackingState
         : trackingState,
@@ -392,10 +429,20 @@ export async function POST(request: Request, routeContext: RouteContext) {
     } else if (trackingOperation && activeTrackingSession) {
       const nextTrackingStatus = trackingOperation === "close" ? "CLOSED" : trackingOperation === "pause" ? "PAUSED" : "ACTIVE";
       const trackingEventId = crypto.randomUUID();
-      const evidence = { attendanceId: aggregateId, jobId: job.id, missionId: operational.mission?.id ?? null, action: trackingOperation, previousStatus: activeTrackingSession.status, nextStatus: nextTrackingStatus, policy: "ATTENDANCE_BOUND" };
+      const correctionApproval = action === "correction_approve";
+      const evidence = {
+        attendanceId: aggregateId,
+        jobId: job.id,
+        missionId: eventMissionId,
+        action: trackingOperation,
+        previousStatus: activeTrackingSession.status,
+        nextStatus: nextTrackingStatus,
+        policy: correctionApproval ? "MANUAL_EXIT_CORRECTION_APPROVED" : "ATTENDANCE_BOUND",
+        correctedExitAt: correctionApproval ? effectiveCorrectionAt : null,
+      };
       trackingStatements.push(
         db.update(trackingSessions).set({ status: nextTrackingStatus, endedAt: trackingOperation === "close" ? now : activeTrackingSession.endedAt, updatedAt: now }).where(and(eq(trackingSessions.tenantId, context.tenantId), eq(trackingSessions.id, activeTrackingSession.id), eq(trackingSessions.status, activeTrackingSession.status))),
-        ...(trackingOperation === "close" ? [db.insert(locationEvents).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventType: "TRACKING_SESSION_ENDED", occurredAt: now, trackingSessionId: activeTrackingSession.id, employeeId: activeTrackingSession.employeeId, vehicleId: activeTrackingSession.vehicleId, locationId: attendanceGeofence.locationId, geofenceId: attendanceGeofence.geofenceId, source: "ZEROW_ATTENDANCE_GATE", confidenceMilli: attendanceGeofence.status === "INSIDE" ? 1000 : 700, evidenceJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), dedupeKey: `tracking-session-ended:${activeTrackingSession.id}:${aggregateId}`, createdAt: now })] : []),
+        ...(trackingOperation === "close" ? [db.insert(locationEvents).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventType: "TRACKING_SESSION_ENDED", occurredAt: now, trackingSessionId: activeTrackingSession.id, employeeId: activeTrackingSession.employeeId, vehicleId: activeTrackingSession.vehicleId, locationId: correctionApproval ? null : attendanceGeofence.locationId, geofenceId: correctionApproval ? null : attendanceGeofence.geofenceId, source: "ZEROW_ATTENDANCE_GATE", confidenceMilli: correctionApproval ? 0 : attendanceGeofence.status === "INSIDE" ? 1000 : 700, evidenceJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), dedupeKey: `tracking-session-ended:${activeTrackingSession.id}:${aggregateId}`, createdAt: now })] : []),
         db.insert(s06Events).values({ eventId: trackingEventId, tenantId: context.tenantId, eventType: `location.tracking_session.${trackingOperation}`, schemaVersion: "1", actorType: "human", actorId: context.actorId, source: "sites-location-intelligence", occurredAt: now, observedAt: now, aggregateType: "tracking.session", aggregateId: activeTrackingSession.id, aggregateVersion: Date.now(), payloadJson: JSON.stringify(evidence), correlationId: crypto.randomUUID(), causationId: null, idempotencyKey: `${idempotencyKey}:tracking`, status: "COMMITTED_SITES_READBACK", createdAt: now }),
         db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId: trackingEventId, topic: `zerow.location.tracking_session.${trackingOperation}`, status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
         db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "tracking.session", aggregateId: activeTrackingSession.id, expectedVersion: Date.now(), observedVersion: Date.now(), status: "SITES_READBACK_VERIFIED", detail: "Stato tracking riallineato alla transizione di presenza.", createdAt: now, updatedAt: now }),

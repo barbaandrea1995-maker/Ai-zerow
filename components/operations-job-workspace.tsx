@@ -10,29 +10,23 @@ import {
 } from "react";
 import {
   ArrowLeft,
-  BadgeCheck,
   BriefcaseBusiness,
-  CalendarClock,
   Check,
   CheckCircle2,
   ClipboardCheck,
   CircleGauge,
   FileText,
   Flag,
-  FolderKanban,
   HardHat,
   Layers3,
   LoaderCircle,
   MapPin,
-  Package,
   Plus,
   RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
-  Truck,
   Users,
-  Wrench,
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -48,7 +42,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import JobCommercialJourney from "@/components/job-commercial-journey";
+import { composeRapportinoNarrative, normalizeRapportinoAnswers } from "@/lib/operations-contract";
+import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 type WorkspaceRecord = {
   id: string;
@@ -76,8 +73,13 @@ type CompletionRequirement = {
 };
 
 type RapportinoReadback = {
+  reportId: string;
+  answers: string[];
   status: "EMPTY" | "DRAFT" | "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
+  reportDate: string;
+  dayAlreadyApproved: boolean;
   draft: string;
+  narrative: string;
   fields: Array<{
     key: string;
     label: string;
@@ -118,6 +120,18 @@ type WorkspacePayload = {
     }>;
     completion: { ready: boolean; requirements: CompletionRequirement[] };
     rapportino: RapportinoReadback;
+    rapportinoHistory?: Array<{
+      reportId: string;
+      status: string;
+      reportDate?: string;
+      answers?: string[];
+      text: string;
+      narrative: string;
+      note: string;
+      at: string;
+      submittedBy: string;
+      reviewedBy: string;
+    }>;
   };
   readback?: { version?: number };
   mutation?: { action: string; version?: number; readback?: string };
@@ -132,18 +146,69 @@ type ActionKind =
   | "progress"
   | null;
 
-function sectionLabel(status: WorkspaceSection["status"]) {
-  if (status === "readback") return "VERIFICATO";
-  if (status === "deferred") return "PROSSIMO PASSO";
-  return "DA COMPLETARE";
-}
+const REPORT_BLOCKER_DETAILS: Record<
+  string,
+  { title: string; detail: string; destination: "details" | "assignment" | "attendance" }
+> = {
+  job: {
+    title: "Completa l’identità della commessa",
+    detail: "Il titolo della commessa non è sufficiente per intestare il rapporto.",
+    destination: "details",
+  },
+  worksite: {
+    title: "Verifica il luogo della commessa",
+    detail: "Indirizzo, geocodifica e geofence devono riferirsi allo stesso luogo verificato.",
+    destination: "details",
+  },
+  assignment: {
+    title: "Indica responsabile o squadra",
+    detail: "Serve un’assegnazione operativa per collegare il consuntivo alla squadra corretta.",
+    destination: "assignment",
+  },
+  attendance: {
+    title: "Registra la presenza del turno",
+    detail: "Non risultano timbrature collegate a questa giornata.",
+    destination: "attendance",
+  },
+  attendance_exit: {
+    title: "Registra l’uscita del turno",
+    detail: "La presenza è ancora aperta: chiudi il turno da Presenze prima dell’invio.",
+    destination: "attendance",
+  },
+};
 
-function sectionTone(status: WorkspaceSection["status"]) {
-  if (status === "readback")
-    return "border-lime-300/25 bg-lime-300/10 text-lime-200";
-  if (status === "deferred")
-    return "border-amber-300/25 bg-amber-300/10 text-amber-200";
-  return "border-white/10 bg-black/20 text-slate-500";
+const REPORT_CHAT_STEPS = [
+  {
+    title: "Attività svolte ed esito",
+    prompt: "Quali lavori avete completato oggi e qual è stato il risultato?",
+    placeholder: "Indica le lavorazioni concluse e l’esito osservato…",
+  },
+  {
+    title: "Criticità e sicurezza",
+    prompt: "Ci sono stati problemi, ritardi, rischi o materiali mancanti? Se no, scrivi “Nessuna”.",
+    placeholder: "Descrivi l’eventuale criticità e come è stata gestita…",
+  },
+  {
+    title: "Prossimi passi e richieste",
+    prompt: "Cosa resta da fare o deve sapere l’ufficio per il prossimo turno? Se nulla, scrivi “Nessuno”.",
+    placeholder: "Indica attività residue, materiali o decisioni necessarie…",
+  },
+] as const;
+
+function reportAnswersFor(narrative: string, savedAnswers?: unknown): [string, string, string] {
+  const saved = normalizeRapportinoAnswers(savedAnswers);
+  if (saved) return saved;
+  const labels = REPORT_CHAT_STEPS.map((step) => `${step.title.toLocaleUpperCase("it-IT")}:`);
+  if (labels.every((label) => narrative.toLocaleUpperCase("it-IT").includes(label))) {
+    return labels.map((label, index) => {
+      const upperNarrative = narrative.toLocaleUpperCase("it-IT");
+      const start = upperNarrative.indexOf(label) + label.length;
+      const nextLabel = labels[index + 1];
+      const end = nextLabel ? upperNarrative.indexOf(nextLabel, start) : narrative.length;
+      return narrative.slice(start, end < 0 ? undefined : end).trim();
+    }) as [string, string, string];
+  }
+  return [narrative.trim(), "", ""];
 }
 
 function statusTone(status: string) {
@@ -203,21 +268,6 @@ function displayStatus(value: string) {
   return STATUS_LABELS[normalized] ?? value.replaceAll("_", " ");
 }
 
-function displayJourneyStep(key: string, fallback: string) {
-  const labels: Record<string, string> = {
-    activity: "Attività",
-    assignment: "Assegnazione",
-    attendance: "Presenze",
-    control: "Verifica finale",
-    field: "Esecuzione sul campo",
-    job: "Commessa",
-    planning: "Pianificazione",
-    rapportino: "Rapportino",
-    "work-context": "Luogo e lavoro",
-  };
-  return labels[key] ?? fallback;
-}
-
 function displayRecordType(value: string) {
   const labels: Record<string, string> = {
     attendance: "Presenza",
@@ -236,6 +286,7 @@ const ACTION_LABELS: Record<string, string> = {
   add_report: "Rapportino aggiunto",
   save_rapportino: "Bozza rapportino salvata",
   submit_rapportino: "Rapportino inviato in ufficio",
+  resubmit_rapportino: "Rapportino corretto reinviato",
   review_rapportino: "Revisione rapportino registrata",
   assign: "Risorse assegnate",
   set_status: "Stato aggiornato",
@@ -386,162 +437,6 @@ function CompletionGate({
   );
 }
 
-function JourneyRail({
-  journey,
-}: {
-  journey: WorkspacePayload["workspace"]["journey"];
-}) {
-  return (
-    <section className="carbon-card rounded-[24px] p-5 sm:p-6">
-      <div className="flex items-start gap-3">
-        <span className="grid size-10 place-items-center rounded-2xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-          <Layers3 className="size-4" />
-        </span>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200/70">
-            Percorso della commessa
-          </p>
-          <h2 className="mt-1 text-[15px] font-semibold text-slate-100">
-            Dalla commessa alla chiusura
-          </h2>
-        </div>
-      </div>
-      <div className="mt-5">
-        {journey.map((step, index) => {
-          const complete = step.status === "readback";
-          const deferred = step.status === "deferred";
-          return (
-            <div className="relative flex gap-3 pb-4 last:pb-0" key={step.key}>
-              {index < journey.length - 1 && (
-                <span className="absolute left-[9px] top-5 h-[calc(100%-9px)] w-px bg-white/[0.09]" />
-              )}
-              <span
-                className={`relative z-10 grid size-[19px] shrink-0 place-items-center rounded-full border ${complete ? "border-lime-300/45 bg-lime-300 text-[#071006]" : deferred ? "border-amber-300/30 bg-amber-300/[0.08] text-amber-200" : "border-white/15 bg-black/30 text-slate-600"}`}
-              >
-                {complete ? (
-                  <Check className="size-2.5" />
-                ) : (
-                  <span className="size-1.5 rounded-full bg-current" />
-                )}
-              </span>
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                <span
-                  className={`text-[11px] ${complete ? "text-slate-200" : deferred ? "text-amber-100/70" : "text-slate-500"}`}
-                >
-                  {displayJourneyStep(step.key, step.label)}
-                </span>
-                <span
-                  className={`rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] ${complete ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-200" : deferred ? "border-amber-300/20 bg-amber-300/[0.05] text-amber-200" : "border-white/10 text-slate-600"}`}
-                >
-                  {complete
-                    ? "completato"
-                    : deferred
-                      ? "prossimo passo"
-                      : "da iniziare"}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function WorkspaceSectionCard({
-  title,
-  eyebrow,
-  icon: Icon,
-  section,
-  onCompleteActivity,
-}: {
-  title: string;
-  eyebrow: string;
-  icon: typeof BriefcaseBusiness;
-  section: WorkspaceSection;
-  onCompleteActivity?: (activityId: string) => void;
-}) {
-  return (
-    <section className="carbon-card group rounded-[22px] p-4 transition hover:border-lime-300/20 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200">
-            <Icon className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">
-              {eyebrow}
-            </p>
-            <h2 className="mt-1 truncate text-[14px] font-semibold text-slate-100">
-              {title}
-            </h2>
-          </div>
-        </div>
-        <span
-          className={`shrink-0 rounded-full border px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.1em] ${sectionTone(section.status)}`}
-        >
-          {section.count
-            ? `${section.count} · ${sectionLabel(section.status)}`
-            : sectionLabel(section.status)}
-        </span>
-      </div>
-      <div className="mt-4 space-y-2">
-        {section.records.map((record) => {
-          const activityId =
-            typeof record.payload?.id === "string" ? record.payload.id : null;
-          return (
-            <div
-              className="carbon-inset flex items-center gap-3 rounded-xl p-3"
-              key={record.id}
-            >
-              <span
-                className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}
-              >
-                <CheckCircle2 className="size-3.5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[11px] font-medium text-slate-200">
-                  {record.title}
-                </p>
-                <p className="mt-1 truncate text-[10px] text-slate-500">
-                  {record.detail || displayRecordType(record.recordType)}
-                </p>
-              </div>
-              <span
-                className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.08em] sm:inline-flex ${statusTone(record.status)}`}
-              >
-                {displayStatus(record.status)}
-              </span>
-              {onCompleteActivity && activityId && record.status !== "DONE" && (
-                <button
-                  aria-label={`Completa ${record.title}`}
-                  className="grid size-7 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-200 transition hover:bg-lime-300/10"
-                  onClick={() => onCompleteActivity(activityId)}
-                  type="button"
-                >
-                  <Check className="size-3.5" />
-                </button>
-              )}
-            </div>
-          );
-        })}
-        {section.records.length === 0 && (
-          <div className="rounded-xl border border-dashed border-white/[0.1] bg-black/15 px-3 py-5 text-center">
-            <p className="text-[11px] text-slate-500">
-              {section.status === "deferred"
-                ? "Disponibile nel prossimo passaggio."
-                : "Nessun record collegato alla commessa."}
-            </p>
-            <p className="mt-1 text-[10px] text-slate-700">
-              I dati compariranno qui quando il passaggio sarà attivo.
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 export default function OperationsJobWorkspace({
   canWriteOperations,
   canWriteReport,
@@ -567,6 +462,9 @@ export default function OperationsJobWorkspace({
   const [description, setDescription] = useState("");
   const [client, setClient] = useState("");
   const [location, setLocation] = useState("");
+  const [worksiteCandidates, setWorksiteCandidates] = useState<GeocodeCandidate[]>([]);
+  const [selectedWorksite, setSelectedWorksite] = useState<GeocodeCandidate | null>(null);
+  const [worksiteGeocoding, setWorksiteGeocoding] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [activityTitle, setActivityTitle] = useState("");
   const [activityDetail, setActivityDetail] = useState("");
@@ -578,8 +476,16 @@ export default function OperationsJobWorkspace({
   const [evidenceTitle, setEvidenceTitle] = useState("");
   const [evidenceDetail, setEvidenceDetail] = useState("");
   const [reportText, setReportText] = useState("");
+  const [reportAnswers, setReportAnswers] = useState<[string, string, string]>(["", "", ""]);
+  const [reportChatStep, setReportChatStep] = useState(0);
+  const [reportSaving, setReportSaving] = useState(false);
+  const [reportQuestionOverrides, setReportQuestionOverrides] = useState<Record<number, string>>({});
+  const [reportQuestionStatuses, setReportQuestionStatuses] = useState<Record<number, "loading" | "live" | "fallback">>({});
   const [reviewNote, setReviewNote] = useState("");
+  const [reportReviewNotes, setReportReviewNotes] = useState<Record<string, string>>({});
+  const [reportRevisionAnswers, setReportRevisionAnswers] = useState<Record<string, [string, string, string]>>({});
   const [progress, setProgress] = useState(0);
+  const [activeSection, setActiveSection] = useState<"overview" | "operations" | "reports">("overview");
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -642,8 +548,12 @@ export default function OperationsJobWorkspace({
   }, [refresh]);
 
   const mutate = useCallback(
-    async (action: string, body: Record<string, unknown>) => {
-      if (!payload) return;
+    async (
+      action: string,
+      body: Record<string, unknown>,
+      options: { closeDialog?: boolean; silent?: boolean } = {},
+    ): Promise<boolean> => {
+      if (!payload) return false;
       try {
         const response = await fetch(
           `/api/operations/jobs/${encodeURIComponent(jobId)}`,
@@ -676,6 +586,8 @@ export default function OperationsJobWorkspace({
             notify(
               `Completamento bloccato: ${missing || "requisiti mancanti"}`,
             );
+          } else if (nextPayload.error === "rapportino_answers_incomplete" && nextPayload.questions?.length) {
+            notify(`Rapportino incompleto: ${nextPayload.questions[0]}`);
           } else if (
             nextPayload.error === "rapportino_completeness_unmet" &&
             (nextPayload.questions?.length || nextPayload.completeness?.missing?.length)
@@ -683,6 +595,12 @@ export default function OperationsJobWorkspace({
             notify(
               `Invio bloccato: ${nextPayload.questions?.[0] ?? "completa i dati mancanti"}`,
             );
+          } else if (nextPayload.error === "rapportino_locked") {
+            notify(nextPayload.message ?? "Il rapportino è già in revisione in ufficio.");
+            await refresh();
+          } else if (nextPayload.error === "rapportino_day_already_approved") {
+            notify(nextPayload.message ?? "Il rapportino della giornata è già approvato dall’ufficio.");
+            await refresh();
           } else
             notify(
               nextPayload.error === "version_conflict"
@@ -690,16 +608,18 @@ export default function OperationsJobWorkspace({
                 : "Operazione non completata. Riprova.",
             );
           if (response.status === 409) await refresh();
-          return;
+          return false;
         }
         setPayload(nextPayload);
         setProgress(nextPayload.job.progress);
-        setActionOpen(null);
-        notify(`Operazione completata · ${displayAction(action)}`);
+        if (options.closeDialog !== false) setActionOpen(null);
+        if (!options.silent) notify(`Operazione completata · ${displayAction(action)}`);
+        return true;
       } catch {
         notify(
           "Connessione non disponibile: nessuna modifica è stata confermata.",
         );
+        return false;
       }
     },
     [jobId, notify, payload, refresh],
@@ -726,10 +646,17 @@ export default function OperationsJobWorkspace({
 
   const submitAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (actionOpen === "details")
+    if (actionOpen === "details") {
+      const savedLocation = typeof payload?.job.payload?.location === "string" ? payload.job.payload.location.trim() : payload?.job.detail.trim() ?? "";
+      const locationChanged = location.trim() !== savedLocation;
+      if (locationChanged && !selectedWorksite) {
+        notify("Riconosci il nuovo indirizzo e seleziona il risultato server-side prima di salvare.");
+        return;
+      }
       await mutate("update_job", {
-        fields: { title, description, client, location, dueDate },
+        fields: { title, description, client, location, dueDate, ...(locationChanged ? { worksiteLocation: selectedWorksite } : {}) },
       });
+    }
     if (actionOpen === "activity")
       await mutate("add_activity", {
         title: activityTitle,
@@ -746,7 +673,7 @@ export default function OperationsJobWorkspace({
         kind: "note",
       });
     if (actionOpen === "report")
-      await mutate("save_rapportino", { text: reportText });
+      await mutate("save_rapportino", { narrative: reportText, answers: reportAnswers });
     if (actionOpen === "progress") await mutate("set_progress", { progress });
   };
 
@@ -772,6 +699,8 @@ export default function OperationsJobWorkspace({
         ? payload.job.payload.location
         : payload.job.detail,
     );
+    setWorksiteCandidates([]);
+    setSelectedWorksite(null);
     setDueDate(
       typeof payload.job.payload?.dueDate === "string"
         ? payload.job.payload.dueDate
@@ -780,20 +709,155 @@ export default function OperationsJobWorkspace({
     setActionOpen("details");
   };
 
-  const openReport = () => {
+  const openAssignment = () => {
     if (!payload) return;
-    setReportText(payload.workspace.rapportino.draft);
+    const assignment = payload.job.payload?.assignment;
+    const record = assignment && typeof assignment === "object" && !Array.isArray(assignment)
+      ? assignment as Record<string, unknown>
+      : {};
+    setResponsible(typeof record.responsible === "string" ? record.responsible : "");
+    setTeam(typeof record.team === "string" ? record.team : "");
+    setRole(typeof record.role === "string" ? record.role : "Responsabile operativo");
+    setActionOpen("assign");
+  };
+
+  const recognizeWorksite = async () => {
+    if (location.trim().length < 5) {
+      notify("Inserisci un indirizzo completo prima di riconoscere il cantiere.");
+      return;
+    }
+    setWorksiteGeocoding(true);
+    setWorksiteCandidates([]);
+    setSelectedWorksite(null);
+    try {
+      const response = await fetch("/api/location/geocode", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address: location.trim() }),
+      });
+      const result = await response.json() as { candidates?: GeocodeCandidate[]; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "geocoder_unavailable");
+      const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+      setWorksiteCandidates(candidates);
+      if (!candidates.length) notify("Il server non ha trovato un luogo: controlla l’indirizzo e riprova.");
+    } catch (error) {
+      notify(error instanceof Error && error.message === "geocoder_not_configured" ? "Il provider Mapbox non è configurato." : "Non riesco a riconoscere il luogo. Riprova tra poco.");
+    } finally {
+      setWorksiteGeocoding(false);
+    }
+  };
+
+  const requestReportQuestion = useCallback(async (step: number, answers: readonly string[]) => {
+    const fallbackQuestion = REPORT_CHAT_STEPS[step]?.prompt;
+    if (!fallbackQuestion) return;
+    setReportQuestionStatuses((current) => ({ ...current, [step]: "loading" }));
+    try {
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ action: "rapportino_interview_question", step, answers }),
+      });
+      const result = await response.json() as {
+        question?: string;
+        ai?: { status?: string };
+      };
+      if (!response.ok || typeof result.question !== "string" || result.question.trim().length < 8) {
+        throw new Error("question_unavailable");
+      }
+      setReportQuestionOverrides((current) => ({ ...current, [step]: result.question!.trim().slice(0, 400) }));
+      setReportQuestionStatuses((current) => ({ ...current, [step]: result.ai?.status === "used" ? "live" : "fallback" }));
+    } catch {
+      setReportQuestionOverrides((current) => ({ ...current, [step]: fallbackQuestion }));
+      setReportQuestionStatuses((current) => ({ ...current, [step]: "fallback" }));
+    }
+  }, [jobId]);
+
+  const openReport = useCallback(() => {
+    if (!payload) return;
+    setActiveSection("reports");
+    const narrative = payload.workspace.rapportino.status === "APPROVED" ? "" : payload.workspace.rapportino.narrative;
+    const answers = reportAnswersFor(narrative, payload.workspace.rapportino.answers);
+    setReportAnswers(answers);
+    setReportText(composeRapportinoNarrative(answers));
+    const firstMissing = answers.findIndex((answer) => answer.trim().length < 2);
+    const nextStep = firstMissing < 0 ? REPORT_CHAT_STEPS.length : firstMissing;
+    setReportChatStep(nextStep);
+    setReportQuestionOverrides({});
+    setReportQuestionStatuses({});
     setReviewNote(payload.workspace.rapportino.review.note);
     setActionOpen("report");
+    if (nextStep < REPORT_CHAT_STEPS.length) void requestReportQuestion(nextStep, answers);
+  }, [payload, requestReportQuestion]);
+
+  const updateReportAnswer = (index: number, value: string) => {
+    const next = [...reportAnswers] as [string, string, string];
+    next[index] = value;
+    setReportAnswers(next);
+    setReportText(composeRapportinoNarrative(next));
+  };
+
+  const advanceReportChat = async () => {
+    if (reportAnswers[reportChatStep]?.trim().length < 2) {
+      notify("Rispondi alla domanda oppure indica che non ci sono elementi da segnalare.");
+      return;
+    }
+    if (!canWriteReport || payload?.workspace.rapportino.status === "SUBMITTED" || payload?.workspace.rapportino.dayAlreadyApproved || reportSaving) return;
+    setReportSaving(true);
+    const saved = await mutate("save_rapportino", {
+      narrative: composeRapportinoNarrative(reportAnswers),
+      answers: reportAnswers,
+    }, { closeDialog: false, silent: true });
+    setReportSaving(false);
+    if (!saved) return;
+    const nextStep = Math.min(REPORT_CHAT_STEPS.length, reportChatStep + 1);
+    setReportChatStep(nextStep);
+    if (nextStep < REPORT_CHAT_STEPS.length) void requestReportQuestion(nextStep, reportAnswers);
+  };
+
+  const updateHistoricalAnswer = (reportId: string, narrative: string, savedAnswers: string[] | undefined, index: number, value: string) => {
+    setReportRevisionAnswers((current) => {
+      const next = [...(current[reportId] ?? reportAnswersFor(narrative, savedAnswers))] as [string, string, string];
+      next[index] = value;
+      return { ...current, [reportId]: next };
+    });
+  };
+
+  const resolveReportBlocker = async (key: string) => {
+    const blocker = REPORT_BLOCKER_DETAILS[key];
+    if (!blocker || !payload) return;
+
+    if (blocker.destination !== "attendance" && !canWriteOperations) {
+      notify("Per correggere i dati della commessa serve il profilo operativo dell’ufficio.");
+      return;
+    }
+
+    const reportStatus = payload.workspace.rapportino.status;
+    const hasEditedDraft = canWriteReport
+      && reportStatus !== "SUBMITTED"
+      && reportText.trim().length >= 2
+      && (reportStatus === "APPROVED"
+        || reportText.trim() !== payload.workspace.rapportino.narrative.trim());
+    if (hasEditedDraft) {
+      const saved = await mutate("save_rapportino", { narrative: reportText, answers: reportAnswers });
+      if (!saved) return;
+    }
+
+    if (blocker.destination === "details") {
+      openDetails();
+    } else if (blocker.destination === "assignment") {
+      openAssignment();
+    } else {
+      setActionOpen(null);
+      router.push("/presenze");
+    }
   };
 
   useEffect(() => {
     if (!openReportFromQuery || !payload || autoOpenedReportJobRef.current === jobId) return;
     autoOpenedReportJobRef.current = jobId;
-    setReportText(payload.workspace.rapportino.draft);
-    setReviewNote(payload.workspace.rapportino.review.note);
-    setActionOpen("report");
-  }, [jobId, openReportFromQuery, payload]);
+    openReport();
+  }, [jobId, openReportFromQuery, openReport, payload]);
 
   const submitReport = (intent: "DRAFT" | "SUBMIT" | "APPROVE" | "REQUEST_CHANGES") => {
     if (intent === "APPROVE" || intent === "REQUEST_CHANGES") {
@@ -803,7 +867,26 @@ export default function OperationsJobWorkspace({
       });
       return;
     }
-    void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", { text: reportText });
+    void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", { narrative: reportText, answers: reportAnswers });
+  };
+
+  const reviewHistoricalReport = (reportId: string, decision: "APPROVE" | "REQUEST_CHANGES") => {
+    const note = reportReviewNotes[reportId]?.trim() ?? "";
+    if (decision === "REQUEST_CHANGES" && note.length < 8) {
+      notify("Per chiedere un’integrazione scrivi una nota di almeno 8 caratteri.");
+      return;
+    }
+    void mutate("review_rapportino", { reportId, decision, reviewNote: note });
+  };
+
+  const resubmitHistoricalReport = (reportId: string, originalNarrative: string, savedAnswers?: string[]) => {
+    const answers = reportRevisionAnswers[reportId] ?? reportAnswersFor(originalNarrative, savedAnswers);
+    const narrative = composeRapportinoNarrative(answers);
+    if (answers.some((answer) => answer.trim().length < 2) || narrative.length < 40) {
+      notify("Completa tutte e tre le risposte del rapportino prima di reinviarlo.");
+      return;
+    }
+    void mutate("resubmit_rapportino", { reportId, narrative, answers });
   };
 
   if (state === "loading")
@@ -878,6 +961,17 @@ export default function OperationsJobWorkspace({
       ? (jobData.worksiteLocation as Record<string, unknown>)
       : null;
   const locationVerified = worksiteLocation?.status === "SERVER_VERIFIED";
+  const worksiteGeofence =
+    worksiteLocation?.geofence &&
+    typeof worksiteLocation.geofence === "object" &&
+    !Array.isArray(worksiteLocation.geofence)
+      ? (worksiteLocation.geofence as Record<string, unknown>)
+      : null;
+  const geofenceLabel = locationVerified
+    ? typeof worksiteGeofence?.radiusMeters === "number"
+      ? `Attiva · raggio ${worksiteGeofence.radiusMeters} m`
+      : "Attiva · verificata dal server"
+    : "Da verificare dal server";
   const jobDescription = valueOr(
     jobData.description,
     "Descrizione operativa da completare.",
@@ -890,10 +984,6 @@ export default function OperationsJobWorkspace({
     hasRealDescription && looksLikeAddress(job.title, locationLabel)
       ? compactDescription(jobDescription, 100)
       : job.title;
-  const heroSummary =
-    displayTitle !== job.title
-      ? "Lavoro organizzato e monitorato dalla scheda della commessa."
-      : jobSummary;
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
@@ -916,21 +1006,11 @@ export default function OperationsJobWorkspace({
       ? `${jobScope.sectionTitle} / ${jobScope.groupTitle} / ${jobScope.subgroupTitle}`
       : "Categoria da completare";
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
-  const nextStep = workspace.completion.ready
-    ? "Verifica finale e chiusura"
-    : workspace.sections.activities.count === 0
-      ? "Aggiungi la prima attività"
-      : workspace.sections.planning.count === 0
-        ? "Prepara il programma di lavoro"
-        : workspace.sections.evidence.count === 0
-          ? "Raccogli la prima evidenza"
-          : "Completa i dati della commessa";
   const contactLabel =
     payloadText("clientContact") ||
     payloadText("clientEmail") ||
     payloadText("clientPhone") ||
     "Referente da indicare";
-  const sourcePreviewId = payloadText("aiPreviewId");
   const workItems = Array.isArray(jobData.workItems)
     ? jobData.workItems
         .filter((item): item is Record<string, unknown> =>
@@ -938,500 +1018,231 @@ export default function OperationsJobWorkspace({
         )
         .slice(0, 24)
     : [];
+  const reportAnswersComplete = reportAnswers.every((answer) => answer.trim().length >= 2);
+  const reportNarrativeReady = reportAnswersComplete && reportText.trim().length >= 40 && !/\[(?:da completare|da confermare|da indicare|da descrivere)\]/i.test(reportText);
+  const reportQuestionStatus = reportQuestionStatuses[reportChatStep] ?? "idle";
+  const reportLocked = workspace.rapportino.status === "SUBMITTED" || workspace.rapportino.dayAlreadyApproved;
+  const reportSystemBlockers = reportLocked
+    ? []
+    : workspace.rapportino.completeness.missing.filter((key) => key !== "narrative");
+  const reportCanSubmit = reportNarrativeReady && reportSystemBlockers.length === 0;
+  const reportOpenBlockers = reportSystemBlockers
+    .map((key) => ({ key, ...REPORT_BLOCKER_DETAILS[key] }))
+    .filter((blocker): blocker is { key: string; title: string; detail: string; destination: "details" | "assignment" | "attendance" } => Boolean(blocker.title));
+  const reportNarrativeQuestion = reportLocked || reportNarrativeReady || !workspace.rapportino.completeness.missing.includes("narrative")
+    ? ""
+    : REPORT_CHAT_STEPS.find((_, index) => reportAnswers[index].trim().length < 2)?.prompt
+      ?? workspace.rapportino.completeness.questions.find((question) => question.startsWith("Racconta l’esito") || question.startsWith("Quali attività sono state svolte?"))
+      ?? "Completa il racconto del turno, le criticità e i prossimi passi.";
+  const reportQuestionCount = reportOpenBlockers.length + Number(Boolean(reportNarrativeQuestion));
+  const reportAutoFields = workspace.rapportino.fields.filter((field) =>
+    ["activities", "attendance", "resources", "materials", "evidence"].includes(field.key),
+  );
 
   return (
     <main className="zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
       <div className="zw-command-ambient" aria-hidden="true" />
-      <div className="relative mx-auto max-w-[1560px] px-4 py-5 sm:px-7 sm:py-7">
-        <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-5 flex min-h-[72px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:-mx-7 sm:px-7">
+      <div className="relative mx-auto max-w-[1320px] px-4 py-4 sm:px-7 sm:py-6">
+        <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-4 flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:-mx-7 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
-            <button aria-label="Apri Command" className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]" onClick={() => router.push("/command")} type="button"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></button>
-            <Button
-              variant="outline"
-              className="h-10 shrink-0 rounded-xl border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100"
-              onClick={() => router.push("/operations")}
-            >
-              <ArrowLeft className="size-3.5" />
-              Commesse
+            <button aria-label="Apri Command" className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/35 bg-black" onClick={() => router.push("/command")} type="button">
+              <Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" />
+            </button>
+            <Button className="h-9 rounded-xl border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/operations")} variant="outline">
+              <ArrowLeft className="size-3.5" />Commesse
             </Button>
             <div className="min-w-0">
-              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                COMMESSE / SCHEDA
-              </p>
-              <p className="mt-1 truncate text-[11px] text-slate-500">
-                Scheda operativa della commessa
-              </p>
+              <p className="truncate text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COMMESSE / DETTAGLIO</p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-600">Scheda operativa</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:inline-flex">
-              <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />
-              Scheda aggiornata
-            </span>
-            <button
-              aria-label="Aggiorna scheda commessa"
-              className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200"
-              onClick={() => void refresh()}
-              type="button"
-            >
-              <RefreshCw className="size-4" />
-            </button>
-          </div>
+          <button aria-label="Aggiorna scheda commessa" className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/20 text-slate-400 transition hover:border-lime-300/30 hover:text-lime-200" onClick={() => void refresh()} type="button">
+            <RefreshCw className="size-4" />
+          </button>
         </header>
 
-        <section className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <article className="relative overflow-hidden rounded-[28px] border border-lime-300/20 bg-[linear-gradient(140deg,rgba(24,38,29,0.96),rgba(7,12,13,0.98)_55%,rgba(13,24,22,0.95))] p-5 shadow-[0_30px_85px_rgba(0,0,0,0.32)] sm:p-7">
-            <div className="pointer-events-none absolute -right-40 -top-44 size-[34rem] rounded-full bg-lime-300/[0.055] blur-3xl" />
-            <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/75 to-transparent" />
-            <div className="relative flex flex-wrap items-start justify-between gap-5">
-              <div className="min-w-0">
+        <section className="overflow-hidden rounded-[26px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(22,34,26,.96),rgba(7,11,11,.98)_58%,rgba(12,20,18,.96))] shadow-[0_24px_70px_rgba(0,0,0,.28)]">
+          <div className="p-5 sm:p-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-lime-300/25 bg-lime-300/[0.08] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-lime-200">
-                    {openingType}
-                  </span>
-                  <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100/80">
-                    {sourceMode}
-                  </span>
-                  {priority !== "STANDARD" && (
-                    <span className="rounded-full border border-amber-300/20 bg-amber-300/[0.07] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200">
-                      Priorità {priority === "HIGH" ? "alta" : "bassa"}
-                    </span>
-                  )}
+                  <span className="text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COMMESSA · {openingType}</span>
+                  {sourceMode === "Da preventivo" && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/80">Da preventivo</span>}
+                  {priority !== "STANDARD" && <span className="rounded-full border border-amber-300/20 bg-amber-300/[.06] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100">Priorità {priority === "HIGH" ? "alta" : "bassa"}</span>}
                 </div>
-                <h1 className="mt-4 max-w-4xl break-words text-3xl font-semibold tracking-[-0.055em] text-lime-100 sm:text-[42px]">
-                  {displayTitle}
-                </h1>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <p className="flex items-center gap-2 text-xs text-slate-400">
-                    <MapPin className="size-3.5 shrink-0 text-cyan-200" />
-                    {locationLabel}
-                  </p>
-                  {locationVerified && (
-                    <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.07] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-200">
-                      Luogo verificato
-                    </span>
-                  )}
-                </div>
-                <p className="mt-4 line-clamp-4 max-w-3xl text-sm leading-6 text-slate-300/85">
-                  {heroSummary}
+                <h1 className="mt-3 max-w-4xl break-words text-[28px] font-semibold leading-tight tracking-[-.045em] text-slate-50 sm:text-[38px]">{displayTitle}</h1>
+                <p className="mt-3 flex items-start gap-2 text-[12px] leading-5 text-slate-300">
+                  <MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" />
+                  <span>{locationLabel}{locationVerified && <span className="ml-2 inline-flex rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[.1em] text-lime-100">Luogo verificato</span>}</span>
                 </p>
+                {hasRealDescription && <p className="mt-3 max-w-3xl text-[12px] leading-5 text-slate-400">{jobSummary}</p>}
               </div>
-              <div className="shrink-0 text-left sm:text-right">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-                  Stato della commessa
-                </p>
-                <span
-                  className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${statusTone(job.status)}`}
-                >
-                  {displayStatus(job.status)}
-                </span>
-              </div>
+              <span className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${statusTone(job.status)}`}>{displayStatus(job.status)}</span>
             </div>
-            <div className="relative mt-7 grid gap-2 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3.5">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-600">
-                  Cliente
-                </p>
-                <p className="mt-2 truncate text-xs font-medium text-slate-200">
-                  {clientName}
-                </p>
-                <p className="mt-1 truncate text-[10px] text-slate-500">
-                  {contactLabel}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-3.5">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-600">
-                  Scadenza
-                </p>
-                <p className="mt-2 truncate text-xs font-medium text-slate-200">
-                  {dueDateLabel}
-                </p>
-                <p className="mt-1 text-[10px] text-slate-500">
-                  Termine previsto
-                </p>
-              </div>
-              <div className="rounded-2xl border border-lime-300/15 bg-lime-300/[0.045] p-3.5">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-lime-300/65">
-                  Categoria lavori
-                </p>
-                <p className="mt-2 line-clamp-2 text-xs font-medium text-lime-100/90">
-                  {scopeLabel}
-                </p>
-                <p className="mt-1 text-[10px] text-slate-500">
-                  Categoria lavori
-                </p>
-              </div>
-            </div>
-            <div className="relative mt-6 border-t border-white/[0.08] pt-5">
-              <div className="flex items-center justify-between gap-3 text-[10px] text-slate-500">
-                <span className="font-semibold uppercase tracking-[0.15em]">
-                  Avanzamento
-                </span>
-                <span className="font-mono text-lg text-lime-200">
-                  {job.progress}%
-                </span>
-              </div>
-              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-black/60">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-lime-300 via-lime-200 to-cyan-300 shadow-[0_0_20px_rgba(190,255,60,0.58)] transition-all"
-                  style={{ width: `${job.progress}%` }}
-                />
-              </div>
-            </div>
-            {canWriteOperations && (
-              <div className="relative mt-6 flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  className="h-10 border-white/10 bg-black/25 text-xs text-slate-300 hover:border-lime-300/35 hover:bg-lime-300/[0.07]"
-                  onClick={openDetails}
-                >
-                  <BriefcaseBusiness className="size-3.5" />
-                  Modifica dati
-                </Button>
-                {nextStatusAction && (
-                  <Button
-                    className="h-10 bg-lime-300 px-4 text-xs font-semibold text-[#060806] shadow-[0_0_22px_rgba(190,255,60,0.18)] hover:bg-lime-200"
-                    onClick={() =>
-                      void mutate("set_status", {
-                        statusCode: nextStatusAction.statusCode,
-                      })
-                    }
-                  >
-                    <Send className="size-3.5" />
-                    {nextStatusAction.label}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  className="h-10 border-cyan-300/25 bg-cyan-300/[0.05] text-xs text-cyan-100 hover:bg-cyan-300/[0.1]"
-                  onClick={() => setActionOpen("progress")}
-                >
-                  <CircleGauge className="size-3.5" />
-                  Aggiorna avanzamento
-                </Button>
-              </div>
-            )}
-          </article>
-          <aside className="carbon-card rounded-[28px] p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                  Quadro commessa
-                </p>
-                <h2 className="mt-1 text-[17px] font-semibold text-slate-100">
-                  Situazione attuale
-                </h2>
-              </div>
-              <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200">
-                <BadgeCheck className="size-5" />
-              </span>
-            </div>
-            <div className="mt-6 flex items-center gap-4">
-              <div className="relative grid size-24 shrink-0 place-items-center rounded-full border-[7px] border-lime-300/15 bg-black/25">
-                <div className="absolute inset-[-7px] rounded-full border-[7px] border-transparent border-lime-300 border-r-transparent rotate-[-45deg]" />
-                <span className="font-mono text-xl font-semibold text-lime-100">
-                  {job.progress}%
-                </span>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-slate-200">
-                  {workspace.completion.ready
-                    ? "Pronta per la chiusura"
-                    : "In lavorazione"}
-                </p>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  Una vista chiara per seguire il lavoro e decidere il prossimo passo.
-                </p>
-              </div>
-            </div>
-            <div className="mt-6 space-y-3">
-              <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Origine</span>
-                <span className="text-cyan-100">{sourceMode}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-white/[0.07] pb-3 text-[11px]">
-                <span className="text-slate-500">Prossimo passo</span>
-                <span
-                  className={
-                    workspace.completion.ready
-                      ? "text-lime-200"
-                      : "text-amber-200"
-                  }
-                >
-                  {workspace.completion.ready ? "CHIUSURA" : nextStep}
-                </span>
-              </div>
-            </div>
-            {sourcePreviewId && (
-              <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3">
-                <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100/75">
-                  <Sparkles className="size-3.5" />
-                  Preventivo collegato
-                </div>
-                <p className="mt-2 text-[10px] leading-4 text-slate-500">
-                  Le lavorazioni rilevate dal preventivo sono disponibili nella scheda e possono essere completate dal team.
-                </p>
-              </div>
-            )}
-          </aside>
-        </section>
 
-        {workItems.length > 0 && (
-          <section className="mt-4 overflow-hidden rounded-[24px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(190,255,60,0.07),rgba(7,13,11,0.94)_58%,rgba(34,211,238,0.035))] p-5 shadow-[0_20px_55px_rgba(0,0,0,0.2)] sm:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                  Lavorazioni della commessa
-                </p>
-                <h2 className="mt-1 text-[15px] font-semibold text-lime-100">
-                  Attività rilevate dal preventivo
-                </h2>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  Le lavorazioni restano organizzate e collegate all’ambito, senza
-                  riversare il testo integrale del documento nella scheda.
-                </p>
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
+                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cliente</p>
+                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{clientName}</p>
               </div>
-              <span className="rounded-full border border-lime-300/25 bg-lime-300/[0.09] px-2.5 py-1 font-mono text-[10px] text-lime-200">
-                {workItems.length} voci
-              </span>
+              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
+                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Scadenza prevista</p>
+                <p className="mt-1.5 text-[12px] font-medium text-slate-200">{dueDateLabel}</p>
+              </div>
+              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
+                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Ambito</p>
+                <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-200">{scopeLabel}</p>
+              </div>
             </div>
-            <div className="mt-4 grid gap-2 md:grid-cols-2">
-              {workItems.map((item, index) => (
-                <div
-                  className="rounded-2xl border border-white/[0.08] bg-black/25 p-3.5"
-                  key={typeof item.id === "string" ? item.id : `work-${index}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/[0.08] font-mono text-[9px] text-lime-200">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold leading-5 text-lime-100">
-                        {valueOr(item.label ?? item.detail, "Lavorazione")}
-                      </p>
-                      <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                        {valueOr(item.detail, "Dettaglio da completare")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-[9px] uppercase tracking-[0.08em] text-slate-600">
-                    <span>
-                      {valueOr(item.quantity, "quantità da verificare")}
-                      {typeof item.unit === "string" && item.unit
-                        ? ` ${item.unit}`
-                        : ""}
-                    </span>
-                    <span className="text-slate-700">·</span>
-                  </div>
-                </div>
-              ))}
+
+            <div className="mt-5 border-t border-white/[.08] pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-500">Avanzamento lavori</span>
+                <span className="font-mono text-sm text-lime-100">{progress}%</span>
+              </div>
+              <div aria-label={`Avanzamento ${progress}%`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progress} className="mt-2 h-2 overflow-hidden rounded-full bg-black/60" role="progressbar">
+                <div className="h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-200 transition-all" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+              </div>
             </div>
-          </section>
-        )}
 
-        <JobCommercialJourney jobId={jobId} />
-
-        <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 space-y-4">
-            <CompletionGate completion={workspace.completion} />
-            <section className="carbon-card rounded-[24px] p-5 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/20 bg-lime-300/10 text-lime-200">
-                    <Wrench className="size-4" />
-                  </span>
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/65">
-                  Gestione commessa
-                    </p>
-                    <h2 className="mt-1 text-[15px] font-semibold">
-                      Cosa vuoi fare?
-                    </h2>
-                  </div>
-                </div>
-                <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.05] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200">
-                  {canWriteOperations
-                    ? "Gestione disponibile"
-                    : canWriteReport
-                      ? "Rapportino disponibile"
-                      : canReviewReport
-                        ? "Revisione disponibile"
-                        : "Solo consultazione"}
-                </span>
-              </div>
-              <div
-                className={`mt-5 grid gap-2 sm:grid-cols-2 ${canWriteOperations ? "lg:grid-cols-5" : "lg:grid-cols-1"}`}
-              >
-                {canWriteOperations && (
-                  <>
-                    <Button
-                      variant="outline"
-                      className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                      onClick={() => setActionOpen("activity")}
-                    >
-                      <Plus className="size-3.5" />
-                      Nuova attività
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                      onClick={() => setActionOpen("assign")}
-                    >
-                      <Users className="size-3.5" />
-                      Assegna risorse
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                      onClick={() => setActionOpen("evidence")}
-                    >
-                      <MapPin className="size-3.5" />
-                      Aggiungi evidenza
-                    </Button>
-                  </>
-                )}
-                {(canWriteReport || (canReviewReport && workspace.rapportino.status === "SUBMITTED")) && <Button
-                  variant="outline"
-                  className="h-11 border-cyan-300/25 bg-cyan-300/[.05] text-xs text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-300/[.1]"
-                  onClick={openReport}
-                >
-                  <FileText className="size-3.5" />
-                  {canWriteReport ? "Crea rapportino con Company AI" : "Rivedi rapportino"}
-                </Button>}
-                <Button
-                  variant="outline"
-                  className="h-11 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30"
-                  onClick={() => void refresh()}
-                >
-                  <RefreshCw className="size-3.5" />
-                  Aggiorna dati
-                </Button>
-              </div>
-            </section>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <WorkspaceSectionCard
-                eyebrow="LAVORO"
-                title="Attività collegate"
-                icon={ClipboardCheck}
-                section={workspace.sections.activities}
-                onCompleteActivity={
-                  canWriteOperations
-                    ? (activityId) =>
-                        void mutate("complete_activity", { activityId })
-                    : undefined
-                }
-              />
-              <WorkspaceSectionCard
-                eyebrow="PROGRAMMA"
-                title="Programma e assegnazioni"
-                icon={Users}
-                section={workspace.sections.planning}
-              />
-              <WorkspaceSectionCard
-                eyebrow="RISORSE"
-                title="Persone, asset e mezzi"
-                icon={Truck}
-                section={workspace.sections.resources}
-              />
-              <WorkspaceSectionCard
-                eyebrow="MATERIALI"
-                title="Materiali e richieste"
-                icon={Package}
-                section={workspace.sections.materials}
-              />
-              <WorkspaceSectionCard
-                eyebrow="DOCUMENTAZIONE"
-                title="Evidenze del lavoro"
-                icon={MapPin}
-                section={workspace.sections.evidence}
-              />
-              <div className="scroll-mt-24" id="rapportino">
-                <WorkspaceSectionCard
-                  eyebrow="CONSUNTIVO"
-                  title="Rapportino e controllo"
-                  icon={FileText}
-                  section={workspace.sections.rapportino}
-                />
-              </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {canWriteReport && !reportLocked && <Button className="min-h-10 bg-cyan-200 px-4 text-[11px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={openReport} type="button"><Sparkles className="size-3.5" />{workspace.rapportino.status === "DRAFT" || workspace.rapportino.status === "CHANGES_REQUESTED" ? "Riprendi rapportino" : "Rapportino con Company AI"}</Button>}
+              {canReviewReport && workspace.rapportino.status === "SUBMITTED" && <Button className="min-h-10 bg-amber-200 px-4 text-[11px] font-semibold text-[#120d04] hover:bg-amber-100" onClick={openReport} type="button"><ClipboardCheck className="size-3.5" />Esamina rapportino</Button>}
+              {canWriteOperations && nextStatusAction && <Button className="min-h-10 border-lime-300/20 bg-lime-300/[.06] px-3 text-[10px] text-lime-100 hover:bg-lime-300/10" disabled={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready)} onClick={() => void mutate("set_status", { statusCode: nextStatusAction.statusCode })} title={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready) ? "Completa i controlli obbligatori prima di avanzare" : undefined} type="button" variant="outline"><Send className="size-3.5" />{nextStatusAction.label}</Button>}
+              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={openDetails} type="button" variant="outline"><BriefcaseBusiness className="size-3.5" />Modifica commessa</Button>}
+              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={() => setActionOpen("progress")} type="button" variant="outline"><CircleGauge className="size-3.5" />Avanzamento</Button>}
             </div>
           </div>
-          <aside className="min-w-0 space-y-4">
-            <section className="carbon-card rounded-[24px] p-5 sm:p-6">
-              <div className="flex items-start gap-3">
-                <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/20 bg-lime-300/10 text-lime-200">
-                  <FolderKanban className="size-4" />
-                </span>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
-                    In breve
-                  </p>
-                  <h2 className="mt-1 text-[15px] font-semibold">
-                    Dati principali
-                  </h2>
-                </div>
-              </div>
-              <div className="mt-4">
-                <InfoRow
-                  icon={BriefcaseBusiness}
-                  label="Cliente / ragione sociale"
-                  value={clientName}
-                />
-                <InfoRow icon={Users} label="Referente" value={contactLabel} />
-                <InfoRow
-                  icon={MapPin}
-                  label="Cantiere / luogo"
-                  value={locationLabel}
-                />
-                <InfoRow
-                  icon={CalendarClock}
-                  label="Scadenza"
-                  value={dueDateLabel}
-                />
-                <InfoRow
-                  icon={Flag}
-                  label="Riferimento cliente"
-                  value={valueOr(jobData.clientReference, "Non indicato")}
-                />
-              </div>
-            </section>
-            <JourneyRail journey={workspace.journey} />
-            <section className="relative overflow-hidden rounded-[24px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(10,28,31,0.82),rgba(7,13,14,0.95))] p-5 sm:p-6">
-              <div className="flex items-center gap-3">
-                <span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-                  <HardHat className="size-4" />
-                </span>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">
-                    Dati protetti
-                  </p>
-                  <h2 className="mt-1 text-[14px] font-semibold">
-                    Tutto sotto controllo
-                  </h2>
-                </div>
-              </div>
-              <p className="mt-4 text-[11px] leading-5 text-slate-500">
-                Le modifiche vengono controllate prima del salvataggio. Il percorso
-                della commessa mostra sempre ciò che è già pronto e ciò che manca.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-2.5 py-1 text-[9px] text-lime-200">
-                  DATI AGGIORNATI
-                </span>
-                <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-2.5 py-1 text-[9px] text-cyan-100">
-                  STATO TRACCIATO
-                </span>
-              </div>
-            </section>
-          </aside>
         </section>
 
-        <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-400">
-          <span>ZEROW · SCHEDA COMMESSA</span>
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="size-3.5 text-lime-300" />
-            Dati aggiornati · attività collegate · stato verificato
-          </span>
-        </footer>
+        <Tabs className="mt-4" onValueChange={(value) => setActiveSection(value as "overview" | "operations" | "reports")} value={activeSection}>
+          <TabsList className={`grid h-12 w-full ${canWriteReport || canReviewReport ? "grid-cols-3" : "grid-cols-2"} rounded-2xl border border-white/[.08] bg-black/25 p-1`}>
+            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Panoramica</TabsTrigger>
+            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="operations"><Layers3 className="size-3.5" />Operatività</TabsTrigger>
+            {(canWriteReport || canReviewReport) && <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-cyan-300/20 data-[state=active]:bg-cyan-300/[.08] data-[state=active]:text-cyan-100" value="reports"><Sparkles className="size-3.5" />Rapportini</TabsTrigger>}
+          </TabsList>
+
+          <TabsContent className="mt-4 space-y-4" value="overview">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(290px,.65fr)]">
+              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">LAVORAZIONI PREVISTE</p>
+                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Cosa va realizzato</h2>
+                  </div>
+                  {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} voci{sourceMode === "Da preventivo" ? " · preventivo" : ""}</span>}
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-slate-400">{jobSummary}</p>
+                {workItems.length > 0 ? <div className="mt-4 space-y-2">
+                  {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
+                    <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.detail}</p>}</div>
+                    {(item.quantity !== undefined || item.unit) && <span className="shrink-0 text-right text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
+                  </div>)}
+                  {workItems.length > 3 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
+                </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] bg-black/15 px-3 py-4 text-[10px] leading-5 text-slate-500">Non ci sono voci di preventivo collegate. La descrizione della commessa resta il riferimento del lavoro.</div>}
+              </section>
+
+              <section className="rounded-[22px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(10,27,29,.72),rgba(7,12,13,.96))] p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">GIORNATA OPERATIVA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Turno e consuntivo</h2></div>
+                  <span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${statusTone(workspace.rapportino.status)}`}>{rapportinoStatusLabel(workspace.rapportino.status)}</span>
+                </div>
+                <p className="mt-2 text-[10px] leading-5 text-slate-500">Presenze, attività, risorse e materiali arrivano dai registri dei rispettivi moduli. Il responsabile aggiunge solo ciò che quei registri non possono sapere.</p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Attività</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.activities.count}</p></div>
+                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Risorse</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.resources.status === "deferred" ? "—" : workspace.sections.resources.count}</p></div>
+                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Materiali</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.materials.status === "deferred" ? "—" : workspace.sections.materials.count}</p></div>
+                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Data rapportino</p><p className="mt-1.5 text-[11px] font-medium text-slate-200">{formatCommercialDate(workspace.rapportino.reportDate)}</p></div>
+                </div>
+                {reportQuestionCount > 0 && (canWriteReport || canReviewReport) && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2 text-[9px] leading-4 text-amber-100/80">{reportQuestionCount} elementi da verificare prima dell’invio.</p>}
+                {(canWriteReport || canReviewReport) && <Button className="mt-4 min-h-10 w-full bg-cyan-200 text-[10px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={() => canReviewReport && workspace.rapportino.status === "SUBMITTED" ? openReport() : setActiveSection("reports")} type="button"><Sparkles className="size-3.5" />{canReviewReport && workspace.rapportino.status === "SUBMITTED" ? "Apri revisione" : "Apri rapportini"}</Button>}
+              </section>
+            </div>
+
+            <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">ATTIVITÀ REGISTRATE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Lavoro pianificato per la commessa</h2></div>
+                {canWriteOperations && <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Nuova attività</Button>}
+              </div>
+              {workspace.sections.activities.records.length > 0 ? <div className="mt-4 space-y-2">
+                {workspace.sections.activities.records.slice(0, 4).map((record) => {
+                  const activityId = typeof record.payload?.id === "string" ? record.payload.id : null;
+                  return <div className="flex items-center gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={record.id}>
+                    <span className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}><CheckCircle2 className="size-3.5" /></span>
+                    <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium text-slate-200">{record.title}</p><p className="mt-0.5 truncate text-[9px] text-slate-500">{record.detail || displayRecordType(record.recordType)}</p></div>
+                    <span className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase sm:inline-flex ${statusTone(record.status)}`}>{displayStatus(record.status)}</span>
+                    {canWriteOperations && activityId && record.status !== "DONE" && <button aria-label={`Completa ${record.title}`} className="grid size-8 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-100 hover:bg-lime-300/10" onClick={() => void mutate("complete_activity", { activityId })} type="button"><Check className="size-3.5" /></button>}
+                  </div>;
+                })}
+                {workspace.sections.activities.count > 4 && <p className="pt-1 text-right text-[9px] text-slate-600">Mostrate 4 di {workspace.sections.activities.count} attività. Il registro completo resta in Pianificazione.</p>}
+              </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] px-3 py-4 text-center text-[10px] text-slate-500">Nessuna attività operativa registrata per questa commessa.</div>}
+              {canWriteOperations && <div className="mt-3 flex flex-wrap gap-2">
+                <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna squadra</Button>
+                <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Aggiungi evidenza</Button>
+              </div>}
+            </section>
+
+            <details className="group overflow-hidden rounded-[20px] border border-white/[.08] bg-black/10">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 marker:hidden">
+                <span><span className="block text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">SCHEDA</span><span className="mt-1 block text-[11px] font-medium text-slate-200">Dettagli e controlli di chiusura</span></span>
+                <span className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:hidden">Mostra</span><span className="hidden rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:inline-flex">Nascondi</span>
+              </summary>
+              <div className="grid gap-3 border-t border-white/[.07] p-4 sm:grid-cols-2">
+                <InfoRow icon={Users} label="Referente" value={contactLabel} />
+                <InfoRow icon={Flag} label="Riferimento cliente" value={valueOr(jobData.clientReference, "Non indicato")} />
+                {payloadText("clientAddress") && <InfoRow icon={MapPin} label="Indirizzo del cliente" value={payloadText("clientAddress")} />}
+                {payloadText("accessNotes") && <InfoRow icon={HardHat} label="Accesso al cantiere" value={payloadText("accessNotes")} />}
+                <InfoRow icon={MapPin} label="Perimetro geofence" value={geofenceLabel} />
+                {canWriteOperations && <details className="group rounded-xl border border-white/[.06] bg-black/15 sm:col-span-2">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 marker:hidden">
+                    <span><span className="block text-[9px] font-medium text-slate-200">Controlli per chiudere la commessa</span><span className="mt-1 block text-[9px] text-slate-500">{workspace.completion.ready ? "Requisiti completi, pronta per verifica." : `${workspace.completion.requirements.filter((requirement) => !requirement.complete).length} requisiti ancora aperti.`}</span></span>
+                    <span className="shrink-0 rounded-lg border border-amber-300/15 px-2.5 py-1.5 text-[8px] text-amber-100/80 group-open:hidden">Mostra</span><span className="hidden shrink-0 rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:inline-flex">Nascondi</span>
+                  </summary>
+                  <div className="border-t border-white/[.06] p-3"><CompletionGate completion={workspace.completion} /></div>
+                </details>}
+              </div>
+            </details>
+          </TabsContent>
+
+          <TabsContent className="mt-4 space-y-4" value="operations">
+            <section className="rounded-[20px] border border-cyan-300/15 bg-cyan-300/[.025] px-4 py-3.5 sm:px-5">
+              <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/70">FLUSSI OPERATIVI COLLEGATI</p>
+              <p className="mt-1 text-[10px] leading-5 text-slate-400">Questa sezione coordina le azioni collegate alla commessa. Presenze, pianificazione, magazzino, missioni e documenti mantengono ciascuno il proprio registro.</p>
+            </section>
+            <JobCommercialJourney jobId={jobId} />
+          </TabsContent>
+
+          {(canWriteReport || canReviewReport) && <TabsContent className="mt-4 space-y-4" value="reports">
+            <section className="overflow-hidden rounded-[22px] border border-cyan-300/18 bg-[linear-gradient(145deg,rgba(10,27,29,.78),rgba(7,12,13,.97))] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-100"><Sparkles className="size-4" /></span><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/70">RAPPORTINO DI COMMESSA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Consuntivo della giornata</h2><p className="mt-1 text-[10px] text-slate-500">{formatCommercialDate(workspace.rapportino.reportDate)} · dati operativi riletti dai registri</p></div></div>
+                <span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${statusTone(workspace.rapportino.status)}`}>{rapportinoStatusLabel(workspace.rapportino.status)}</span>
+              </div>
+              <p className="mt-3 max-w-3xl text-[10px] leading-5 text-slate-400">Company AI prepara il rapporto con le timbrature, le attività, le risorse e i movimenti registrati. Il responsabile aggiunge l’esito osservato, le criticità e i prossimi passi. Le missioni di consegna hanno il proprio rapportino nel modulo Missioni.</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {reportAutoFields.map((field) => <div className="min-w-0 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={field.key}><div className="flex items-center justify-between gap-2"><p className="truncate text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">{field.label}</p><span className={`shrink-0 text-[7px] font-semibold uppercase ${field.status === "known" ? "text-lime-200" : field.status === "missing" ? "text-amber-200" : "text-slate-600"}`}>{field.status === "known" ? "RILETTO" : field.status === "missing" ? "DA COMPLETARE" : "OPZIONALE"}</span></div><p className="mt-1 break-words text-[10px] leading-4 text-slate-300">{field.value}</p></div>)}
+              </div>
+              {reportOpenBlockers.length > 0 && <div className="mt-4 space-y-2"><p className="text-[8px] font-semibold uppercase tracking-[.15em] text-amber-100/70">Dati necessari prima dell’invio</p>{reportOpenBlockers.map((blocker) => <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/12 bg-amber-300/[.025] px-3 py-2.5" key={blocker.key}><div className="min-w-0"><p className="text-[10px] font-medium text-amber-100/90">{blocker.title}</p><p className="mt-0.5 text-[9px] leading-4 text-slate-500">{blocker.detail}</p></div><Button className="min-h-8 shrink-0 border-amber-300/15 px-2.5 text-[8px] text-amber-100 hover:bg-amber-300/[.06]" disabled={blocker.destination !== "attendance" && !canWriteOperations} onClick={() => void resolveReportBlocker(blocker.key)} type="button" variant="outline">{blocker.destination === "attendance" ? "Apri Presenze" : blocker.destination === "assignment" ? "Apri assegnazione" : "Completa dati"}</Button></div>)}</div>}
+              {reportNarrativeQuestion && <p className="mt-3 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] px-3 py-2.5 text-[9px] leading-5 text-cyan-50/75">Da raccogliere con Company AI: {reportNarrativeQuestion}</p>}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.07] pt-4">
+                <p className="max-w-2xl text-[9px] leading-4 text-slate-600">L’invio all’ufficio resta bloccato finché mancano dati obbligatori o la timbratura di uscita.</p>
+                {canReviewReport && workspace.rapportino.status === "SUBMITTED" ? <Button className="min-h-10 bg-amber-200 px-4 text-[10px] font-semibold text-[#120d04] hover:bg-amber-100" onClick={openReport} type="button"><ClipboardCheck className="size-3.5" />Apri revisione</Button> : canWriteReport && !reportLocked ? <Button className="min-h-10 bg-cyan-200 px-4 text-[10px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={openReport} type="button"><Sparkles className="size-3.5" />{workspace.rapportino.status === "DRAFT" || workspace.rapportino.status === "CHANGES_REQUESTED" ? "Riprendi colloquio" : "Apri Company AI"}</Button> : <span className={`rounded-full border px-3 py-2 text-[8px] font-semibold uppercase tracking-[.1em] ${statusTone(workspace.rapportino.status)}`}>{workspace.rapportino.status === "SUBMITTED" ? "In revisione in ufficio" : workspace.rapportino.status === "APPROVED" ? "Giornata approvata" : rapportinoStatusLabel(workspace.rapportino.status)}</span>}
+              </div>
+            </section>
+
+            {(workspace.rapportinoHistory?.length ?? 0) > 0 && <details className="group overflow-hidden rounded-[20px] border border-white/[.08] bg-black/10">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 marker:hidden"><span><span className="block text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">ARCHIVIO</span><span className="mt-1 block text-[11px] font-medium text-slate-200">Rapportini precedenti · {workspace.rapportinoHistory?.length ?? 0}</span></span><span className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:hidden">Apri archivio</span><span className="hidden rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:inline-flex">Chiudi</span></summary>
+              <div className="space-y-2 border-t border-white/[.07] p-3 sm:p-4">{[...(workspace.rapportinoHistory ?? []).filter((entry) => entry.status === "SUBMITTED"), ...(workspace.rapportinoHistory ?? []).filter((entry) => entry.status !== "SUBMITTED")].slice(0, 12).map((entry) => <details className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-2.5" key={entry.reportId}>
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 marker:hidden"><span className="text-[10px] font-medium text-slate-200">{entry.reportDate ? formatCommercialDate(entry.reportDate) : Number.isFinite(Date.parse(entry.at)) ? new Date(entry.at).toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" }) : "Data non disponibile"}</span><span className={`rounded-full border px-2 py-1 text-[7px] font-semibold uppercase ${statusTone(entry.status)}`}>{rapportinoStatusLabel(entry.status.toUpperCase() as RapportinoReadback["status"])}</span></summary>
+                <div className="mt-3 border-t border-white/[.06] pt-3"><p className="whitespace-pre-wrap text-[10px] leading-5 text-slate-300">{entry.text || entry.narrative || "Nessun testo archiviato."}</p>{entry.note && <p className="mt-2 rounded-lg border border-amber-300/10 bg-amber-300/[.025] p-2.5 text-[9px] text-amber-100/75">Nota ufficio: {entry.note}</p>}
+                  {canReviewReport && entry.reportId !== workspace.rapportino.reportId && entry.status === "SUBMITTED" && <div className="mt-3 space-y-2 border-t border-white/[.06] pt-3"><label className="block space-y-1 text-[9px] text-slate-500"><span>Nota ufficio, necessaria per chiedere modifiche</span><Textarea className="min-h-[68px] border-amber-300/15 bg-black/30 text-[10px] text-slate-100" onChange={(event) => setReportReviewNotes((current) => ({ ...current, [entry.reportId]: event.target.value }))} placeholder="Indica cosa integrare…" value={reportReviewNotes[entry.reportId] ?? ""} /></label><div className="flex flex-wrap gap-2"><Button className="min-h-8 bg-lime-300 px-3 text-[9px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => reviewHistoricalReport(entry.reportId, "APPROVE")} type="button"><CheckCircle2 className="size-3.5" />Approva</Button><Button className="min-h-8 border-amber-300/20 px-3 text-[9px] text-amber-100 hover:bg-amber-300/10" onClick={() => reviewHistoricalReport(entry.reportId, "REQUEST_CHANGES")} type="button" variant="outline"><FileText className="size-3.5" />Richiedi integrazione</Button></div></div>}
+                  {canWriteReport && entry.reportId !== workspace.rapportino.reportId && ["DRAFT", "CHANGES_REQUESTED"].includes(entry.status) && <div className="mt-3 space-y-2 border-t border-white/[.06] pt-3"><p className="text-[9px] font-medium text-cyan-100/75">{entry.status === "CHANGES_REQUESTED" ? "Integra il rapporto e reinvia" : "Completa e invia il rapporto"}</p>{REPORT_CHAT_STEPS.map((step, index) => <label className="block space-y-1 text-[9px] text-slate-500" key={step.title}><span>{step.title}</span><Textarea className="min-h-[68px] border-cyan-300/15 bg-black/30 text-[10px] text-slate-100" onChange={(event) => updateHistoricalAnswer(entry.reportId, entry.narrative, entry.answers, index, event.target.value)} placeholder={step.placeholder} value={reportRevisionAnswers[entry.reportId]?.[index] ?? reportAnswersFor(entry.narrative, entry.answers)[index]} /></label>)}<Button className="min-h-8 bg-cyan-200 px-3 text-[9px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={() => resubmitHistoricalReport(entry.reportId, entry.narrative, entry.answers)} type="button"><FileText className="size-3.5" />Reinvia rapportino</Button></div>}
+                </div>
+              </details>)}</div>
+            </details>}
+          </TabsContent>}
+        </Tabs>
       </div>
 
       {(canWriteOperations || canWriteReport || canReviewReport) && (
@@ -1451,11 +1262,11 @@ export default function OperationsJobWorkspace({
                       : actionOpen === "evidence"
                         ? "Registra evidenza"
                         : actionOpen === "report"
-                          ? canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" ? "Revisione rapportino" : "Rapportino giornaliero"
+                          ? canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" ? "Revisione rapportino" : "Rapportino con Company AI"
                           : "Aggiorna avanzamento"}
               </DialogTitle>
               <DialogDescription className="text-slate-500">
-                Le modifiche vengono verificate e confermate nella scheda della commessa.
+                {actionOpen === "report" ? "Presenze, attività, risorse e materiali vengono riletti dai moduli. Il responsabile risponde soltanto alle domande ancora aperte." : "Le modifiche vengono verificate e confermate nella scheda della commessa."}
               </DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={submitAction}>
@@ -1497,9 +1308,24 @@ export default function OperationsJobWorkspace({
                     Ubicazione
                     <Input
                       className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setLocation(event.target.value)}
+                      onChange={(event) => { setLocation(event.target.value); setSelectedWorksite(null); setWorksiteCandidates([]); }}
                       value={location}
                     />
+                    <span className="flex flex-wrap items-center gap-2 pt-1">
+                      <Button className="min-h-9 border-cyan-300/20 bg-cyan-300/[.05] px-3 text-[10px] text-cyan-100 hover:bg-cyan-300/10" disabled={worksiteGeocoding} onClick={() => void recognizeWorksite()} type="button" variant="outline">
+                        {worksiteGeocoding ? <LoaderCircle className="size-3.5 animate-spin" /> : <MapPin className="size-3.5" />}
+                        Riconosci luogo
+                      </Button>
+                      {selectedWorksite && <span className="text-[9px] text-lime-200">Indirizzo selezionato · {Math.round(selectedWorksite.confidence * 100)}%</span>}
+                    </span>
+                    {worksiteCandidates.length > 0 && <span className="block space-y-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.025] p-2.5">
+                      <span className="block px-1 text-[9px] font-semibold uppercase tracking-[.14em] text-cyan-200/70">Seleziona il luogo verificato dal server</span>
+                      {worksiteCandidates.map((candidate) => <button className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition ${selectedWorksite?.providerPlaceId === candidate.providerPlaceId ? "border-lime-300/40 bg-lime-300/[.07]" : "border-white/[.07] bg-black/20 hover:border-cyan-300/25"}`} key={candidate.providerPlaceId} onClick={() => setSelectedWorksite(candidate)} type="button">
+                        {selectedWorksite?.providerPlaceId === candidate.providerPlaceId ? <Check className="mt-0.5 size-3.5 shrink-0 text-lime-200" /> : <MapPin className="mt-0.5 size-3.5 shrink-0 text-cyan-200" />}
+                        <span className="min-w-0"><span className="block text-[10px] font-medium text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[9px] text-slate-600">{candidate.city}{candidate.province ? ` · ${candidate.province}` : ""} · coordinate Mapbox · attendibilità {Math.round(candidate.confidence * 100)}%</span></span>
+                      </button>)}
+                    </span>}
+                    <span className="block text-[9px] leading-4 text-slate-600">Se cambi l’indirizzo, il server aggiorna insieme luogo canonico e geofence della commessa.</span>
                   </label>
                 </div>
               )}
@@ -1603,62 +1429,64 @@ export default function OperationsJobWorkspace({
               )}
               {actionOpen === "report" && (
                 <div className="space-y-4">
-                  <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.045] p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5">
-                        <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
-                          <Sparkles className="size-3.5" />
-                        </span>
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100/80">
-                            Company AI · precompilazione governata
-                          </p>
-                          <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                            Ho raccolto ciò che il sistema già conosce da commessa, presenze, planning, asset e magazzino. Tu confermi solo ciò che manca.
-                          </p>
-                        </div>
-                      </div>
-                      <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.1em] ${statusTone(payload.workspace.rapportino.status)}`}>
-                        {rapportinoStatusLabel(payload.workspace.rapportino.status)}
-                      </span>
+                  <section className="rounded-2xl border border-cyan-300/20 bg-[linear-gradient(145deg,rgba(11,28,30,.72),rgba(5,10,11,.88))] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/75">COMPANY AI · RAPPORTINO COMMESSA</p>
+                      <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.1em] ${statusTone(payload.workspace.rapportino.status)}`}>{rapportinoStatusLabel(payload.workspace.rapportino.status)}</span>
                     </div>
-                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                      {payload.workspace.rapportino.fields.map((field) => (
-                        <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3" key={field.key}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">{field.label}</span>
-                            <span className={`size-1.5 rounded-full ${field.status === "known" ? "bg-lime-300" : field.status === "missing" ? "bg-amber-300" : "bg-cyan-300"}`} />
+                    <div className="mt-4 flex gap-3">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-100"><Sparkles className="size-3.5" /></span>
+                      <div className="rounded-2xl rounded-tl-sm border border-white/[.08] bg-black/25 px-3.5 py-3">
+                        <p className="text-[11px] leading-5 text-slate-200">Ho raccolto i dati registrati per questa commessa. Non serve reinserire orari, presenze, persone, mezzi o movimenti già riletti.</p>
+                        <p className="mt-2 text-[9px] text-slate-600">Fonti: commessa · Presenze · Pianificazione · Asset · Magazzino</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-1.5">
+                      {reportAutoFields.map((field) => <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border border-white/[.06] bg-black/15 px-3 py-2" key={field.key}><span className="text-[9px] text-slate-500">{field.label}</span><span className={`min-w-0 text-right text-[10px] ${field.status === "known" ? "text-slate-200" : field.status === "missing" ? "text-amber-100" : "text-slate-600"}`}>{field.value}{field.status === "known" ? " · verificato" : field.status === "optional" ? " · facoltativo" : " · da completare"}</span></div>)}
+                    </div>
+                    {reportQuestionCount > 0 ? (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75">Prima dell’invio</p>
+                        {reportOpenBlockers.map((blocker) => (
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5" key={blocker.key}>
+                            <div className="flex min-w-0 flex-1 gap-2.5 text-[10px] leading-5 text-amber-100/85">
+                              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-300" />
+                              <span><span className="block font-medium">{blocker.title}</span><span className="text-amber-100/60">{blocker.detail}</span></span>
+                            </div>
+                            {blocker.destination === "attendance" ? (
+                              <Button className="min-h-9 shrink-0 border-cyan-300/20 bg-cyan-300/[.05] px-3 text-[9px] text-cyan-100 hover:bg-cyan-300/10" onClick={() => void resolveReportBlocker(blocker.key)} type="button" variant="outline">Apri Presenze</Button>
+                            ) : canWriteOperations ? (
+                              <Button className="min-h-9 shrink-0 border-lime-300/20 bg-lime-300/[.05] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => void resolveReportBlocker(blocker.key)} type="button" variant="outline">{blocker.destination === "assignment" ? "Apri assegnazione" : "Apri scheda commessa"}</Button>
+                            ) : (
+                              <span className="shrink-0 text-[9px] text-slate-500">Richiede un profilo ufficio</span>
+                            )}
                           </div>
-                          <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-200">{field.value}</p>
-                          <p className="mt-1 text-[9px] text-slate-600">{field.source}</p>
-                        </div>
-                      ))}
-                    </div>
-                    {payload.workspace.rapportino.completeness.questions.length > 0 && (
-                      <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3">
-                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">Dati richiesti prima dell’invio</p>
-                        <ul className="mt-2 space-y-1.5 text-[11px] leading-4 text-amber-100/80">
-                          {payload.workspace.rapportino.completeness.questions.map((question) => (
-                            <li className="flex gap-2" key={question}>
-                              <span className="mt-1.5 size-1 shrink-0 rounded-full bg-amber-300" />
-                              <span>{question}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        ))}
+                        {reportNarrativeQuestion && <div className="flex gap-2.5 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5 text-[10px] leading-5 text-amber-100/85"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-300" /><span>{reportNarrativeQuestion} Completa la risposta qui sotto.</span></div>}
                       </div>
-                    )}
-                    {payload.workspace.rapportino.review.status === "CHANGES_REQUESTED" && payload.workspace.rapportino.review.note && <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">NOTA DELL’UFFICIO</p><p className="mt-2 text-[11px] leading-5 text-amber-100/85">{payload.workspace.rapportino.review.note}</p></div>}
+                    ) : <p className="mt-4 rounded-xl border border-lime-300/15 bg-lime-300/[.04] px-3 py-2.5 text-[10px] text-lime-100/80">Tutti i controlli automatici sono pronti. Rivedi il racconto prima dell’invio.</p>}
+                    {payload.workspace.rapportino.review.note && payload.workspace.rapportino.status !== "APPROVED" && <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">RICHIESTA DELL’UFFICIO</p><p className="mt-2 text-[11px] leading-5 text-amber-100/85">{payload.workspace.rapportino.review.note}</p></div>}
                   </section>
-                  <label className="space-y-2 text-xs text-slate-400">
-                    Consuntivo del turno
-                    <Textarea
-                      className="mt-2 min-h-[220px] border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setReportText(event.target.value)}
-                      placeholder="Company AI precompila qui. Completa criticità, materiali e prossimi passi; poi salva la bozza o invia in ufficio."
-                      readOnly={!canWriteReport}
-                      value={reportText}
-                    />
-                  </label>
+                  <section aria-live="polite" className="space-y-3 rounded-2xl border border-cyan-300/15 bg-black/20 p-3.5" aria-label="Intervista guidata per il rapportino">
+                    <div className="flex gap-2.5">
+                      <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-100"><Sparkles className="size-3" /></span>
+                      <p className="rounded-xl rounded-tl-sm border border-white/[.07] bg-black/25 px-3 py-2.5 text-[10px] leading-5 text-slate-300">I registri hanno già fornito orari, persone, mezzi e materiali. Ti chiedo solo quello che non possono sapere: esito del lavoro, criticità e prossimi passi.</p>
+                    </div>
+                    {REPORT_CHAT_STEPS.slice(0, reportChatStep).map((step, index) => <div className="space-y-2" key={step.title}>
+                      <p className="text-[9px] leading-4 text-cyan-100/65">{reportQuestionOverrides[index] ?? step.prompt}</p>
+                      <div className="flex items-start justify-between gap-3 rounded-xl border border-lime-300/10 bg-lime-300/[.035] px-3 py-2.5"><p className="whitespace-pre-wrap text-[10px] leading-5 text-slate-200">{reportAnswers[index]}</p>{canWriteReport && !reportLocked && <Button className="min-h-7 shrink-0 px-2 text-[9px] text-cyan-100" onClick={() => setReportChatStep(index)} type="button" variant="outline">Modifica</Button>}</div>
+                    </div>)}
+                    {reportChatStep < REPORT_CHAT_STEPS.length ? <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2"><span className="text-[8px] font-semibold uppercase tracking-[.13em] text-cyan-100/65">Company AI · {reportQuestionStatus === "live" ? "domanda adattata ai dati" : reportQuestionStatus === "loading" ? "sta preparando la domanda" : reportQuestionStatus === "fallback" ? "domanda standard di riserva" : "colloquio guidato"}</span><span className="text-[9px] text-slate-600">{reportChatStep + 1}/{REPORT_CHAT_STEPS.length}</span></div>
+                      <p aria-live="polite" className="rounded-xl rounded-tl-sm border border-white/[.07] bg-black/25 px-3 py-2.5 text-[10px] leading-5 text-slate-200">{reportQuestionOverrides[reportChatStep] ?? REPORT_CHAT_STEPS[reportChatStep].prompt}</p>
+                      <label className="block space-y-1.5 text-[9px] text-slate-500"><span>{REPORT_CHAT_STEPS[reportChatStep].title} · risposta obbligatoria</span><Textarea aria-label={REPORT_CHAT_STEPS[reportChatStep].title} className="min-h-[96px] border-white/10 bg-black/30 text-[11px] text-slate-100" disabled={!canWriteReport || reportLocked || reportQuestionStatus === "loading"} onChange={(event) => updateReportAnswer(reportChatStep, event.target.value)} placeholder={REPORT_CHAT_STEPS[reportChatStep].placeholder} value={reportAnswers[reportChatStep]} /></label>
+                      <div className="flex items-center justify-between gap-3"><span aria-live="polite" className="text-[9px] text-slate-600">{reportSaving ? "Salvataggio della risposta…" : reportQuestionStatus === "loading" ? "Preparazione della domanda personalizzata…" : "Risposta salvata prima di proseguire"}</span><Button className="min-h-9 bg-cyan-200 px-3 text-[10px] font-semibold text-[#061012] hover:bg-cyan-100" disabled={!canWriteReport || reportLocked || reportSaving || reportQuestionStatus === "loading"} onClick={advanceReportChat} type="button">{reportSaving ? "Salvataggio…" : reportQuestionStatus === "loading" ? "Company AI…" : reportChatStep === REPORT_CHAT_STEPS.length - 1 ? "Rivedi il racconto" : "Invia risposta"}<Send className="size-3.5" /></Button></div>
+                    </div> : <div className="space-y-2.5">
+                      <p className="rounded-xl rounded-tl-sm border border-lime-300/15 bg-lime-300/[.04] px-3 py-2.5 text-[10px] leading-5 text-lime-100/85">Racconto completo. Rileggi le risposte; puoi modificarle prima dell’invio.</p>
+                      {REPORT_CHAT_STEPS.map((step, index) => <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-2.5" key={step.title}><div className="flex items-center justify-between gap-2"><span className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-500">{step.title}</span>{canWriteReport && !reportLocked && <Button className="min-h-7 px-2 text-[9px] text-cyan-100" onClick={() => setReportChatStep(index)} type="button" variant="outline">Modifica</Button>}</div><p className="mt-1 whitespace-pre-wrap text-[10px] leading-5 text-slate-200">{reportAnswers[index]}</p></div>)}
+                      <p className="text-right text-[9px] text-slate-600">{reportText.trim().length}/40 caratteri minimi</p>
+                    </div>}
+                  </section>
                   {canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" && <label className="space-y-2 text-xs text-slate-400"><span>Nota revisione <span className="text-slate-600">(obbligatoria per richiedere integrazioni)</span></span><Textarea className="mt-2 min-h-[90px] border-amber-300/20 bg-black/30 text-slate-100" onChange={(event) => setReviewNote(event.target.value)} placeholder="Conferma il rapportino oppure indica cosa deve essere integrato…" value={reviewNote} /></label>}
                 </div>
               )}
@@ -1697,21 +1525,23 @@ export default function OperationsJobWorkspace({
                 </DialogClose>
                 {actionOpen === "report" ? (
                   <>
-                    {canWriteReport && <Button
+                    {canWriteReport && !reportLocked && <Button
                       type="button"
                       variant="outline"
                       className="border-cyan-300/25 bg-cyan-300/[0.05] text-cyan-100 hover:bg-cyan-300/[0.1]"
+                      disabled={reportText.trim().length < 2}
                       onClick={() => submitReport("DRAFT")}
                     >
                       Salva bozza
                     </Button>}
-                    {canWriteReport && <Button
+                    {canWriteReport && !reportLocked && <Button
                       type="button"
-                      className="bg-lime-300 text-[#060806] hover:bg-lime-200"
+                      className="bg-lime-300 text-[#060806] hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={!reportCanSubmit}
                       onClick={() => submitReport("SUBMIT")}
                     >
                       <Send className="size-3.5" />
-                      {payload.workspace.rapportino.status === "SUBMITTED" ? "Invia revisione" : "Invia in ufficio"}
+                      Invia in ufficio
                     </Button>}
                     {canReviewReport && payload.workspace.rapportino.status === "SUBMITTED" && <><Button type="button" variant="outline" className="border-amber-300/25 bg-amber-300/[0.05] text-amber-100 hover:bg-amber-300/[0.1]" onClick={() => submitReport("REQUEST_CHANGES")}><FileText className="size-3.5" />Richiedi integrazione</Button><Button type="button" className="bg-lime-300 text-[#060806] hover:bg-lime-200" onClick={() => submitReport("APPROVE")}><CheckCircle2 className="size-3.5" />Approva rapportino</Button></>}
                   </>

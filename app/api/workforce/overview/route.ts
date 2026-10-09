@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantMemberships, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { isAuthorityRole, ROLE_METADATA } from "@/lib/authority-catalog";
+import { isAuthorityRole, normalizeAuthorityRoles, ROLE_METADATA } from "@/lib/authority-catalog";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { getMissionResourceCatalog } from "@/lib/mission-resources";
 
@@ -60,6 +60,8 @@ function startOfToday() {
   return date.getTime();
 }
 
+const workforceEntityTypes = new Set(["person", "worker", "operator", "driver", "team"]);
+
 export async function GET() {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -107,40 +109,62 @@ export async function GET() {
       getMissionResourceCatalog({ tenantId: context.tenantId }),
     ]);
 
-    const members = (canSeeRegistry ? membershipRows : [{
+    const visibleMembershipRows = canSeeRegistry ? membershipRows : [{
       id: context.membershipId,
       actorId: context.actorId,
       actorEmail: context.actorEmail,
       displayName: context.actorName,
       role: context.role,
+      roles: context.roles,
       status: "active",
       updatedAt: new Date().toISOString(),
-    }]).map((membership) => ({
-      id: membership.id,
-      name: membership.displayName,
-      email: canSeeRegistry ? membership.actorEmail : undefined,
-      role: membership.role,
-      roleLabel: roleLabel(membership.role),
-      status: membership.status,
-      updatedAt: membership.updatedAt,
-    }));
+    }];
+    const members = visibleMembershipRows.map((membership) => {
+      const roleSource = "rolesJson" in membership ? membership.rolesJson : membership.roles;
+      const roles = normalizeAuthorityRoles(roleSource, membership.role);
+      return {
+        id: membership.id,
+        name: membership.displayName,
+        email: canSeeRegistry ? membership.actorEmail : undefined,
+        role: roles[0] ?? membership.role,
+        roleLabel: roleLabel(roles[0] ?? membership.role),
+        roles,
+        rolesLabel: roles.map(roleLabel),
+        status: membership.status,
+        updatedAt: membership.updatedAt,
+      };
+    });
 
     const scopedWorkforceRows = canSeeRegistry
       ? workforceRows
       : workforceRows.filter((row) => {
         const payload = parseJson(row.payloadJson);
+        const teamMembershipIds = Array.isArray(payload.memberMembershipIds)
+          ? payload.memberMembershipIds.filter((value): value is string => typeof value === "string")
+          : [];
         return text(payload.authorityMembershipId || payload.membershipId) === context.membershipId
-          || text(payload.actorId) === context.actorId;
+          || text(payload.actorId) === context.actorId
+          || teamMembershipIds.includes(context.membershipId);
       });
-    const resources = scopedWorkforceRows.map((row) => {
+    const resources = scopedWorkforceRows.flatMap((row) => {
       const payload = parseJson(row.payloadJson);
       const entityType = text(payload.entityType || payload.resourceKind || payload.kind, row.recordType).toLowerCase();
+      if (!workforceEntityTypes.has(entityType)) return [];
       const status = statusOf(row, payload);
       const qualifications = Array.isArray(payload.qualifications)
         ? payload.qualifications.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 24)
         : [];
       const missionDriver = missionCatalog.drivers.find((driver) => driver.id === row.id);
-      return {
+      const memberMembershipIds = Array.isArray(payload.memberMembershipIds)
+        ? payload.memberMembershipIds.filter((item): item is string => typeof item === "string")
+          .filter((membershipId) => canSeeRegistry || members.some((member) => member.id === membershipId))
+          .slice(0, 100)
+        : [];
+      const memberNames = memberMembershipIds
+        .map((membershipId) => members.find((member) => member.id === membershipId)?.name)
+        .filter((name): name is string => Boolean(name))
+        .slice(0, 20);
+      return [{
         id: row.id,
         code: row.canonicalCode,
         label: row.title,
@@ -150,8 +174,10 @@ export async function GET() {
         conflict: missionDriver?.conflict ?? null,
         qualifications,
         authorityMembershipId: text(payload.authorityMembershipId || payload.membershipId, "") || null,
+        memberMembershipIds,
+        memberNames,
         updatedAt: row.updatedAt,
-      };
+      }];
     });
 
     const allowedJobIds = new Set(jobs.filter((job) => job.recordType !== "adapter-contract").map((job) => job.id));
@@ -224,7 +250,9 @@ export async function GET() {
       attendance: attendanceViews,
       summary: {
         activePeople: members.filter((member) => member.status === "active").length,
-        drivers: resources.filter((resource) => resource.entityType === "driver").length,
+        drivers: members.filter((member) => member.roles?.some((role) => role === "driver" || role === "delivery_driver")).length,
+        teams: resources.filter((resource) => resource.entityType === "team").length,
+        availableDrivers: resources.filter((resource) => resource.entityType === "driver" && resource.available).length,
         availableResources: resources.filter((resource) => resource.available).length,
         plannedToday,
         plans: scopedPlanViews.length,

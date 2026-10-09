@@ -1,33 +1,26 @@
 "use client";
 
-import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Activity,
   ArrowLeft,
   ArrowUpRight,
   Bell,
   BriefcaseBusiness,
   CalendarClock,
-  ChevronRight,
+  CheckCircle2,
   CircleAlert,
   Clock3,
   HardHat,
-  Layers3,
   LoaderCircle,
   Menu,
-  MessageSquareText,
-  Package,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   Search,
   ShieldCheck,
-  Sparkles,
   Truck,
+  UserRound,
   Users,
-  X,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 import { AccountMenu } from "@/components/account-menu";
@@ -35,9 +28,10 @@ import { Button } from "@/components/ui/button";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { Input } from "@/components/ui/input";
 import { TenantSwitcher } from "@/components/tenant-switcher";
-import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 
 type Tone = "lime" | "cyan" | "amber" | "red";
+type Filter = "ALL" | "PEOPLE" | "DRIVERS" | "TEAMS";
 
 type WorkforceContext = {
   actorName: string;
@@ -53,6 +47,8 @@ type WorkforceMember = {
   email?: string;
   role: string;
   roleLabel: string;
+  roles?: string[];
+  rolesLabel?: string[];
   status: string;
   updatedAt: string;
 };
@@ -67,6 +63,8 @@ type WorkforceResource = {
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
   qualifications: string[];
   authorityMembershipId: string | null;
+  memberMembershipIds?: string[];
+  memberNames?: string[];
   updatedAt: string;
 };
 
@@ -77,43 +75,17 @@ type WorkforcePayload = {
   summary?: {
     activePeople?: number;
     drivers?: number;
-    availableResources?: number;
-  };
-  registration?: {
-    owner?: string;
-    route?: string;
-    workforceCreation?: string;
+    teams?: number;
+    inService?: number;
   };
   readback?: { status?: string; checkedAt?: string };
   error?: string;
 };
 
-type NavItem = {
-  id: CommandNavigationId;
-  label: string;
-  path: string;
-  capability: string;
-  icon: LucideIcon;
-};
-
-const navItems: NavItem[] = [
-  { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
-  { id: "operations", label: "OPERATIONS", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
-  { id: "workforce", label: "WORKFORCE", path: "/workforce", capability: "workforce.read", icon: Users },
-  { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: CalendarClock },
-  { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: Clock3 },
-  { id: "assets", label: "ASSET", path: "/assets", capability: "asset.read", icon: Package },
-  { id: "warehouse", label: "MAGAZZINO", path: "/warehouse", capability: "warehouse.read", icon: Layers3 },
-  { id: "mission", label: "MISSIONI", path: "/mission", capability: "mission.read", icon: Truck },
-  { id: "documents", label: "DOCUMENTI", path: "/documents", capability: "documents.read", icon: Layers3 },
-  { id: "authority", label: "AUTHORITY", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
-  { id: "events", label: "EVENTI", path: "/events", capability: "events.read", icon: Activity },
-  { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: ShieldCheck },
-];
-
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
   admin: "Amministratore",
+  member: "Collaboratore",
   manager: "Manager",
   office: "Ufficio",
   technical: "Tecnico",
@@ -122,63 +94,47 @@ const ROLE_LABELS: Record<string, string> = {
   warehouse_manager: "Responsabile magazzino",
   warehouse_operator: "Magazziniere",
   driver: "Autista",
+  delivery_driver: "Autista di consegna",
   maintenance: "Manutentore",
   auditor: "Auditor",
 };
 
-const toneStyles: Record<Tone, { icon: string; badge: string }> = {
-  lime: { icon: "text-lime-200", badge: "border-lime-300/25 bg-lime-300/10 text-lime-100" },
-  cyan: { icon: "text-cyan-200", badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100" },
-  amber: { icon: "text-amber-200", badge: "border-amber-300/25 bg-amber-300/10 text-amber-100" },
-  red: { icon: "text-rose-200", badge: "border-rose-300/25 bg-rose-300/10 text-rose-100" },
+const toneClasses: Record<Tone, string> = {
+  lime: "border-lime-300/25 bg-lime-300/[.07] text-lime-100",
+  cyan: "border-cyan-300/25 bg-cyan-300/[.06] text-cyan-100",
+  amber: "border-amber-300/25 bg-amber-300/[.06] text-amber-100",
+  red: "border-rose-300/25 bg-rose-300/[.06] text-rose-100",
 };
 
 function roleLabel(role: string) {
-  return ROLE_LABELS[role] ?? role;
+  return ROLE_LABELS[role] ?? role.replaceAll("_", " ");
 }
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
+function formatDate(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("it-IT", { dateStyle: "medium" });
 }
 
-function statusLabel(status: string) {
-  if (status === "active") return "ATTIVA";
-  if (status === "AVAILABLE") return "DISPONIBILE";
-  if (status === "ACTIVE") return "OPERATIVA";
-  if (status === "BUSY") return "IMPEGNATA";
-  if (status === "SUSPENDED") return "SOSPESA";
-  return status.replaceAll("_", " ");
-}
-
-function resourceTypeLabel(entityType: string) {
-  if (entityType === "driver") return "Autista";
-  if (entityType === "person" || entityType === "worker") return "Operatore";
-  if (entityType === "team") return "Squadra";
-  if (entityType === "vehicle") return "Mezzo";
-  if (entityType === "asset") return "Asset";
-  return entityType.replaceAll("_", " ");
-}
-
-function statusTone(status: string): Tone {
-  if (["active", "AVAILABLE", "ACTIVE", "OPERATIVO", "ONLINE"].includes(status)) return "lime";
-  if (["BUSY", "PAUSED", "DRAFT"].includes(status)) return "amber";
-  if (["SUSPENDED", "CONFLICTED"].includes(status)) return "red";
-  return "cyan";
+function memberStatus(status: string) {
+  if (status.toLowerCase() === "active") return { label: "Attiva", tone: "lime" as const };
+  if (status.toLowerCase() === "suspended") return { label: "Sospesa", tone: "red" as const };
+  if (status.toLowerCase() === "pending") return { label: "In attesa", tone: "amber" as const };
+  return { label: status.replaceAll("_", " "), tone: "cyan" as const };
 }
 
 function IconButton({ label, children, onClick, className = "" }: { label: string; children: ReactNode; onClick?: () => void; className?: string }) {
-  return <button aria-label={label} className={`grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${className}`} onClick={onClick} type="button">{children}</button>;
+  return <button aria-label={label} className={`grid size-9 shrink-0 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-400 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 ${className}`} onClick={onClick} type="button">{children}</button>;
 }
 
-function StatusPill({ status, tone = statusTone(status) }: { status: string; tone?: Tone }) {
-  const style = toneStyles[tone];
-  return <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[.06em] ${style.badge}`}><span className="size-1.5 rounded-full bg-current shadow-[0_0_8px_currentColor]" />{statusLabel(status)}</span>;
+function Metric({ label, value, detail, icon: Icon, tone }: { label: string; value: number; detail: string; icon: LucideIcon; tone: Tone }) {
+  return <article className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><span className={`grid size-10 place-items-center rounded-xl border ${toneClasses[tone]}`}><Icon className="size-[18px]" /></span><span className="text-[10px] text-slate-600">{detail}</span></div><p className="mt-5 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500">{label}</p><p className="mt-2 font-mono text-[30px] font-semibold leading-none tracking-[-.06em] text-slate-50">{value}</p></article>;
 }
 
-function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; value: number | string; detail: string; icon: LucideIcon; tone: Tone }) {
-  return <article className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><span className={`grid size-10 place-items-center rounded-xl border border-current/20 bg-current/10 ${toneStyles[tone].icon}`}><Icon className="size-[18px]" /></span><StatusPill status={detail} tone={tone} /></div><p className="mt-5 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-600">{label}</p><p className="mt-2 font-mono text-[32px] font-semibold leading-none tracking-[-.07em] text-slate-50">{value}</p><p className="mt-4 text-[10px] text-slate-600">Dati operativi aggiornati</p></article>;
+function RoleChip({ role }: { role: string }) {
+  const isDriver = role === "driver" || role === "delivery_driver";
+  const isWarehouse = role === "warehouse_manager" || role === "warehouse_operator";
+  const tone = isDriver ? "cyan" : isWarehouse ? "amber" : "lime";
+  return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium ${toneClasses[tone]}`}>{roleLabel(role)}</span>;
 }
 
 export default function WorkforceControl() {
@@ -186,11 +142,11 @@ export default function WorkforceControl() {
   const [payload, setPayload] = useState<WorkforcePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [query, setQuery] = useState("");
-  const [resourceFilter, setResourceFilter] = useState<"ALL" | "DRIVER" | "PERSON" | "AVAILABLE">("ALL");
+  const [filter, setFilter] = useState<Filter>("ALL");
+  const [loadError, setLoadError] = useState(false);
   const [notice, setNotice] = useState("");
+  const hasPayload = useRef(false);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -199,9 +155,12 @@ export default function WorkforceControl() {
       const next = await response.json() as WorkforcePayload;
       if (!response.ok) throw new Error(next.error ?? "workforce_overview_unavailable");
       setPayload(next);
+      hasPayload.current = true;
+      setLoadError(false);
       setNotice("");
     } catch {
-      setNotice("Le risorse operative non sono disponibili in questo momento. Riprova tra poco.");
+      if (hasPayload.current) setNotice("Aggiornamento non riuscito. Sono mostrati gli ultimi dati caricati.");
+      else setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -214,79 +173,93 @@ export default function WorkforceControl() {
   }, [refresh]);
 
   const context = payload?.context;
-  const capabilities = useMemo(() => context?.capabilities ?? ["workforce.read"], [context]);
+  const capabilities = useMemo(() => context?.capabilities ?? ["workforce.read"], [context?.capabilities]);
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
-  const visibleNavItems = useMemo(() => navItems.filter((item) => capabilities.includes(item.capability)), [capabilities]);
-  const members = useMemo(() => payload?.members ?? [], [payload]);
-  const resources = useMemo(() => payload?.resources ?? [], [payload]);
-  const summary = payload?.summary ?? {};
-  const canReadAuthority = capabilities.includes("authority.read") || capabilities.includes("authority.manage");
+  const members = useMemo(() => payload?.members ?? [], [payload?.members]);
+  const resources = useMemo(() => payload?.resources ?? [], [payload?.resources]);
+  const teams = resources.filter((resource) => resource.entityType === "team");
+  const driverProfiles = resources.filter((resource) => resource.entityType === "driver");
+  const canSeeRegistry = capabilities.some((capability) => ["workforce.read.all", "workforce.registry.read", "workforce.manage", "authority.read"].includes(capability));
+  const canManageAuthority = capabilities.includes("authority.manage");
+  const canReadAuthority = canManageAuthority || capabilities.includes("authority.read");
   const canReadPlanning = capabilities.includes("planning.read");
+  const canReadAttendance = capabilities.includes("workforce.read") || capabilities.includes("attendance.read");
   const canReadMission = capabilities.includes("mission.read");
-  const canReadAttendance = capabilities.includes("workforce.read");
+  const canReadCommunication = capabilities.includes("communication.read");
 
-  const memberByResource = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
-  const filteredResources = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return resources.filter((resource) => {
-      const linkedMember = resource.authorityMembershipId ? memberByResource.get(resource.authorityMembershipId) : undefined;
-      const searchable = `${resource.label} ${resource.code ?? ""} ${resource.entityType} ${linkedMember?.name ?? ""} ${linkedMember?.roleLabel ?? ""} ${resource.qualifications.join(" ")}`.toLowerCase();
-      const matchesQuery = !normalized || searchable.includes(normalized);
-      const matchesFilter = resourceFilter === "ALL"
-        || (resourceFilter === "DRIVER" && resource.entityType === "driver")
-        || (resourceFilter === "PERSON" && ["person", "worker", "team"].includes(resource.entityType))
-        || (resourceFilter === "AVAILABLE" && resource.available);
-      return matchesQuery && matchesFilter;
-    });
-  }, [memberByResource, query, resourceFilter, resources]);
-
-  const availableResources = resources.filter((resource) => resource.available);
-  const drivers = resources.filter((resource) => resource.entityType === "driver");
-  const availableDrivers = drivers.filter((resource) => resource.available);
-  const occupiedResources = resources.filter((resource) => !resource.available);
-  const conflictedResources = resources.filter((resource) => resource.conflict);
-  const unprovisionedMembers = members.filter((member) => member.status === "active" && !resources.some((resource) => resource.authorityMembershipId === member.id));
-  const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
-
-  function navigate(item: NavItem) {
-    setMobileMenu(false);
-    router.push(item.path);
-  }
-
-  function goBack() {
-    if (window.history.length > 1) router.back();
-    else router.push("/command");
-  }
-
-  function openAuthority() {
-    if (!canReadAuthority) {
-      setNotice("Authority non è incluso nel tuo perimetro. Chiedi al responsabile dell’azienda.");
-      return;
-    }
-    router.push("/onboarding");
-  }
+  const roleSets = useMemo(() => new Map(members.map((member) => [member.id, member.roles ?? [member.role]])), [members]);
+  const normalizedQuery = query.trim().toLocaleLowerCase("it-IT");
+  const filteredMembers = members.filter((member) => {
+    const roles = roleSets.get(member.id) ?? [];
+    const isDriver = roles.some((role) => role === "driver" || role === "delivery_driver");
+    const searchable = `${member.name} ${member.email ?? ""} ${roles.map(roleLabel).join(" ")}`.toLocaleLowerCase("it-IT");
+    const matchesQuery = !normalizedQuery || searchable.includes(normalizedQuery);
+    const matchesFilter = filter === "ALL" || filter === "PEOPLE" || (filter === "DRIVERS" && isDriver);
+    return matchesQuery && matchesFilter;
+  });
+  const filteredTeams = teams.filter((team) => {
+    const searchable = `${team.label} ${team.memberNames?.join(" ") ?? ""}`.toLocaleLowerCase("it-IT");
+    return (filter === "ALL" || filter === "TEAMS") && (!normalizedQuery || searchable.includes(normalizedQuery));
+  });
+  const deliveryDrivers = members.filter((member) => member.status.toLowerCase() === "active" && (member.roles ?? [member.role]).includes("delivery_driver")).length;
+  const actor = { email: context?.actorEmail ?? "", name: context?.actorName ?? "Operatore" };
+  const navigate = (path: string) => router.push(path);
 
   if (loading && !payload) {
-    return <main className="grid min-h-screen place-items-center bg-[#030504] text-xs text-slate-500"><LoaderCircle className="mr-2 inline size-4 animate-spin text-lime-300" />Apertura risorse operative…</main>;
+    return <main className="grid min-h-screen place-items-center bg-[#030504] text-sm text-slate-400"><LoaderCircle className="mr-2 inline size-4 animate-spin text-lime-300" />Caricamento persone…</main>;
   }
 
-  return <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]"><div className="zw-command-ambient" aria-hidden="true" /><div className="relative flex min-h-screen">
-    <aside className={`zw-command-sidebar fixed inset-y-0 left-0 z-40 flex flex-col px-3 py-4 transition-[width,transform] lg:static lg:translate-x-0 ${sidebarCollapsed ? "is-collapsed lg:w-[76px]" : "lg:w-[248px]"} ${mobileMenu ? "translate-x-0" : "-translate-x-full"}`}>
-      <div className="flex items-center justify-between px-2"><button aria-label="Apri Control" className="flex min-w-0 items-center gap-3 text-left" onClick={() => { setMobileMenu(false); router.push("/command"); }} type="button"><span className="neon-pulse relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="AI-ZEROW" width={40} height={40} className="size-full object-cover" /></span><span className="zw-command-sidebar__brand-copy min-w-0"><span className="block text-sm font-bold tracking-[.18em] text-slate-50">AI-ZEROW</span><span className="block text-[10px] uppercase tracking-[.22em] text-lime-300/75">command</span></span></button><div className="flex items-center gap-1"><IconButton label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} className="hidden lg:grid" onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><IconButton label="Chiudi menu" className="lg:hidden" onClick={() => setMobileMenu(false)}><X className="size-4" /></IconButton></div></div>
-      <div className="zw-command-tenant mt-7 flex items-center gap-3 rounded-2xl p-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><HardHat className="size-4" /></span><span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[.1em] text-slate-600">{roleLabel(context?.role ?? "workforce")} · profilo operativo</span></span></div>
-      <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale"><p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[.22em] text-slate-700">Area autorizzata</p><div className="mt-2 space-y-1">{visibleNavItems.map((item) => { const Icon = item.icon; const active = item.id === "workforce"; return <button aria-current={active ? "page" : undefined} aria-label={sidebarCollapsed ? item.label : undefined} className={`zw-command-nav-item ${active ? "is-active" : ""}`} key={item.id} onClick={() => navigate(item)} title={sidebarCollapsed ? item.label : undefined} type="button"><Icon className={`size-4 ${active ? "text-lime-200" : "text-slate-600 group-hover:text-slate-300"}`} /><span className="zw-command-sidebar__nav-label">{item.label}</span>{item.id === "command" && <span className="zw-command-sidebar__nav-badge ml-auto rounded border border-lime-300/20 px-1.5 py-0.5 font-mono text-[8px] tracking-[.08em] text-lime-200">AI</span>}</button>; })}</div></nav>
-      <div className="zw-command-sidebar__footer mt-4 border-t border-white/[.07] pt-4"><div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[.14em] text-slate-600"><span>Sistema</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />{payload?.readback?.status === "verified" ? "DATI AGGIORNATI" : "AGGIORNAMENTO"}</span></div><div className="zw-command-core-status mt-3 rounded-xl p-3"><p className="font-mono text-[9px] text-slate-500">{resources.length} RISORSE</p><p className="mt-2 font-mono text-[9px] text-lime-300/60">PROFILO / {roleLabel(context?.role ?? "workforce").toUpperCase()}</p></div></div>
-    </aside>
-    {mobileMenu && <button className="fixed inset-0 z-30 bg-black/75 lg:hidden" onClick={() => setMobileMenu(false)} aria-label="Chiudi menu" type="button" />}
-    <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton label="Apri menu" onClick={() => setMobileMenu(true)} className="lg:hidden"><Menu className="size-4" /></IconButton><button aria-label="Apri Workforce" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/workforce")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[.2em] text-lime-300/75">workforce</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca nelle risorse operative" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca persone, squadre, qualifiche…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">WORKFORCE</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "AGGIORNAMENTO" : "DATI AGGIORNATI"}</span><IconButton className="zw-command-topbar__back" label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton className="zw-command-topbar__refresh" label="Aggiorna risorse" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
-      <div className="mx-auto max-w-[1920px] px-4 py-5 sm:px-7 sm:py-7"><div className="mb-5 flex flex-wrap items-end justify-between gap-4"><div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,.9)]" />AI-ZEROW / WORKFORCE</div><h1 className="mt-2 text-2xl font-semibold tracking-[-.04em] text-slate-50 sm:text-[28px]">Risorse operative</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">Persone, squadre e mezzi pronti per essere collegati alle attività · {payload?.readback?.status === "verified" ? "dati operativi aggiornati" : "aggiornamento in corso"}</p></div><div className="flex flex-wrap items-center gap-2">{canReadAuthority && <Button className="h-10 rounded-xl border-lime-100/55 px-4 text-xs shadow-[0_0_30px_rgba(190,255,60,.18)]" onClick={openAuthority}><ShieldCheck className="size-4" />Authority</Button>}{canReadPlanning && <Button className="h-10 rounded-xl border-white/10 bg-black/25 text-xs text-slate-300 hover:border-cyan-300/30 hover:bg-cyan-300/10 hover:text-cyan-100" onClick={() => router.push("/planning")} variant="outline"><CalendarClock className="size-4" />Pianificazione</Button>}</div></div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><KpiCard label="Persone autorizzate" value={summary.activePeople ?? 0} detail="ATTIVE" icon={Users} tone="lime" /><KpiCard label="Risorse operative" value={resources.length} detail="REGISTRO" icon={BriefcaseBusiness} tone="cyan" /><KpiCard label="Disponibili ora" value={summary.availableResources ?? availableResources.length} detail="PRONTE" icon={Sparkles} tone="lime" /><KpiCard label="Autisti disponibili" value={availableDrivers.length} detail="SELEZIONABILI" icon={Truck} tone="amber" /></div>
-        <div className="mt-4 grid gap-4 2xl:grid-cols-[minmax(0,1.18fr)_minmax(340px,.82fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">REGISTRO OPERATIVO</p><h2 className="mt-1 text-[17px] font-semibold text-slate-100">Risorse assegnabili</h2><p className="mt-1 text-[11px] text-slate-500">Disponibilità, qualifiche e impegni già presenti. La scelta finale viene sempre ricontrollata nel modulo di destinazione.</p></div><div className="flex items-center gap-2"><StatusPill status="UPDATED" /><IconButton label="Aggiorna registro" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton></div></div><div className="mt-4 flex flex-wrap items-center gap-2"><div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca risorse" className="h-9 border-white/10 bg-black/25 pl-9 text-[11px]" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca nome, tipo, qualifica…" value={query} /></div>{(["ALL", "PERSON", "DRIVER", "AVAILABLE"] as const).map((filter) => <button className={`rounded-lg border px-3 py-2 text-[10px] font-semibold transition ${resourceFilter === filter ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/10 bg-black/20 text-slate-500 hover:border-lime-300/25 hover:text-lime-100"}`} key={filter} onClick={() => setResourceFilter(filter)} type="button">{filter === "ALL" ? "Tutte" : filter === "PERSON" ? "Persone e squadre" : filter === "DRIVER" ? "Autisti" : "Disponibili"}</button>)}</div><div className="mt-4 overflow-hidden rounded-xl border border-white/[.08] bg-black/20"><div className="hidden grid-cols-[minmax(0,1.4fr)_120px_minmax(130px,.8fr)_125px] gap-3 border-b border-white/[.08] px-4 py-3 text-[9px] font-semibold uppercase tracking-[.14em] text-slate-600 md:grid"><span>Risorsa</span><span>Tipologia</span><span>Qualifiche</span><span>Disponibilità</span></div>{filteredResources.map((resource) => { const linkedMember = resource.authorityMembershipId ? memberByResource.get(resource.authorityMembershipId) : undefined; const resourceTone = resource.conflict ? "amber" : resource.available ? "lime" : "cyan"; return <article className="grid gap-3 border-b border-white/[.06] px-4 py-3.5 last:border-b-0 md:grid-cols-[minmax(0,1.4fr)_120px_minmax(130px,.8fr)_125px] md:items-center" key={resource.id}><div className="flex min-w-0 items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl border ${resource.entityType === "driver" ? "border-cyan-300/20 bg-cyan-300/[.07] text-cyan-100" : "border-lime-300/20 bg-lime-300/[.07] text-lime-100"}`}>{resource.entityType === "driver" ? <Truck className="size-4" /> : resource.entityType === "team" ? <Users className="size-4" /> : <HardHat className="size-4" />}</span><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{resource.label}</p><p className="mt-1 truncate text-[10px] text-slate-600">{linkedMember?.roleLabel ?? resourceTypeLabel(resource.entityType)} · {resource.code ?? "Codice assegnato automaticamente"}</p>{resource.conflict && <p className="mt-1 truncate text-[10px] text-amber-200/80">Impegnata: {resource.conflict.title} · {formatDate(resource.conflict.startsAt)}</p>}</div></div><div><span className="text-[10px] font-medium text-slate-300">{resourceTypeLabel(resource.entityType)}</span><span className="mt-1 block text-[9px] text-slate-600">{linkedMember ? "persona autorizzata" : "risorsa registrata"}</span></div><div className="flex flex-wrap gap-1.5">{resource.qualifications.length > 0 ? resource.qualifications.slice(0, 3).map((qualification) => <span className="rounded-full border border-white/10 px-2 py-1 text-[9px] text-slate-500" key={qualification}>{qualification}</span>) : <span className="text-[10px] text-slate-600">Nessuna qualifica indicata</span>}</div><div><StatusPill status={resource.conflict ? "BUSY" : resource.available ? "AVAILABLE" : resource.status} tone={resourceTone} /></div></article>; })}{filteredResources.length === 0 && <div className="px-4 py-12 text-center"><Users className="mx-auto size-7 text-slate-700" /><p className="mt-3 text-xs font-medium text-slate-400">Nessuna risorsa nel filtro corrente</p><p className="mt-1 text-[10px] text-slate-600">Prova a cambiare ricerca o filtro.</p></div>}</div>{unprovisionedMembers.length > 0 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3.5 py-3"><div className="flex items-start gap-2"><ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-lime-200" /><p className="text-[10px] leading-5 text-slate-500">{unprovisionedMembers.length} persona{unprovisionedMembers.length === 1 ? "a" : "e"} autorizzata non ha ancora una risorsa operativa collegata.</p></div>{canReadAuthority && <Button className="h-8 shrink-0 border-white/10 bg-black/25 text-[10px] text-lime-100 hover:border-lime-300/30 hover:bg-lime-300/10" onClick={openAuthority} variant="outline"><ShieldCheck className="size-3.5" />Completa in Authority</Button>}</div>}</section>
-          <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-cyan-200/70">DISPONIBILITÀ</p><h2 className="mt-1 text-[17px] font-semibold text-slate-100">Quadro operativo</h2><p className="mt-1 text-[11px] text-slate-500">Una vista sintetica per capire chi può essere collegato a un’attività in questo momento.</p></div><span className="grid size-10 place-items-center rounded-2xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><Sparkles className="size-5" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Disponibili</p><p className="mt-2 font-mono text-xl text-lime-100">{availableResources.length}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Impegnate</p><p className="mt-2 font-mono text-xl text-amber-100">{occupiedResources.length}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Autisti</p><p className="mt-2 font-mono text-xl text-cyan-100">{drivers.length}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Con attenzione</p><p className="mt-2 font-mono text-xl text-amber-100">{conflictedResources.length}</p></div></div><div className="mt-5 space-y-2">{conflictedResources.slice(0, 3).map((resource) => <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5" key={resource.id}><div className="flex items-center justify-between gap-2"><p className="truncate text-[11px] font-medium text-slate-300">{resource.label}</p><StatusPill status="BUSY" tone="amber" /></div><p className="mt-1 truncate text-[9px] text-slate-600">{resource.conflict?.title} · {formatDate(resource.conflict?.startsAt ?? null)}</p></div>)}{conflictedResources.length === 0 && <p className="rounded-xl border border-dashed border-cyan-300/15 p-5 text-center text-[10px] text-slate-600">Nessun impegno in conflitto rilevato.</p>}</div>{canReadMission && <Button className="mt-5 h-9 w-full border-white/10 bg-black/20 text-[10px] text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => router.push("/mission")} variant="outline"><Truck className="size-3.5" />Apri Missioni</Button>}</section></div>
-        <section className="mt-4 carbon-card rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COLLEGAMENTI OPERATIVI</p><h2 className="mt-1 text-[17px] font-semibold text-slate-100">Ogni modulo al posto giusto</h2><p className="mt-1 text-[11px] text-slate-500">Workforce legge la disponibilità e rimanda la gestione al modulo responsabile, senza duplicare registri o azioni.</p></div><StatusPill status="PERIMETRO CHIARO" tone="lime" /></div><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4"><button className="group rounded-xl border border-white/[.08] bg-black/20 p-4 text-left transition hover:border-lime-300/30 hover:bg-lime-300/[.04]" onClick={openAuthority} type="button" disabled={!canReadAuthority}><div className="flex items-center justify-between"><ShieldCheck className="size-5 text-lime-200" /><ArrowUpRight className="size-4 text-slate-600 transition group-hover:text-lime-200" /></div><p className="mt-4 text-xs font-semibold text-slate-200">Authority</p><p className="mt-1 text-[10px] leading-5 text-slate-600">Persone, mansioni e accessi.</p></button>{canReadPlanning && <button className="group rounded-xl border border-white/[.08] bg-black/20 p-4 text-left transition hover:border-lime-300/30 hover:bg-lime-300/[.04]" onClick={() => router.push("/planning")} type="button"><div className="flex items-center justify-between"><CalendarClock className="size-5 text-cyan-200" /><ArrowUpRight className="size-4 text-slate-600 transition group-hover:text-lime-200" /></div><p className="mt-4 text-xs font-semibold text-slate-200">Pianificazione</p><p className="mt-1 text-[10px] leading-5 text-slate-600">Attività, turni e assegnazioni.</p></button>}{canReadAttendance && <button className="group rounded-xl border border-white/[.08] bg-black/20 p-4 text-left transition hover:border-lime-300/30 hover:bg-lime-300/[.04]" onClick={() => router.push("/presenze")} type="button"><div className="flex items-center justify-between"><Clock3 className="size-5 text-cyan-200" /><ArrowUpRight className="size-4 text-slate-600 transition group-hover:text-lime-200" /></div><p className="mt-4 text-xs font-semibold text-slate-200">Presenze</p><p className="mt-1 text-[10px] leading-5 text-slate-600">Timbrature, posizione e geofence.</p></button>}{canReadMission && <button className="group rounded-xl border border-white/[.08] bg-black/20 p-4 text-left transition hover:border-lime-300/30 hover:bg-lime-300/[.04]" onClick={() => router.push("/mission")} type="button"><div className="flex items-center justify-between"><Truck className="size-5 text-amber-200" /><ArrowUpRight className="size-4 text-slate-600 transition group-hover:text-lime-200" /></div><p className="mt-4 text-xs font-semibold text-slate-200">Missioni</p><p className="mt-1 text-[10px] leading-5 text-slate-600">Viaggi e selezione di autista e mezzo.</p></button>}</div></section>
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,.8fr)]"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><ShieldCheck className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">PERIMETRO DEL MODULO</p><h2 className="mt-1 text-[17px] font-semibold text-slate-100">Qui non si creano persone</h2><p className="mt-2 text-[11px] leading-5 text-slate-500">Le persone entrano nel sistema tramite Authority. Dopo l’abilitazione, Workforce mostra la risorsa operativa e la sua disponibilità. La gestione resta nel modulo proprietario.</p></div></div><div className="mt-5 grid gap-2 sm:grid-cols-3"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Persone</p><p className="mt-2 text-xs text-lime-100">AUTHORITY</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Disponibilità</p><p className="mt-2 text-xs text-cyan-100">WORKFORCE</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Assegnazione</p><p className="mt-2 text-xs text-amber-100">MODULO DESTINAZIONE</p></div></div></section><section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Sparkles className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COMPANY AI</p><h2 className="mt-1 text-[17px] font-semibold text-slate-100">Leggi la capacità del team</h2></div><StatusPill status="ASSISTITA" tone="cyan" /></div><p className="mt-3 text-[11px] leading-5 text-slate-500">Company AI può evidenziare scoperture, sovraccarichi e risorse non pronte. Le modifiche restano nei moduli autorizzati.</p><div className="mt-4 space-y-2"><button className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/command?prompt=Analizza%20disponibilita%20risorse")} type="button"><ChevronRight className="size-3.5 text-lime-300" />Analizza disponibilità risorse</button><button className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/command?prompt=Individua%20risorse%20non%20pronte")} type="button"><ChevronRight className="size-3.5 text-lime-300" />Individua risorse non pronte</button></div></section></div>
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · RISORSE OPERATIVE</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,.8)]" />Disponibilità aggiornata · accesso personalizzato</span></div>
+  if (loadError && !payload) {
+    return <main className="grid min-h-screen place-items-center bg-[#030504] p-5"><div className="carbon-card w-full max-w-md rounded-2xl p-6 text-center"><CircleAlert className="mx-auto size-8 text-amber-200" /><h1 className="mt-4 text-lg font-semibold text-slate-100">Elenco persone non disponibile</h1><p className="mt-2 text-sm leading-6 text-slate-500">Non è stato possibile leggere i dati autorizzati. Riprova tra qualche istante.</p><Button className="mt-5 bg-lime-300 text-[#050705] hover:bg-lime-200" onClick={() => void refresh()}><RefreshCw className="size-4" />Riprova</Button></div></main>;
+  }
+
+  const filters: { id: Filter; label: string; count: number }[] = [
+    { id: "ALL", label: "Tutti", count: members.length + teams.length },
+    { id: "PEOPLE", label: "Persone", count: members.length },
+    { id: "DRIVERS", label: "Autisti", count: members.filter((member) => (member.roles ?? [member.role]).some((role) => role === "driver" || role === "delivery_driver")).length },
+    { id: "TEAMS", label: "Squadre", count: teams.length },
+  ];
+
+  return <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]"><div aria-hidden="true" className="zw-command-ambient" /><section className="relative min-w-0">
+    <header className="zw-command-topbar sticky top-0 z-20 flex min-h-[72px] items-center gap-3 px-4 py-3 sm:gap-5 sm:px-7">
+      <IconButton className="lg:hidden" label="Apri menu"><Menu className="size-4" /></IconButton>
+      <button aria-label="Apri Persone" className="zw-command-topbar__brand flex shrink-0 items-center gap-3 text-left" onClick={() => navigate("/workforce")} type="button"><span className="grid size-10 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[.07] text-lime-200"><Users className="size-5" /></span><span><span className="block text-sm font-semibold text-slate-100">Persone</span><span className="mt-0.5 hidden text-[10px] uppercase tracking-[.16em] text-slate-500 sm:block">Anagrafica e squadre</span></span></button>
+      <div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/[.04] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300" />{refreshing ? "AGGIORNAMENTO" : payload?.readback?.status === "verified" ? "DATI AGGIORNATI" : "DATI OPERATIVI"}</span><IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton><IconButton className="zw-command-topbar__refresh" label="Aggiorna persone" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{canReadCommunication && <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div>
+    </header>
+
+    <div className="mx-auto w-full max-w-[1440px] px-4 pb-28 pt-6 sm:px-7 lg:pb-10">
+      <section className="carbon-card overflow-hidden rounded-3xl p-5 sm:p-7"><div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/75">PERSONE · ANAGRAFICA OPERATIVA</p><h1 className="mt-2 text-2xl font-semibold tracking-[-.035em] text-slate-50 sm:text-3xl">Persone e squadre</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Ruoli e accessi arrivano da Authority. Qui trovi le persone e i gruppi di lavoro visibili nel tuo perimetro aziendale.</p></div>{canReadAuthority && <Button className="h-10 shrink-0 border-lime-300/25 bg-lime-300/[.07] px-4 text-lime-100 hover:bg-lime-300/[.13]" onClick={() => navigate("/onboarding")} variant="outline"><ShieldCheck className="size-4" />{canManageAuthority ? "Gestisci ruoli in Authority" : "Apri Authority"}<ArrowUpRight className="size-3.5" /></Button>}</div></section>
+
+      <section aria-label="Riepilogo persone" className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric detail="nel tuo perimetro" icon={Users} label={canSeeRegistry ? "Persone attive" : "Il mio profilo"} tone="lime" value={canSeeRegistry ? payload?.summary?.activePeople ?? members.filter((member) => member.status.toLowerCase() === "active").length : members.length} /><Metric detail="mansione abilitata" icon={Truck} label="Autisti di consegna" tone="cyan" value={canSeeRegistry ? deliveryDrivers : members.some((member) => (member.roles ?? []).includes("delivery_driver")) ? 1 : 0} /><Metric detail="gruppi registrati" icon={HardHat} label="Squadre" tone="amber" value={teams.length} /><Metric detail="da Presenze" icon={Clock3} label="In servizio" tone="lime" value={payload?.summary?.inService ?? 0} /></section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(290px,.75fr)]"><div className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">ELENCO AZIENDALE</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{canSeeRegistry ? "Persone" : "Il mio profilo operativo"}</h2><p className="mt-1 text-xs leading-5 text-slate-500">{canSeeRegistry ? "Ogni persona compare una sola volta, con tutte le mansioni abilitate." : "Mostriamo solo le informazioni del tuo profilo autorizzato."}</p></div><div className="relative w-full sm:max-w-[300px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca persone e squadre" className="h-10 border-white/10 bg-black/25 pl-10 text-sm text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Nome, ruolo o e-mail" value={query} /></div></div>
+
+        <div aria-label="Filtra elenco" className="mt-4 flex flex-wrap gap-2">{filters.map((item) => <button aria-pressed={filter === item.id} className={`rounded-full border px-3 py-2 text-xs transition ${filter === item.id ? "border-lime-300/35 bg-lime-300/[.1] text-lime-100" : "border-white/[.08] bg-black/20 text-slate-400 hover:border-white/20 hover:text-slate-200"}`} key={item.id} onClick={() => setFilter(item.id)} type="button">{item.label}<span className="ml-2 font-mono text-[10px] opacity-70">{item.count}</span></button>)}</div>
+
+        <div className="mt-4 space-y-2">{filter !== "TEAMS" && filteredMembers.map((member) => {
+          const roles = roleSets.get(member.id) ?? [member.role];
+          const isDriver = roles.some((role) => role === "driver" || role === "delivery_driver");
+          const driverProfile = driverProfiles.find((resource) => resource.authorityMembershipId === member.id);
+          const status = memberStatus(member.status);
+          return <article className="rounded-2xl border border-white/[.08] bg-black/20 p-4 transition hover:border-lime-300/20" key={member.id}><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 items-start gap-3"><span className={`grid size-10 shrink-0 place-items-center rounded-xl border ${isDriver ? toneClasses.cyan : toneClasses.lime}`}>{isDriver ? <Truck className="size-[18px]" /> : <UserRound className="size-[18px]" />}</span><div className="min-w-0"><h3 className="truncate text-sm font-semibold text-slate-100">{member.name || "Persona senza nome"}</h3>{member.email && <p className="mt-1 truncate text-xs text-slate-500">{member.email}</p>}<div className="mt-2 flex flex-wrap gap-1.5">{(member.rolesLabel?.length ? member.rolesLabel : roles.map(roleLabel)).map((label, index) => <RoleChip key={`${member.id}-${roles[index] ?? label}`} role={roles[index] ?? label} />)}</div></div></div><span className={`inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${toneClasses[status.tone]}`}><span className="size-1.5 rounded-full bg-current" />{status.label}</span></div>
+            {isDriver && <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/[.06] pt-3 text-[11px] text-slate-500"><span className="flex items-center gap-1.5"><Truck className="size-3.5 text-cyan-200" />{driverProfile ? "Profilo missioni collegato" : "Profilo missioni da verificare in Authority"}</span>{driverProfile?.qualifications?.length ? <span>Abilitazioni: {driverProfile.qualifications.join(", ")}</span> : null}</div>}
+            <p className="mt-2 text-[10px] text-slate-600">Profilo aggiornato {formatDate(member.updatedAt)}</p>
+          </article>;
+        })}{(filter === "ALL" || filter === "TEAMS") && filteredTeams.map((team) => <article className="rounded-2xl border border-amber-300/15 bg-amber-300/[.025] p-4" key={team.id}><div className="flex items-start gap-3"><span className={`grid size-10 shrink-0 place-items-center rounded-xl border ${toneClasses.amber}`}><Users className="size-[18px]" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-slate-100">{team.label}</h3><span className="rounded-full border border-amber-300/20 px-2.5 py-1 text-[10px] text-amber-100">Squadra · {team.memberNames?.length ?? team.memberMembershipIds?.length ?? 0} persone</span></div><p className="mt-1 text-xs text-slate-500">{team.memberNames?.length ? team.memberNames.join(" · ") : "Nessun componente visibile nel tuo perimetro."}</p></div></div></article>)}
+          {filteredMembers.length === 0 && filteredTeams.length === 0 && <div className="rounded-2xl border border-dashed border-white/10 px-4 py-12 text-center"><Users className="mx-auto size-7 text-slate-700" /><p className="mt-3 text-sm font-medium text-slate-300">Nessun risultato</p><p className="mt-1 text-xs text-slate-600">Prova un altro filtro o termine di ricerca.</p></div>}</div>
       </div>
-    </section>
-  </div><CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />{notice && <button className="fixed bottom-5 right-5 z-50 max-w-[390px] rounded-xl border border-amber-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CircleAlert className="mr-2 inline size-4 text-amber-200" />{notice}</button>}</main>;
+
+      <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start gap-3"><span className={`grid size-10 shrink-0 place-items-center rounded-xl border ${toneClasses.cyan}`}><BriefcaseBusiness className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">RESPONSABILITÀ DEI MODULI</p><h2 className="mt-1 text-base font-semibold text-slate-100">Un dato, un modulo titolare</h2></div></div><div className="mt-4 space-y-2"><div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-xs font-semibold text-slate-200">Authority</p><p className="mt-1 text-[11px] leading-5 text-slate-500">Identità, mansioni e accessi.</p></div><button className="w-full rounded-xl border border-white/[.07] bg-black/20 p-3 text-left transition hover:border-lime-300/20" disabled={!canReadPlanning} onClick={() => navigate("/planning")} type="button"><span className="flex items-center justify-between text-xs font-semibold text-slate-200">Pianificazione<ArrowUpRight className="size-3.5 text-slate-500" /></span><span className="mt-1 block text-[11px] leading-5 text-slate-500">Assegnazioni e disponibilità verificate per data e attività.</span></button><button className="w-full rounded-xl border border-white/[.07] bg-black/20 p-3 text-left transition hover:border-lime-300/20" disabled={!canReadAttendance} onClick={() => navigate("/presenze")} type="button"><span className="flex items-center justify-between text-xs font-semibold text-slate-200">Presenze<ArrowUpRight className="size-3.5 text-slate-500" /></span><span className="mt-1 block text-[11px] leading-5 text-slate-500">Timbrature e servizio registrati.</span></button><button className="w-full rounded-xl border border-white/[.07] bg-black/20 p-3 text-left transition hover:border-lime-300/20" disabled={!canReadMission} onClick={() => navigate("/mission")} type="button"><span className="flex items-center justify-between text-xs font-semibold text-slate-200">Missioni<ArrowUpRight className="size-3.5 text-slate-500" /></span><span className="mt-1 block text-[11px] leading-5 text-slate-500">Autisti di consegna, viaggi ed eventi di carico/scarico.</span></button></div></section>
+
+        {canSeeRegistry && <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-center gap-3"><span className={`grid size-10 place-items-center rounded-xl border ${toneClasses.lime}`}><CheckCircle2 className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-lime-200/75">LETTURA OPERATIVA</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Dati con perimetro chiaro</h2></div></div><ul className="mt-4 space-y-3 text-[11px] leading-5 text-slate-500"><li className="flex gap-2"><UserRound className="mt-0.5 size-3.5 shrink-0 text-lime-200" /><span>Una riga per membership, con tutte le mansioni attive.</span></li><li className="flex gap-2"><Warehouse className="mt-0.5 size-3.5 shrink-0 text-cyan-200" /><span>Le assegnazioni ai magazzini restano nei moduli Magazzino e Presenze.</span></li><li className="flex gap-2"><CalendarClock className="mt-0.5 size-3.5 shrink-0 text-amber-200" /><span>La disponibilità effettiva viene ricalcolata da Pianificazione sulla finestra scelta.</span></li></ul></section>}
+
+        {canManageAuthority && <Button className="h-10 w-full border-white/10 bg-black/20 text-slate-300 hover:border-lime-300/25 hover:bg-lime-300/[.05] hover:text-lime-100" onClick={() => navigate("/onboarding")} variant="outline"><ShieldCheck className="size-4" />Apri gestione Authority<ArrowUpRight className="size-3.5" /></Button>}
+      </aside></section>
+
+      <footer className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.07] py-5 text-[10px] text-slate-600"><span>AI-ZEROW · PERSONE</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300" />{canSeeRegistry ? "Visibilità aziendale autorizzata" : "Visibilità limitata al profilo e al team"}</span></footer>
+    </div>
+  </section>
+  <CommandMobileNav active="more" allowedNavigation={allowedNavigation} role={context?.role} roles={context?.roles} />
+  {notice && <div className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-amber-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl"><CircleAlert className="size-4 shrink-0 text-amber-200" />{notice}<button aria-label="Chiudi avviso" className="ml-2 text-slate-400 hover:text-slate-100" onClick={() => setNotice("")} type="button">×</button></div>}
+  </main>;
 }

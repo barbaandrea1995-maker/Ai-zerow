@@ -55,12 +55,16 @@ export async function GET(request: Request, routeContext: RouteContext) {
     }
     const window: PlanningAvailabilityWindow | undefined = hasWindow ? { startsAt, endsAt } : undefined;
     const planningOptions = await getPlanningResourceOptions(context.tenantId, window, excludedPlanId);
-    const workforce = hasCapability(context, "workforce.read")
+    const canReadWorkforceRegistry = hasCapability(context, "workforce.registry.read")
+      || hasCapability(context, "workforce.read.all")
+      || hasCapability(context, "workforce.manage");
+    const workforce = canReadWorkforceRegistry
       ? planningOptions.filter((item) => item.kind === "person" || item.kind === "team")
       : [];
     const assets = hasCapability(context, "asset.read")
       ? planningOptions.filter((item) => item.kind === "asset" || item.kind === "vehicle")
       : [];
+    const visibleOptions = [...workforce, ...assets];
     const plans = hasCapability(context, "planning.read")
       ? await getDb().select().from(jobJourneyRecords).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.jobId, job.id), eq(jobJourneyRecords.domain, "planning"))).orderBy(desc(jobJourneyRecords.updatedAt)).limit(50)
       : [];
@@ -71,7 +75,7 @@ export async function GET(request: Request, routeContext: RouteContext) {
         workforce,
         assets: assets.filter((item) => item.assignable),
         unavailableAssets: assets.filter((item) => !item.assignable && !item.assignmentCustody),
-        unavailableForWindow: planningOptions.filter((item) => item.assignable && !item.availableForWindow),
+        unavailableForWindow: visibleOptions.filter((item) => item.assignable && !item.availableForWindow),
       },
       existingPlans: plans.map((plan) => ({ id: plan.id, status: plan.status, version: plan.version, title: plan.title, updatedAt: plan.updatedAt })),
       contract: {

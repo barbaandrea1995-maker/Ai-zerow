@@ -95,6 +95,7 @@ export function contextScopeTokens(context: AuthorityContext, extraTokens: reado
     context.actorName,
     context.membershipId,
     `AUTH-DRIVER-${context.actorId}`,
+    `AUTH-PERSON-${context.actorId}`,
     ...extraTokens,
   ]);
   return values;

@@ -1,6 +1,7 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -10,7 +11,12 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import {
   canTransitionJob,
   clampJobProgress,
+  activeRapportinoDate,
   buildRapportinoReadback,
+  composeRapportinoNarrative,
+  italyDateKey,
+  normalizeRapportinoAnswers,
+  persistedRapportinoDate,
   jobCompletionRequirements,
   jobStatusLabel,
   normalizeJobStatus,
@@ -22,7 +28,16 @@ import {
   type RapportinoReadback,
 } from "@/lib/operations-contract";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { defaultGeofenceRadius } from "@/lib/location-intelligence/repository";
+import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { generateCompanyAiRapportinoQuestion } from "@/lib/company-ai-openai";
+import {
+  companyAiRateLimit,
+  companyAiRateLimitResponse,
+  consumeCompanyAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -194,14 +209,121 @@ type ReportSourceRecord = {
   meta?: string;
 };
 
+function reportAttendanceRecords(
+  rows: (typeof jobJourneyRecords.$inferSelect)[],
+  reportDate: string,
+): ReportSourceRecord[] {
+  return rows
+    .filter((row) => row.domain === "field" && row.recordType.toUpperCase() === "ATTENDANCE")
+    .flatMap((row) => {
+      const payload = parsePayload(row.payloadJson);
+      const transitions = Array.isArray(payload.transitions) ? payload.transitions.filter(isRecord) : [];
+      let shiftDate = "";
+      const reportTransitions = transitions.flatMap((transition) => {
+        const action = safeText(transition.action).toLowerCase();
+        const occurredAt = ["correction_request", "correction_approve"].includes(action)
+          ? safeText(transition.correctionAt) || safeText(transition.recordedAt)
+          : safeText(transition.recordedAt);
+        const eventDate = occurredAt && Number.isFinite(Date.parse(occurredAt))
+          ? italyDateKey(new Date(occurredAt))
+          : "";
+        if (action === "check_in" && eventDate) shiftDate = eventDate;
+        const ownerDate = shiftDate || eventDate;
+        return ownerDate === reportDate ? [{ transition, action, occurredAt }] : [];
+      }).slice(-12);
+      if (!reportTransitions.length && (transitions.length > 0 || italyDateKey(new Date(row.updatedAt)) !== reportDate)) return [];
+      const statusByAction: Record<string, string> = {
+        check_in: "CHECKED_IN",
+        pause: "PAUSED",
+        resume: "CHECKED_IN",
+        check_out: "CHECKED_OUT",
+        correction_request: "CORRECTION_REQUESTED",
+        correction_approve: "APPROVED",
+      };
+      const lastAction = reportTransitions.at(-1)?.action;
+      const timeline = reportTransitions.map(({ transition, action, occurredAt }) => {
+        const label = action.replaceAll("_", " ").toLocaleUpperCase("it-IT");
+        const time = occurredAt && Number.isFinite(Date.parse(occurredAt))
+          ? new Date(occurredAt).toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" })
+          : "orario non disponibile";
+        const location = isRecord(transition.location) && isRecord(transition.location.geofence)
+          ? safeText(transition.location.geofence.name)
+          : "";
+        return `${label || "EVENTO"} ${time}${location ? ` · ${location}` : ""}`;
+      });
+      const workerId = boundedText(payload.workerId, 80, row.createdBy);
+      return [{
+        title: `Presenza · ${workerId}`,
+        detail: timeline.join("; ") || `Stato storico · ${row.status}`,
+        status: lastAction ? statusByAction[lastAction] ?? row.status : row.status,
+        meta: reportDate,
+      }];
+    });
+}
+
+function reportRecordOnDate(
+  record: { payload: JsonObject; createdAt?: string; updatedAt?: string; status?: string; recordType?: string },
+  reportDate: string,
+) {
+  const payload = record.payload;
+  const dayOf = (value: unknown) => {
+    if (typeof value !== "string" || !value.trim()) return "";
+    const raw = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    return Number.isFinite(Date.parse(raw)) ? italyDateKey(new Date(raw)) : "";
+  };
+  const rangeContainsDate = (startValue: unknown, endValue: unknown, openEnded = false) => {
+    const startDate = dayOf(startValue);
+    const endDate = dayOf(endValue);
+    if (!startDate) return "";
+    if (endDate) return startDate <= reportDate && reportDate <= endDate ? reportDate : "NO_MATCH";
+    if (openEnded && ["ACTIVE", "ASSIGNED", "IN_USE", "ALLOCATED", "SCHEDULED"].includes((record.status ?? "").toUpperCase())) {
+      return reportDate >= startDate ? reportDate : "NO_MATCH";
+    }
+    return startDate === reportDate ? reportDate : "NO_MATCH";
+  };
+
+  const slots = Array.isArray(payload.slots) ? payload.slots.filter(isRecord) : [];
+  if (slots.length) {
+    return slots.some((slot) => rangeContainsDate(slot.startsAt, slot.endsAt) === reportDate);
+  }
+  const scheduledStart = payload.startsAt ?? payload.startAt;
+  if (dayOf(scheduledStart)) {
+    const scheduledEnd = payload.endsAt ?? payload.endAt ?? payload.returnedAt ?? payload.cancelledAt;
+    const longTermAssetAssignment = (record.recordType ?? "").toUpperCase() === "ASSET_ASSIGNMENT"
+      && !dayOf(scheduledEnd);
+    return rangeContainsDate(scheduledStart, scheduledEnd, longTermAssetAssignment) === reportDate;
+  }
+  const assignedStart = payload.assignedAt ?? payload.validFrom ?? payload.effectiveFrom;
+  if (dayOf(assignedStart)) {
+    return rangeContainsDate(assignedStart, payload.endsAt ?? payload.endAt ?? payload.validUntil ?? payload.returnedAt ?? payload.cancelledAt, true) === reportDate;
+  }
+  const eventTime = payload.occurredAt
+    ?? payload.recordedAt
+    ?? payload.startedAt
+    ?? payload.movedAt
+    ?? payload.deliveredAt
+    ?? payload.completedAt
+    ?? payload.createdAt
+    ?? record.createdAt;
+  if (dayOf(eventTime)) return dayOf(eventTime) === reportDate;
+  return dayOf(record.updatedAt) === reportDate;
+}
+
 function reportContextFromVisibleRecords(input: {
+  reportDate: string;
+  dayAlreadyApproved?: boolean;
   attendance: ReportSourceRecord[];
+  assignment: ReportSourceRecord[];
   resources: ReportSourceRecord[];
   materials: ReportSourceRecord[];
   field: ReportSourceRecord[];
 }): RapportinoContext {
   return {
+    reportDate: input.reportDate,
+    dayAlreadyApproved: input.dayAlreadyApproved,
     attendance: input.attendance,
+    assignment: input.assignment,
     resources: input.resources,
     materials: input.materials,
     field: input.field,
@@ -211,29 +333,35 @@ function reportContextFromVisibleRecords(input: {
 function reportContextFromJourneyAndRelated(
   journeyRows: (typeof jobJourneyRecords.$inferSelect)[],
   related: ReturnType<typeof relatedRecords>,
+  reportDate: string,
 ): RapportinoContext {
   const journeyRecords = journeyRows.map(journeyWorkspaceRecord);
+  const dailyJourneyRecords = journeyRecords.filter((record) => reportRecordOnDate(record, reportDate));
+  const dailyRelated = related.filter((record) => reportRecordOnDate(record, reportDate));
   return reportContextFromVisibleRecords({
-    attendance: journeyRows
-      .filter((row) => row.domain === "field" && row.recordType.toUpperCase() === "ATTENDANCE")
-      .map(journeyWorkspaceRecord),
+    reportDate,
+    attendance: reportAttendanceRecords(journeyRows, reportDate),
+    assignment: [
+      ...dailyJourneyRecords.filter((record) => record.recordType === "plan" && !isWarehouseStaffRecord(record)),
+      ...dailyRelated.filter((record) => ["workforce", "mission", "planning"].includes(record.module) && !isWarehouseStaffRecord(record)),
+    ],
     resources: [
-      ...journeyRecords.filter((record) => ["plan", "asset_assignment"].includes(record.recordType)),
-      ...related.filter((record) => ["assets", "workforce", "mission", "planning"].includes(record.module)),
+      ...dailyJourneyRecords.filter((record) => ["plan", "asset_assignment"].includes(record.recordType) && !isWarehouseStaffRecord(record)),
+      ...dailyRelated.filter((record) => ["assets", "workforce", "mission", "planning"].includes(record.module) && !isWarehouseStaffRecord(record)),
     ],
     materials: [
-      ...journeyRecords.filter((record) => ["material_request", "material_movement"].includes(record.recordType)),
-      ...related.filter((record) => record.module === "warehouse"),
+      ...dailyJourneyRecords.filter((record) => ["material_request", "material_movement"].includes(record.recordType)),
+      ...dailyRelated.filter((record) => record.module === "warehouse"),
     ],
     field: [
       ...journeyRows
-        .filter((row) => row.domain === "field" && row.recordType.toUpperCase() !== "ATTENDANCE")
+        .filter((row) => row.domain === "field" && row.recordType.toUpperCase() !== "ATTENDANCE" && reportRecordOnDate(journeyWorkspaceRecord(row), reportDate))
         .map(journeyWorkspaceRecord),
     ],
   });
 }
 
-function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback) {
+function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback, detailsVisible = true) {
   const statusLabel = readback.status === "APPROVED"
     ? "APPROVATO DALL’UFFICIO"
     : readback.status === "CHANGES_REQUESTED"
@@ -246,14 +374,18 @@ function rapportinoSectionRecord(jobKey: string, readback: RapportinoReadback) {
     module: "operations" as const,
     recordType: "rapportino",
     title: "Rapportino giornaliero",
-    detail: readback.completeness.ready
-      ? "Controllo Company AI superato"
-      : `${readback.completeness.missing.length} dati da completare`,
+    detail: !detailsVisible
+      ? "Stato del rapportino"
+      : readback.completeness.ready
+        ? "Controllo Company AI superato"
+        : `${readback.completeness.missing.length} dati da completare`,
     meta: statusLabel,
     status: readback.status,
     tone: readback.status === "CHANGES_REQUESTED" || !readback.completeness.ready ? "amber" as const : "lime" as const,
-    progress: readback.completeness.ready ? 100 : 0,
-    payload: { status: readback.status, missing: readback.completeness.missing },
+    progress: detailsVisible && readback.completeness.ready ? 100 : 0,
+    payload: detailsVisible
+      ? { status: readback.status, missing: readback.completeness.missing }
+      : { status: readback.status },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -269,10 +401,18 @@ async function workspaceResponse(
   const payload = parseJobPayload(jobRow.payloadJson);
   const progress = clampJobProgress(payload.progress ?? jobRow.progress);
   const jobKey = jobRow.canonicalCode ?? jobRow.id;
+  const canReadRapportinoDetails = hasCapability(context, "operations.write")
+    || hasCapability(context, "operations.rapportino.write")
+    || hasCapability(context, "operations.rapportino.review")
+    || (hasCapability(context, "field.write") && hasCapability(context, "workforce.registry.read"));
   const activities = activityRecords(jobKey, payload.activities);
   const evidence = evidenceRecords(jobKey, payload.evidence);
   const assignment = payload.assignment ? assignmentRecord(jobKey, payload.assignment) : null;
   const visibleAssignment = assignment && !isWarehouseStaffRecord(assignment) ? assignment : null;
+  const reportPayload: JobPayload = visibleAssignment ? payload : { ...payload, assignment: null };
+  const clientPayload = canReadRapportinoDetails || !isRecord(payload.rapportino)
+    ? reportPayload
+    : { ...reportPayload, rapportino: { status: safeText(payload.rapportino.status).toUpperCase() } };
   const job = {
     ...baseJob,
     title: payload.title || baseJob.title,
@@ -280,7 +420,7 @@ async function workspaceResponse(
     meta: payload.dueDate || baseJob.meta,
     status: jobStatusLabel(payload.statusCode),
     progress,
-    payload: { ...payload, progress },
+    payload: { ...clientPayload, progress },
   };
   const jobVariants = new Set(keyVariants(requestedJobId));
   const related = relatedRecords(rows, jobVariants);
@@ -288,36 +428,112 @@ async function workspaceResponse(
     eq(jobJourneyRecords.tenantId, context.tenantId),
     eq(jobJourneyRecords.jobId, jobRow.id),
   )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+  const canReadRapportinoHistory = canReadRapportinoDetails;
+  const reportEvents = canReadRapportinoHistory ? await getDb().select().from(s06Events).where(and(
+    eq(s06Events.tenantId, context.tenantId),
+    eq(s06Events.aggregateType, "commessa"),
+    eq(s06Events.aggregateId, jobKey),
+    inArray(s06Events.eventType, [
+      "operations.job.rapportino_saved",
+      "operations.job.rapportino_submitted",
+      "operations.job.rapportino_approved",
+      "operations.job.rapportino_changes_requested",
+    ]),
+  )).orderBy(desc(s06Events.occurredAt)).limit(500) : [];
+  const seenReportIds = new Set<string>();
+  const rapportinoHistory = reportEvents.flatMap((event) => {
+    const eventPayload = parsePayload(event.payloadJson);
+    const change = isRecord(eventPayload.change) ? eventPayload.change : {};
+    const snapshot = isRecord(change.reportSnapshot) ? change.reportSnapshot : null;
+    const reportId = boundedText(snapshot?.reportId, 80);
+    if (!snapshot || !reportId || seenReportIds.has(reportId)) return [];
+    seenReportIds.add(reportId);
+    return [{
+      reportId,
+      status: boundedText(snapshot.status, 32).toUpperCase(),
+      reportDate: boundedText(snapshot.reportDate, 10),
+      answers: normalizeRapportinoAnswers(snapshot.answers) ?? undefined,
+      text: boundedText(snapshot.text, 5_000),
+      narrative: boundedText(snapshot.narrative, 4_000),
+      note: boundedText(snapshot.reviewNote, 1_000),
+      at: boundedText(snapshot.updatedAt, 40, event.occurredAt),
+      submittedBy: boundedText(snapshot.submittedBy, 160),
+      reviewedBy: boundedText(snapshot.reviewedBy, 160),
+    }];
+  });
   const journeyRecords = journeyRows.map(journeyWorkspaceRecord);
-  const planningJourney = journeyRecords.filter((record) => record.recordType === "plan");
-  const attendanceJourney = journeyRecords.filter((record) => record.recordType === "attendance");
+  const planningJourney = journeyRecords.filter((record) => record.recordType === "plan" && !isWarehouseStaffRecord(record));
+  const allAttendanceJourneyRows = journeyRows.filter((row) => row.domain === "field" && row.recordType.toUpperCase() === "ATTENDANCE");
+  const canReadAttendanceRoster = hasCapability(context, "attendance.read")
+    || hasCapability(context, "attendance.approve")
+    || hasCapability(context, "workforce.read.all")
+    || canReadRapportinoDetails;
+  const visibleAttendanceIds = new Set(allAttendanceJourneyRows
+    .filter((row) => canReadAttendanceRoster || boundedText(parsePayload(row.payloadJson).workerId, 120, row.createdBy) === context.actorId)
+    .map((row) => row.id));
+  const attendanceJourney = journeyRecords.filter((record) => record.recordType === "attendance" && visibleAttendanceIds.has(record.id));
   const byModule = (module: string) => related.filter((record) => record.module === module);
   const canReadPlanning = hasCapability(context, "planning.read") || hasCapability(context, "workforce.read");
   const canReadWorkforce = hasCapability(context, "workforce.read");
   const canReadMission = hasCapability(context, "mission.read");
   const canReadAssets = hasCapability(context, "asset.read");
   const canReadWarehouse = hasCapability(context, "warehouse.read") || hasCapability(context, "warehouse.request");
-  const canReadField = hasCapability(context, "field.read") || hasCapability(context, "attendance.read") || hasCapability(context, "attendance.self");
+  const canReadField = hasCapability(context, "field.read")
+    || hasCapability(context, "attendance.read")
+    || hasCapability(context, "attendance.self")
+    || canReadRapportinoDetails;
   const planningRecords = canReadPlanning
     ? [
       ...(visibleAssignment ? [visibleAssignment] : []),
       ...planningJourney,
       ...(canReadWorkforce ? byModule("workforce").filter((record) => !isWarehouseStaffRecord(record)) : []),
-      ...(canReadMission ? byModule("mission") : []),
+      ...(canReadMission ? byModule("mission").filter((record) => !isWarehouseStaffRecord(record)) : []),
     ]
     : [];
   const resourceRecords = canReadAssets ? byModule("assets") : [];
   const materialRecords = canReadWarehouse ? byModule("warehouse") : [];
   const fieldRecords = canReadField ? [...evidence, ...attendanceJourney] : [];
-  const rapportino = buildRapportinoReadback(payload, reportContextFromVisibleRecords({
-    attendance: canReadField ? attendanceJourney : [],
-    resources: [
-      ...(canReadPlanning ? planningRecords : []),
-      ...(canReadAssets ? resourceRecords : []),
+  const reportDate = activeRapportinoDate(reportPayload.rapportino);
+  const reportIsApproved = isRecord(reportPayload.rapportino)
+    && safeText(reportPayload.rapportino.status).toUpperCase() === "APPROVED";
+  const priorReportDate = persistedRapportinoDate(reportPayload.rapportino);
+  const dayAlreadyApproved = reportIsApproved
+    && priorReportDate === italyDateKey();
+  const startsNewReportDay = Boolean(priorReportDate) && priorReportDate < reportDate;
+  const reportPayloadForReadback: JobPayload = {
+    ...reportPayload,
+    ...(startsNewReportDay ? { rapportino: null } : {}),
+    evidence: reportPayload.evidence.filter((item) => Number.isFinite(Date.parse(item.createdAt))
+      && italyDateKey(new Date(item.createdAt)) === reportDate),
+  };
+  const reportReadback = buildRapportinoReadback(reportPayloadForReadback, reportContextFromVisibleRecords({
+    reportDate,
+    dayAlreadyApproved,
+    attendance: canReadField
+      ? reportAttendanceRecords(allAttendanceJourneyRows.filter((row) => visibleAttendanceIds.has(row.id)), reportDate)
+      : [],
+    assignment: [
+      ...(canReadPlanning ? planningJourney.filter((record) => reportRecordOnDate(record, reportDate)) : []),
+      ...(canReadWorkforce ? byModule("workforce").filter((record) => !isWarehouseStaffRecord(record) && reportRecordOnDate(record, reportDate)) : []),
+      ...(canReadMission ? byModule("mission").filter((record) => !isWarehouseStaffRecord(record) && reportRecordOnDate(record, reportDate)) : []),
     ],
-    materials: canReadWarehouse ? materialRecords : [],
-    field: canReadField ? fieldRecords.filter((record) => record.recordType !== "attendance" && record.recordType !== "evidence") : [],
+    resources: [
+      ...(canReadPlanning ? planningRecords.filter((record) => reportRecordOnDate(record, reportDate)) : []),
+      ...(canReadAssets ? resourceRecords.filter((record) => reportRecordOnDate(record, reportDate)) : []),
+    ],
+    materials: canReadWarehouse ? materialRecords.filter((record) => reportRecordOnDate(record, reportDate)) : [],
+    field: canReadField ? fieldRecords.filter((record) => record.recordType !== "attendance" && record.recordType !== "evidence" && reportRecordOnDate(record, reportDate)) : [],
   }));
+  const rapportino: RapportinoReadback = reportReadback;
+  const rapportinoForViewer: RapportinoReadback = canReadRapportinoDetails ? rapportino : {
+    ...rapportino,
+    answers: [],
+    draft: "",
+    narrative: "",
+    fields: [],
+    completeness: { ready: false, missing: [], questions: [] },
+    review: { ...rapportino.review, note: "", reviewedAt: "", reviewedBy: "" },
+  };
   const completionRequirements = jobCompletionRequirements(payload);
 
   return {
@@ -330,7 +546,8 @@ async function workspaceResponse(
         ready: completionRequirements.every((requirement) => requirement.complete),
         requirements: completionRequirements,
       },
-      rapportino,
+      rapportino: rapportinoForViewer,
+      rapportinoHistory,
       requestedJobId,
       sections: {
         activities: section(activities.length ? "readback" : "empty", activities),
@@ -340,7 +557,7 @@ async function workspaceResponse(
         field: section(fieldRecords.length ? "readback" : "deferred", fieldRecords),
         rapportino: section(
           rapportino.status === "EMPTY" ? "empty" : "readback",
-          rapportino.status === "EMPTY" ? [] : [rapportinoSectionRecord(jobKey, rapportino)],
+          rapportino.status === "EMPTY" ? [] : [rapportinoSectionRecord(jobKey, rapportino, canReadRapportinoDetails)],
         ),
         control: section("readback", []),
         evidence: section(evidence.length ? "readback" : "empty", evidence),
@@ -422,12 +639,132 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   }
 }
 
+const RAPPORTINO_INTERVIEW_STAGES = [
+  {
+    title: "Attività svolte ed esito",
+    goal: "Raccogliere lavorazioni svolte e risultato osservato dal responsabile.",
+    fallback: "Quali lavori avete completato oggi e qual è stato il risultato?",
+  },
+  {
+    title: "Criticità e sicurezza",
+    goal: "Raccogliere problemi, ritardi, rischi, incidenti o mancanze di materiali; se assenti, consentire una conferma esplicita.",
+    fallback: "Ci sono stati problemi, ritardi, rischi o materiali mancanti? Se no, scrivi “Nessuna”.",
+  },
+  {
+    title: "Prossimi passi e richieste",
+    goal: "Raccogliere attività residue e informazioni o decisioni utili al prossimo turno e all’ufficio.",
+    fallback: "Cosa resta da fare o deve sapere l’ufficio per il prossimo turno? Se nulla, scrivi “Nessuno”.",
+  },
+] as const;
+
+export async function POST(request: Request, routeContext: RouteContext) {
+  const context = await getAuthorityContext();
+  if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  const canWriteRapportino = hasCapability(context, "operations.write")
+    || hasCapability(context, "operations.rapportino.write")
+    || (hasCapability(context, "field.write") && hasCapability(context, "workforce.registry.read"));
+  if (!canWriteRapportino) {
+    return Response.json({ error: "forbidden", capability: "operations.rapportino.write" }, { status: 403 });
+  }
+
+  let requestedJobId = "";
+  try {
+    requestedJobId = decodeURIComponent((await routeContext.params).jobId).trim();
+  } catch {
+    return Response.json({ error: "invalid_job_id" }, { status: 400 });
+  }
+  if (!requestedJobId || requestedJobId.length > 160) {
+    return Response.json({ error: "invalid_job_id" }, { status: 400 });
+  }
+
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > 8_192) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
+  }
+  let input: JsonObject;
+  try {
+    const value = await request.json() as unknown;
+    if (!isRecord(value) || JSON.stringify(value).length > 8_192) {
+      return Response.json({ error: "invalid_or_oversized_payload" }, { status: 400 });
+    }
+    input = value;
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  if (input.action !== "rapportino_interview_question") {
+    return Response.json({ error: "unsupported_rapportino_interview_action" }, { status: 400 });
+  }
+  const step = typeof input.step === "number" ? Math.floor(input.step) : -1;
+  if (step < 0 || step >= RAPPORTINO_INTERVIEW_STAGES.length) {
+    return Response.json({ error: "rapportino_interview_step_invalid" }, { status: 400 });
+  }
+  const answers = normalizeRapportinoAnswers(input.answers);
+  if (!answers || answers.slice(0, step).some((answer) => answer.length < 2)) {
+    return Response.json({ error: "rapportino_interview_answers_incomplete" }, { status: 422 });
+  }
+
+  try {
+    const { rows, jobRow } = await findJob(context, requestedJobId);
+    if (!jobRow || !canReadJob(context, jobRow, rows)) {
+      return Response.json({ error: "job_not_found" }, { status: 404 });
+    }
+    const workspace = await workspaceResponse(context, jobRow, rows, requestedJobId);
+    const report = workspace.workspace.rapportino;
+    if (report.status === "SUBMITTED" || report.dayAlreadyApproved) {
+      return Response.json({ error: "rapportino_locked" }, { status: 409 });
+    }
+
+    const rateLimit = await consumeCompanyAiRateLimit({
+      tenantId: context.tenantId,
+      actorId: context.actorId,
+      action: "rapportino",
+      limit: companyAiRateLimit("rapportino"),
+    });
+    if (!rateLimit.allowed) return companyAiRateLimitResponse(rateLimit);
+
+    const stage = RAPPORTINO_INTERVIEW_STAGES[step];
+    const allowedFactKeys = new Set(["activities", "attendance", "resources", "materials", "evidence"]);
+    const knownFacts = report.fields
+      .filter((field) => allowedFactKeys.has(field.key))
+      .map((field) => ({ label: field.label, value: field.value, source: field.source }));
+    const jobPayload = parseJobPayload(jobRow.payloadJson);
+    knownFacts.push(...jobPayload.activities.slice(0, 5).map((activity) => ({
+      label: `Attività pianificata · ${activity.title}`,
+      value: `${activity.state.toLocaleUpperCase("it-IT")}${activity.detail ? ` · ${activity.detail}` : ""}`.slice(0, 360),
+      source: "Piano della commessa",
+    })));
+
+    const outcome = await generateCompanyAiRapportinoQuestion({
+      stage: stage.title,
+      goal: stage.goal,
+      fallbackQuestion: stage.fallback,
+      knownFacts,
+      previousAnswers: answers.slice(0, step),
+    });
+    return Response.json({
+      question: outcome.result?.question ?? stage.fallback,
+      ai: {
+        provider: "openai",
+        status: outcome.status,
+        model: outcome.model,
+        requestId: outcome.result?.requestId ?? null,
+        directWrite: false,
+      },
+      reportDate: report.reportDate,
+      readback: { status: "verified", scope: "tenant" },
+    }, { headers: { "cache-control": "private, no-store" } });
+  } catch {
+    return Response.json({ error: "rapportino_interview_unavailable" }, { status: 503 });
+  }
+}
+
 export async function PATCH(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   const canWriteOperations = hasCapability(context, "operations.write");
   const canWriteField = hasCapability(context, "field.write");
-  const canReviewRapportino = canWriteOperations || hasCapability(context, "approvals.review") || hasCapability(context, "attendance.approve");
+  const canReviewRapportino = hasCapability(context, "operations.rapportino.review");
   if (!canWriteOperations && !canWriteField && !canReviewRapportino) {
     return Response.json({ error: "forbidden", capability: "operations.write" }, { status: 403 });
   }
@@ -450,11 +787,15 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
 
   const action = boundedText(input.action, 48, "update_job").toLowerCase();
   const reportActions = new Set(["save_rapportino", "submit_rapportino"]);
-  if (!canWriteOperations && action === "review_rapportino" && !canReviewRapportino) {
-    return Response.json({ error: "forbidden", capability: "approvals.review", action }, { status: 403 });
+  const canWriteRapportinoAction = reportActions.has(action) || action === "resubmit_rapportino";
+  const canWriteRapportino = canWriteOperations
+    || hasCapability(context, "operations.rapportino.write")
+    || (canWriteField && hasCapability(context, "workforce.registry.read"));
+  if (action === "review_rapportino" && !canReviewRapportino) {
+    return Response.json({ error: "forbidden", capability: "operations.rapportino.review", action }, { status: 403 });
   }
-  if (!canWriteOperations && action !== "review_rapportino" && (!canWriteField || !reportActions.has(action))) {
-    return Response.json({ error: "forbidden", capability: "field.write", action }, { status: 403 });
+  if (!canWriteOperations && action !== "review_rapportino" && (!canWriteRapportino || !canWriteRapportinoAction)) {
+    return Response.json({ error: "forbidden", requiredCapabilities: ["field.write", "workforce.read"], action }, { status: 403 });
   }
   const idempotencyKey = boundedText(input.idempotencyKey, 160);
   if (typeof input.idempotencyKey === "string" && input.idempotencyKey.trim().length > 160) {
@@ -489,6 +830,33 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
     if (expectedVersion !== null && expectedVersion !== current.version) {
       return Response.json({ error: "version_conflict", expectedVersion, currentVersion: current.version }, { status: 409 });
     }
+    const reportStatus = isRecord(current.rapportino) ? safeText(current.rapportino.status).toUpperCase() : "";
+    if (reportActions.has(action)
+      && reportStatus === "APPROVED"
+      && persistedRapportinoDate(current.rapportino) === italyDateKey()) {
+      return Response.json({
+        error: "rapportino_day_already_approved",
+        message: "Il rapportino di questa giornata è già stato approvato dall’ufficio.",
+      }, { status: 409 });
+    }
+    if (reportActions.has(action)
+      && reportStatus === "SUBMITTED"
+      && persistedRapportinoDate(current.rapportino) === italyDateKey()) {
+      return Response.json({
+        error: "rapportino_locked",
+        status: reportStatus,
+        message: "Il rapportino è già stato inviato e attende la revisione dell’ufficio.",
+      }, { status: 409 });
+    }
+    if (reportActions.has(action)
+      && ["DRAFT", "CHANGES_REQUESTED"].includes(reportStatus)
+      && isRecord(current.rapportino)
+      && persistedRapportinoDate(current.rapportino) === italyDateKey()) {
+      const reportOwner = safeText(current.rapportino.submittedBy, safeText(current.rapportino.updatedBy));
+      if (reportOwner && reportOwner !== context.actorId) {
+        return Response.json({ error: "rapportino_owned_by_another_responsible", message: "La bozza appartiene al responsabile che l’ha avviata." }, { status: 403 });
+      }
+    }
 
     let rapportinoContext: RapportinoContext | undefined;
     if (action === "submit_rapportino") {
@@ -502,13 +870,25 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.jobId, jobRow.id),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
-      rapportinoContext = reportContextFromJourneyAndRelated(journeyRows, related);
+      rapportinoContext = reportContextFromJourneyAndRelated(
+        journeyRows,
+        related,
+        activeRapportinoDate(current.rapportino),
+      );
     }
 
     const next: JobPayload = { ...current, version: current.version + 1 };
     const now = new Date().toISOString();
     let eventType = "operations.job.updated";
     let change: JsonObject = {};
+    let worksiteMutation: {
+      candidate: GeocodeCandidate;
+      geoLocationId: string;
+      geofenceId: string;
+      geoLocation: typeof geoLocations.$inferSelect;
+      geofence: typeof geofences.$inferSelect;
+      staleGeofences: (typeof geofences.$inferSelect)[];
+    } | null = null;
 
     if (action === "set_status") {
       const nextStatus = normalizeJobStatus(input.statusCode ?? input.status);
@@ -590,15 +970,43 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       eventType = "operations.job.evidence_added";
       change = { evidenceId: evidence.id, kind: evidence.kind };
     } else if (action === "save_rapportino") {
-      const text = boundedText(input.text, 4_000);
-      if (text.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
-      next.rapportino = { status: "DRAFT", text, updatedAt: now, updatedBy: context.actorId };
+      const answers = normalizeRapportinoAnswers(input.answers);
+      const narrative = answers
+        ? boundedText(composeRapportinoNarrative(answers), 4_000)
+        : boundedText(input.narrative ?? input.text, 4_000);
+      if (narrative.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
+      const priorReport = isRecord(current.rapportino) ? current.rapportino : {};
+      const reportDate = activeRapportinoDate(priorReport, new Date(now));
+      const reportId = persistedRapportinoDate(priorReport) !== reportDate
+        ? `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`
+        : boundedText(priorReport.reportId, 80) || `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+      next.rapportino = {
+        status: "DRAFT",
+        reportId,
+        reportDate,
+        text: narrative,
+        narrative,
+        ...(answers ? { answers } : {}),
+        reviewNote: safeText(priorReport.status).toUpperCase() === "APPROVED" ? "" : safeText(priorReport.reviewNote),
+        updatedAt: now,
+        updatedBy: context.actorId,
+      };
       eventType = "operations.job.rapportino_saved";
-      change = { status: "DRAFT" };
+      change = { status: "DRAFT", reportSnapshot: { ...next.rapportino } };
     } else if (action === "submit_rapportino") {
-      const reportText = boundedText(input.text, 4_000);
-      if (reportText.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
-      const reportReadback = buildRapportinoReadback(current, rapportinoContext ?? {}, { textOverride: reportText });
+      const answers = normalizeRapportinoAnswers(input.answers);
+      if (!answers || answers.some((answer) => answer.length < 2)) {
+        return Response.json({
+          error: "rapportino_answers_incomplete",
+          questions: ["Completa tutte e tre le risposte: attività ed esito, criticità e prossimi passi."],
+        }, { status: 422 });
+      }
+      const narrative = boundedText(composeRapportinoNarrative(answers), 4_000);
+      if (narrative.length < 40) {
+        return Response.json({ error: "rapportino_answers_incomplete", questions: ["Aggiungi qualche dettaglio alle risposte prima di inviare il rapportino."] }, { status: 422 });
+      }
+      if (narrative.length < 2) return Response.json({ error: "rapportino_text_required" }, { status: 400 });
+      const reportReadback = buildRapportinoReadback(current, rapportinoContext ?? {}, { narrativeOverride: narrative, answersOverride: answers });
       if (!reportReadback.completeness.ready) {
         return Response.json({
           error: "rapportino_completeness_unmet",
@@ -607,9 +1015,17 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
           message: "Il rapportino resta in bozza: Company AI deve ricevere tutti i dati importanti prima dell’invio in ufficio.",
         }, { status: 422 });
       }
+      const priorReport = isRecord(current.rapportino) ? current.rapportino : {};
+      const reportId = persistedRapportinoDate(priorReport) !== reportReadback.reportDate
+        ? `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`
+        : boundedText(priorReport.reportId, 80) || `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
       next.rapportino = {
         status: "SUBMITTED",
-        text: reportText,
+        reportId,
+        reportDate: reportReadback.reportDate,
+        text: reportReadback.draft,
+        narrative,
+        answers,
         submittedAt: now,
         submittedBy: context.actorId,
         updatedAt: now,
@@ -617,11 +1033,115 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         completeness: reportReadback.completeness,
       };
       eventType = "operations.job.rapportino_submitted";
-      change = { status: "SUBMITTED", missing: 0 };
+      change = {
+        status: "SUBMITTED",
+        missing: 0,
+        reportSnapshot: {
+          ...(next.rapportino as JsonObject),
+          text: boundedText(reportReadback.draft, 5_000),
+          narrative: boundedText(narrative, 4_000),
+        },
+      };
+    } else if (action === "resubmit_rapportino") {
+      const reportId = boundedText(input.reportId, 80);
+      const answers = normalizeRapportinoAnswers(input.answers);
+      const narrative = answers ? boundedText(composeRapportinoNarrative(answers), 4_000) : "";
+      if (!reportId || !answers || answers.some((answer) => answer.length < 2) || narrative.length < 40) {
+        return Response.json({ error: "rapportino_answers_incomplete", questions: ["Completa tutte le risposte richieste per reinviare il rapportino storico."] }, { status: 422 });
+      }
+      const jobKey = jobRow.canonicalCode ?? jobRow.id;
+      const priorReportEvents = await db.select().from(s06Events).where(and(
+        eq(s06Events.tenantId, context.tenantId),
+        eq(s06Events.aggregateType, "commessa"),
+        eq(s06Events.aggregateId, jobKey),
+        inArray(s06Events.eventType, [
+          "operations.job.rapportino_saved",
+          "operations.job.rapportino_submitted",
+          "operations.job.rapportino_approved",
+          "operations.job.rapportino_changes_requested",
+        ]),
+      )).orderBy(desc(s06Events.occurredAt)).limit(500);
+      const report = priorReportEvents.map((event) => {
+        const eventPayload = parsePayload(event.payloadJson);
+        const change = isRecord(eventPayload.change) ? eventPayload.change : {};
+        return isRecord(change.reportSnapshot) ? change.reportSnapshot : null;
+      }).find((snapshot) => safeText(snapshot?.reportId) === reportId) ?? null;
+      if (!report || !["DRAFT", "CHANGES_REQUESTED"].includes(safeText(report.status).toUpperCase())) {
+        return Response.json({ error: "historical_rapportino_not_open_for_revision" }, { status: 409 });
+      }
+      const reportDate = persistedRapportinoDate(report);
+      const jobVariants = new Set([
+        ...keyVariants(requestedJobId),
+        ...keyVariants(jobRow.id),
+        ...keyVariants(jobRow.canonicalCode ?? ""),
+      ]);
+      const related = relatedRecords(rows, jobVariants);
+      const journeyRows = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.jobId, jobRow.id),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+      const historicalPayload: JobPayload = {
+        ...current,
+        rapportino: report,
+        evidence: current.evidence.filter((item) => Number.isFinite(Date.parse(item.createdAt))
+          && italyDateKey(new Date(item.createdAt)) === reportDate),
+      };
+      const reportReadback = buildRapportinoReadback(
+        historicalPayload,
+        reportContextFromJourneyAndRelated(journeyRows, related, reportDate),
+        { narrativeOverride: narrative, answersOverride: answers },
+      );
+      if (!reportReadback.completeness.ready) {
+        return Response.json({
+          error: "rapportino_completeness_unmet",
+          completeness: reportReadback.completeness,
+          questions: reportReadback.completeness.questions,
+          message: "La revisione resta in bozza: completa i dati richiesti prima di reinviare il rapportino storico.",
+        }, { status: 422 });
+      }
+      const revisedReport = {
+        ...report,
+        status: "SUBMITTED",
+        reportDate,
+        text: boundedText(reportReadback.draft, 5_000),
+        narrative,
+        answers,
+        reviewNote: "",
+        submittedAt: now,
+        submittedBy: context.actorId,
+        updatedAt: now,
+        updatedBy: context.actorId,
+        completeness: reportReadback.completeness,
+      };
+      eventType = "operations.job.rapportino_submitted";
+      change = { status: "SUBMITTED", reportId, missing: 0, reportSnapshot: revisedReport };
     } else if (action === "review_rapportino") {
-      const report = isRecord(current.rapportino) ? current.rapportino : null;
+      const targetReportId = boundedText(input.reportId, 80);
+      let report: Record<string, unknown> | null = isRecord(current.rapportino) ? current.rapportino : null;
+      if (targetReportId && safeText(report?.reportId) !== targetReportId) {
+        const jobKey = jobRow.canonicalCode ?? jobRow.id;
+        const priorReportEvents = await db.select().from(s06Events).where(and(
+          eq(s06Events.tenantId, context.tenantId),
+          eq(s06Events.aggregateType, "commessa"),
+          eq(s06Events.aggregateId, jobKey),
+          inArray(s06Events.eventType, [
+            "operations.job.rapportino_saved",
+            "operations.job.rapportino_submitted",
+            "operations.job.rapportino_approved",
+            "operations.job.rapportino_changes_requested",
+          ]),
+        )).orderBy(desc(s06Events.occurredAt)).limit(500);
+        report = priorReportEvents.map((event) => {
+          const eventPayload = parsePayload(event.payloadJson);
+          const change = isRecord(eventPayload.change) ? eventPayload.change : {};
+          return isRecord(change.reportSnapshot) ? change.reportSnapshot : null;
+        }).find((snapshot) => safeText(snapshot?.reportId) === targetReportId) ?? null;
+      }
       if (!report || safeText(report.status).toUpperCase() !== "SUBMITTED") {
         return Response.json({ error: "rapportino_not_ready_for_review" }, { status: 409 });
+      }
+      if (safeText(report.submittedBy, safeText(report.updatedBy)) === context.actorId) {
+        return Response.json({ error: "rapportino_self_review_forbidden", message: "Chi invia il rapportino non può approvare la propria giornata." }, { status: 403 });
       }
       const decision = boundedText(input.decision, 32).toUpperCase();
       if (decision !== "APPROVE" && decision !== "REQUEST_CHANGES") {
@@ -632,7 +1152,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         return Response.json({ error: "rapportino_review_note_required" }, { status: 400 });
       }
       const approved = decision === "APPROVE";
-      next.rapportino = {
+      const reviewedReport = {
         ...report,
         status: approved ? "APPROVED" : "CHANGES_REQUESTED",
         reviewNote: reviewNote || "Rapportino verificato dall’ufficio.",
@@ -642,8 +1162,16 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         updatedBy: context.actorId,
         ...(approved ? { approvedAt: now, approvedBy: context.actorId } : { approvedAt: null, approvedBy: null }),
       };
+      if (safeText(current.rapportino && isRecord(current.rapportino) ? current.rapportino.reportId : "") === safeText(report.reportId)) {
+        next.rapportino = reviewedReport;
+      }
       eventType = approved ? "operations.job.rapportino_approved" : "operations.job.rapportino_changes_requested";
-      change = { status: approved ? "APPROVED" : "CHANGES_REQUESTED", reviewNote: Boolean(reviewNote) };
+      change = {
+        status: approved ? "APPROVED" : "CHANGES_REQUESTED",
+        reportId: safeText(report.reportId),
+        reportSnapshot: reviewedReport,
+        reviewNote: Boolean(reviewNote),
+      };
     } else if (action === "update_job") {
       const fields = isRecord(input.fields) ? input.fields : input;
       if (typeof fields.title === "string") {
@@ -660,10 +1188,58 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (typeof fields.clientEmail === "string") next.clientEmail = boundedText(fields.clientEmail, 160);
       if (typeof fields.clientReference === "string") next.clientReference = boundedText(fields.clientReference, 160);
       if (typeof fields.clientAddress === "string") next.clientAddress = boundedText(fields.clientAddress, 240);
-      if (typeof fields.location === "string") next.location = boundedText(fields.location, 240);
-      if (typeof fields.worksite === "string") {
-        next.worksite = boundedText(fields.worksite, 240);
-        next.location = boundedText(fields.worksite, 240);
+      const requestedWorksite = typeof fields.worksite === "string" ? boundedText(fields.worksite, 320) : typeof fields.location === "string" ? boundedText(fields.location, 320) : "";
+      if (requestedWorksite && requestedWorksite !== current.location) {
+        const candidateInput = isRecord(fields.worksiteLocation) ? fields.worksiteLocation : null;
+        const providerPlaceId = boundedText(candidateInput?.providerPlaceId, 160);
+        if (!providerPlaceId) {
+          return Response.json({ error: "worksite_location_confirmation_required", message: "Riconosci e seleziona dal risultato server-side il nuovo indirizzo prima di salvare." }, { status: 409 });
+        }
+        const geocode = await geocodeWithMapbox(requestedWorksite);
+        if (geocode.status === "not_configured") return Response.json({ error: "worksite_geocoder_not_configured", provider: "MAPBOX" }, { status: 503 });
+        if (geocode.status === "unavailable") return Response.json({ error: "worksite_geocoder_unavailable", provider: "MAPBOX" }, { status: 503 });
+        const candidate = geocode.candidates.find((item) => item.provider === "MAPBOX" && item.providerPlaceId === providerPlaceId);
+        if (!candidate) return Response.json({ error: "worksite_location_candidate_mismatch", provider: "MAPBOX" }, { status: 409 });
+
+        const db = getDb();
+        const [geoLocation] = await db.select().from(geoLocations).where(and(
+          eq(geoLocations.tenantId, context.tenantId),
+          eq(geoLocations.entityId, jobRow.id),
+          or(eq(geoLocations.entityType, "CANTIERE"), eq(geoLocations.entityType, "COMMESSA")),
+        )).limit(1);
+        const existingGeofences = await db.select().from(geofences).where(and(
+          eq(geofences.tenantId, context.tenantId),
+          eq(geofences.entityId, jobRow.id),
+        )).limit(20);
+        if (!geoLocation) return Response.json({ error: "worksite_location_integrity_incomplete", message: "La commessa non ha una location canonica da aggiornare. Completa prima la registrazione del luogo." }, { status: 409 });
+        const geoLocationId = geoLocation?.id || boundedText(current.worksiteGeoLocationId, 100) || `GEO-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        const geofence = existingGeofences.find((item) => item.locationId === geoLocationId) ?? null;
+        if (!geofence) return Response.json({ error: "worksite_geofence_integrity_incomplete", message: "La commessa non ha una geofence canonica da aggiornare. Completa prima la configurazione del perimetro." }, { status: 409 });
+        const geofenceId = geofence?.id || boundedText(current.worksiteGeofenceId, 100) || `GEOFENCE-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
+        const radius = geofence?.radiusMeters ?? defaultGeofenceRadius("CANTIERE");
+        const persistedWorksiteLocation = {
+          provider: candidate.provider,
+          providerPlaceId: candidate.providerPlaceId,
+          formattedAddress: candidate.formattedAddress,
+          address: { street: candidate.street, streetNumber: candidate.streetNumber, city: candidate.city, province: candidate.province, postalCode: candidate.postalCode, country: candidate.country },
+          coordinates: { latitude: candidate.latitude, longitude: candidate.longitude },
+          confidence: candidate.confidence,
+          status: "SERVER_VERIFIED",
+          geoLocationId,
+          geofenceId,
+          geofence: { shapeType: "CIRCLE", radiusMeters: radius },
+          verifiedAt: now,
+        };
+        next.location = candidate.formattedAddress;
+        next.worksite = candidate.formattedAddress;
+        next.worksiteLocation = persistedWorksiteLocation;
+        next.worksiteGeoLocationId = geoLocationId;
+        next.worksiteGeofenceId = geofenceId;
+        next.worksiteGeocodeStatus = "CONFIRMED";
+        worksiteMutation = { candidate, geoLocationId, geofenceId, geoLocation, geofence, staleGeofences: existingGeofences.filter((item) => item.status === "ACTIVE" && item.id !== geofenceId) };
+      } else if (requestedWorksite) {
+        next.location = current.location;
+        next.worksite = current.location;
       }
       if (typeof fields.accessNotes === "string") next.accessNotes = boundedText(fields.accessNotes, 2_000);
       if (typeof fields.cig === "string") next.cig = boundedText(fields.cig, 80);
@@ -718,7 +1294,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       return Response.json({ error: "job_payload_too_large" }, { status: 413 });
     }
 
-    const updatedRows = await db.batch([
+    const statementBatch: BatchItem<"sqlite">[] = [
       db.update(s04Records)
         .set({
           detail: next.location,
@@ -776,7 +1352,68 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         createdAt: now,
         updatedAt: now,
       }),
-    ]);
+    ];
+    if (worksiteMutation) {
+      const { candidate, geoLocationId, geofenceId, geoLocation, geofence, staleGeofences } = worksiteMutation;
+      const worksiteCommitCondition = sql`EXISTS (
+        SELECT 1 FROM s04_records
+        WHERE s04_records.id = ${jobRow.id}
+          AND s04_records.tenant_id = ${context.tenantId}
+          AND s04_records.updated_at = ${now}
+          AND s04_records.payload_json = ${serializedPayload}
+      )`;
+      const geoValues = {
+        formattedAddress: candidate.formattedAddress,
+        street: candidate.street,
+        streetNumber: candidate.streetNumber,
+        city: candidate.city,
+        province: candidate.province,
+        postalCode: candidate.postalCode,
+        country: candidate.country,
+        latitudeE6: Math.round(candidate.latitude * 1_000_000),
+        longitudeE6: Math.round(candidate.longitude * 1_000_000),
+        provider: candidate.provider,
+        providerPlaceId: candidate.providerPlaceId,
+        geocodeConfidenceMilli: Math.round(Math.min(1, Math.max(0, candidate.confidence)) * 1_000),
+        verifiedByUser: 1,
+        verifiedAt: now,
+        status: "ACTIVE",
+        version: (geoLocation?.version ?? 0) + 1,
+        updatedAt: now,
+      };
+      statementBatch.push(db.update(geoLocations).set(geoValues).where(and(
+        eq(geoLocations.tenantId, context.tenantId),
+        eq(geoLocations.id, geoLocationId),
+        worksiteCommitCondition,
+      )));
+      for (const stale of staleGeofences) {
+        statementBatch.push(db.update(geofences).set({ status: "INACTIVE", updatedAt: now }).where(and(
+          eq(geofences.tenantId, context.tenantId),
+          eq(geofences.id, stale.id),
+          worksiteCommitCondition,
+        )));
+      }
+      const geofenceValues = {
+        locationId: geoLocationId,
+        entityType: "CANTIERE",
+        entityId: jobRow.id,
+        name: `${jobRow.canonicalCode ?? jobRow.id} · Cantiere`,
+        shapeType: "CIRCLE",
+        centerLatitudeE6: Math.round(candidate.latitude * 1_000_000),
+        centerLongitudeE6: Math.round(candidate.longitude * 1_000_000),
+        radiusMeters: geofence?.radiusMeters ?? defaultGeofenceRadius("CANTIERE"),
+        polygonJson: "[]",
+        status: "ACTIVE",
+        version: (geofence?.version ?? 0) + 1,
+        updatedAt: now,
+      };
+      statementBatch.push(db.update(geofences).set(geofenceValues).where(and(
+        eq(geofences.tenantId, context.tenantId),
+        eq(geofences.id, geofenceId),
+        worksiteCommitCondition,
+      )));
+    }
+    const updatedRows = await db.batch(statementBatch);
 
     const updated = (updatedRows[0] as (typeof s04Records.$inferSelect)[])[0];
     if (!updated) return Response.json({ error: "version_conflict", currentVersion: current.version }, { status: 409 });

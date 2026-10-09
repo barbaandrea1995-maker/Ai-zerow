@@ -165,6 +165,16 @@ function currentDayOverlap(startsAt: string | null, endsAt: string | null) {
   return starts < dayEnd.getTime() && ends > dayStart.getTime();
 }
 
+const NON_PLANNABLE_JOB_STATUSES = new Set(["COMPLETED", "CLOSED", "CANCELLED"]);
+
+function planningEligibility(status: string) {
+  const normalized = status.trim().toUpperCase();
+  if (!NON_PLANNABLE_JOB_STATUSES.has(normalized)) return { planningEligible: true, planningBlockedReason: null };
+  if (normalized === "COMPLETED") return { planningEligible: false, planningBlockedReason: "Commessa completata: riaprila prima di aggiungere attività." };
+  if (normalized === "CANCELLED") return { planningEligible: false, planningBlockedReason: "Perimetro annullato: disponibile solo per consultazione." };
+  return { planningEligible: false, planningBlockedReason: "Perimetro chiuso: disponibile solo per consultazione." };
+}
+
 export async function GET() {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -260,12 +270,14 @@ export async function GET() {
     const jobById = new Map(visibleJobs.map((job) => [job.id, job]));
     const jobViews = visibleJobs.map((job) => {
       const payload = parseJobPayload(job.payloadJson);
+      const status = payload.statusCode || job.status;
       return {
         id: job.id,
         code: job.canonicalCode,
         title: payload.title || job.title,
         module: job.module,
-        status: payload.statusCode || job.status,
+        status,
+        ...planningEligibility(status),
         location: payload.worksite || payload.location || job.detail,
         scopeSubgroupId: payload.scopeSubgroupId || null,
         scopeSubgroupTitle: typeof payload.scope === "object" && payload.scope && "subgroupTitle" in payload.scope
@@ -308,6 +320,14 @@ export async function GET() {
         resourceCount: resources.length,
         resourceLabels: resources.map((resource) => typeof resource.label === "string" ? resource.label : "Risorsa").slice(0, 16),
         conflictCount: evaluation && Array.isArray(evaluation.conflicts) ? evaluation.conflicts.length : 0,
+        conflictDetails: evaluation && Array.isArray(evaluation.conflicts)
+          ? evaluation.conflicts
+            .map((conflict) => conflict && typeof conflict === "object" && !Array.isArray(conflict) && typeof (conflict as Record<string, unknown>).detail === "string"
+              ? String((conflict as Record<string, unknown>).detail)
+              : "")
+            .filter(Boolean)
+            .slice(0, 4)
+          : [],
         feasible: evaluation?.feasible !== false,
         linkedMission: linkedMissionByPlan.get(plan.id) ?? null,
         updatedAt: plan.updatedAt,

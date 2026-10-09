@@ -109,7 +109,12 @@ export function warehouseIsInScope(scope: WarehouseScope, warehouseId: string) {
 }
 
 function actorResourceIds(context: AuthorityContext, workforceRows: readonly ScopeRow[]) {
-  const ids = new Set<string>();
+  const ids = new Set<string>([
+    context.actorId,
+    context.membershipId,
+    `AUTH-DRIVER-${context.actorId}`,
+    `AUTH-PERSON-${context.actorId}`,
+  ]);
   for (const row of workforceRows) {
     const payload = parseScopePayload(row.payloadJson);
     if (String(payload.actorId ?? "") === context.actorId || String(payload.membershipId ?? payload.authorityMembershipId ?? "") === context.membershipId) {

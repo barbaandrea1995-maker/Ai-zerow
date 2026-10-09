@@ -128,6 +128,51 @@ function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+export function normalizeRapportinoAnswers(value: unknown): [string, string, string] | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  return value.map((answer) => text(answer).slice(0, 2_000)) as [string, string, string];
+}
+
+export function composeRapportinoNarrative(answers: readonly string[]) {
+  const sections = [
+    ["ATTIVITÀ SVOLTE ED ESITO", answers[0]],
+    ["CRITICITÀ E SICUREZZA", answers[1]],
+    ["PROSSIMI PASSI E RICHIESTE", answers[2]],
+  ] as const;
+  return sections
+    .filter(([, answer]) => text(answer).length > 0)
+    .map(([title, answer]) => `${title}:\n${text(answer)}`)
+    .join("\n\n");
+}
+
+export function italyDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Rome",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "00";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function persistedRapportinoDate(reportValue: unknown) {
+  const report = isRecord(reportValue) ? reportValue : {};
+  const persistedDate = text(report.reportDate);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(persistedDate)) return persistedDate;
+  const anchor = [report.createdAt, report.submittedAt, report.updatedAt]
+    .find((value) => typeof value === "string" && Number.isFinite(Date.parse(value)));
+  return typeof anchor === "string" ? italyDateKey(new Date(anchor)) : "";
+}
+
+export function activeRapportinoDate(reportValue: unknown, now = new Date()) {
+  const report = isRecord(reportValue) ? reportValue : {};
+  const today = italyDateKey(now);
+  const persistedDate = persistedRapportinoDate(report);
+  if (persistedDate && persistedDate < today) return today;
+  return persistedDate || today;
+}
+
 function progress(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
@@ -199,7 +244,10 @@ export type RapportinoContextRecord = {
 };
 
 export type RapportinoContext = {
+  reportDate?: string;
+  dayAlreadyApproved?: boolean;
   attendance?: RapportinoContextRecord[];
+  assignment?: RapportinoContextRecord[];
   resources?: RapportinoContextRecord[];
   materials?: RapportinoContextRecord[];
   field?: RapportinoContextRecord[];
@@ -227,8 +275,13 @@ export type RapportinoReview = {
 };
 
 export type RapportinoReadback = {
+  reportId: string;
+  answers: string[];
   status: "EMPTY" | "DRAFT" | "SUBMITTED" | "APPROVED" | "CHANGES_REQUESTED";
+  reportDate: string;
+  dayAlreadyApproved: boolean;
   draft: string;
+  narrative: string;
   fields: RapportinoField[];
   completeness: RapportinoCompleteness;
   review: RapportinoReview;
@@ -259,7 +312,8 @@ function reportRecordLines(records: RapportinoContextRecord[], emptyLabel: strin
     .map((record) => {
       const detail = text(record.detail);
       const status = text(record.status);
-      return `- ${text(record.title, "Record operativo")}${detail ? ` · ${detail}` : ""}${status ? ` · ${status}` : ""}`;
+      const time = text(record.meta);
+      return `- ${text(record.title, "Record operativo")}${detail ? ` · ${detail}` : ""}${status ? ` · ${status}` : ""}${time ? ` · ${time}` : ""}`;
     })
     .join("\n");
 }
@@ -276,33 +330,48 @@ function reportStatus(value: unknown): RapportinoReadback["status"] {
 export function buildRapportinoReadback(
   payload: JobPayload,
   context: RapportinoContext = {},
-  options: { textOverride?: string } = {},
+  options: { textOverride?: string; narrativeOverride?: string; answersOverride?: unknown } = {},
 ): RapportinoReadback {
   const report = isRecord(payload.rapportino) ? payload.rapportino : null;
   const attendance = uniqueReportRecords(context.attendance);
+  const assignments = uniqueReportRecords(context.assignment);
   const resources = uniqueReportRecords(context.resources);
   const materials = uniqueReportRecords(context.materials);
   const field = uniqueReportRecords(context.field);
   const savedText = text(options.textOverride ?? report?.text);
-  const hasPlaceholder = /\[(?:da completare|da confermare|da indicare|da descrivere)\]/i.test(savedText);
-  const narrativeComplete = savedText.length >= 40 && !hasPlaceholder;
+  const savedNarrative = text(options.narrativeOverride ?? report?.narrative);
+  const answers = normalizeRapportinoAnswers(options.answersOverride ?? report?.answers);
+  const hasDedicatedNarrative = Boolean(options.narrativeOverride !== undefined || savedNarrative);
+  const narrative = answers ? composeRapportinoNarrative(answers) : savedNarrative || savedText;
+  const hasPlaceholder = /\[(?:da completare|da confermare|da indicare|da descrivere)\]/i.test(narrative);
+  const narrativeComplete = narrative.length >= 40 && !hasPlaceholder;
   const doneActivities = payload.activities.filter((activity) => activity.state === "done").length;
   const openActivities = payload.activities.length - doneActivities;
-  const attendanceClosed = attendance.some((record) => ["CHECKED_OUT", "APPROVED", "CLOSED"].includes(text(record.status).toUpperCase()));
+  const attendanceClosed = attendance.length > 0 && attendance.every((record) => ["CHECKED_OUT", "APPROVED", "CLOSED"].includes(text(record.status).toUpperCase()));
   const assignmentLabel = payload.assignment
     ? [payload.assignment.responsible, payload.assignment.team].filter(Boolean).join(" · ")
-    : "Da assegnare";
+    : reportRecordsSummary(assignments, "Da assegnare");
+  const assignmentKnown = Boolean(payload.assignment || assignments.length);
+  const reportDate = /^\d{4}-\d{2}-\d{2}$/.test(text(context.reportDate))
+    ? text(context.reportDate)
+    : italyDateKey();
+  const status = reportStatus(report?.status);
 
   const missing: string[] = [];
   const questions: string[] = [];
-  if (!payload.activities.length) {
-    missing.push("activities");
-    questions.push("Quali attività sono state svolte durante il turno?");
-  } else if (openActivities > 0) {
-    missing.push("activities_status");
-    questions.push("Ci sono attività ancora aperte: conferma cosa resta da fare o chiudi le attività completate.");
+  if (text(payload.title).length < 2) {
+    missing.push("job");
+    questions.push("La commessa non ha un titolo valido: completa i dati prima di inviare il rapportino.");
   }
-  if (!payload.assignment) {
+  const normalizedLocation = text(payload.location).toLocaleLowerCase("it-IT");
+  const worksiteLocation = isRecord(payload.worksiteLocation) ? payload.worksiteLocation : {};
+  const worksiteVerified = worksiteLocation.status === "SERVER_VERIFIED"
+    && Boolean(text(worksiteLocation.providerPlaceId) && text(worksiteLocation.geoLocationId) && text(worksiteLocation.geofenceId));
+  if (normalizedLocation.length < 2 || ["ubicazione da definire", "luogo da definire"].includes(normalizedLocation) || !worksiteVerified) {
+    missing.push("worksite");
+    questions.push("Il luogo non ha più una geocodifica e una geofence attive coerenti: verifica l’indirizzo della commessa.");
+  }
+  if (!assignmentKnown) {
     missing.push("assignment");
     questions.push("Chi è il responsabile della squadra o dell’attività?");
   }
@@ -313,38 +382,36 @@ export function buildRapportinoReadback(
     missing.push("attendance_exit");
     questions.push("La presenza risulta ancora aperta: registra l’uscita prima di inviare il rapportino.");
   }
-  if (!payload.evidence.length && !field.length) {
-    missing.push("evidence");
-    questions.push("Aggiungi almeno un’evidenza verificabile: nota, foto, file o rilievo operativo.");
-  }
   if (!narrativeComplete) {
     missing.push("narrative");
-    questions.push("Completa il consuntivo con attività svolte, criticità, materiali e prossimi passi.");
+    questions.push(payload.activities.length
+      ? "Racconta l’esito del turno, le criticità emerse e i prossimi passi."
+      : "Quali attività sono state svolte? Aggiungi esito, eventuali criticità e prossimi passi.");
   }
 
   const fields: RapportinoField[] = [
     { key: "job", label: "Commessa", value: text(payload.title, "Da completare"), status: text(payload.title).length >= 2 ? "known" : "missing", source: "Anagrafica commessa" },
-    { key: "worksite", label: "Luogo", value: text(payload.location, "Da verificare"), status: text(payload.location).length >= 2 ? "known" : "missing", source: "Location server-side" },
-    { key: "assignment", label: "Responsabile / squadra", value: assignmentLabel, status: payload.assignment ? "known" : "missing", source: "Assegnazione operativa" },
-    { key: "activities", label: "Attività", value: payload.activities.length ? `${doneActivities}/${payload.activities.length} completate` : "Nessuna attività registrata", status: payload.activities.length && openActivities === 0 ? "known" : "missing", source: "Attività della commessa" },
-    { key: "attendance", label: "Presenze e timbrature", value: attendance.length ? `${attendance.length} record · ${attendanceClosed ? "uscita registrata" : "uscita da registrare"}` : "Da registrare", status: attendanceClosed ? "known" : "missing", source: "Presenze / geofence" },
-    { key: "resources", label: "Persone, mezzi e asset", value: reportRecordsSummary(resources, "Nessuna risorsa collegata"), status: resources.length ? "known" : "optional", source: "Planning / Asset" },
+    { key: "worksite", label: "Luogo", value: text(payload.location, "Da verificare"), status: worksiteVerified ? "known" : "missing", source: "Geocodifica e geofence server-side" },
+    { key: "assignment", label: "Responsabile / squadra", value: assignmentLabel, status: assignmentKnown ? "known" : "missing", source: "Assegnazione operativa" },
+    { key: "activities", label: "Attività", value: payload.activities.length ? `${doneActivities}/${payload.activities.length} completate · ${openActivities} ancora aperte` : narrativeComplete ? "Descritte dal responsabile" : "Da descrivere nel rapportino", status: payload.activities.length || narrativeComplete ? "known" : "missing", source: payload.activities.length ? "Attività della commessa" : "Racconto del responsabile" },
+    { key: "attendance", label: "Presenze e timbrature", value: attendance.length ? `${attendance.length} record · ${attendanceClosed ? "tutte le uscite registrate" : "una o più uscite da registrare"}` : "Da registrare", status: attendanceClosed ? "known" : "missing", source: "Presenze / geofence" },
+    { key: "resources", label: "Persone, mezzi e asset", value: reportRecordsSummary(resources, assignmentKnown ? assignmentLabel : "Nessuna risorsa collegata"), status: resources.length ? "known" : "optional", source: "Planning / Asset" },
     { key: "materials", label: "Materiali", value: reportRecordsSummary(materials, "Nessun movimento collegato"), status: materials.length ? "known" : "optional", source: "Magazzino" },
-    { key: "evidence", label: "Evidenze", value: `${payload.evidence.length + field.length} record verificabili`, status: payload.evidence.length || field.length ? "known" : "missing", source: "Field / documenti" },
+    { key: "evidence", label: "Evidenze", value: `${payload.evidence.length + field.length} record verificabili`, status: payload.evidence.length || field.length ? "known" : "optional", source: "Field / documenti" },
     { key: "narrative", label: "Consuntivo", value: narrativeComplete ? "Pronto per l’invio" : "Da completare", status: narrativeComplete ? "known" : "missing", source: "Company AI · risposta responsabile" },
   ];
 
   const generatedDraft = [
-    `RAPPORTINO COMMESSA · ${new Date().toISOString().slice(0, 10)}`,
+    `RAPPORTINO COMMESSA · ${new Date(`${reportDate}T12:00:00.000Z`).toLocaleDateString("it-IT", { timeZone: "Europe/Rome" })}`,
     `Commessa: ${text(payload.title, "[da completare]")}`,
     `Luogo: ${text(payload.location, "[da confermare]")}`,
     `Responsabile / squadra: ${assignmentLabel}`,
     "",
-    "ATTIVITÀ",
-    reportRecordsSummary(payload.activities.map((activity) => ({ title: activity.title, detail: activity.detail, status: activity.state })), "[da completare]"),
+    "ATTIVITÀ E RESIDUI",
+    reportRecordLines(payload.activities.map((activity) => ({ title: activity.title, detail: activity.detail, status: activity.state, meta: activity.updatedAt })), "Nessuna attività pianificata a sistema"),
     "",
     "PRESENZE E RISORSE",
-    reportRecordLines(attendance, "Presenza da verificare"),
+    reportRecordLines(attendance, "Nessuna timbratura collegata"),
     reportRecordLines(resources, "Nessuna risorsa collegata"),
     "",
     "MATERIALI",
@@ -354,15 +421,11 @@ export function buildRapportinoReadback(
     reportRecordLines([
       ...payload.evidence.map((item) => ({ title: item.title, detail: item.detail, status: item.kind })),
       ...field,
-    ], "[da indicare]"),
+    ], "Nessuna evidenza aggiunta"),
     "",
-    "CRITICITÀ / NOTE",
-    "[da descrivere]",
-    "",
-    "PROSSIMI PASSI",
-    "[da descrivere]",
+    "RACCONTO DEL RESPONSABILE",
+    narrative || "In attesa del racconto del responsabile.",
   ].join("\n");
-  const status = reportStatus(report?.status);
   const reviewStatus: RapportinoReview["status"] = status === "APPROVED"
     ? "APPROVED"
     : status === "CHANGES_REQUESTED"
@@ -370,8 +433,17 @@ export function buildRapportinoReadback(
       : "PENDING";
 
   return {
+    reportId: text(report?.reportId),
+    answers: answers ?? [],
     status,
-    draft: savedText || generatedDraft,
+    reportDate,
+    dayAlreadyApproved: context.dayAlreadyApproved === true,
+    draft: options.narrativeOverride !== undefined
+      ? generatedDraft
+      : ["SUBMITTED", "APPROVED"].includes(status) && savedText
+      ? savedText
+      : hasDedicatedNarrative ? generatedDraft : savedText || generatedDraft,
+    narrative,
     fields,
     completeness: { ready: missing.length === 0, missing, questions },
     review: {
@@ -383,9 +455,10 @@ export function buildRapportinoReadback(
   };
 }
 
-export function jobCompletionRequirements(payload: JobPayload): JobCompletionRequirement[] {
+export function jobCompletionRequirements(payload: JobPayload, reportDate = activeRapportinoDate(payload.rapportino)): JobCompletionRequirement[] {
   const rapportino = isRecord(payload.rapportino)
     && text(payload.rapportino.text).length >= 2
+    && persistedRapportinoDate(payload.rapportino) === reportDate
     && (["SUBMITTED", "APPROVED"].includes(text(payload.rapportino.status).toUpperCase()) || !("status" in payload.rapportino));
   const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
   const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));

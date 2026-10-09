@@ -65,3 +65,13 @@ crea commessa
 ## Confini ancora aperti
 
 W03 non dichiara completati i servizi esterni di planning, workforce, FIELD, asset, warehouse, mission, documents o finance. Le sezioni cross-domain restano `EMPTY` o `DEFERRED` quando non esiste un record adapter-backed verificato. Il prossimo verticale è W04 Planning, già compatibile con il contratto `jobId`, versione e assignment introdotto qui.
+
+## Avanzamento rapportino giornaliero Company AI — 9 ottobre 2026
+
+- Il responsabile apre il colloquio Company AI dopo la timbratura di uscita dalla scheda Presenze assegnata oppure dalla scheda della commessa.
+- Il colloquio raccoglie tre contributi umani: attività ed esito, criticità e sicurezza, prossimi passi e richieste. Le risposte vengono salvate come bozza a ogni passaggio e il responsabile può riprendere dalla prima risposta mancante.
+- Le domande sono generate server-side tramite il provider OpenAI già configurato, con contesto ristretto ai riepiloghi della giornata, alle attività della commessa e alle risposte precedenti. In caso di provider non configurato, errore o rate limit si usano le domande standard.
+- Il modello non riceve coordinate GPS grezze e non scrive su commessa, presenze, materiali o asset. Il server compone il rapportino usando i registri verificati e le risposte del responsabile.
+- L’invio resta bloccato finché non sono presenti le tre risposte, un’uscita valida, l’assegnazione e il luogo verificato con geofence. Le precondizioni per portare la commessa a `COMPLETATA` restano controllate server-side.
+- `npm run build` e `git diff --check`: pass locale. Non è stato eseguito uno smoke autenticato del nuovo endpoint; il secret OpenAI è configurato su Sites, ma questa specifica interazione live resta da verificare dopo la pubblicazione.
+- Stato della tranche: implementata e compilata localmente, non pubblicata. Il workflow Sites richiesto non è disponibile nel workspace corrente, quindi il codice non è stato caricato sulla PWA.

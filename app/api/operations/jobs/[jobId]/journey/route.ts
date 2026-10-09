@@ -63,7 +63,7 @@ const ACTION_CAPABILITY = {
   mission_reconcile: "mission.manage",
   mission_report_save: "mission.report.write",
   mission_report_submit: "mission.report.write",
-  mission_report_review: "approvals.review",
+  mission_report_review: "mission.report.review",
   mission_close: "mission.manage",
 } as const;
 
@@ -398,7 +398,7 @@ function actionAccess(context: AuthorityContext) {
       action,
       hasCapability(context, capability),
     ])),
-    mission_report_review: hasCapability(context, "approvals.review") || hasCapability(context, "mission.manage"),
+    mission_report_review: hasCapability(context, "mission.report.review"),
     document_upload: hasCapability(context, "documents.write"),
     document_security: hasCapability(context, "documents.write"),
   };
@@ -820,9 +820,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const capability = ACTION_CAPABILITY[action];
   const managementReportBypass = ["mission_report_save", "mission_report_submit"].includes(action)
     && hasCapability(context, "mission.manage");
-  const managementReportReviewBypass = action === "mission_report_review" && hasCapability(context, "mission.manage");
   const managementExceptionBypass = action === "mission_exception" && hasCapability(context, "mission.manage");
-  if (!hasCapability(context, capability) && !managementReportBypass && !managementReportReviewBypass && !managementExceptionBypass) {
+  if (!hasCapability(context, capability) && !managementReportBypass && !managementExceptionBypass) {
     return Response.json({ error: "forbidden", capability }, { status: 403 });
   }
   if (action === "mission_create" && !hasCapability(context, "mission.resources.read")) {
@@ -1783,6 +1782,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const report = isRecord(payload.missionReport) ? payload.missionReport : null;
         if (!report || boundedText(report.status, 24).toUpperCase() !== "SUBMITTED") {
           return Response.json({ error: "mission_report_not_ready_for_review", message: "Il rapportino deve essere inviato dall’autista prima della revisione." }, { status: 409 });
+        }
+        if (boundedText(report.submittedBy, 160, boundedText(report.updatedBy, 160)) === context.actorId) {
+          return Response.json({ error: "mission_report_self_review_forbidden", message: "Chi invia il rapportino non può approvare la propria missione." }, { status: 403 });
         }
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
         const reportReadback = buildMissionReportReadback({ ...payload, warehouseReadback });

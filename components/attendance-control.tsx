@@ -9,6 +9,7 @@ type AttendanceRecord = {
   status: string;
   version: number;
   payload: {
+    workerId?: string;
     lastTransition?: {
       action?: string;
       recordedAt?: string;
@@ -17,10 +18,16 @@ type AttendanceRecord = {
       location?: { lat: number; lon: number; accuracyM: number | null } | null;
     };
   };
+  createdBy?: string;
   updatedAt: string;
 };
 
-type AttendanceResponse = { records?: AttendanceRecord[]; context?: { capabilities?: string[] }; error?: string };
+type AttendanceResponse = {
+  records?: AttendanceRecord[];
+  currentRecord?: AttendanceRecord | null;
+  context?: { capabilities?: string[]; canOpenReport?: boolean; canApprove?: boolean };
+  error?: string;
+};
 type AttendanceWriteResponse = { error?: string; reason?: string; tracking?: { status?: string } };
 type AttendanceAction = "check_in" | "pause" | "resume" | "check_out" | "correction_request" | "correction_approve";
 
@@ -85,6 +92,7 @@ async function postAttendance(url: string, body: Record<string, unknown>) {
 
 export function AttendanceControl({ jobId, canApprove = false, reportHref, onChanged }: { jobId: string; canApprove?: boolean; reportHref?: string | null; onChanged?: () => void | Promise<void> }) {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [currentRecord, setCurrentRecord] = useState<AttendanceRecord | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState<AttendanceAction | "">("");
   const [locationState, setLocationState] = useState<"idle" | "captured" | "unavailable">("idle");
@@ -102,9 +110,10 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
       const payload = await response.json() as AttendanceResponse;
       if (!response.ok) throw new Error("Le presenze non sono disponibili in questo momento.");
       setRecords(payload.records ?? []);
+      setCurrentRecord(payload.currentRecord ?? null);
       const capabilities = payload.context?.capabilities ?? [];
-      setServerCanApprove(Boolean(capabilities.includes("attendance.approve") || capabilities.includes("workforce.manage")));
-      setServerCanOpenReport(Boolean(capabilities.includes("operations.write") || capabilities.includes("field.write")));
+      setServerCanApprove(payload.context?.canApprove === true || Boolean(capabilities.includes("attendance.approve") || capabilities.includes("workforce.manage")));
+      setServerCanOpenReport(payload.context?.canOpenReport === true);
       setState("ready");
     } catch {
       setNotice("Le presenze non sono disponibili in questo momento.");
@@ -114,16 +123,16 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
 
   useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
 
-  const latest = records[0];
+  const latest = currentRecord;
   const status = latest?.status ?? "NONE";
   const actions = useMemo(() => {
     if (status === "CHECKED_IN") return [{ action: "pause" as const, label: "Pausa", icon: Pause }, { action: "check_out" as const, label: "Uscita", icon: LogOut }, { action: "correction_request" as const, label: "Uscita dimenticata", icon: FilePenLine }];
     if (status === "PAUSED") return [{ action: "resume" as const, label: "Riprendi", icon: Play }, { action: "check_out" as const, label: "Uscita", icon: LogOut }, { action: "correction_request" as const, label: "Uscita dimenticata", icon: FilePenLine }];
-    if (status === "CORRECTION_REQUESTED") return (canApprove || serverCanApprove) ? [{ action: "correction_approve" as const, label: "Approva uscita", icon: ShieldCheck }] : [];
+    if (status === "CORRECTION_REQUESTED") return [];
     return [{ action: "check_in" as const, label: "Entrata", icon: LogIn }];
-  }, [canApprove, serverCanApprove, status]);
+  }, [status]);
 
-  async function execute(action: AttendanceAction) {
+  async function execute(action: AttendanceAction, approvalTarget?: AttendanceRecord) {
     setBusy(action);
     setNotice("");
     setReportHandoffVisible(false);
@@ -143,12 +152,13 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
     try {
       const response = await postAttendance(`/api/operations/jobs/${encodeURIComponent(jobId)}/attendance`, {
         action,
-        expectedVersion: latest?.version,
         clientObservedAt: new Date().toISOString(),
         correctionAt: correctionAt ? new Date(correctionAt).toISOString() : undefined,
         correctionNote: correctionNote.trim() || undefined,
         note: correctionNote.trim() || undefined,
+        ...(action === "correction_approve" ? { workerId: approvalTarget?.payload.workerId ?? approvalTarget?.createdBy } : {}),
         location,
+        expectedVersion: approvalTarget?.version ?? latest?.version,
         idempotencyKey: `attendance-${action}-${jobId}-${crypto.randomUUID()}`,
       });
       const payload = await response.json() as AttendanceWriteResponse;
@@ -159,7 +169,7 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
         if (payload.error === "correction_note_required") throw new Error("Inserisci il motivo della correzione.");
         throw new Error("La timbratura non è stata registrata.");
       }
-      const shouldOpenReport = (action === "check_out" || action === "correction_approve") && Boolean(reportHref && serverCanOpenReport);
+      const shouldOpenReport = action === "check_out" && Boolean(reportHref && serverCanOpenReport);
       await refresh();
       await onChanged?.();
       setReportHandoffVisible(shouldOpenReport);
@@ -177,6 +187,8 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
       <button aria-label="Aggiorna timbrature" className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/25 text-slate-500 transition hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => void refresh()} type="button"><RefreshCw className="size-4" /></button>
     </div>
     <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center"><div className="rounded-2xl border border-white/[.08] bg-black/25 p-4"><div className="flex flex-wrap items-center gap-2"><span className={`size-2 rounded-full ${status === "CHECKED_IN" ? "bg-lime-300 shadow-[0_0_14px_rgba(200,255,34,.8)]" : status === "PAUSED" ? "bg-amber-300" : "bg-slate-600"}`} /><span className="text-[11px] font-semibold text-slate-100">{statusLabel(status)}</span><span className="rounded-full border border-white/10 px-2 py-1 font-mono text-[8px] text-slate-600">{state === "loading" ? "AGGIORNAMENTO" : state === "error" ? "NON DISPONIBILE" : "DATI AGGIORNATI"}</span></div><div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[10px] text-slate-500"><span>Ultimo evento: <strong className="font-medium text-slate-300">{formatTime(latest?.payload.lastTransition?.correctionAt ?? latest?.payload.lastTransition?.recordedAt ?? latest?.updatedAt)}</strong>{latest?.payload.lastTransition?.correctionAt && <span className="ml-1 text-amber-200/70">(ora corretta)</span>}</span><span className="inline-flex items-center gap-1.5">{locationState === "captured" ? <MapPin className="size-3 text-lime-200" /> : <MapPin className="size-3 text-slate-600" />}Posizione {locationState === "captured" ? "osservata" : locationState === "unavailable" ? "non disponibile" : "in attesa"}</span></div></div><div className="flex flex-wrap gap-2">{actions.map(({ action, label, icon: Icon }) => <button className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-[10px] font-semibold transition disabled:cursor-wait disabled:opacity-50 ${action === "check_out" ? "border border-rose-300/25 bg-rose-300/[.04] text-rose-100 hover:bg-rose-300/[.08]" : action === "correction_request" ? "border border-amber-300/25 bg-amber-300/[.04] text-amber-100 hover:bg-amber-300/[.08]" : "bg-lime-300 text-[#050705] hover:bg-lime-200"}`} disabled={Boolean(busy) || state === "loading"} key={action} onClick={() => void execute(action)} type="button">{busy === action ? <LoaderCircle className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}{label}</button>)}</div></div>
+    {status === "CORRECTION_REQUESTED" && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.04] px-3 py-2.5 text-[10px] leading-5 text-amber-100/75">La richiesta di correzione è stata inviata e attende una persona autorizzata diversa da chi l’ha richiesta.</p>}
+    {(canApprove || serverCanApprove) && records.some((record) => record.status === "CORRECTION_REQUESTED") && <div className="mt-3 rounded-2xl border border-amber-300/15 bg-amber-300/[.035] p-4"><p className="text-[9px] font-semibold uppercase tracking-[.15em] text-amber-200/75">Richieste da approvare</p><div className="mt-2 space-y-2">{records.filter((record) => record.status === "CORRECTION_REQUESTED").map((record) => { const workerId = record.payload.workerId ?? record.createdBy ?? ""; const transition = record.payload.lastTransition; return <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[.07] bg-black/20 px-3 py-2.5" key={record.id}><div><p className="text-[10px] font-medium text-slate-200">Persona · {workerId.slice(0, 12)}</p><p className="mt-1 text-[9px] text-slate-500">Richiesta {formatTime(transition?.recordedAt)} · ora dichiarata {formatTime(transition?.correctionAt ?? undefined)}</p></div><button className="min-h-9 rounded-lg border border-lime-300/25 bg-lime-300/[.07] px-3 text-[9px] font-semibold text-lime-100 disabled:opacity-50" disabled={Boolean(busy)} onClick={() => void execute("correction_approve", record)} type="button">{busy === "correction_approve" ? <LoaderCircle className="size-3.5 animate-spin" /> : "Approva uscita"}</button></div>; })}</div></div>}
     {(status === "CHECKED_IN" || status === "PAUSED") && <div className="mt-3 grid gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[.035] p-4 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)]"><label className="text-[10px] text-amber-100/70">Ora effettiva (opzionale)<Input className="mt-1 h-9 border-amber-300/15 bg-black/25 text-[10px]" onChange={(event) => setCorrectionAt(event.target.value)} type="datetime-local" value={correctionAt} /></label><label className="text-[10px] text-amber-100/70">Motivo correzione uscita<Input className="mt-1 h-9 border-amber-300/15 bg-black/25 text-[10px]" onChange={(event) => setCorrectionNote(event.target.value)} placeholder="Ho dimenticato di timbrare l’uscita…" value={correctionNote} /></label><p className="text-[9px] leading-4 text-amber-100/60 sm:col-span-2">Se sei fuori geofence, l’uscita normale resta bloccata. La richiesta viene registrata con audit e si chiude solo dopo approvazione autorizzata.</p></div>}
     <div className="mt-3 flex items-center gap-2 text-[9px] text-slate-600"><ShieldCheck className="size-3.5 text-cyan-200/70" />La posizione viene letta solo quando effettui una timbratura. Entrata e uscita richiedono GPS e geofence; per un autista il tracking continua fino all’uscita.</div>
     {notice && <p className="mt-3 rounded-xl border border-white/[.08] bg-black/20 px-3 py-2 text-[10px] text-slate-400">{notice}</p>}

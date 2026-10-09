@@ -10,8 +10,8 @@ export default async function OperationsJobPage({ params }: PageProps) {
   return (
     <OperationsJobWorkspace
       canWriteOperations={hasCapability(authority, "operations.write")}
-      canWriteReport={hasCapability(authority, "operations.write") || hasCapability(authority, "field.write")}
-      canReviewReport={hasCapability(authority, "operations.write") || hasCapability(authority, "approvals.review") || hasCapability(authority, "attendance.approve")}
+      canWriteReport={hasCapability(authority, "operations.rapportino.write") || hasCapability(authority, "operations.write") || (hasCapability(authority, "field.write") && hasCapability(authority, "workforce.registry.read"))}
+      canReviewReport={hasCapability(authority, "operations.rapportino.review")}
       jobId={decodeURIComponent(jobId)}
     />
   );
