@@ -109,7 +109,6 @@ function forbidden(context: Awaited<ReturnType<typeof getAuthorityContext>>, mod
 }
 
 function workflowForResponse(row: typeof w10Workflows.$inferSelect) {
-  const payload = jsonValue(row.payloadJson);
   let lines: unknown[] = [];
   try {
     const parsed = JSON.parse(row.linesJson) as unknown;
@@ -130,7 +129,6 @@ function workflowForResponse(row: typeof w10Workflows.$inferSelect) {
     jobId: row.jobId,
     supplier: row.supplier,
     lines,
-    payload,
     version: row.version,
     progress: w10Progress(moduleKey, row.status),
     nextActions: w10NextActions(moduleKey, row.status),
@@ -204,6 +202,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (!moduleKey) return Response.json({ error: "unknown_w10_module" }, { status: 404 });
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  const readDenied = forbidden(context, moduleKey, W10_MODULES[moduleKey].read);
+  if (readDenied) return readDenied;
 
   let payload: Record<string, unknown>;
   try {
@@ -233,6 +233,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (amountMilli < 0 || amountMilli > 9_000_000_000_000) return Response.json({ error: "amount_out_of_range" }, { status: 400 });
 
     try {
+      if (jobReference) {
+        const jobsDenied = forbidden(context, moduleKey, "operations.read");
+        if (jobsDenied) return jobsDenied;
+      }
       const operationJob = jobReference ? await findOperationJob(context.tenantId, jobReference) : null;
       if (jobReference && !operationJob) return Response.json({ error: "w10_job_not_found" }, { status: 404 });
       const jobId = operationJob?.id ?? null;
@@ -247,8 +251,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const id = `W10-${moduleKey.toUpperCase()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const eventId = crypto.randomUUID();
       const initialStatus = W10_MODULES[moduleKey].initialStatus;
-      const payloadJson = JSON.stringify({ source: "sites-w10-workflow", createdAt: now, input: payload });
-      if (payloadJson.length > 14_000) return Response.json({ error: "payload_too_large" }, { status: 400 });
+      const payloadJson = JSON.stringify({ source: "sites-w10-workflow", createdAt: now });
       await getDb().batch([
         getDb().insert(w10Workflows).values({
           id,
