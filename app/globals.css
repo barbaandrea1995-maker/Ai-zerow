@@ -1848,6 +1848,14 @@ main > div > aside:not(.zw-workspace-sidebar) {
   z-index: 110 !important;
 }
 
+@media (max-width: 1023px) {
+  body.zw-mobile-focused-role .zw-global-workspace-sidebar,
+  body.zw-mobile-focused-role button[aria-label="Apri menu"],
+  body.zw-mobile-focused-role button[aria-label="Apri navigazione"] {
+    display: none !important;
+  }
+}
+
 @media (min-width: 1024px) {
   body.has-zerow-workspace-sidebar > main,
   body.has-zerow-workspace-sidebar .zw-app-shell,

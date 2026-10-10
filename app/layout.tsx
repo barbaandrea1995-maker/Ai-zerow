@@ -35,7 +35,7 @@ export default async function RootLayout({
   let authority: GlobalAuthority | null = null;
   try {
     const context = await getAuthorityContext();
-    if (context) authority = { role: context.role, capabilities: context.capabilities };
+    if (context) authority = { role: context.role, roles: context.roles, capabilities: context.capabilities };
   } catch {
     authority = null;
   }
