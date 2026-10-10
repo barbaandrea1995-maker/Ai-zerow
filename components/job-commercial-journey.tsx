@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { CalendarClock, Check, CheckCircle2, FileArchive, GitBranch as GitBranchIcon, HardHat, LoaderCircle, LockKeyhole, PackageCheck, Pencil, Play, RefreshCw, Send, ShieldCheck, Truck, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +23,16 @@ type JourneyPayload = {
   documents: { access: "granted" | "restricted"; count: number; records: Array<{ id: string; fileName: string; category: string; sizeBytes: number; scanStatus: string; status: string; downloadable: boolean; downloadUrl: string; createdAt: string }> };
   };
   can: Record<string, boolean>;
+  options?: {
+    documentCategories?: Array<{ value: string; label: string }>;
+    inventoryUnits?: Array<{ code: string; label: string; symbol: string }>;
+    workforce?: {
+      people: Array<{ id: string; label: string }>;
+      teams: Array<{ id: string; label: string }>;
+    };
+  };
+  readback?: { status: string; checkedAt?: string };
+  mutation?: { action: string; eventId?: string; record?: JourneyRecord; idempotent?: boolean };
 };
 type ModalKind = "planning" | "field" | "material" | "material_review" | "mission" | "delivery" | "document" | null;
 type ReviewLine = { id: string; itemId: string | null; description: string; unit: string; quantity: number };
@@ -106,7 +116,7 @@ function DocumentSecurityActions({ document, allowed, busy, onAction }: { docume
   return null;
 }
 
-function RecordActions({ record, can, mutate, deliver, review }: { record: JourneyRecord; can: Record<string, boolean>; mutate: (action: string, body: Record<string, unknown>) => Promise<void>; deliver: (record: JourneyRecord) => void; review: (record: JourneyRecord) => void }) {
+function RecordActions({ record, can, mutate, deliver, review }: { record: JourneyRecord; can: Record<string, boolean>; mutate: (action: string, body: Record<string, unknown>) => Promise<boolean>; deliver: (record: JourneyRecord) => void; review: (record: JourneyRecord) => void }) {
   if (record.domain === "planning" && record.status === "DRAFT" && can.planning_publish) return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 transition hover:bg-lime-300/10" onClick={() => void mutate("planning_publish", { recordId: record.id, expectedVersion: record.version })} type="button"><Send className="mr-1.5 inline size-3" />Pubblica</button>;
   if (record.domain === "field" && record.status === "OPEN" && can.field_close) return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 transition hover:bg-lime-300/10" onClick={() => void mutate("field_close", { recordId: record.id, expectedVersion: record.version, summary: "Sessione chiusa dal workspace operativo" })} type="button"><Check className="mr-1.5 inline size-3" />Chiudi</button>;
   if (record.domain === "warehouse" && record.status === "REQUESTED" && can.material_review) return <div className="flex gap-1.5"><button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 hover:bg-lime-300/10" onClick={() => review(record)} type="button"><Pencil className="mr-1.5 inline size-3" />Rivedi</button><button className="rounded-lg border border-rose-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-rose-100 hover:bg-rose-300/10" onClick={() => void mutate("material_review", { recordId: record.id, expectedVersion: record.version, decision: "REJECTED", note: "Richiesta rifiutata dal responsabile" })} type="button">Rifiuta</button></div>;
@@ -130,6 +140,8 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   const [modal, setModal] = useState<ModalKind>(null);
   const [selected, setSelected] = useState<JourneyRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const idempotencyKeys = useRef(new Map<string, string>());
   const [securityBusy, setSecurityBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [plannedAt, setPlannedAt] = useState("");
@@ -148,6 +160,15 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   const [warehouseState, setWarehouseState] = useState<"idle" | "loading" | "ready" | "error">("idle");
 
   const notify = useCallback((message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 3400); }, []);
+  const requestKey = useCallback((scope: string, value: unknown) => {
+    const identity = `${scope}:${JSON.stringify(value)}`;
+    let key = idempotencyKeys.current.get(identity);
+    if (!key) {
+      key = `${scope}-${crypto.randomUUID()}`;
+      idempotencyKeys.current.set(identity, key);
+    }
+    return { identity, key };
+  }, []);
   const refresh = useCallback(async () => {
     try {
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/journey`, { cache: "no-store" });
@@ -160,37 +181,55 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
 
   useEffect(() => { const timer = window.setTimeout(() => void refresh(), 0); return () => window.clearTimeout(timer); }, [refresh]);
 
-  const mutate = useCallback(async (action: string, body: Record<string, unknown>) => {
+  const mutate = useCallback(async (action: string, body: Record<string, unknown>): Promise<boolean> => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
+    const { identity, key } = requestKey(`journey-${action}`, body);
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/journey`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, idempotencyKey: `journey-${action}-${crypto.randomUUID()}`, ...body }) });
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/journey`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, idempotencyKey: key, ...body }) });
       const result = await response.json() as JourneyPayload & { error?: string };
       if (!response.ok) {
         notify(result.error === "version_conflict" ? "Il record è cambiato: scheda aggiornata." : "Operazione non completata. Riprova.");
         if (response.status === 409) await refresh();
-        return;
+        if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity);
+        return false;
       }
+      if (result.readback?.status !== "verified"
+        || result.mutation?.action !== action
+        || !result.mutation.eventId
+        || !result.mutation.record
+        || !result.sections) {
+        notify("Il server non ha confermato registro e rilettura. Aggiorno il percorso.");
+        await refresh();
+        return false;
+      }
+      idempotencyKeys.current.delete(identity);
       setPayload(result);
       setModal(null);
       setSelected(null);
-      notify("Operazione registrata nella commessa.");
-    } catch { notify("Connessione non disponibile: nessuna operazione confermata."); }
-    finally { setBusy(false); }
-  }, [jobId, notify, refresh]);
+      notify(`Operazione registrata · ${result.mutation.eventId.slice(0, 8)} · v${result.mutation.record.version}`);
+      return true;
+    } catch { notify("Connessione non disponibile: nessuna operazione confermata."); return false; }
+    finally { busyRef.current = false; setBusy(false); }
+  }, [jobId, notify, refresh, requestKey]);
 
   const openMaterialReview = (record: JourneyRecord) => {
     const rawLines = Array.isArray(record.payload.lines) ? record.payload.lines : [];
+    const validUnits = new Set((payload?.options?.inventoryUnits ?? []).map((unit) => unit.code));
+    const fallbackUnit = validUnits.has("PZ") ? "PZ" : payload?.options?.inventoryUnits?.[0]?.code ?? "PZ";
     setReviewRecord(record);
     setReviewLines(rawLines.flatMap((line, index) => {
       if (!line || typeof line !== "object" || Array.isArray(line)) return [];
       const value = line as Record<string, unknown>;
       const quantity = Number(value.quantity);
       if (!Number.isFinite(quantity) || quantity <= 0) return [];
+      const requestedUnit = typeof value.unit === "string" ? value.unit.trim().toUpperCase() : "";
       return [{
         id: typeof value.id === "string" && value.id ? value.id : `line-${index + 1}`,
         itemId: typeof value.itemId === "string" && value.itemId ? value.itemId : null,
         description: typeof value.description === "string" ? value.description : typeof value.name === "string" ? value.name : "Materiale",
-        unit: typeof value.unit === "string" ? value.unit : "PZ",
+        unit: validUnits.has(requestedUnit) ? requestedUnit : fallbackUnit,
         quantity,
       }];
     }));
@@ -211,25 +250,37 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   };
 
   const mutateDocumentSecurity = useCallback(async (documentId: string, action: "queue_scan" | "manual_review") => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setSecurityBusy(`${documentId}:${action}`);
+    const identityBody = { documentId, action };
+    const { identity, key } = requestKey("document-security", identityBody);
     try {
       const response = await fetch(`/api/documents/${encodeURIComponent(documentId)}/security`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, idempotencyKey: `document-security-${action}-${documentId}-${crypto.randomUUID()}` }),
+        body: JSON.stringify({ action, idempotencyKey: key }),
       });
+      const result = await response.json() as { document?: JourneyDocument; eventId?: string; idempotent?: boolean; readback?: { status?: string; version?: number } };
       if (!response.ok) {
         notify("Verifica documento non completata. Riprova.");
+        if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity);
         return;
       }
+      if (!result.document || result.readback?.status !== "verified" || (!result.idempotent && !result.eventId)) {
+        notify("Il server non ha confermato evento e readback del documento.");
+        return;
+      }
+      idempotencyKeys.current.delete(identity);
       await refresh();
-      notify(action === "queue_scan" ? "Documento messo in quarantena per la scansione." : "Documento inviato alla revisione manuale.");
+      notify(`${action === "queue_scan" ? "Documento messo in quarantena per la scansione" : "Documento inviato alla revisione manuale"} · ${result.eventId?.slice(0, 8) ?? "riletto"} · v${result.readback.version}`);
     } catch {
       notify("Connessione non disponibile: nessuna transizione documento confermata.");
     } finally {
+      busyRef.current = false;
       setSecurityBusy("");
     }
-  }, [notify, refresh]);
+  }, [notify, refresh, requestKey]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -244,7 +295,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
         notify("Controlla le righe materiali prima di confermare.");
         return;
       }
-      await mutate("material_review", {
+      const saved = await mutate("material_review", {
         recordId: reviewRecord.id,
         expectedVersion: reviewRecord.version,
         decision,
@@ -252,7 +303,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
         lines: reviewLines,
         note: field(form, "reviewNote"),
       });
-      setReviewRecord(null);
+      if (saved) setReviewRecord(null);
       return;
     }
     if (modal === "planning") {
@@ -260,28 +311,40 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
         notify("Seleziona almeno una risorsa reale per il piano.");
         return;
       }
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
+      const planningBody = { action: "draft", title: field(form, "title"), startsAt: field(form, "startsAt"), endsAt: field(form, "endsAt"), resourceIds: planningResourceIds, notes: field(form, "notes") };
+      const { identity, key } = requestKey("planning-draft", planningBody);
       try {
         const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/planning`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "draft", title: field(form, "title"), startsAt: field(form, "startsAt"), endsAt: field(form, "endsAt"), resourceIds: planningResourceIds, notes: field(form, "notes"), idempotencyKey: `planning-draft-${crypto.randomUUID()}` }),
+          body: JSON.stringify({ ...planningBody, idempotencyKey: key }),
         });
+        const result = await response.json() as { plan?: JourneyRecord; eventId?: string; idempotent?: boolean; readback?: { status?: string; version?: number } };
         if (!response.ok) {
           notify("Piano non creato. Controlla i dati e riprova.");
+          if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity);
           return;
         }
+        if (!result.plan || result.readback?.status !== "verified" || (!result.idempotent && !result.eventId)) {
+          notify("Il server non ha confermato l’evento e il readback del piano.");
+          return;
+        }
+        idempotencyKeys.current.delete(identity);
         await refresh();
         setModal(null);
-        notify("Piano creato in bozza.");
+        notify(`Piano registrato · ${result.eventId?.slice(0, 8) ?? "riletto"} · v${result.readback.version}`);
       } catch {
         notify("Connessione non disponibile: nessun piano confermato.");
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
       return;
     }
-    if (modal === "field") await mutate("field_open", { title: field(form, "title"), startedAt: field(form, "startedAt"), team: field(form, "team"), supervisor: field(form, "supervisor"), notes: field(form, "notes") });
+    if (modal === "field") await mutate("field_open", { title: field(form, "title"), startedAt: field(form, "startedAt"), teamId: field(form, "teamId"), supervisorMembershipId: field(form, "supervisorMembershipId"), notes: field(form, "notes") });
     if (modal === "material") await mutate("material_request", { title: field(form, "title"), neededAt: field(form, "neededAt"), deliveryPoint: field(form, "deliveryPoint"), notes: field(form, "notes"), lines: [{ description: field(form, "description"), quantity: field(form, "quantity"), unit: field(form, "unit") }] });
     if (modal === "mission") {
       if (!field(form, "driverId") || !field(form, "vehicleId")) {
@@ -300,14 +363,26 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       const file = form.get("file");
       if (!(file instanceof File) || !file.size) { notify("Seleziona un file."); return; }
       if (file.size > 20 * 1024 * 1024) { notify("Il file supera il limite di 20 MB."); return; }
-      form.set("idempotencyKey", `document-upload-${crypto.randomUUID()}`);
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
+      const uploadIdentity = {
+        category: field(form, "category"),
+        fileName: file.name,
+        size: file.size,
+        lastModified: file.lastModified,
+      };
+      const { identity, key } = requestKey("document-upload", uploadIdentity);
+      form.set("idempotencyKey", key);
       try {
         const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/documents`, { method: "POST", body: form });
-        if (!response.ok) { notify("Documento non archiviato. Controlla il file e riprova."); return; }
-        await refresh(); setModal(null); notify("Documento archiviato e verificato.");
+        const result = await response.json() as { document?: JourneyDocument; eventId?: string; idempotent?: boolean; duplicate?: boolean; readback?: { status?: string; version?: number } };
+        if (!response.ok) { notify("Documento non archiviato. Controlla il file e riprova."); if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity); return; }
+        if (!result.document || result.readback?.status !== "verified" || (!result.idempotent && !result.eventId)) { notify("Il server non ha confermato il documento nel registro."); return; }
+        idempotencyKeys.current.delete(identity);
+        await refresh(); setModal(null); notify(`Documento archiviato e riletto · ${result.eventId?.slice(0, 8) ?? "duplicato"} · v${result.readback.version}`);
       } catch { notify("Caricamento non disponibile: nessun documento confermato."); }
-      finally { setBusy(false); }
+      finally { busyRef.current = false; setBusy(false); }
     }
   };
 
@@ -383,12 +458,12 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
 
     <Dialog open={modal !== null} onOpenChange={(open) => !open && setModal(null)}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[600px]"><DialogHeader><DialogTitle>{modal === "planning" ? "Nuovo piano operativo" : modal === "field" ? "Apri sessione di cantiere" : modal === "material" ? "Richiesta materiali" : modal === "material_review" ? "Revisiona richiesta materiali" : modal === "mission" ? "Nuova missione di trasporto" : modal === "delivery" ? "Prova di consegna" : "Carica documento"}</DialogTitle><DialogDescription className="text-slate-500">Le informazioni vengono validate prima di essere confermate nella commessa.</DialogDescription></DialogHeader><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
       {modal === "planning" && <><label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Attività operativa" required /></label><label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" name="startsAt" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label><label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" name="endsAt" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label><PlanningResourceFields jobId={jobId} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} /><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
-      {modal === "field" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Sessione di cantiere" required /></label><label className="text-xs text-slate-400">Apertura<Input className="mt-2 border-white/10 bg-black/30" name="startedAt" type="datetime-local" required /></label><label className="text-xs text-slate-400">Squadra<Input className="mt-2 border-white/10 bg-black/30" name="team" /></label><label className="text-xs text-slate-400 sm:col-span-2">Supervisore<Input className="mt-2 border-white/10 bg-black/30" name="supervisor" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
-      {modal === "material" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Richiesta materiali" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Materiale<Input className="mt-2 border-white/10 bg-black/30" name="description" placeholder="Descrizione materiale" required /></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" min="0.001" name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Unità<Input className="mt-2 border-white/10 bg-black/30" name="unit" placeholder="pz, m, kg…" required /></label><label className="text-xs text-slate-400">Necessario entro<Input className="mt-2 border-white/10 bg-black/30" name="neededAt" type="datetime-local" /></label><label className="text-xs text-slate-400">Punto consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveryPoint" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
-      {modal === "material_review" && reviewRecord && <><div className="rounded-2xl border border-amber-300/15 bg-amber-300/[0.035] p-4 sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-200/70">REVISIONE MAGAZZINO</p><p className="mt-2 text-sm font-semibold text-slate-100">{reviewRecord.title}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">Assegna il magazzino di evasione e conferma o correggi le quantità. Le righe richieste restano nello storico.</p></div><label className="text-xs text-slate-400 sm:col-span-2">Magazzino di evasione<select aria-label="Magazzino di evasione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="warehouseId" onChange={(event) => setReviewWarehouseId(event.target.value)} required value={reviewWarehouseId}><option value="">{warehouseState === "loading" ? "Caricamento magazzini…" : warehouseState === "error" ? "Catalogo non disponibile" : "Seleziona magazzino"}</option>{warehouseOptions.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name} · {warehouse.locationLabel}</option>)}</select></label><label className="text-xs text-slate-400">Esito<select aria-label="Esito revisione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="reviewDecision" defaultValue="APPROVED"><option value="APPROVED">Approva quantità richieste</option><option value="MODIFIED">Modifica quantità e approva</option></select></label><div className="space-y-2 sm:col-span-2">{reviewLines.map((line, index) => <div className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-3 sm:grid-cols-[minmax(0,1fr)_100px_100px]" key={line.id}><label className="text-[10px] text-slate-500">Materiale<Input className="mt-1 h-9 border-white/10 bg-black/30 text-xs" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value } : item))} value={line.description} /></label><label className="text-[10px] text-slate-500">Quantità<Input className="mt-1 h-9 border-white/10 bg-black/30 text-xs" min="0.001" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(event.target.value) } : item))} step="0.001" type="number" value={line.quantity} /></label><label className="text-[10px] text-slate-500">Unità<Input className="mt-1 h-9 border-white/10 bg-black/30 text-xs" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, unit: event.target.value } : item))} value={line.unit} /></label></div>)}{!reviewLines.length && <p className="rounded-xl border border-rose-300/15 bg-rose-300/[0.03] p-3 text-[10px] text-rose-100">Nessuna riga valida da revisionare.</p>}</div><label className="text-xs text-slate-400 sm:col-span-2">Nota del responsabile<Textarea className="mt-2 border-white/10 bg-black/30" name="reviewNote" placeholder="Vincoli, sostituzioni o quantità approvate…" /></label></>}
+      {modal === "field" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Sessione di cantiere" required /></label><label className="text-xs text-slate-400">Apertura<Input className="mt-2 border-white/10 bg-black/30" name="startedAt" type="datetime-local" required /></label><label className="text-xs text-slate-400">Squadra<select aria-label="Squadra di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="teamId" defaultValue=""><option value="">Non assegnata</option>{(payload.options?.workforce?.teams ?? []).map((team) => <option key={team.id} value={team.id}>{team.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Supervisore<select aria-label="Supervisore di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="supervisorMembershipId" defaultValue=""><option value="">Non assegnato</option>{(payload.options?.workforce?.people ?? []).map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
+      {modal === "material" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Richiesta materiali" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Materiale<Input className="mt-2 border-white/10 bg-black/30" name="description" placeholder="Descrizione materiale" required /></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" min="0.001" name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Unità<select aria-label="Unità materiale" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="unit" required defaultValue="PZ">{(payload.options?.inventoryUnits ?? []).map((unit) => <option key={unit.code} value={unit.code}>{unit.label} ({unit.symbol})</option>)}</select></label><label className="text-xs text-slate-400">Necessario entro<Input className="mt-2 border-white/10 bg-black/30" name="neededAt" type="datetime-local" /></label><label className="text-xs text-slate-400">Punto consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveryPoint" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
+      {modal === "material_review" && reviewRecord && <><div className="rounded-2xl border border-amber-300/15 bg-amber-300/[0.035] p-4 sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-200/70">REVISIONE MAGAZZINO</p><p className="mt-2 text-sm font-semibold text-slate-100">{reviewRecord.title}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">Assegna il magazzino di evasione e conferma o correggi le quantità. Le righe richieste restano nello storico.</p></div><label className="text-xs text-slate-400 sm:col-span-2">Magazzino di evasione<select aria-label="Magazzino di evasione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="warehouseId" onChange={(event) => setReviewWarehouseId(event.target.value)} required value={reviewWarehouseId}><option value="">{warehouseState === "loading" ? "Caricamento magazzini…" : warehouseState === "error" ? "Catalogo non disponibile" : "Seleziona magazzino"}</option>{warehouseOptions.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name} · {warehouse.locationLabel}</option>)}</select></label><label className="text-xs text-slate-400">Esito<select aria-label="Esito revisione" className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" name="reviewDecision" defaultValue="APPROVED"><option value="APPROVED">Approva quantità richieste</option><option value="MODIFIED">Modifica quantità e approva</option></select></label><div className="space-y-2 sm:col-span-2">{reviewLines.map((line, index) => <div className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/20 p-3 sm:grid-cols-[minmax(0,1fr)_100px_100px]" key={line.id}><label className="text-[10px] text-slate-500">Materiale<Input className="mt-1 h-9 border-white/10 bg-black/30 text-xs" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value } : item))} value={line.description} /></label><label className="text-[10px] text-slate-500">Quantità<Input className="mt-1 h-9 border-white/10 bg-black/30 text-xs" min="0.001" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Number(event.target.value) } : item))} step="0.001" type="number" value={line.quantity} /></label><label className="text-[10px] text-slate-500">Unità<select aria-label={`Unità per ${line.description}`} className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-100" onChange={(event) => setReviewLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, unit: event.target.value } : item))} value={line.unit}>{(payload.options?.inventoryUnits ?? []).map((unit) => <option key={unit.code} value={unit.code}>{unit.code}</option>)}</select></label></div>)}{!reviewLines.length && <p className="rounded-xl border border-rose-300/15 bg-rose-300/[0.03] p-3 text-[10px] text-rose-100">Nessuna riga valida da revisionare.</p>}</div><label className="text-xs text-slate-400 sm:col-span-2">Nota del responsabile<Textarea className="mt-2 border-white/10 bg-black/30" name="reviewNote" placeholder="Vincoli, sostituzioni o quantità approvate…" /></label></>}
       {modal === "mission" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Missione di trasporto" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{(payload.context?.operatingTransportModes ?? []).map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode as TransportMode]?.label ?? mode}</option>)}</select></label>{transportMode === "WAREHOUSE_TO_JOB" && <label className="text-xs text-slate-400 sm:col-span-2">Richiesta materiali approvata<select aria-label="Richiesta materiali approvata" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="materialRequestId" required><option value="">Seleziona richiesta</option>{payload.sections.warehouse.records.filter((record) => record.recordType === "MATERIAL_REQUEST" && record.status === "APPROVED" && !record.payload.missionId).map((record) => <option key={record.id} value={record.id}>{record.title} · {textValue(record.payload.deliveryPoint, "Punto consegna da definire")}</option>)}</select></label>}{transportMode === "WAREHOUSE_TO_JOB" && !payload.sections.warehouse.records.some((record) => record.recordType === "MATERIAL_REQUEST" && record.status === "APPROVED" && !record.payload.missionId) && <p className="rounded-xl border border-amber-300/15 bg-amber-300/[0.03] p-3 text-[10px] text-amber-100 sm:col-span-2">Prima di programmare il trasporto, il responsabile deve approvare una richiesta materiali.</p>}<label className="text-xs text-slate-400">Partenza<Input className="mt-2 border-white/10 bg-black/30" name="pickup" required /></label><label className="text-xs text-slate-400">Destinazione<Input className="mt-2 border-white/10 bg-black/30" name="dropoff" required /></label><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" type="datetime-local" onChange={(event) => setPlannedAt(event.target.value)} required value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" type="datetime-local" onChange={(event) => setPlannedEndAt(event.target.value)} value={plannedEndAt} /></label><MissionResourceFields plannedAt={plannedAt} plannedEndAt={plannedEndAt} transportMode={transportMode} driverId={driverId} vehicleId={vehicleId} cargoAssetId={cargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} onCargoAssetChange={setCargoAssetId} /><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
       {modal === "delivery" && <><label className="text-xs text-slate-400 sm:col-span-2">Ricevente<Input className="mt-2 border-white/10 bg-black/30" name="recipient" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Data consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveredAt" type="datetime-local" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota POD<Textarea className="mt-2 border-white/10 bg-black/30" name="note" /></label></>}
-      {modal === "document" && <><label className="text-xs text-slate-400 sm:col-span-2">Categoria<Input className="mt-2 border-white/10 bg-black/30" name="category" defaultValue="COMMESSA" required /></label><label className="rounded-2xl border border-dashed border-lime-300/20 bg-lime-300/[0.035] p-5 text-xs text-slate-400 sm:col-span-2"><Upload className="mb-3 size-5 text-lime-200" />File · massimo 20 MB<Input accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic,.heif" className="mt-3 border-white/10 bg-black/30 file:text-lime-200" name="file" type="file" required /><span className="mt-2 block text-[10px] text-slate-600">DOCX incluso. Il documento viene verificato prima dell’archiviazione.</span></label></>}
+      {modal === "document" && <><label className="text-xs text-slate-400 sm:col-span-2">Categoria<select aria-label="Categoria documento" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="category" defaultValue="COMMESSA" required>{(payload.options?.documentCategories ?? []).map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select></label><label className="rounded-2xl border border-dashed border-lime-300/20 bg-lime-300/[0.035] p-5 text-xs text-slate-400 sm:col-span-2"><Upload className="mb-3 size-5 text-lime-200" />File · massimo 20 MB<Input accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic,.heif" className="mt-3 border-white/10 bg-black/30 file:text-lime-200" name="file" type="file" required /><span className="mt-2 block text-[10px] text-slate-600">DOCX incluso. Il documento viene verificato prima dell’archiviazione.</span></label></>}
       <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={busy || (modal === "material_review" && warehouseState !== "ready")} type="submit" className="bg-lime-300 text-[#050705] hover:bg-lime-200">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "material_review" ? "Conferma revisione" : "Conferma"}</Button></DialogFooter>
     </form></DialogContent></Dialog>
     {notice && <button className="fixed bottom-5 right-5 z-[70] max-w-[370px] rounded-xl border border-lime-300/25 bg-[#080d09]/95 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_30px_rgba(190,255,60,0.14)] backdrop-blur-xl" onClick={() => setNotice("")} type="button"><CheckCircle2 className="mr-2 inline size-4 text-lime-300" />{notice}</button>}

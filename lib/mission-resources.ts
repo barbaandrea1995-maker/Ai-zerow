@@ -356,5 +356,6 @@ export async function assertMissionResourceSelection(args: {
     if (selectedCargoAsset && !selectedCargoAsset.available) throw new MissionResourceError(selectedCargoAsset.conflict ? "mission_resource_conflict" : "cargo_asset_unavailable", { resourceId: selectedCargoAsset.id, conflict: selectedCargoAsset.conflict });
   }
 
-  return { driver, vehicle, cargoAsset, cargoAssets: cargoAssets.filter((resource): resource is MissionResource => Boolean(resource)), window: catalog.window! };
+  const resolvedCargoAssets = cargoAssets.flatMap((resource) => resource ? [resource] : []);
+  return { driver, vehicle, cargoAsset, cargoAssets: resolvedCargoAssets, window: catalog.window! };
 }

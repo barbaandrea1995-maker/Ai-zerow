@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantMemberships } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -11,6 +11,7 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import {
   canTransitionJob,
   clampJobProgress,
+  JOB_STATUS_CODES,
   activeRapportinoDate,
   buildRapportinoReadback,
   composeRapportinoNarrative,
@@ -27,7 +28,8 @@ import {
   type RapportinoContext,
   type RapportinoReadback,
 } from "@/lib/operations-contract";
-import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
+import { COMPANY_AI_SCOPE_TAXONOMY, COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius } from "@/lib/location-intelligence/repository";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
@@ -44,6 +46,76 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
 type WorkspaceSectionStatus = "readback" | "empty" | "deferred";
+
+const ASSIGNABLE_ROLES = new Set([
+  "technical", "field_supervisor", "worker", "driver", "delivery_driver", "maintenance", "manager", "office",
+]);
+const ASSIGNMENT_ROLE_OPTIONS = [
+  { value: "RESPONSABILE_OPERATIVO", label: "Responsabile operativo" },
+  { value: "CAPOSQUADRA", label: "Caposquadra" },
+  { value: "RESPONSABILE_CANTIERE", label: "Responsabile di cantiere" },
+  { value: "REFERENTE_TECNICO", label: "Referente tecnico" },
+] as const;
+const STATUS_ACTION_LABELS: Record<string, string> = {
+  PROPOSED: "Invia in proposta",
+  APPROVED: "Approva commessa",
+  PLANNED: "Pianifica commessa",
+  ACTIVE: "Avvia commessa",
+  BLOCKED: "Segna come bloccata",
+  COMPLETED: "Verifica completamento",
+  CLOSED: "Chiudi commessa",
+  CANCELLED: "Annulla commessa",
+};
+const STATUS_TRANSITION_PRIORITY = ["PROPOSED", "APPROVED", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED", "BLOCKED", "CANCELLED"];
+
+function workforceEntityType(row: typeof s04Records.$inferSelect) {
+  const payload = parsePayload(row.payloadJson);
+  return safeText(payload.entityType ?? payload.resourceKind ?? payload.kind, row.recordType).toLowerCase();
+}
+
+async function assignmentOptions(
+  context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
+  rows: (typeof s04Records.$inferSelect)[],
+) {
+  const registryReadable = hasCapability(context, "workforce.registry.read")
+    || hasCapability(context, "workforce.read.all")
+    || hasCapability(context, "workforce.manage");
+  if (!registryReadable) return { people: [], teams: [] };
+
+  const memberships = await getDb().select({
+    id: tenantMemberships.id,
+    actorId: tenantMemberships.actorId,
+    displayName: tenantMemberships.displayName,
+    role: tenantMemberships.role,
+    rolesJson: tenantMemberships.rolesJson,
+  }).from(tenantMemberships).where(and(
+    eq(tenantMemberships.tenantId, context.tenantId),
+    eq(tenantMemberships.status, "active"),
+  ));
+  const people = memberships.flatMap((membership) => {
+    const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
+    if (!roles.some((role) => ASSIGNABLE_ROLES.has(role))) return [];
+    return [{
+      id: membership.id,
+      actorId: membership.actorId,
+      label: membership.displayName,
+      role: roles[0] ?? membership.role,
+    }];
+  });
+  const activeMembershipIds = new Set(memberships.map((membership) => membership.id));
+  const teams = rows.flatMap((row) => {
+    if (row.module !== "workforce" || workforceEntityType(row) !== "team") return [];
+    const payload = parsePayload(row.payloadJson);
+    const rawMembers = Array.isArray(payload.memberMembershipIds)
+      ? payload.memberMembershipIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const memberMembershipIds = [...new Set(rawMembers.filter((id) => activeMembershipIds.has(id)))];
+    const status = safeText(payload.statusCode ?? payload.status, row.status).toUpperCase();
+    if (!memberMembershipIds.length || ["INACTIVE", "SUSPENDED", "ARCHIVED", "CANCELLED"].includes(status)) return [];
+    return [{ id: row.id, label: row.title, memberMembershipIds }];
+  });
+  return { people, teams };
+}
 
 function parsePayload(payloadJson: string): JsonObject {
   try {
@@ -401,6 +473,20 @@ async function workspaceResponse(
   const payload = parseJobPayload(jobRow.payloadJson);
   const progress = clampJobProgress(payload.progress ?? jobRow.progress);
   const jobKey = jobRow.canonicalCode ?? jobRow.id;
+  const canWriteOperations = hasCapability(context, "operations.write");
+  const canReadAssignmentRegistry = hasCapability(context, "workforce.registry.read")
+    || hasCapability(context, "workforce.read.all")
+    || hasCapability(context, "workforce.manage");
+  const assignments = canWriteOperations && canReadAssignmentRegistry
+    ? await assignmentOptions(context, rows)
+    : { people: [], teams: [] };
+  const statusCode = normalizeJobStatus(payload.statusCode ?? jobRow.status);
+  const statusTransitions = canWriteOperations
+    ? JOB_STATUS_CODES
+      .filter((candidate) => candidate !== statusCode && canTransitionJob(statusCode, candidate))
+      .sort((left, right) => STATUS_TRANSITION_PRIORITY.indexOf(left) - STATUS_TRANSITION_PRIORITY.indexOf(right))
+      .map((candidate) => ({ statusCode: candidate, label: jobStatusLabel(candidate), actionLabel: STATUS_ACTION_LABELS[candidate] ?? `Aggiorna stato · ${jobStatusLabel(candidate)}` }))
+    : [];
   const canReadRapportinoDetails = hasCapability(context, "operations.write")
     || hasCapability(context, "operations.rapportino.write")
     || hasCapability(context, "operations.rapportino.review")
@@ -542,6 +628,31 @@ async function workspaceResponse(
     workspace: {
       source: "sites-d1-w03-commessa-read-write",
       authority: "server-context",
+      options: canWriteOperations ? {
+        commercial: {
+          openingTypes: COMMESSA_TYPES,
+          priorities: [
+            { value: "HIGH", label: "Alta" },
+            { value: "STANDARD", label: "Standard" },
+            { value: "LOW", label: "Bassa" },
+          ],
+          scopeSections: COMPANY_AI_SCOPE_TAXONOMY.map((section) => ({
+            id: section.id,
+            title: section.title,
+            groups: section.groups.map((group) => ({
+              id: group.id,
+              title: group.title,
+              subgroups: group.subgroups.map((subgroup) => ({ id: subgroup.id, title: subgroup.title })),
+            })),
+          })),
+        },
+        assignment: {
+          people: assignments.people,
+          teams: assignments.teams.map(({ id, label }) => ({ id, label })),
+          roles: ASSIGNMENT_ROLE_OPTIONS,
+        },
+      } : undefined,
+      statusTransitions,
       completion: {
         ready: completionRequirements.every((requirement) => requirement.complete),
         requirements: completionRequirements,
@@ -818,10 +929,14 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (existing[0].aggregateType !== "commessa" || existing[0].aggregateId !== aggregateId) {
         return Response.json({ error: "operations_idempotency_key_conflict" }, { status: 409 });
       }
+      const existingPayload = parsePayload(existing[0].payloadJson);
+      if (safeText(existingPayload.action) !== action) {
+        return Response.json({ error: "operations_idempotency_key_conflict" }, { status: 409 });
+      }
       return Response.json({
         ...(await workspaceResponse(context, jobRow, rows, requestedJobId)),
         idempotent: true,
-        mutation: { action, eventId: existing[0].eventId, readback: "verified" },
+        mutation: { action, eventId: existing[0].eventId, version: existing[0].aggregateVersion, readback: "verified" },
       }, { headers: { "cache-control": "no-store" } });
     }
 
@@ -915,16 +1030,30 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       }
       next.progress = clampJobProgress(rawProgress);
       eventType = "operations.job.progress_changed";
-      change = { progress: next.progress };
+      change = { from: current.progress ?? jobRow.progress, to: next.progress };
     } else if (action === "add_activity") {
       const title = boundedText(input.title, 160);
       if (title.length < 2) return Response.json({ error: "activity_title_required" }, { status: 400 });
+      const ownerMembershipId = boundedText(input.ownerMembershipId, 160);
+      const ownerTeamId = boundedText(input.ownerTeamId, 160);
+      if (ownerMembershipId && ownerTeamId) return Response.json({ error: "activity_owner_selection_invalid" }, { status: 400 });
+      let activityOwner = { label: "Da assegnare", id: "", kind: "" as "" | "person" | "team" };
+      if (ownerMembershipId || ownerTeamId) {
+        const options = await assignmentOptions(context, rows);
+        const person = ownerMembershipId ? options.people.find((item) => item.id === ownerMembershipId) : null;
+        const selectedTeam = ownerTeamId ? options.teams.find((item) => item.id === ownerTeamId) : null;
+        if (ownerMembershipId && !person) return Response.json({ error: "activity_owner_not_assignable" }, { status: 409 });
+        if (ownerTeamId && !selectedTeam) return Response.json({ error: "activity_owner_not_assignable" }, { status: 409 });
+        if (person) activityOwner = { label: person.label, id: person.id, kind: "person" };
+        if (selectedTeam) activityOwner = { label: selectedTeam.label, id: selectedTeam.id, kind: "team" };
+      }
       const activity: JobActivity = {
         id: `activity-${crypto.randomUUID().slice(0, 8)}`,
         title,
         detail: boundedText(input.detail, 280, "Attività operativa"),
         state: input.state === "active" || input.state === "done" || input.state === "blocked" ? input.state : "queued",
-        owner: boundedText(input.owner, 120, "Da assegnare"),
+        owner: activityOwner.label,
+        ...(activityOwner.id && activityOwner.kind ? { ownerResourceId: activityOwner.id, ownerResourceKind: activityOwner.kind } : {}),
         dueDate: boundedText(input.dueDate, 40, "—"),
         progress: clampJobProgress(input.progress),
         createdAt: now,
@@ -932,30 +1061,55 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       };
       next.activities = [...current.activities, activity];
       eventType = "operations.job.activity_added";
-      change = { activityId: activity.id, title: activity.title };
+      change = {
+        activityId: activity.id,
+        title: activity.title,
+        detail: activity.detail,
+        ownerResourceId: activity.ownerResourceId ?? null,
+        ownerResourceKind: activity.ownerResourceKind ?? null,
+        dueDate: activity.dueDate,
+      };
     } else if (action === "complete_activity") {
       const activityId = boundedText(input.activityId, 120);
       const activity = current.activities.find((item) => item.id === activityId);
       if (!activity) return Response.json({ error: "activity_not_found" }, { status: 404 });
       next.activities = current.activities.map((item) => item.id === activityId ? { ...item, state: "done", progress: 100, updatedAt: now } : item);
       eventType = "operations.job.activity_completed";
-      change = { activityId };
+      change = { activityId, from: activity.state, to: "done" };
     } else if (action === "assign") {
-      const responsible = boundedText(input.responsible, 120);
-      const team = boundedText(input.team, 120);
-      if (!responsible && !team) return Response.json({ error: "responsible_or_team_required" }, { status: 400 });
+      const responsibleMembershipId = boundedText(input.responsibleMembershipId, 160);
+      const teamId = boundedText(input.teamId, 160);
+      if ((!responsibleMembershipId && !teamId) || (responsibleMembershipId && teamId)) {
+        return Response.json({ error: "responsible_or_team_required" }, { status: 400 });
+      }
+      const options = await assignmentOptions(context, rows);
+      const responsibleOption = responsibleMembershipId
+        ? options.people.find((item) => item.id === responsibleMembershipId)
+        : null;
+      const teamOption = teamId ? options.teams.find((item) => item.id === teamId) : null;
+      if (responsibleMembershipId && !responsibleOption) return Response.json({ error: "assignment_person_not_assignable" }, { status: 409 });
+      if (teamId && !teamOption) return Response.json({ error: "assignment_team_not_assignable" }, { status: 409 });
+      const roleCode = boundedText(input.role, 80);
+      const roleOption = ASSIGNMENT_ROLE_OPTIONS.find((option) => option.value === roleCode);
+      if (!roleOption) return Response.json({ error: "assignment_role_invalid", allowed: ASSIGNMENT_ROLE_OPTIONS }, { status: 400 });
+      const responsible = responsibleOption?.label ?? "Da assegnare";
+      const team = teamOption?.label ?? "Da assegnare";
       next.assignment = {
-        responsible: responsible || "Da assegnare",
-        team: team || "Da assegnare",
-        role: boundedText(input.role, 120, "Responsabile operativo"),
+        responsible,
+        team,
+        role: roleOption.label,
+        roleCode: roleOption.value,
         assignedAt: now,
         assignedBy: context.actorId,
-        ...(boundedText(input.responsibleActorId ?? input.responsibleId, 160) ? { responsibleActorId: boundedText(input.responsibleActorId ?? input.responsibleId, 160) } : {}),
-        ...(boundedText(input.responsibleMembershipId ?? input.membershipId, 160) ? { responsibleMembershipId: boundedText(input.responsibleMembershipId ?? input.membershipId, 160) } : {}),
-        ...(boundedText(input.teamId, 160) ? { teamId: boundedText(input.teamId, 160) } : {}),
+        ...(responsibleOption ? { responsibleActorId: responsibleOption.actorId, responsibleMembershipId: responsibleOption.id } : {}),
+        ...(teamOption ? { teamId: teamOption.id } : {}),
       };
       eventType = "operations.job.assigned";
-      change = { responsible: next.assignment.responsible, team: next.assignment.team };
+      change = {
+        responsibleMembershipId: responsibleOption?.id ?? null,
+        teamId: teamOption?.id ?? null,
+        roleCode: next.assignment.roleCode,
+      };
     } else if (action === "add_evidence") {
       const title = boundedText(input.title, 160, "Evidenza operativa");
       const evidence: JobEvidence = {
@@ -968,7 +1122,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       };
       next.evidence = [...current.evidence, evidence];
       eventType = "operations.job.evidence_added";
-      change = { evidenceId: evidence.id, kind: evidence.kind };
+      change = { evidenceId: evidence.id, kind: evidence.kind, title: evidence.title, detail: evidence.detail };
     } else if (action === "save_rapportino") {
       const answers = normalizeRapportinoAnswers(input.answers);
       const narrative = answers
@@ -980,7 +1134,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       const reportId = persistedRapportinoDate(priorReport) !== reportDate
         ? `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`
         : boundedText(priorReport.reportId, 80) || `RAPPORTINO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
-      next.rapportino = {
+      const savedReport: JsonObject = {
         status: "DRAFT",
         reportId,
         reportDate,
@@ -991,8 +1145,9 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         updatedAt: now,
         updatedBy: context.actorId,
       };
+      next.rapportino = savedReport;
       eventType = "operations.job.rapportino_saved";
-      change = { status: "DRAFT", reportSnapshot: { ...next.rapportino } };
+      change = { status: "DRAFT", reportSnapshot: savedReport };
     } else if (action === "submit_rapportino") {
       const answers = normalizeRapportinoAnswers(input.answers);
       if (!answers || answers.some((answer) => answer.length < 2)) {
@@ -1185,7 +1340,13 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (typeof fields.clientTaxId === "string") next.clientTaxId = boundedText(fields.clientTaxId, 80);
       if (typeof fields.clientContact === "string") next.clientContact = boundedText(fields.clientContact, 120);
       if (typeof fields.clientPhone === "string") next.clientPhone = boundedText(fields.clientPhone, 80);
-      if (typeof fields.clientEmail === "string") next.clientEmail = boundedText(fields.clientEmail, 160);
+      if (typeof fields.clientEmail === "string") {
+        const clientEmail = boundedText(fields.clientEmail, 160).toLowerCase();
+        if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+          return Response.json({ error: "client_email_invalid" }, { status: 400 });
+        }
+        next.clientEmail = clientEmail;
+      }
       if (typeof fields.clientReference === "string") next.clientReference = boundedText(fields.clientReference, 160);
       if (typeof fields.clientAddress === "string") next.clientAddress = boundedText(fields.clientAddress, 240);
       const requestedWorksite = typeof fields.worksite === "string" ? boundedText(fields.worksite, 320) : typeof fields.location === "string" ? boundedText(fields.location, 320) : "";
@@ -1269,11 +1430,48 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         next.jobType = scopeSelection.groupTitle;
         next.specialization = scopeSelection.subgroupTitle;
       }
-      if (typeof fields.category === "string") next.category = boundedText(fields.category, 80);
-      if (typeof fields.dueDate === "string") next.dueDate = boundedText(fields.dueDate, 40);
-      if (fields.priority === "HIGH" || fields.priority === "STANDARD" || fields.priority === "LOW") next.priority = fields.priority;
+      if (typeof fields.category === "string") {
+        const category = boundedText(fields.category, 80);
+        if (category && !COMPANY_AI_SCOPE_TAXONOMY.some((section) => section.title === category)) {
+          return Response.json({ error: "category_must_match_server_scope_catalog" }, { status: 400 });
+        }
+        next.category = category;
+      }
+      if (typeof fields.dueDate === "string") {
+        const dueDate = boundedText(fields.dueDate, 40);
+        if (dueDate && dueDate !== "—" && !Number.isFinite(Date.parse(dueDate))) {
+          return Response.json({ error: "due_date_invalid" }, { status: 400 });
+        }
+        next.dueDate = dueDate;
+      }
+      if (typeof fields.priority === "string") {
+        if (!["HIGH", "STANDARD", "LOW"].includes(fields.priority)) {
+          return Response.json({ error: "priority_invalid", allowed: ["HIGH", "STANDARD", "LOW"] }, { status: 400 });
+        }
+        next.priority = fields.priority as JobPayload["priority"];
+      }
       eventType = "operations.job.details_updated";
-      change = { fields: Object.keys(fields).filter((key) => ["title", "description", "client", "location", "category", "dueDate", "priority"].includes(key)) };
+      const commercialFieldNames = new Set([
+        "title", "description", "client", "clientName", "clientTaxId", "clientContact", "clientPhone",
+        "clientEmail", "clientReference", "clientAddress", "location", "worksite", "worksiteLocation",
+        "category", "openingType", "jobType", "specialization", "scope", "scopeSectionId", "scopeGroupId",
+        "scopeSubgroupId", "dueDate", "priority", "accessNotes", "cig", "cup",
+      ]);
+      const changedFields = Object.keys(fields).filter((key) => commercialFieldNames.has(key)
+        && JSON.stringify(current[key]) !== JSON.stringify(next[key]));
+      const auditValue = (key: string, source: JobPayload) => {
+        if (key === "worksiteLocation") return safeText(source.location);
+        if (key === "scope") {
+          const scope = isRecord(source.scope) ? source.scope : {};
+          return { sectionId: safeText(scope.sectionId), groupId: safeText(scope.groupId), subgroupId: safeText(scope.subgroupId) };
+        }
+        return source[key] ?? null;
+      };
+      change = {
+        fields: changedFields,
+        before: Object.fromEntries(changedFields.map((key) => [key, auditValue(key, current)])),
+        after: Object.fromEntries(changedFields.map((key) => [key, auditValue(key, next)])),
+      };
     } else {
       return Response.json({ error: "unknown_job_action" }, { status: 400 });
     }
@@ -1294,7 +1492,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       return Response.json({ error: "job_payload_too_large" }, { status: 413 });
     }
 
-    const statementBatch: BatchItem<"sqlite">[] = [
+    const statementBatch: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
       db.update(s04Records)
         .set({
           detail: next.location,
@@ -1417,6 +1615,37 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
 
     const updated = (updatedRows[0] as (typeof s04Records.$inferSelect)[])[0];
     if (!updated) return Response.json({ error: "version_conflict", currentVersion: current.version }, { status: 409 });
+
+    if (worksiteMutation) {
+      const { candidate, geoLocationId, geofenceId, staleGeofences } = worksiteMutation;
+      const [locationReadback] = await db.select().from(geoLocations).where(and(
+        eq(geoLocations.tenantId, context.tenantId),
+        eq(geoLocations.id, geoLocationId),
+      )).limit(1);
+      const activeGeofences = await db.select().from(geofences).where(and(
+        eq(geofences.tenantId, context.tenantId),
+        eq(geofences.entityId, jobRow.id),
+        eq(geofences.status, "ACTIVE"),
+      ));
+      const activeGeofence = activeGeofences.find((item) => item.id === geofenceId);
+      const staleStillActive = staleGeofences.some((stale) => activeGeofences.some((item) => item.id === stale.id));
+      const expectedLatitude = Math.round(candidate.latitude * 1_000_000);
+      const expectedLongitude = Math.round(candidate.longitude * 1_000_000);
+      const locationVerified = Boolean(locationReadback
+        && locationReadback.status === "ACTIVE"
+        && locationReadback.provider === candidate.provider
+        && locationReadback.providerPlaceId === candidate.providerPlaceId
+        && locationReadback.formattedAddress === candidate.formattedAddress
+        && locationReadback.latitudeE6 === expectedLatitude
+        && locationReadback.longitudeE6 === expectedLongitude);
+      const geofenceVerified = Boolean(activeGeofence
+        && activeGeofence.locationId === geoLocationId
+        && activeGeofence.centerLatitudeE6 === expectedLatitude
+        && activeGeofence.centerLongitudeE6 === expectedLongitude);
+      if (!locationVerified || !geofenceVerified || staleStillActive || activeGeofences.length !== 1) {
+        return Response.json({ error: "worksite_location_readback_failed", eventId, readback: { status: "unverified" } }, { status: 503 });
+      }
+    }
 
     const refreshed = await findJob(context, requestedJobId);
     return Response.json({

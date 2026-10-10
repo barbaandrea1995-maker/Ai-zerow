@@ -317,12 +317,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existingEvent) {
+      if (existingEvent.aggregateType !== "job.journey.planning") {
+        return Response.json({ error: "planning_idempotency_key_conflict" }, { status: 409 });
+      }
       const [record] = await db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.id, existingEvent.aggregateId),
+        eq(jobJourneyRecords.jobId, job.id),
       )).limit(1);
       if (!record) return Response.json({ error: "planning_idempotency_readback_unavailable" }, { status: 503 });
-      return Response.json({ plan: recordForResponse(record), idempotent: true, eventId: existingEvent.eventId }, { headers: { "cache-control": "private, no-store" } });
+      return Response.json({ plan: recordForResponse(record), idempotent: true, eventId: existingEvent.eventId, readback: { status: "verified", scope: "tenant", version: record.version } }, { headers: { "cache-control": "private, no-store" } });
     }
     if (NON_PLANNABLE_JOB_STATUSES.has(jobStatus)) {
       return Response.json({ error: "planning_job_not_active", status: jobStatus }, { status: 409 });
@@ -410,7 +414,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         now,
       });
       if (!result.row) return Response.json({ error: "planning_readback_unavailable" }, { status: 503 });
-      return Response.json({ plan: recordForResponse(result.row), evaluation, eventId: result.eventId, idempotent: false }, { status: 201, headers: { "cache-control": "private, no-store" } });
+      return Response.json({ plan: recordForResponse(result.row), evaluation, eventId: result.eventId, idempotent: false, readback: { status: "verified", scope: "tenant", version: result.row.version } }, { status: 201, headers: { "cache-control": "private, no-store" } });
     }
 
     if (action !== "publish") return Response.json({ error: "unsupported_planning_action", allowed: ["draft", "publish", "revise", "what_if"] }, { status: 400 });
@@ -430,7 +434,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const evaluation = evaluateAgainstTenant(data.slots, data.resources, await activeTenantPlans(context.tenantId, record.id));
     if (!evaluation.feasible && input.allowConflicts !== true) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
     const nextPayload = { ...data.payload, evaluation, publishedAt: now, publishedBy: context.actorId, status: "PUBLISHED" };
-    const updated = await db.update(jobJourneyRecords).set({
+    const eventId = crypto.randomUUID();
+    const publishUpdate = db.update(jobJourneyRecords).set({
       status: "PUBLISHED",
       version: record.version + 1,
       payloadJson: JSON.stringify(nextPayload),
@@ -441,9 +446,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(jobJourneyRecords.id, record.id),
       eq(jobJourneyRecords.version, expectedVersion),
     )).returning();
-    if (!updated[0]) return Response.json({ error: "version_conflict", currentVersion: record.version }, { status: 409 });
-    const eventId = crypto.randomUUID();
-    await db.batch([
+    const results = await db.batch([
+      publishUpdate,
       db.insert(s06Events).values({
         eventId,
         tenantId: context.tenantId,
@@ -467,7 +471,17 @@ export async function POST(request: Request, routeContext: RouteContext) {
       db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: "zerow.planning.plan.published", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
       db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.planning", aggregateId: record.id, expectedVersion: record.version + 1, observedVersion: record.version + 1, status: "SITES_READBACK_VERIFIED", detail: "Piano pubblicato dopo controllo concorrenza e capacità.", createdAt: now, updatedAt: now }),
     ]);
-    return Response.json({ plan: recordForResponse(updated[0]), evaluation, eventId, idempotent: false }, { headers: { "cache-control": "private, no-store" } });
+    const updated = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
+    if (!updated) return Response.json({ error: "version_conflict", currentVersion: record.version }, { status: 409 });
+    const [readback] = await db.select().from(jobJourneyRecords).where(and(
+      eq(jobJourneyRecords.tenantId, context.tenantId),
+      eq(jobJourneyRecords.jobId, job.id),
+      eq(jobJourneyRecords.id, record.id),
+      eq(jobJourneyRecords.version, record.version + 1),
+      eq(jobJourneyRecords.status, "PUBLISHED"),
+    )).limit(1);
+    if (!readback) return Response.json({ error: "planning_readback_unavailable" }, { status: 503 });
+    return Response.json({ plan: recordForResponse(readback), evaluation, eventId, idempotent: false, readback: { status: "verified", scope: "tenant", version: readback.version } }, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (/unique|constraint/i.test(message)) return Response.json({ error: "planning_idempotency_or_version_conflict" }, { status: 409 });

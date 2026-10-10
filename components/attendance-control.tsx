@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, FilePenLine, LoaderCircle, LogIn, LogOut, MapPin, Pause, Play, RefreshCw, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
@@ -28,7 +28,15 @@ type AttendanceResponse = {
   context?: { capabilities?: string[]; canOpenReport?: boolean; canApprove?: boolean };
   error?: string;
 };
-type AttendanceWriteResponse = { error?: string; reason?: string; tracking?: { status?: string } };
+type AttendanceWriteResponse = {
+  attendance?: AttendanceRecord;
+  eventId?: string;
+  idempotent?: boolean;
+  readback?: { status?: string; version?: number };
+  error?: string;
+  reason?: string;
+  tracking?: { status?: string };
+};
 type AttendanceAction = "check_in" | "pause" | "resume" | "check_out" | "correction_request" | "correction_approve";
 
 function statusLabel(status: string) {
@@ -102,6 +110,7 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
   const [serverCanApprove, setServerCanApprove] = useState(false);
   const [serverCanOpenReport, setServerCanOpenReport] = useState(false);
   const [reportHandoffVisible, setReportHandoffVisible] = useState(false);
+  const pendingActions = useRef(new Map<string, { idempotencyKey: string; body: Record<string, unknown> }>());
 
   const refresh = useCallback(async () => {
     setReportHandoffVisible(false);
@@ -150,30 +159,51 @@ export function AttendanceControl({ jobId, canApprove = false, reportHref, onCha
       return;
     }
     try {
-      const response = await postAttendance(`/api/operations/jobs/${encodeURIComponent(jobId)}/attendance`, {
-        action,
-        clientObservedAt: new Date().toISOString(),
-        correctionAt: correctionAt ? new Date(correctionAt).toISOString() : undefined,
-        correctionNote: correctionNote.trim() || undefined,
-        note: correctionNote.trim() || undefined,
-        ...(action === "correction_approve" ? { workerId: approvalTarget?.payload.workerId ?? approvalTarget?.createdBy } : {}),
-        location,
-        expectedVersion: approvalTarget?.version ?? latest?.version,
-        idempotencyKey: `attendance-${action}-${jobId}-${crypto.randomUUID()}`,
-      });
+      const workerId = approvalTarget?.payload.workerId ?? approvalTarget?.createdBy ?? "";
+      const targetVersion = approvalTarget?.version ?? latest?.version;
+      const identity = `${jobId}:${action}:${workerId}:${targetVersion ?? "new"}`;
+      let pending = pendingActions.current.get(identity);
+      if (!pending) {
+        const idempotencyKey = `attendance-${crypto.randomUUID()}`;
+        pending = {
+          idempotencyKey,
+          body: {
+            action,
+            clientObservedAt: new Date().toISOString(),
+            correctionAt: correctionAt ? new Date(correctionAt).toISOString() : undefined,
+            correctionNote: correctionNote.trim() || undefined,
+            note: correctionNote.trim() || undefined,
+            ...(action === "correction_approve" ? { workerId } : {}),
+            location,
+            expectedVersion: targetVersion,
+            idempotencyKey,
+          },
+        };
+        pendingActions.current.set(identity, pending);
+      }
+      const response = await postAttendance(`/api/operations/jobs/${encodeURIComponent(jobId)}/attendance`, pending.body);
       const payload = await response.json() as AttendanceWriteResponse;
       if (!response.ok) {
+        if (response.status < 500 && response.status !== 409) pendingActions.current.delete(identity);
+        if (response.status === 409) await refresh();
         if (payload.error === "driver_attendance_geofence_required" || payload.error === "driver_origin_geofence_required") throw new Error("driver_attendance_geofence_required");
         if (payload.error === "attendance_geofence_required") throw new Error("attendance_geofence_required");
         if (payload.error === "driver_tracking_device_not_bound" || payload.error === "vehicle_tracking_device_required") throw new Error("Prima di timbrare devi avere mezzo e dispositivo GPS associati alla missione.");
         if (payload.error === "correction_note_required") throw new Error("Inserisci il motivo della correzione.");
         throw new Error("La timbratura non è stata registrata.");
       }
+      if (!payload.attendance || !payload.eventId || payload.readback?.status !== "verified") {
+        setNotice("Il server non ha confermato l’evento e il readback della presenza. Aggiorna la scheda prima di riprovare.");
+        await refresh();
+        return;
+      }
+      pendingActions.current.delete(identity);
       const shouldOpenReport = action === "check_out" && Boolean(reportHref && serverCanOpenReport);
       await refresh();
       await onChanged?.();
       setReportHandoffVisible(shouldOpenReport);
-      setNotice(action === "correction_request" ? "Richiesta di uscita correttiva registrata: serve l’approvazione autorizzata." : action === "correction_approve" ? "Uscita correttiva approvata e presenza chiusa." : payload.tracking?.status === "STARTED" ? "Ingresso registrato: tracking GPS attivo per la missione." : payload.tracking?.status === "CLOSED" ? "Uscita registrata: tracking GPS terminato." : "Presenza registrata con posizione osservata.");
+      const confirmation = action === "correction_request" ? "Richiesta di uscita correttiva registrata: serve l’approvazione autorizzata." : action === "correction_approve" ? "Uscita correttiva approvata e presenza chiusa." : payload.tracking?.status === "STARTED" ? "Ingresso registrato: tracking GPS attivo per la missione." : payload.tracking?.status === "CLOSED" ? "Uscita registrata: tracking GPS terminato." : "Presenza registrata con posizione osservata.";
+      setNotice(`${confirmation} · registro ${payload.eventId.slice(0, 8)} · v${payload.readback.version}`);
     } catch (error) {
       setNotice(attendanceErrorMessage(error));
     } finally {

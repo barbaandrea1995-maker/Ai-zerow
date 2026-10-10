@@ -20,6 +20,8 @@ export type JobActivity = {
   detail: string;
   state: JobActivityState;
   owner: string;
+  ownerResourceId?: string;
+  ownerResourceKind?: "person" | "team";
   dueDate: string;
   progress: number;
   createdAt: string;
@@ -49,6 +51,7 @@ export type JobAssignment = {
   responsible: string;
   team: string;
   role: string;
+  roleCode?: string;
   assignedAt: string;
   assignedBy: string;
   responsibleActorId?: string;
@@ -193,6 +196,8 @@ function activityFromUnknown(value: unknown, index: number): JobActivity | null 
     detail: text(value.detail, "Attività operativa" ).slice(0, 280),
     state: activityState(value.state),
     owner: text(value.owner, "Da assegnare").slice(0, 120),
+    ...(text(value.ownerResourceId) ? { ownerResourceId: text(value.ownerResourceId).slice(0, 160) } : {}),
+    ...(value.ownerResourceKind === "person" || value.ownerResourceKind === "team" ? { ownerResourceKind: value.ownerResourceKind } : {}),
     dueDate: text(value.dueDate, "—").slice(0, 40),
     progress: progress(value.progress),
     createdAt: text(value.createdAt, now),
@@ -513,6 +518,7 @@ export function parseJobPayload(payloadJson: string): JobPayload {
       responsible: text(rawAssignment.responsible, "Da assegnare"),
       team: text(rawAssignment.team, "Da assegnare"),
       role: text(rawAssignment.role, "Responsabile operativo"),
+      ...(text(rawAssignment.roleCode) ? { roleCode: text(rawAssignment.roleCode).slice(0, 80) } : {}),
       assignedAt: text(rawAssignment.assignedAt, new Date().toISOString()),
       assignedBy: text(rawAssignment.assignedBy, "server-readback"),
       ...(text(rawAssignment.responsibleActorId, text(rawAssignment.responsibleId)) ? { responsibleActorId: text(rawAssignment.responsibleActorId, text(rawAssignment.responsibleId)) } : {}),

@@ -119,6 +119,23 @@ type WorkspacePayload = {
       status: "readback" | "empty" | "deferred";
     }>;
     completion: { ready: boolean; requirements: CompletionRequirement[] };
+    options?: {
+      commercial?: {
+        openingTypes: Array<{ value: string; label: string }>;
+        priorities: Array<{ value: "HIGH" | "STANDARD" | "LOW"; label: string }>;
+        scopeSections: Array<{
+          id: string;
+          title: string;
+          groups: Array<{ id: string; title: string; subgroups: Array<{ id: string; title: string }> }>;
+        }>;
+      };
+      assignment?: {
+        people: Array<{ id: string; actorId: string; label: string; role: string }>;
+        teams: Array<{ id: string; label: string }>;
+        roles: Array<{ value: string; label: string }>;
+      };
+    };
+    statusTransitions?: Array<{ statusCode: string; label: string; actionLabel: string }>;
     rapportino: RapportinoReadback;
     rapportinoHistory?: Array<{
       reportId: string;
@@ -133,8 +150,45 @@ type WorkspacePayload = {
       reviewedBy: string;
     }>;
   };
-  readback?: { version?: number };
-  mutation?: { action: string; version?: number; readback?: string };
+  readback?: { status?: string; version?: number };
+  mutation?: { action: string; eventId?: string; version?: number; readback?: string };
+  message?: string;
+};
+
+type CommercialDetails = {
+  clientName: string;
+  clientTaxId: string;
+  clientContact: string;
+  clientPhone: string;
+  clientEmail: string;
+  clientReference: string;
+  clientAddress: string;
+  accessNotes: string;
+  cig: string;
+  cup: string;
+  openingType: string;
+  priority: "HIGH" | "STANDARD" | "LOW";
+  scopeSectionId: string;
+  scopeGroupId: string;
+  scopeSubgroupId: string;
+};
+
+const EMPTY_COMMERCIAL_DETAILS: CommercialDetails = {
+  clientName: "",
+  clientTaxId: "",
+  clientContact: "",
+  clientPhone: "",
+  clientEmail: "",
+  clientReference: "",
+  clientAddress: "",
+  accessNotes: "",
+  cig: "",
+  cup: "",
+  openingType: "",
+  priority: "STANDARD",
+  scopeSectionId: "",
+  scopeGroupId: "",
+  scopeSubgroupId: "",
 };
 
 type ActionKind =
@@ -453,6 +507,9 @@ export default function OperationsJobWorkspace({
   const openReportFromQuery = searchParams.get("open") === "rapportino";
   const autoOpenedReportJobRef = useRef("");
   const [payload, setPayload] = useState<WorkspacePayload | null>(null);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const mutationInFlight = useRef(false);
+  const mutationKeys = useRef(new Map<string, string>());
   const [state, setState] = useState<
     "loading" | "ready" | "unauthenticated" | "forbidden" | "missing" | "error"
   >("loading");
@@ -461,6 +518,7 @@ export default function OperationsJobWorkspace({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [client, setClient] = useState("");
+  const [commercialDetails, setCommercialDetails] = useState<CommercialDetails>(EMPTY_COMMERCIAL_DETAILS);
   const [location, setLocation] = useState("");
   const [worksiteCandidates, setWorksiteCandidates] = useState<GeocodeCandidate[]>([]);
   const [selectedWorksite, setSelectedWorksite] = useState<GeocodeCandidate | null>(null);
@@ -470,9 +528,8 @@ export default function OperationsJobWorkspace({
   const [activityDetail, setActivityDetail] = useState("");
   const [activityOwner, setActivityOwner] = useState("");
   const [activityDueDate, setActivityDueDate] = useState("");
-  const [responsible, setResponsible] = useState("");
-  const [team, setTeam] = useState("");
-  const [role, setRole] = useState("Responsabile operativo");
+  const [assignmentSelection, setAssignmentSelection] = useState("");
+  const [assignmentRole, setAssignmentRole] = useState("RESPONSABILE_OPERATIVO");
   const [evidenceTitle, setEvidenceTitle] = useState("");
   const [evidenceDetail, setEvidenceDetail] = useState("");
   const [reportText, setReportText] = useState("");
@@ -521,6 +578,28 @@ export default function OperationsJobWorkspace({
           ? nextPayload.job.payload.client
           : "",
       );
+      const jobData = nextPayload.job.payload ?? {};
+      const jobScope = jobData.scope && typeof jobData.scope === "object" && !Array.isArray(jobData.scope)
+        ? jobData.scope as Record<string, unknown>
+        : {};
+      const jobText = (key: string, fallback = "") => typeof jobData[key] === "string" ? String(jobData[key]) : fallback;
+      setCommercialDetails({
+        clientName: jobText("clientName", jobText("client")),
+        clientTaxId: jobText("clientTaxId"),
+        clientContact: jobText("clientContact"),
+        clientPhone: jobText("clientPhone"),
+        clientEmail: jobText("clientEmail"),
+        clientReference: jobText("clientReference"),
+        clientAddress: jobText("clientAddress"),
+        accessNotes: jobText("accessNotes"),
+        cig: jobText("cig"),
+        cup: jobText("cup"),
+        openingType: jobText("openingType", "NUOVA_COMMESSA"),
+        priority: jobData.priority === "HIGH" || jobData.priority === "LOW" ? jobData.priority : "STANDARD",
+        scopeSectionId: jobText("scopeSectionId", typeof jobScope.sectionId === "string" ? jobScope.sectionId : ""),
+        scopeGroupId: jobText("scopeGroupId", typeof jobScope.groupId === "string" ? jobScope.groupId : ""),
+        scopeSubgroupId: jobText("scopeSubgroupId", typeof jobScope.subgroupId === "string" ? jobScope.subgroupId : ""),
+      });
       setLocation(
         typeof nextPayload.job.payload?.location === "string"
           ? nextPayload.job.payload.location
@@ -554,6 +633,15 @@ export default function OperationsJobWorkspace({
       options: { closeDialog?: boolean; silent?: boolean } = {},
     ): Promise<boolean> => {
       if (!payload) return false;
+      if (mutationInFlight.current) return false;
+      mutationInFlight.current = true;
+      setMutationBusy(true);
+      const expectedVersion = payload.readback?.version ?? 1;
+      const serializedBody = JSON.stringify(body);
+      const mutationIdentity = `${action}:${expectedVersion}:${serializedBody}`;
+      const idempotencyKey = mutationKeys.current.get(mutationIdentity)
+        ?? `w03-${crypto.randomUUID()}`;
+      mutationKeys.current.set(mutationIdentity, idempotencyKey);
       try {
         const response = await fetch(
           `/api/operations/jobs/${encodeURIComponent(jobId)}`,
@@ -562,8 +650,8 @@ export default function OperationsJobWorkspace({
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
               action,
-              expectedVersion: payload.readback?.version ?? 1,
-              idempotencyKey: `w03-${jobId}-${action}-${crypto.randomUUID()}`,
+              expectedVersion,
+              idempotencyKey,
               ...body,
             }),
           },
@@ -608,64 +696,98 @@ export default function OperationsJobWorkspace({
                 : "Operazione non completata. Riprova.",
             );
           if (response.status === 409) await refresh();
+          if (response.status < 500) mutationKeys.current.delete(mutationIdentity);
           return false;
         }
+        if (nextPayload.mutation?.action !== action
+          || nextPayload.mutation.readback !== "verified"
+          || !nextPayload.mutation.eventId
+          || nextPayload.readback?.status !== "ok"
+          || typeof nextPayload.readback.version !== "number"
+          || !nextPayload.job) {
+          notify("Il server non ha confermato registro e rilettura. Aggiorno la scheda prima di riprovare.");
+          await refresh();
+          return false;
+        }
+        mutationKeys.current.delete(mutationIdentity);
         setPayload(nextPayload);
         setProgress(nextPayload.job.progress);
         if (options.closeDialog !== false) setActionOpen(null);
-        if (!options.silent) notify(`Operazione completata · ${displayAction(action)}`);
+        if (!options.silent) notify(`Operazione registrata · ${displayAction(action)} · ${nextPayload.mutation.eventId.slice(0, 8)} · v${nextPayload.readback.version}`);
         return true;
       } catch {
         notify(
           "Connessione non disponibile: nessuna modifica è stata confermata.",
         );
         return false;
+      } finally {
+        mutationInFlight.current = false;
+        setMutationBusy(false);
       }
     },
     [jobId, notify, payload, refresh],
   );
 
   const nextStatusAction = useMemo(() => {
-    const status = payload?.job.status ?? "";
-    if (status === "BOZZA")
-      return { label: "Invia in proposta", statusCode: "PROPOSED" };
-    if (status === "PROPOSTA")
-      return { label: "Approva commessa", statusCode: "APPROVED" };
-    if (status === "APPROVATA")
-      return { label: "Pianifica commessa", statusCode: "PLANNED" };
-    if (status === "PIANIFICATA")
-      return { label: "Avvia commessa", statusCode: "ACTIVE" };
-    if (status === "IN CORSO")
-      return { label: "Verifica completamento", statusCode: "COMPLETED" };
-    if (status === "BLOCCATA")
-      return { label: "Riprendi commessa", statusCode: "ACTIVE" };
-    if (status === "COMPLETATA")
-      return { label: "Chiudi commessa", statusCode: "CLOSED" };
-    return null;
-  }, [payload?.job.status]);
+    return payload?.workspace.statusTransitions?.[0] ?? null;
+  }, [payload?.workspace.statusTransitions]);
 
   const submitAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (actionOpen === "details") {
       const savedLocation = typeof payload?.job.payload?.location === "string" ? payload.job.payload.location.trim() : payload?.job.detail.trim() ?? "";
       const locationChanged = location.trim() !== savedLocation;
+      const selectedScopeParts = [commercialDetails.scopeSectionId, commercialDetails.scopeGroupId, commercialDetails.scopeSubgroupId].filter(Boolean).length;
+      if (selectedScopeParts > 0 && selectedScopeParts < 3) {
+        notify("Completa settore, categoria e sottocategoria oppure lascia invariato l’ambito.");
+        return;
+      }
       if (locationChanged && !selectedWorksite) {
         notify("Riconosci il nuovo indirizzo e seleziona il risultato server-side prima di salvare.");
         return;
       }
       await mutate("update_job", {
-        fields: { title, description, client, location, dueDate, ...(locationChanged ? { worksiteLocation: selectedWorksite } : {}) },
+        fields: {
+          title,
+          description,
+          client,
+          clientName: commercialDetails.clientName,
+          clientTaxId: commercialDetails.clientTaxId,
+          clientContact: commercialDetails.clientContact,
+          clientPhone: commercialDetails.clientPhone,
+          clientEmail: commercialDetails.clientEmail,
+          clientReference: commercialDetails.clientReference,
+          clientAddress: commercialDetails.clientAddress,
+          location,
+          dueDate,
+          accessNotes: commercialDetails.accessNotes,
+          cig: commercialDetails.cig,
+          cup: commercialDetails.cup,
+          openingType: commercialDetails.openingType,
+          priority: commercialDetails.priority,
+          ...(selectedScopeParts === 3 ? {
+            scopeSectionId: commercialDetails.scopeSectionId,
+            scopeGroupId: commercialDetails.scopeGroupId,
+            scopeSubgroupId: commercialDetails.scopeSubgroupId,
+          } : {}),
+          ...(locationChanged ? { worksiteLocation: selectedWorksite } : {}),
+        },
       });
     }
     if (actionOpen === "activity")
       await mutate("add_activity", {
         title: activityTitle,
         detail: activityDetail,
-        owner: activityOwner,
+        ...(activityOwner.startsWith("person:") ? { ownerMembershipId: activityOwner.slice(7) } : {}),
+        ...(activityOwner.startsWith("team:") ? { ownerTeamId: activityOwner.slice(5) } : {}),
         dueDate: activityDueDate,
       });
     if (actionOpen === "assign")
-      await mutate("assign", { responsible, team, role });
+      await mutate("assign", {
+        ...(assignmentSelection.startsWith("person:") ? { responsibleMembershipId: assignmentSelection.slice(7) } : {}),
+        ...(assignmentSelection.startsWith("team:") ? { teamId: assignmentSelection.slice(5) } : {}),
+        role: assignmentRole,
+      });
     if (actionOpen === "evidence")
       await mutate("add_evidence", {
         title: evidenceTitle,
@@ -694,6 +816,28 @@ export default function OperationsJobWorkspace({
         ? payload.job.payload.client
         : "",
     );
+    const currentPayload = payload.job.payload ?? {};
+    const currentScope = currentPayload.scope && typeof currentPayload.scope === "object" && !Array.isArray(currentPayload.scope)
+      ? currentPayload.scope as Record<string, unknown>
+      : {};
+    const currentText = (key: string, fallback = "") => typeof currentPayload[key] === "string" ? String(currentPayload[key]) : fallback;
+    setCommercialDetails({
+      clientName: currentText("clientName", currentText("client")),
+      clientTaxId: currentText("clientTaxId"),
+      clientContact: currentText("clientContact"),
+      clientPhone: currentText("clientPhone"),
+      clientEmail: currentText("clientEmail"),
+      clientReference: currentText("clientReference"),
+      clientAddress: currentText("clientAddress"),
+      accessNotes: currentText("accessNotes"),
+      cig: currentText("cig"),
+      cup: currentText("cup"),
+      openingType: currentText("openingType", "NUOVA_COMMESSA"),
+      priority: currentPayload.priority === "HIGH" || currentPayload.priority === "LOW" ? currentPayload.priority : "STANDARD",
+      scopeSectionId: currentText("scopeSectionId", typeof currentScope.sectionId === "string" ? currentScope.sectionId : ""),
+      scopeGroupId: currentText("scopeGroupId", typeof currentScope.groupId === "string" ? currentScope.groupId : ""),
+      scopeSubgroupId: currentText("scopeSubgroupId", typeof currentScope.subgroupId === "string" ? currentScope.subgroupId : ""),
+    });
     setLocation(
       typeof payload.job.payload?.location === "string"
         ? payload.job.payload.location
@@ -715,9 +859,10 @@ export default function OperationsJobWorkspace({
     const record = assignment && typeof assignment === "object" && !Array.isArray(assignment)
       ? assignment as Record<string, unknown>
       : {};
-    setResponsible(typeof record.responsible === "string" ? record.responsible : "");
-    setTeam(typeof record.team === "string" ? record.team : "");
-    setRole(typeof record.role === "string" ? record.role : "Responsabile operativo");
+    const responsibleMembershipId = typeof record.responsibleMembershipId === "string" ? record.responsibleMembershipId : "";
+    const teamId = typeof record.teamId === "string" ? record.teamId : "";
+    setAssignmentSelection(responsibleMembershipId ? `person:${responsibleMembershipId}` : teamId ? `team:${teamId}` : "");
+    setAssignmentRole(typeof record.roleCode === "string" ? record.roleCode : "RESPONSABILE_OPERATIVO");
     setActionOpen("assign");
   };
 
@@ -944,6 +1089,10 @@ export default function OperationsJobWorkspace({
 
   const { job, workspace } = payload;
   const jobData = job.payload ?? {};
+  const commercialCatalog = workspace.options?.commercial;
+  const assignmentCatalog = workspace.options?.assignment;
+  const selectedScopeSection = commercialCatalog?.scopeSections.find((section) => section.id === commercialDetails.scopeSectionId);
+  const selectedScopeGroup = selectedScopeSection?.groups.find((group) => group.id === commercialDetails.scopeGroupId);
   const payloadText = (key: string, fallback = "") =>
     typeof jobData[key] === "string" ? (jobData[key] as string) : fallback;
   const clientName = valueOr(
@@ -1108,7 +1257,7 @@ export default function OperationsJobWorkspace({
             <div className="mt-5 flex flex-wrap gap-2">
               {canWriteReport && !reportLocked && <Button className="min-h-10 bg-cyan-200 px-4 text-[11px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={openReport} type="button"><Sparkles className="size-3.5" />{workspace.rapportino.status === "DRAFT" || workspace.rapportino.status === "CHANGES_REQUESTED" ? "Riprendi rapportino" : "Rapportino con Company AI"}</Button>}
               {canReviewReport && workspace.rapportino.status === "SUBMITTED" && <Button className="min-h-10 bg-amber-200 px-4 text-[11px] font-semibold text-[#120d04] hover:bg-amber-100" onClick={openReport} type="button"><ClipboardCheck className="size-3.5" />Esamina rapportino</Button>}
-              {canWriteOperations && nextStatusAction && <Button className="min-h-10 border-lime-300/20 bg-lime-300/[.06] px-3 text-[10px] text-lime-100 hover:bg-lime-300/10" disabled={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready)} onClick={() => void mutate("set_status", { statusCode: nextStatusAction.statusCode })} title={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready) ? "Completa i controlli obbligatori prima di avanzare" : undefined} type="button" variant="outline"><Send className="size-3.5" />{nextStatusAction.label}</Button>}
+              {canWriteOperations && nextStatusAction && <Button className="min-h-10 border-lime-300/20 bg-lime-300/[.06] px-3 text-[10px] text-lime-100 hover:bg-lime-300/10" disabled={mutationBusy || (["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready)} onClick={() => void mutate("set_status", { statusCode: nextStatusAction.statusCode })} title={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready) ? "Completa i controlli obbligatori prima di avanzare" : undefined} type="button" variant="outline"><Send className="size-3.5" />{nextStatusAction.actionLabel}</Button>}
               {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={openDetails} type="button" variant="outline"><BriefcaseBusiness className="size-3.5" />Modifica commessa</Button>}
               {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={() => setActionOpen("progress")} type="button" variant="outline"><CircleGauge className="size-3.5" />Avanzamento</Button>}
             </div>
@@ -1137,7 +1286,7 @@ export default function OperationsJobWorkspace({
                   {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
                     <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.detail}</p>}</div>
-                    {(item.quantity !== undefined || item.unit) && <span className="shrink-0 text-right text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
+                    {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                   </div>)}
                   {workItems.length > 3 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
                 </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] bg-black/15 px-3 py-4 text-[10px] leading-5 text-slate-500">Non ci sono voci di preventivo collegate. La descrizione della commessa resta il riferimento del lavoro.</div>}
@@ -1191,6 +1340,11 @@ export default function OperationsJobWorkspace({
               <div className="grid gap-3 border-t border-white/[.07] p-4 sm:grid-cols-2">
                 <InfoRow icon={Users} label="Referente" value={contactLabel} />
                 <InfoRow icon={Flag} label="Riferimento cliente" value={valueOr(jobData.clientReference, "Non indicato")} />
+                {payloadText("clientTaxId") && <InfoRow icon={BriefcaseBusiness} label="Codice fiscale / P. IVA" value={payloadText("clientTaxId")} />}
+                {payloadText("clientPhone") && <InfoRow icon={BriefcaseBusiness} label="Telefono cliente" value={payloadText("clientPhone")} />}
+                {payloadText("clientEmail") && <InfoRow icon={BriefcaseBusiness} label="E-mail cliente" value={payloadText("clientEmail")} />}
+                {payloadText("cig") && <InfoRow icon={Flag} label="CIG" value={payloadText("cig")} />}
+                {payloadText("cup") && <InfoRow icon={Flag} label="CUP" value={payloadText("cup")} />}
                 {payloadText("clientAddress") && <InfoRow icon={MapPin} label="Indirizzo del cliente" value={payloadText("clientAddress")} />}
                 {payloadText("accessNotes") && <InfoRow icon={HardHat} label="Accesso al cantiere" value={payloadText("accessNotes")} />}
                 <InfoRow icon={MapPin} label="Perimetro geofence" value={geofenceLabel} />
@@ -1292,8 +1446,12 @@ export default function OperationsJobWorkspace({
                     Cliente
                     <Input
                       className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setClient(event.target.value)}
-                      value={client}
+                      maxLength={160}
+                      onChange={(event) => {
+                        setClient(event.target.value);
+                        setCommercialDetails((current) => ({ ...current, clientName: event.target.value }));
+                      }}
+                      value={commercialDetails.clientName}
                     />
                   </label>
                   <label className="space-y-2 text-xs text-slate-400">
@@ -1301,8 +1459,78 @@ export default function OperationsJobWorkspace({
                     <Input
                       className="mt-2 border-white/10 bg-black/30 text-slate-100"
                       onChange={(event) => setDueDate(event.target.value)}
-                      value={dueDate}
+                      type="date"
+                      value={dueDate.slice(0, 10)}
                     />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Codice fiscale / P. IVA
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={80} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientTaxId: event.target.value }))} value={commercialDetails.clientTaxId} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Riferimento cliente
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={160} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientReference: event.target.value }))} value={commercialDetails.clientReference} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Referente
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={120} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientContact: event.target.value }))} value={commercialDetails.clientContact} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Telefono
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={80} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientPhone: event.target.value }))} value={commercialDetails.clientPhone} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    E-mail
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={160} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientEmail: event.target.value }))} type="email" value={commercialDetails.clientEmail} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
+                    Indirizzo cliente / fatturazione
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={240} onChange={(event) => setCommercialDetails((current) => ({ ...current, clientAddress: event.target.value }))} value={commercialDetails.clientAddress} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Apertura commessa
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setCommercialDetails((current) => ({ ...current, openingType: event.target.value }))} value={commercialDetails.openingType}>
+                      {(commercialCatalog?.openingTypes ?? []).map((option) => <option className="bg-[#080c09]" key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Priorità
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setCommercialDetails((current) => ({ ...current, priority: event.target.value as CommercialDetails["priority"] }))} value={commercialDetails.priority}>
+                      {(commercialCatalog?.priorities ?? []).map((option) => <option className="bg-[#080c09]" key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    CIG
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={80} onChange={(event) => setCommercialDetails((current) => ({ ...current, cig: event.target.value }))} value={commercialDetails.cig} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    CUP
+                    <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={80} onChange={(event) => setCommercialDetails((current) => ({ ...current, cup: event.target.value }))} value={commercialDetails.cup} />
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Ambito
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSectionId: event.target.value, scopeGroupId: "", scopeSubgroupId: "" }))} value={commercialDetails.scopeSectionId}>
+                      <option className="bg-[#080c09]" value="">Seleziona settore</option>
+                      {(commercialCatalog?.scopeSections ?? []).map((section) => <option className="bg-[#080c09]" key={section.id} value={section.id}>{section.title}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400">
+                    Categoria
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeSection} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeGroupId: event.target.value, scopeSubgroupId: "" }))} value={commercialDetails.scopeGroupId}>
+                      <option className="bg-[#080c09]" value="">Seleziona categoria</option>
+                      {(selectedScopeSection?.groups ?? []).map((group) => <option className="bg-[#080c09]" key={group.id} value={group.id}>{group.title}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
+                    Sottocategoria operativa
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeGroup} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSubgroupId: event.target.value }))} value={commercialDetails.scopeSubgroupId}>
+                      <option className="bg-[#080c09]" value="">Seleziona sottocategoria</option>
+                      {(selectedScopeGroup?.subgroups ?? []).map((subgroup) => <option className="bg-[#080c09]" key={subgroup.id} value={subgroup.id}>{subgroup.title}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
+                    Note accesso e vincoli
+                    <Textarea className="mt-2 min-h-[72px] border-white/10 bg-black/30 text-slate-100" maxLength={2000} onChange={(event) => setCommercialDetails((current) => ({ ...current, accessNotes: event.target.value }))} value={commercialDetails.accessNotes} />
                   </label>
                   <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
                     Ubicazione
@@ -1353,12 +1581,15 @@ export default function OperationsJobWorkspace({
                   </label>
                   <label className="space-y-2 text-xs text-slate-400">
                     Responsabile
-                    <Input
-                      className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setActivityOwner(event.target.value)}
-                      placeholder="Persona o squadra"
-                      value={activityOwner}
-                    />
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setActivityOwner(event.target.value)} value={activityOwner}>
+                      <option className="bg-[#080c09]" value="">Da assegnare</option>
+                      <optgroup label="Persone">
+                        {(assignmentCatalog?.people ?? []).map((person) => <option className="bg-[#080c09]" key={person.id} value={`person:${person.id}`}>{person.label}</option>)}
+                      </optgroup>
+                      <optgroup label="Squadre">
+                        {(assignmentCatalog?.teams ?? []).map((selectedTeam) => <option className="bg-[#080c09]" key={selectedTeam.id} value={`team:${selectedTeam.id}`}>{selectedTeam.label}</option>)}
+                      </optgroup>
+                    </select>
                   </label>
                   <label className="space-y-2 text-xs text-slate-400">
                     Scadenza
@@ -1377,29 +1608,21 @@ export default function OperationsJobWorkspace({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="space-y-2 text-xs text-slate-400">
                     Responsabile
-                    <Input
-                      className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setResponsible(event.target.value)}
-                      placeholder="Nome responsabile"
-                      value={responsible}
-                    />
-                  </label>
-                  <label className="space-y-2 text-xs text-slate-400">
-                    Squadra
-                    <Input
-                      className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setTeam(event.target.value)}
-                      placeholder="Squadra / crew"
-                      value={team}
-                    />
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setAssignmentSelection(event.target.value)} value={assignmentSelection}>
+                      <option className="bg-[#080c09]" value="">Seleziona responsabile o squadra</option>
+                      <optgroup label="Persone">
+                        {(assignmentCatalog?.people ?? []).map((person) => <option className="bg-[#080c09]" key={person.id} value={`person:${person.id}`}>{person.label} · {person.role.replaceAll("_", " ")}</option>)}
+                      </optgroup>
+                      <optgroup label="Squadre">
+                        {(assignmentCatalog?.teams ?? []).map((selectedTeam) => <option className="bg-[#080c09]" key={selectedTeam.id} value={`team:${selectedTeam.id}`}>{selectedTeam.label}</option>)}
+                      </optgroup>
+                    </select>
                   </label>
                   <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
                     Ruolo
-                    <Input
-                      className="mt-2 border-white/10 bg-black/30 text-slate-100"
-                      onChange={(event) => setRole(event.target.value)}
-                      value={role}
-                    />
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setAssignmentRole(event.target.value)} value={assignmentRole}>
+                      {(assignmentCatalog?.roles ?? []).map((option) => <option className="bg-[#080c09]" key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
                   </label>
                 </div>
               )}
@@ -1529,7 +1752,7 @@ export default function OperationsJobWorkspace({
                       type="button"
                       variant="outline"
                       className="border-cyan-300/25 bg-cyan-300/[0.05] text-cyan-100 hover:bg-cyan-300/[0.1]"
-                      disabled={reportText.trim().length < 2}
+                      disabled={mutationBusy || reportText.trim().length < 2}
                       onClick={() => submitReport("DRAFT")}
                     >
                       Salva bozza
@@ -1537,7 +1760,7 @@ export default function OperationsJobWorkspace({
                     {canWriteReport && !reportLocked && <Button
                       type="button"
                       className="bg-lime-300 text-[#060806] hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
-                      disabled={!reportCanSubmit}
+                      disabled={mutationBusy || !reportCanSubmit}
                       onClick={() => submitReport("SUBMIT")}
                     >
                       <Send className="size-3.5" />
@@ -1548,6 +1771,7 @@ export default function OperationsJobWorkspace({
                 ) : (
                   <Button
                     type="submit"
+                    disabled={mutationBusy}
                     className="bg-lime-300 text-[#060806] hover:bg-lime-200"
                   >
                     <Send className="size-3.5" />

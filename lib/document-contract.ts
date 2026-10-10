@@ -1,5 +1,16 @@
 export const MAX_OPERATIONAL_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
+export const OPERATIONAL_DOCUMENT_CATEGORIES = [
+  { value: "COMMESSA", label: "Documentazione commessa" },
+  { value: "PREVENTIVO", label: "Preventivo" },
+  { value: "CONTRATTO", label: "Contratto" },
+  { value: "TECNICO", label: "Documentazione tecnica" },
+  { value: "POD", label: "Prova di consegna" },
+  { value: "AUTORIZZAZIONE", label: "Autorizzazione" },
+  { value: "FOTO", label: "Fotografia" },
+  { value: "ALTRO", label: "Altro" },
+] as const;
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
   doc: "application/msword",

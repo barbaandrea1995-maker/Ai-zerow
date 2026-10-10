@@ -42,6 +42,7 @@ import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { OPERATIONAL_DOCUMENT_CATEGORIES } from "@/lib/document-contract";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
@@ -109,7 +110,7 @@ const navItems: NavItem[] = [
   { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: SlidersHorizontal },
 ];
 
-const categoryOptions = ["PREVENTIVO", "CONTRATTO", "TECNICO", "POD", "AUTORIZZAZIONE", "FOTO", "ALTRO"];
+const categoryOptions = OPERATIONAL_DOCUMENT_CATEGORIES.map((category) => category.value);
 const accept = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic,.heif";
 
 const ROLE_LABELS: Record<string, string> = {

@@ -149,7 +149,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (existingEvent[0].aggregateType !== "operational.document.security") return Response.json({ error: "document_security_idempotency_conflict" }, { status: 409 });
       const existing = await findDocument(tenantId, id);
       if (!existing) return Response.json({ error: "document_security_readback_unavailable" }, { status: 503 });
-      return Response.json({ document: responseDocument(existing), eventId: existingEvent[0].eventId, idempotent: true }, { headers: { "cache-control": "private, no-store" } });
+      return Response.json({ document: responseDocument(existing), eventId: existingEvent[0].eventId, idempotent: true, readback: { status: "verified", scope: "tenant", version: existing.version } }, { headers: { "cache-control": "private, no-store" } });
     }
     const transition = transitionDocumentSecurity({
       scanStatus: current.scanStatus,
@@ -230,7 +230,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (!changed) return Response.json({ error: "document_security_version_conflict" }, { status: 409 });
     const updated = await findDocument(tenantId, id);
     if (!updated || updated.version !== nextVersion) return Response.json({ error: "document_security_readback_unavailable" }, { status: 503 });
-    return Response.json({ document: responseDocument(updated), eventId, transition: { action, detail: transition.detail }, idempotent: false }, { status: 201, headers: { "cache-control": "private, no-store" } });
+    return Response.json({ document: responseDocument(updated), eventId, transition: { action, detail: transition.detail }, idempotent: false, readback: { status: "verified", scope: "tenant", version: updated.version } }, { status: 201, headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     if (error instanceof DocumentSecurityTransitionError) return Response.json({ error: error.code }, { status: 409 });
     const message = error instanceof Error ? error.message : "";

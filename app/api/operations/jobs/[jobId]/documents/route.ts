@@ -14,6 +14,7 @@ import { documentCanDownload } from "@/lib/document-security";
 import {
   matchesOperationalDocumentSignature,
   MAX_OPERATIONAL_DOCUMENT_BYTES,
+  OPERATIONAL_DOCUMENT_CATEGORIES,
   operationalDocumentMime,
   safeDocumentFileName,
   sha256Hex,
@@ -133,6 +134,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const mimeType = operationalDocumentMime(fileName, candidate.type);
   if (!mimeType) return Response.json({ error: "unsupported_or_mismatched_file_type" }, { status: 415 });
   const category = boundedText(formData.get("category"), 80, "COMMESSA").toUpperCase();
+  if (!OPERATIONAL_DOCUMENT_CATEGORIES.some((option) => option.value === category)) {
+    return Response.json({ error: "document_category_invalid", allowed: OPERATIONAL_DOCUMENT_CATEGORIES }, { status: 400 });
+  }
   const idempotencyKey = boundedText(formData.get("idempotencyKey"), 160);
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
 
@@ -153,7 +157,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(operationalDocuments.tenantId, context.tenantId), eq(operationalDocuments.id, existingEvent.aggregateId),
       )).limit(1);
       if (!existing || existing.jobId !== job.id) return Response.json({ error: "document_idempotency_readback_unavailable" }, { status: 503 });
-      return Response.json({ document: responseDocument(existing), idempotent: true, eventId: existingEvent.eventId }, {
+      return Response.json({ document: responseDocument(existing), idempotent: true, eventId: existingEvent.eventId, readback: { status: "verified", scope: "tenant", version: existing.version } }, {
         headers: { "cache-control": "private, no-store" },
       });
     }
@@ -169,7 +173,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(operationalDocuments.sha256, sha256),
     )).limit(1);
     if (duplicate) {
-      return Response.json({ document: responseDocument(duplicate), duplicate: true, idempotent: true }, {
+      return Response.json({ document: responseDocument(duplicate), duplicate: true, idempotent: true, readback: { status: "verified", scope: "tenant", version: duplicate.version } }, {
         headers: { "cache-control": "private, no-store" },
       });
     }
@@ -243,7 +247,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(operationalDocuments.tenantId, context.tenantId), eq(operationalDocuments.id, documentId),
     )).limit(1);
     if (!created) throw new Error("document_readback_unavailable");
-    return Response.json({ document: responseDocument(created), idempotent: false, eventId }, {
+    return Response.json({ document: responseDocument(created), idempotent: false, eventId, readback: { status: "verified", scope: "tenant", version: created.version } }, {
       status: 201,
       headers: { "cache-control": "private, no-store" },
     });

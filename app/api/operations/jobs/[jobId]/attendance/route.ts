@@ -211,7 +211,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.jobId, job.id),
       )).limit(1);
       if (!record) return Response.json({ error: "attendance_idempotency_readback_unavailable" }, { status: 503 });
-      return Response.json({ attendance: attendanceForResponse(record), eventId: existingEvent.eventId, idempotent: true }, { headers: { "cache-control": "private, no-store" } });
+      return Response.json({ attendance: attendanceForResponse(record), eventId: existingEvent.eventId, idempotent: true, readback: { status: "verified", scope: "tenant", version: record.version } }, { headers: { "cache-control": "private, no-store" } });
     }
 
     failureStage = "read_latest_attendance";
@@ -323,11 +323,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
           trackingOperation = "close";
           trackingSessionId = activeTrackingSession.id;
         }
-      } else if (action === "pause" || action === "resume" || action === "check_out" || action === "correction_approve") {
+      } else if (action === "pause" || action === "resume" || action === "check_out") {
         if (!activeTrackingSession) return Response.json({ error: "driver_tracking_session_not_open", reason: "driver_tracking_is_opened_by_check_in_and_closed_by_check_out" }, { status: 409 });
         if (action === "pause" && activeTrackingSession.status !== "ACTIVE") return Response.json({ error: "driver_tracking_session_not_active" }, { status: 409 });
         if (action === "resume" && activeTrackingSession.status !== "PAUSED") return Response.json({ error: "driver_tracking_session_not_paused" }, { status: 409 });
-        trackingOperation = action === "check_out" || action === "correction_approve" ? "close" : action;
+        trackingOperation = action === "check_out" ? "close" : action;
         trackingSessionId = activeTrackingSession.id;
       }
     }

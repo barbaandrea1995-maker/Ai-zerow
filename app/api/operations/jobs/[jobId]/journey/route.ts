@@ -14,10 +14,13 @@ import {
   s06Outbox,
   s06Reconciliations,
   tenantWarehouses,
+  tenantMemberships,
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext, type AuthorityContext } from "@/lib/authority-context";
+import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import { documentCanDownload } from "@/lib/document-security";
-import { inventoryMovementForResponse, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
+import { INVENTORY_UNIT_CATALOG, inventoryMovementForResponse, inventoryUnitForCode, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
+import { OPERATIONAL_DOCUMENT_CATEGORIES } from "@/lib/document-contract";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
 import { buildMissionReportReadback } from "@/lib/mission-contract";
@@ -35,6 +38,7 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
 type JourneyDomain = "planning" | "field" | "warehouse" | "mission";
+const FIELD_ASSIGNABLE_ROLES = new Set(["technical", "field_supervisor", "worker", "driver", "delivery_driver", "maintenance", "manager", "office"]);
 
 const DOMAIN_READ_CAPABILITY: Record<JourneyDomain | "documents", string> = {
   planning: "planning.read",
@@ -197,6 +201,33 @@ function parseJson(value: string) {
   } catch {
     return {};
   }
+}
+
+async function fieldWorkforceOptions(context: AuthorityContext) {
+  const canReadRegistry = hasCapability(context, "workforce.registry.read")
+    || hasCapability(context, "workforce.read.all")
+    || hasCapability(context, "workforce.manage");
+  if (!canReadRegistry) return { people: [], teams: [] };
+  const [memberships, workforceRows] = await Promise.all([
+    getDb().select({ id: tenantMemberships.id, actorId: tenantMemberships.actorId, displayName: tenantMemberships.displayName, role: tenantMemberships.role, rolesJson: tenantMemberships.rolesJson })
+      .from(tenantMemberships).where(and(eq(tenantMemberships.tenantId, context.tenantId), eq(tenantMemberships.status, "active"))),
+    getDb().select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500),
+  ]);
+  const activeIds = new Set(memberships.map((membership) => membership.id));
+  const people = memberships.flatMap((membership) => {
+    const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
+    return roles.some((role) => FIELD_ASSIGNABLE_ROLES.has(role)) ? [{ id: membership.id, label: membership.displayName }] : [];
+  });
+  const teams = workforceRows.flatMap((row) => {
+    const data = parseJson(row.payloadJson);
+    const kind = boundedText(data.entityType ?? data.resourceKind ?? data.kind, 40, row.recordType).toLowerCase();
+    const status = boundedText(data.statusCode ?? data.status, 32, row.status).toUpperCase();
+    const memberIds = stringIds(data.memberMembershipIds).filter((id) => activeIds.has(id));
+    return kind === "team" && memberIds.length && !["INACTIVE", "SUSPENDED", "ARCHIVED", "CANCELLED"].includes(status)
+      ? [{ id: row.id, label: row.title }]
+      : [];
+  });
+  return { people, teams };
 }
 
 function stringIds(value: unknown) {
@@ -446,6 +477,9 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
     return { access: allowed ? "granted" : "restricted", count: domainRecords.length, records: domainRecords };
   };
   const payload = parseJobPayload(job.payloadJson);
+  const workforce = hasCapability(context, "field.write")
+    ? await fieldWorkforceOptions(context)
+    : { people: [], teams: [] };
   const missionReports = visibleRecords
     .filter((record) => record.domain === "mission" && record.recordType === "TRANSPORT")
     .map((record) => {
@@ -502,6 +536,11 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
     },
     missionReports,
     can: actionAccess(context),
+    options: {
+      documentCategories: OPERATIONAL_DOCUMENT_CATEGORIES,
+      inventoryUnits: INVENTORY_UNIT_CATALOG,
+      workforce,
+    },
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   };
 }
@@ -512,7 +551,7 @@ function normalizeLines(value: unknown) {
     if (!isRecord(candidate)) return null;
     const itemId = boundedText(candidate.itemId, 120);
     const description = boundedText(candidate.description ?? candidate.name, 200);
-    const unit = boundedText(candidate.unit, 24);
+    const unit = inventoryUnitForCode(candidate.unit)?.code ?? "";
     const quantityMilli = quantityToMilli(candidate.quantity);
     if ((!itemId && description.length < 2) || !unit || quantityMilli === null) return null;
     return {
@@ -939,10 +978,22 @@ export async function POST(request: Request, routeContext: RouteContext) {
       status = "OPEN";
       const startedAt = boundedText(input.startedAt, 40, now);
       if (!validDateTime(startedAt)) return Response.json({ error: "valid_field_start_required" }, { status: 400 });
+      const teamId = boundedText(input.teamId, 160);
+      const supervisorMembershipId = boundedText(input.supervisorMembershipId, 160);
+      if (boundedText(input.team, 160) || boundedText(input.supervisor, 160)) {
+        return Response.json({ error: "field_assignment_must_use_server_registry" }, { status: 400 });
+      }
+      const workforce = await fieldWorkforceOptions(context);
+      const team = teamId ? workforce.teams.find((item) => item.id === teamId) : null;
+      const supervisor = supervisorMembershipId ? workforce.people.find((item) => item.id === supervisorMembershipId) : null;
+      if (teamId && !team) return Response.json({ error: "field_team_not_assignable" }, { status: 409 });
+      if (supervisorMembershipId && !supervisor) return Response.json({ error: "field_supervisor_not_assignable" }, { status: 409 });
       payload = {
         startedAt,
-        team: boundedText(input.team, 160),
-        supervisor: boundedText(input.supervisor, 160),
+        team: team?.label ?? "",
+        ...(team ? { teamId: team.id } : {}),
+        supervisor: supervisor?.label ?? "",
+        ...(supervisor ? { supervisorMembershipId: supervisor.id } : {}),
         notes: boundedText(input.notes, 2_000),
       };
       eventType = "field.session.opened";
