@@ -1116,14 +1116,9 @@ export default function OperationsJobWorkspace({
       ? `Attiva · raggio ${worksiteGeofence.radiusMeters} m`
       : "Attiva · verificata dal server"
     : "Da verificare dal server";
-  const jobDescription = valueOr(
-    jobData.description,
-    "Descrizione operativa da completare.",
-  );
+  const jobDescription = typeof jobData.description === "string" ? jobData.description.trim() : "";
   const jobSummary = compactDescription(jobDescription);
-  const hasRealDescription = Boolean(
-    typeof jobData.description === "string" && jobData.description.trim(),
-  );
+  const hasRealDescription = Boolean(jobDescription);
   // Keep the registered commessa name in the title. A worksite-looking name
   // is still a valid project identity; descriptive text belongs below it.
   const displayTitle = job.title;
@@ -1150,11 +1145,19 @@ export default function OperationsJobWorkspace({
       : "Categoria da completare";
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
   const jobCode = valueOr(job.canonicalCode, jobId);
-  const contactLabel =
-    payloadText("clientContact") ||
-    payloadText("clientEmail") ||
-    payloadText("clientPhone") ||
-    "Referente da indicare";
+  const contactLabel = payloadText("clientContact") || "Referente non registrato";
+  const clientRows = [
+    { icon: Users, label: "Referente", value: payloadText("clientContact") },
+    { icon: Flag, label: "Riferimento cliente", value: valueOr(jobData.clientReference, "") },
+    { icon: BriefcaseBusiness, label: "Codice fiscale / P. IVA", value: valueOr(jobData.clientTaxId, "") },
+    { icon: BriefcaseBusiness, label: "Telefono", value: valueOr(jobData.clientPhone, "") },
+    { icon: BriefcaseBusiness, label: "E-mail", value: valueOr(jobData.clientEmail, "") },
+    { icon: MapPin, label: "Indirizzo cliente / fatturazione", value: valueOr(jobData.clientAddress, "") },
+    { icon: Flag, label: "CIG", value: valueOr(jobData.cig, "") },
+    { icon: Flag, label: "CUP", value: valueOr(jobData.cup, "") },
+  ];
+  const populatedClientRows = clientRows.filter((row) => row.value.trim().length > 0);
+  const missingClientRows = clientRows.filter((row) => row.value.trim().length === 0);
   const workItems = Array.isArray(jobData.workItems)
     ? jobData.workItems
         .filter((item): item is Record<string, unknown> =>
@@ -1216,11 +1219,6 @@ export default function OperationsJobWorkspace({
                   {priority !== "STANDARD" && <span className="rounded-full border border-amber-300/20 bg-amber-300/[.06] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100">Priorità {priority === "HIGH" ? "alta" : "bassa"}</span>}
                 </div>
                 <h1 className="mt-3 max-w-4xl break-words text-[26px] font-semibold leading-tight tracking-[-.04em] text-slate-50 sm:text-[34px]">{displayTitle}</h1>
-                {hasRealDescription && <p className="mt-2 line-clamp-2 max-w-4xl text-[12px] leading-5 text-slate-400">{jobSummary}</p>}
-                <p className="mt-3 flex items-start gap-2 text-[12px] leading-5 text-slate-300">
-                  <MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" />
-                  <span>{locationLabel}{locationVerified && <span className="ml-2 inline-flex rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[.1em] text-lime-100">Luogo verificato</span>}</span>
-                </p>
               </div>
               <span className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${statusTone(job.status)}`}>{displayStatus(job.status)}</span>
             </div>
@@ -1281,11 +1279,17 @@ export default function OperationsJobWorkspace({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">OGGETTO DELLA COMMESSA</p>
-                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Descrizione e lavorazioni</h2>
+                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Descrizione registrata e lavorazioni</h2>
                   </div>
                   {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} voci{sourceMode === "Da preventivo" ? " · preventivo" : ""}</span>}
                 </div>
-                <p className="mt-3 line-clamp-4 text-[11px] leading-5 text-slate-400">{jobSummary}</p>
+                {hasRealDescription ? <div className="mt-3 rounded-xl border border-white/[.06] bg-black/15 p-3">
+                  <p className="line-clamp-3 whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p>
+                  {jobDescription.length > 260 && <details className="mt-2 border-t border-white/[.06] pt-2">
+                    <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo completo</summary>
+                    <p className="mt-2 whitespace-pre-wrap break-words text-[10px] leading-5 text-slate-400">{jobDescription}</p>
+                  </details>}
+                </div> : <p className="mt-3 rounded-xl border border-dashed border-white/[.08] px-3 py-3 text-[10px] text-slate-500">Descrizione non registrata.</p>}
                 {workItems.length > 0 ? <div className="mt-4 space-y-2">
                   {workItems.slice(0, 4).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
@@ -1293,21 +1297,18 @@ export default function OperationsJobWorkspace({
                     {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                   </div>)}
                   {workItems.length > 4 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 4} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(4).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
-                </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] bg-black/15 px-3 py-4 text-[10px] leading-5 text-slate-500">Nessuna lavorazione strutturata è collegata alla commessa. La descrizione resta disponibile come riferimento.</div>}
+                </div> : <p className="mt-3 text-[9px] text-slate-600">Nessuna riga di lavorazione strutturata collegata.</p>}
               </section>
 
               <section className="carbon-card rounded-[22px] p-4 sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">ANAGRAFICA CLIENTE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Contatti e riferimenti</h2></div><span className="rounded-full border border-white/[.08] bg-black/20 px-2.5 py-1 text-[9px] text-slate-400">{clientName}</span></div>
-                <div className="mt-3 grid gap-x-5 sm:grid-cols-2">
-                  <InfoRow icon={Users} label="Referente" value={contactLabel} />
-                  <InfoRow icon={Flag} label="Riferimento cliente" value={valueOr(jobData.clientReference, "Non indicato")} />
-                  <InfoRow icon={BriefcaseBusiness} label="Codice fiscale / P. IVA" value={valueOr(jobData.clientTaxId, "Non indicato")} />
-                  <InfoRow icon={BriefcaseBusiness} label="Telefono" value={valueOr(jobData.clientPhone, "Non indicato")} />
-                  <InfoRow icon={BriefcaseBusiness} label="E-mail" value={valueOr(jobData.clientEmail, "Non indicata")} />
-                  <InfoRow icon={MapPin} label="Indirizzo cliente / fatturazione" value={valueOr(jobData.clientAddress, "Non indicato")} />
-                  <InfoRow icon={Flag} label="CIG" value={valueOr(jobData.cig, "Non indicato")} />
-                  <InfoRow icon={Flag} label="CUP" value={valueOr(jobData.cup, "Non indicato")} />
-                </div>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">ANAGRAFICA CLIENTE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">{clientName}</h2></div><span className="rounded-full border border-white/[.08] bg-black/20 px-2.5 py-1 text-[9px] text-slate-400">Cliente</span></div>
+                {populatedClientRows.length > 0 ? <div className="mt-2 grid gap-x-5 sm:grid-cols-2">
+                  {populatedClientRows.map((row) => <InfoRow icon={row.icon} key={row.label} label={row.label} value={row.value} />)}
+                </div> : <p className="mt-3 text-[10px] leading-5 text-slate-500">I recapiti amministrativi non sono ancora registrati.</p>}
+                {missingClientRows.length > 0 && <details className="mt-3 rounded-xl border border-white/[.07] bg-black/15 px-3 py-2.5">
+                  <summary className="cursor-pointer list-none text-[9px] font-medium text-amber-100/75">Dati cliente da completare · {missingClientRows.length}</summary>
+                  <ul className="mt-2 grid gap-1.5 border-t border-white/[.06] pt-2 sm:grid-cols-2">{missingClientRows.map((row) => <li className="text-[9px] text-slate-500" key={row.label}>{row.label}</li>)}</ul>
+                </details>}
               </section>
             </div>
 
