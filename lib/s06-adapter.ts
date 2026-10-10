@@ -8,13 +8,17 @@ import {
   type AuthorityContext,
 } from "@/lib/authority-context";
 
-function canUseEventSurface(context: AuthorityContext, operation: "read" | "write") {
+function canUseEventSurface(context: AuthorityContext, operation: "read" | "write" | "diagnostic") {
+  if (operation === "diagnostic") return hasCapability(context, "pwa.signal");
   return hasCapability(context, operation === "write" ? "events.write" : "events.read");
 }
 
-export function s06AccessDenied(context: AuthorityContext | null, operation: "read" | "write"): Response | null {
+export function s06AccessDenied(context: AuthorityContext | null, operation: "read" | "write" | "diagnostic"): Response | null {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!canUseEventSurface(context, operation)) return Response.json({ error: "forbidden", operation }, { status: 403 });
+  if (!canUseEventSurface(context, operation)) {
+    const capability = operation === "diagnostic" ? "pwa.signal" : operation === "write" ? "events.write" : "events.read";
+    return Response.json({ error: "forbidden", capability }, { status: 403 });
+  }
   return null;
 }
 

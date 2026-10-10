@@ -35,8 +35,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const context = await getS06Context();
-  const denied = s06AccessDenied(context, "write");
-  if (denied) return denied;
+  if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
 
   let payload: Record<string, unknown>;
   try {
@@ -48,19 +47,43 @@ export async function POST(request: Request) {
   }
 
   const eventType = safeText(payload.eventType).slice(0, 80);
-  const aggregateType = safeText(payload.aggregateType).slice(0, 80);
-  const aggregateId = safeText(payload.aggregateId).slice(0, 120);
-  const idempotencyKey = safeText(payload.idempotencyKey).slice(0, 160);
-  const aggregateVersion = typeof payload.aggregateVersion === "number" && Number.isInteger(payload.aggregateVersion)
-    ? payload.aggregateVersion
-    : 0;
-  const eventPayload = isRecord(payload.payload) ? payload.payload : {};
+  const bodyIdempotencyKey = safeText(payload.idempotencyKey);
+  const headerIdempotencyKey = safeText(request.headers.get("x-idempotency-key"));
+  if (bodyIdempotencyKey && headerIdempotencyKey && bodyIdempotencyKey !== headerIdempotencyKey) {
+    return Response.json({ error: "idempotency_key_mismatch" }, { status: 400 });
+  }
+  const rawIdempotencyKey = bodyIdempotencyKey || headerIdempotencyKey;
+  const idempotencyKey = rawIdempotencyKey.slice(0, 160);
+  const isPwaDiagnosticSignal = eventType === "pwa.diagnostics.signal";
+  const denied = s06AccessDenied(context, isPwaDiagnosticSignal ? "diagnostic" : "write");
+  if (denied) return denied;
+  if (isPwaDiagnosticSignal && rawIdempotencyKey.length > 80) {
+    return Response.json({ error: "pwa_idempotency_key_too_long" }, { status: 400 });
+  }
+  // PWA diagnostics are non-operational telemetry. The server owns their
+  // aggregate identity so a queued client event cannot claim a mission,
+  // attendance or stock aggregate.
+  const aggregateType = isPwaDiagnosticSignal
+    ? "pwa_diagnostics"
+    : safeText(payload.aggregateType).slice(0, 80);
+  const aggregateId = isPwaDiagnosticSignal
+    ? `signal:${idempotencyKey}`
+    : safeText(payload.aggregateId).slice(0, 120);
+  const aggregateVersion = isPwaDiagnosticSignal
+    ? 1
+    : typeof payload.aggregateVersion === "number" && Number.isInteger(payload.aggregateVersion)
+      ? payload.aggregateVersion
+      : 0;
+  const submittedPayload = isRecord(payload.payload) ? payload.payload : {};
+  const eventPayload = isPwaDiagnosticSignal
+    ? { signal: "pwa-mobile-control", build: safeText(submittedPayload.build, "unknown").slice(0, 120) }
+    : submittedPayload;
   const serializedPayload = JSON.stringify({ ...eventPayload, source: "sites-s06-adapter" });
 
   if (eventType.length < 2 || aggregateType.length < 2 || aggregateId.length < 1 || idempotencyKey.length < 4 || aggregateVersion < 1) {
     return Response.json({ error: "event_type_aggregate_and_positive_version_required" }, { status: 400 });
   }
-  if (typeof payload.idempotencyKey === "string" && payload.idempotencyKey.trim().length > 160) {
+  if (rawIdempotencyKey.length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
   }
   if (serializedPayload.length > 12_000) return Response.json({ error: "payload_too_large" }, { status: 400 });
@@ -78,6 +101,13 @@ export async function POST(request: Request) {
     if (existing[0]) {
       if (existing[0].eventType !== eventType || existing[0].aggregateType !== aggregateType || existing[0].aggregateId !== aggregateId || existing[0].aggregateVersion !== aggregateVersion) {
         return Response.json({ error: "s06_idempotency_key_conflict" }, { status: 409 });
+      }
+      if (isPwaDiagnosticSignal) {
+        return Response.json({
+          created: { eventId: existing[0].eventId, eventType: existing[0].eventType, status: existing[0].status },
+          readback: { status: "ok", checkedAt: existing[0].createdAt },
+          idempotent: true,
+        }, { headers: { "cache-control": "no-store" } });
       }
       const snapshot = await getS06Snapshot(context!.tenantId);
       return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(existing[0]), idempotent: true }, {
@@ -140,6 +170,14 @@ export async function POST(request: Request) {
       eq(s06Events.eventId, eventId),
     )).limit(1);
     if (!event) throw new Error("s06_event_readback_missing");
+
+    if (isPwaDiagnosticSignal) {
+      return Response.json({
+        created: { eventId: event.eventId, eventType: event.eventType, status: event.status },
+        readback: { status: "ok", checkedAt: event.createdAt },
+        idempotent: false,
+      }, { status: 201, headers: { "cache-control": "no-store" } });
+    }
 
     const snapshot = await getS06Snapshot(context!.tenantId);
     return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(event), idempotent: false }, {

@@ -1,4 +1,4 @@
-const PLATFORM = ["settings.read", "pwa.read"];
+const PLATFORM = ["settings.read", "pwa.read", "pwa.signal"];
 const COMMAND = ["command.read", "command.customize", "analytics.read", "events.read"];
 const EVENTS_WRITE = ["events.write"];
 const AUTHORITY_VIEW = ["authority.read"];

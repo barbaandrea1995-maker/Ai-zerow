@@ -56,3 +56,9 @@ La pubblicazione resta privata e owner-only. Il checkpoint chiude il perimetro S
 ## Decisione checkpoint
 
 `W11 SITES TECHNICAL PASS` nel perimetro owner-only privato. Event stream, delivery control, read model e ledger sono collegati senza inventare consumer o proiezioni esterne; la certificazione commerciale resta `NO_GO` finché i gate sopra non sono chiusi.
+
+## Addendum di coerenza W11/W15 — 10 ottobre 2026
+
+L’integrazione offline aveva un contratto incoerente: la PWA mandava la chiave idempotente nell’header, mentre `/api/events` la cercava solo nel body e richiedeva aggregati che il client non deve poter dichiarare per un segnale diagnostico. Il replay ora accetta la chiave dal body o dall’header e rifiuta valori discordanti. `pwa.diagnostics.signal` usa la capability dedicata `pwa.signal`, un aggregato server-owned derivato dalla chiave idempotente e un payload limitato al build; non può dichiarare eventi di commessa, missione, presenza o magazzino. La risposta contiene soltanto la conferma del singolo segnale, senza esporre il registro eventi a chi non ha `events.read`. Gli altri eventi mantengono il gate `events.write` e il contratto standard.
+
+La coda rimuove l’elemento solo dopo questo readback positivo. Restano da eseguire il replay offline/online su browser autenticato e la certificazione device reale; il consumer esterno continua a essere differito.

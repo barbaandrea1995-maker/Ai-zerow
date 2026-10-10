@@ -31,6 +31,7 @@ Nelle superfici protette la sessione Neon autenticata e l'identita primaria anch
 - `authority.read`: Owner, Amministratore, Manager, Ufficio e Auditor;
 - `command.customize`: solo ruoli operativi con Command; Auditor escluso;
 - `events.write`: Owner, Amministratore e Manager;
+- `pwa.signal`: consente solo di registrare una signal diagnostica PWA; non abilita la scrittura generica degli eventi né la lettura del registro;
 - `approvals.review`: Owner, Amministratore, Manager e Ufficio; Auditor mantiene accesso in sola lettura e non può approvare;
 - `operations.write`: Owner, Amministratore, Manager, Ufficio e Tecnico; i profili field in sola lettura non vedono le CTA di mutazione;
 - `warehouse.request`: separata da `warehouse.write`; Operatore, Collaboratore, Tecnico, Caposquadra e Manutentore possono richiedere materiale senza alterare i saldi;

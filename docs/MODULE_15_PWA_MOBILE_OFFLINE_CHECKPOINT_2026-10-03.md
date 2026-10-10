@@ -53,3 +53,7 @@ La route è protetta da `pwa.read`. La `CommandMobileNav` resta disponibile solt
 5. Conservare il blocco di promozione commerciale finché W12/W16/provider/device e sign-off umano non sono chiusi.
 
 **Conclusione:** W15 è pronto come superficie tecnica Sites/D1 e come contratto offline governato; non è una certificazione mobile commerciale.
+
+## Addendum di coerenza replay — 10 ottobre 2026
+
+Il replay della signal PWA ora usa una capability dedicata `pwa.signal`, disponibile ai ruoli che accedono a W15. L’API associa l’evento all’identità autenticata, limita il payload diagnostico e restituisce una conferma minima; la PWA elimina la voce IndexedDB soltanto dopo il readback HTTP positivo. Una signal non può impersonare un evento di dominio. La prova offline/online autenticata su device resta `NOT RUN`.
