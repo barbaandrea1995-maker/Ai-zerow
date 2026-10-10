@@ -95,20 +95,23 @@ export async function GET(request: Request) {
     });
 
     return Response.json({
+      ...snapshot,
       context: publicAuthorityContext(context),
       provider: {
-        id: "OPEN_METEO",
+        id: snapshot.provider,
         status: "READY",
-        source: "api.open-meteo.com",
-        attribution: "Open-Meteo · CC BY 4.0",
+        source: "api.weatherapi.com",
+        attribution: "WeatherAPI.com",
       },
       location,
-      ...snapshot,
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, max-age=300, stale-while-revalidate=600" } });
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("open_meteo_")) {
-      return Response.json({ error: "weather_provider_unavailable", provider: "OPEN_METEO" }, { status: 503 });
+    if (error instanceof Error && error.message === "weatherapi_not_configured") {
+      return Response.json({ error: "weather_provider_not_configured", provider: "WEATHERAPI" }, { status: 503 });
+    }
+    if (error instanceof Error && error.message.startsWith("weatherapi_")) {
+      return Response.json({ error: "weather_provider_unavailable", provider: "WEATHERAPI" }, { status: 503 });
     }
     return Response.json({ error: "weather_readback_unavailable" }, { status: 503 });
   }

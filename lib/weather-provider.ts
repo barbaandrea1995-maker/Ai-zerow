@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+
 export type WeatherProviderLocation = {
   latitude: number;
   longitude: number;
@@ -38,7 +40,7 @@ export type WeatherDaily = {
 };
 
 export type WeatherSnapshot = {
-  provider: "OPEN_METEO";
+  provider: "WEATHERAPI";
   timezone: string;
   current: WeatherCurrent;
   hourly: WeatherHourly[];
@@ -52,6 +54,7 @@ function isRecord(value: unknown): value is JsonObject {
 }
 
 function numberValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -64,20 +67,14 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-export function weatherCondition(code: number | null) {
-  if (code === null) return "Condizione non disponibile";
-  if (code === 0) return "Sereno";
-  if (code === 1) return "Prevalentemente sereno";
-  if (code === 2) return "Parzialmente nuvoloso";
-  if (code === 3) return "Coperto";
-  if ([45, 48].includes(code)) return "Nebbia";
-  if ([51, 53, 55, 56, 57].includes(code)) return "Pioviggine";
-  if ([61, 63, 65, 66, 67].includes(code)) return "Pioggia";
-  if ([71, 73, 75, 77].includes(code)) return "Neve";
-  if ([80, 81, 82].includes(code)) return "Rovesci";
-  if ([85, 86].includes(code)) return "Rovesci di neve";
-  if ([95, 96, 99].includes(code)) return "Temporale";
-  return "Condizioni variabili";
+function nestedRecord(value: unknown, key: string): JsonObject {
+  if (!isRecord(value)) return {};
+  const child = value[key];
+  return isRecord(child) ? child : {};
+}
+
+function conditionText(value: unknown) {
+  return stringValue(nestedRecord(value, "condition").text) || "Condizione non disponibile";
 }
 
 export function windDirectionLabel(degrees: number | null) {
@@ -86,52 +83,39 @@ export function windDirectionLabel(degrees: number | null) {
   return directions[Math.round(degrees / 45) % directions.length] ?? "—";
 }
 
-function listNumber(value: unknown, index: number) {
-  return numberValue(arrayValue(value)[index]);
-}
-
-function listString(value: unknown, index: number) {
-  return stringValue(arrayValue(value)[index]);
+function runtimeSecret() {
+  const names = ["WEATHERAPI_API_KEY", "weather_api_key"] as const;
+  const bindings = env as unknown as Record<string, unknown>;
+  for (const name of names) {
+    const bound = bindings[name];
+    if (typeof bound === "string" && bound.trim()) return bound.trim();
+  }
+  for (const name of names) {
+    const local = process.env[name];
+    if (typeof local === "string" && local.trim()) return local.trim();
+  }
+  return "";
 }
 
 export interface WeatherProvider {
-  readonly provider: "OPEN_METEO";
+  readonly provider: "WEATHERAPI";
   getForecast(location: WeatherProviderLocation): Promise<WeatherSnapshot>;
 }
 
-export class OpenMeteoAdapter implements WeatherProvider {
-  readonly provider = "OPEN_METEO" as const;
+export class WeatherApiAdapter implements WeatherProvider {
+  readonly provider = "WEATHERAPI" as const;
 
   async getForecast(location: WeatherProviderLocation): Promise<WeatherSnapshot> {
-    const endpoint = new URL("https://api.open-meteo.com/v1/forecast");
-    endpoint.searchParams.set("latitude", location.latitude.toFixed(6));
-    endpoint.searchParams.set("longitude", location.longitude.toFixed(6));
-    endpoint.searchParams.set("timezone", "auto");
-    endpoint.searchParams.set("forecast_days", "3");
-    endpoint.searchParams.set("current", [
-      "temperature_2m",
-      "relative_humidity_2m",
-      "apparent_temperature",
-      "precipitation",
-      "weather_code",
-      "wind_speed_10m",
-      "wind_direction_10m",
-      "is_day",
-    ].join(","));
-    endpoint.searchParams.set("hourly", [
-      "temperature_2m",
-      "precipitation_probability",
-      "precipitation",
-      "weather_code",
-      "wind_speed_10m",
-    ].join(","));
-    endpoint.searchParams.set("daily", [
-      "temperature_2m_max",
-      "temperature_2m_min",
-      "precipitation_probability_max",
-      "precipitation_sum",
-      "weather_code",
-    ].join(","));
+    const apiKey = runtimeSecret();
+    if (!apiKey) throw new Error("weatherapi_not_configured");
+
+    const endpoint = new URL("https://api.weatherapi.com/v1/forecast.json");
+    endpoint.searchParams.set("key", apiKey);
+    endpoint.searchParams.set("q", `${location.latitude.toFixed(6)},${location.longitude.toFixed(6)}`);
+    endpoint.searchParams.set("days", "3");
+    endpoint.searchParams.set("aqi", "no");
+    endpoint.searchParams.set("alerts", "no");
+    endpoint.searchParams.set("lang", "it");
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
@@ -140,65 +124,73 @@ export class OpenMeteoAdapter implements WeatherProvider {
         headers: { accept: "application/json" },
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`open_meteo_http_${response.status}`);
+      if (!response.ok) throw new Error(`weatherapi_http_${response.status}`);
       const payload = await response.json() as unknown;
-      if (!isRecord(payload)) throw new Error("open_meteo_invalid_payload");
+      if (!isRecord(payload)) throw new Error("weatherapi_invalid_payload");
       return this.normalize(payload);
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith("open_meteo_")) throw error;
-      throw new Error("open_meteo_unavailable");
+      if (error instanceof Error && error.message.startsWith("weatherapi_")) throw error;
+      throw new Error("weatherapi_unavailable");
     } finally {
       clearTimeout(timeout);
     }
   }
 
   private normalize(payload: JsonObject): WeatherSnapshot {
+    const location = isRecord(payload.location) ? payload.location : {};
     const current = isRecord(payload.current) ? payload.current : {};
-    const hourly = isRecord(payload.hourly) ? payload.hourly : {};
-    const daily = isRecord(payload.daily) ? payload.daily : {};
-    const currentCode = numberValue(current.weather_code);
-    const currentWindDirection = numberValue(current.wind_direction_10m);
-    const hourlyTimes = arrayValue(hourly.time);
-    const dailyDates = arrayValue(daily.time);
+    const forecastDays = arrayValue(nestedRecord(payload, "forecast").forecastday).filter(isRecord);
+    if (!isRecord(payload.location) || !isRecord(payload.current) || forecastDays.length === 0) {
+      throw new Error("weatherapi_invalid_payload");
+    }
+
+    const currentCondition = nestedRecord(current, "condition");
+    const currentWindDirection = numberValue(current.wind_degree);
+    const currentEpoch = numberValue(current.last_updated_epoch);
+    const hourlyRows = forecastDays.flatMap((day) => arrayValue(day.hour).filter(isRecord));
+    const upcomingHours = hourlyRows
+      .filter((hour) => currentEpoch === null || numberValue(hour.time_epoch) === null || numberValue(hour.time_epoch)! >= currentEpoch)
+      .slice(0, 8);
+    const selectedHours = upcomingHours.length ? upcomingHours : hourlyRows.slice(0, 8);
 
     return {
       provider: this.provider,
-      timezone: stringValue(payload.timezone) || "auto",
+      timezone: stringValue(location.tz_id) || "auto",
       current: {
-        observedAt: stringValue(current.time),
-        temperatureC: numberValue(current.temperature_2m),
-        apparentTemperatureC: numberValue(current.apparent_temperature),
-        humidityPct: numberValue(current.relative_humidity_2m),
-        precipitationMm: numberValue(current.precipitation),
-        windSpeedKmh: numberValue(current.wind_speed_10m),
+        observedAt: stringValue(current.last_updated),
+        temperatureC: numberValue(current.temp_c),
+        apparentTemperatureC: numberValue(current.feelslike_c),
+        humidityPct: numberValue(current.humidity),
+        precipitationMm: numberValue(current.precip_mm),
+        windSpeedKmh: numberValue(current.wind_kph),
         windDirectionDeg: currentWindDirection,
         windDirection: windDirectionLabel(currentWindDirection),
-        weatherCode: currentCode,
-        condition: weatherCondition(currentCode),
+        weatherCode: numberValue(currentCondition.code),
+        condition: stringValue(currentCondition.text) || "Condizione non disponibile",
         isDay: numberValue(current.is_day) === 1,
       },
-      hourly: hourlyTimes.slice(0, 8).map((_, index) => {
-        const code = listNumber(hourly.weather_code, index);
+      hourly: selectedHours.map((hour) => {
+        const condition = nestedRecord(hour, "condition");
         return {
-          time: listString(hourly.time, index),
-          temperatureC: listNumber(hourly.temperature_2m, index),
-          precipitationProbabilityPct: listNumber(hourly.precipitation_probability, index),
-          precipitationMm: listNumber(hourly.precipitation, index),
-          windSpeedKmh: listNumber(hourly.wind_speed_10m, index),
-          weatherCode: code,
-          condition: weatherCondition(code),
+          time: stringValue(hour.time),
+          temperatureC: numberValue(hour.temp_c),
+          precipitationProbabilityPct: numberValue(hour.chance_of_rain),
+          precipitationMm: numberValue(hour.precip_mm),
+          windSpeedKmh: numberValue(hour.wind_kph),
+          weatherCode: numberValue(condition.code),
+          condition: stringValue(condition.text) || "Condizione non disponibile",
         };
       }),
-      daily: dailyDates.slice(0, 3).map((_, index) => {
-        const code = listNumber(daily.weather_code, index);
+      daily: forecastDays.slice(0, 3).map((day) => {
+        const dayForecast = nestedRecord(day, "day");
         return {
-          date: listString(daily.time, index),
-          temperatureMaxC: listNumber(daily.temperature_2m_max, index),
-          temperatureMinC: listNumber(daily.temperature_2m_min, index),
-          precipitationProbabilityPct: listNumber(daily.precipitation_probability_max, index),
-          precipitationMm: listNumber(daily.precipitation_sum, index),
-          weatherCode: code,
-          condition: weatherCondition(code),
+          date: stringValue(day.date),
+          temperatureMaxC: numberValue(dayForecast.maxtemp_c),
+          temperatureMinC: numberValue(dayForecast.mintemp_c),
+          precipitationProbabilityPct: numberValue(dayForecast.daily_chance_of_rain),
+          precipitationMm: numberValue(dayForecast.totalprecip_mm),
+          weatherCode: numberValue(nestedRecord(dayForecast, "condition").code),
+          condition: conditionText(dayForecast),
         };
       }),
     };
@@ -206,5 +198,5 @@ export class OpenMeteoAdapter implements WeatherProvider {
 }
 
 export function weatherProvider(): WeatherProvider {
-  return new OpenMeteoAdapter();
+  return new WeatherApiAdapter();
 }
