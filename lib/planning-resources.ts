@@ -9,6 +9,8 @@ export type PlanningAvailabilityWindow = {
   endsAt: string;
 };
 
+export type PlanningJobModule = "operations" | "mission";
+
 export type PlanningResourceConflict = PlanningAvailabilityWindow & {
   recordId: string;
   title: string;
@@ -129,9 +131,11 @@ function custodyAppliesToWindow(custody: PlanningAssetCustody, window?: Planning
   return Number.isFinite(windowStart) && Number.isFinite(windowEnd) && windowStart < endsAt && startsAt < windowEnd;
 }
 
-function planningRoleEligible(roles: string[]) {
-  const operationalRoles = new Set(["technical", "field_supervisor", "worker", "driver", "delivery_driver", "maintenance"]);
-  return roles.some((role) => operationalRoles.has(role));
+function planningRoleEligible(roles: string[], module: PlanningJobModule) {
+  const eligibleRoles = module === "mission"
+    ? new Set(["driver", "delivery_driver"])
+    : new Set(["technical", "field_supervisor", "worker", "driver", "maintenance"]);
+  return roles.some((role) => eligibleRoles.has(role));
 }
 
 function optionForMembership(
@@ -160,6 +164,7 @@ function optionForRow(
   conflict?: PlanningResourceConflict,
   activeMembershipIds?: Set<string>,
   planningMembershipIds?: Set<string>,
+  planningActorIds?: Set<string>,
   attachedAssets: PlanningAttachedAsset[] = [],
   assignmentCustody?: PlanningAssetCustody,
 ): PlanningResourceOption | null {
@@ -168,8 +173,11 @@ function optionForRow(
   const payload = parsePayload(row.payloadJson);
   const status = text(payload.lifecycleStatus, row.status || "AVAILABLE").toUpperCase();
   const membershipId = text(payload.authorityMembershipId || payload.membershipId);
+  const actorId = text(payload.actorId);
+  const hasEligibleMembership = (membershipId && planningMembershipIds?.has(membershipId))
+    || (actorId && planningActorIds?.has(actorId));
   const assignable = kind === "person"
-    ? status !== "INACTIVE" && status !== "SUSPENDED" && (!planningMembershipIds || !membershipId || planningMembershipIds.has(membershipId))
+    ? status !== "INACTIVE" && status !== "SUSPENDED" && Boolean(hasEligibleMembership)
     : kind === "team"
       ? status !== "INACTIVE" && status !== "SUSPENDED"
         && stringList(payload.memberMembershipIds).length > 0
@@ -286,7 +294,8 @@ async function activeAssetCustody(tenantId: string) {
 
 export async function getPlanningResourceOptions(
   tenantId: string,
-  window?: PlanningAvailabilityWindow,
+  window: PlanningAvailabilityWindow | undefined,
+  module: PlanningJobModule,
   excludedPlanId?: string,
 ) {
   const [rows, assignments, activeMembershipRows, custodyRows] = await Promise.all([
@@ -311,8 +320,12 @@ export async function getPlanningResourceOptions(
   const activeMembershipIds = new Set(activeMembershipRows.map((membership) => membership.id));
   const planningMembershipIds = new Set(activeMembershipRows.filter((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
-    return planningRoleEligible(roles);
+    return planningRoleEligible(roles, module);
   }).map((membership) => membership.id));
+  const planningActorIds = new Set(activeMembershipRows.filter((membership) => {
+    const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
+    return planningRoleEligible(roles, module);
+  }).map((membership) => membership.actorId));
   const conflictsByResource = new Map<string, PlanningResourceConflict>();
   if (window) {
     for (const assignment of assignments) {
@@ -411,7 +424,7 @@ export async function getPlanningResourceOptions(
         ? stringList(payload.memberMembershipIds)
         : [];
     const attachedAssets = attachedAssetsFor(attachedIdentities);
-    return optionForRow(row, conflictIncludingAttached(row.id, attachedAssets), activeMembershipIds, planningMembershipIds, attachedAssets, custodyByAsset.get(row.id));
+    return optionForRow(row, conflictIncludingAttached(row.id, attachedAssets), activeMembershipIds, planningMembershipIds, planningActorIds, attachedAssets, custodyByAsset.get(row.id));
   })
     .filter((item): item is PlanningResourceOption => Boolean(item));
 
@@ -451,17 +464,27 @@ export function planningResourceForOption(option: PlanningResourceOption): Plann
   };
 }
 
-export async function resolvePlanningResources(tenantId: string, value: unknown, window?: PlanningAvailabilityWindow) {
+export async function resolvePlanningResources(
+  tenantId: string,
+  value: unknown,
+  window: PlanningAvailabilityWindow | undefined,
+  module: PlanningJobModule,
+  excludedPlanId?: string,
+) {
   const resourceIds = Array.isArray(value)
     ? [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 64)
     : [];
   if (!resourceIds.length) throw new PlanningResourceError("planning_resource_ids_required");
 
-  const options = await getPlanningResourceOptions(tenantId, window);
+  const options = await getPlanningResourceOptions(tenantId, window, module, excludedPlanId);
   const byId = new Map(options.map((option) => [option.id, option]));
+  const implicitlyAttachedIds = new Set(resourceIds.flatMap((resourceId) =>
+    byId.get(resourceId)?.attachedAssets.map((asset) => asset.id) ?? [],
+  ));
   const resolved: PlanningResource[] = [];
   const resolvedIds = new Set<string>();
   for (const resourceId of resourceIds) {
+    if (implicitlyAttachedIds.has(resourceId)) continue;
     const option = byId.get(resourceId);
     if (!option) throw new PlanningResourceError("planning_resource_not_found", resourceId);
     if (!option.assignable || option.availabilityConflict) throw new PlanningResourceError("planning_resource_unavailable", option.label);

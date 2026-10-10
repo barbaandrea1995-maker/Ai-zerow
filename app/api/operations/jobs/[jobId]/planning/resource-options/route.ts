@@ -54,12 +54,13 @@ export async function GET(request: Request, routeContext: RouteContext) {
       return Response.json({ error: "invalid_planning_window" }, { status: 400 });
     }
     const window: PlanningAvailabilityWindow | undefined = hasWindow ? { startsAt, endsAt } : undefined;
-    const planningOptions = await getPlanningResourceOptions(context.tenantId, window, excludedPlanId);
+    const jobModule = job.module === "mission" ? "mission" : "operations";
+    const planningOptions = await getPlanningResourceOptions(context.tenantId, window, jobModule, excludedPlanId);
     const canReadWorkforceRegistry = hasCapability(context, "workforce.registry.read")
       || hasCapability(context, "workforce.read.all")
       || hasCapability(context, "workforce.manage");
     const workforce = canReadWorkforceRegistry
-      ? planningOptions.filter((item) => item.kind === "person" || item.kind === "team")
+      ? planningOptions.filter((item) => item.assignable && (item.kind === "person" || item.kind === "team"))
       : [];
     const assets = hasCapability(context, "asset.read")
       ? planningOptions.filter((item) => item.kind === "asset" || item.kind === "vehicle")

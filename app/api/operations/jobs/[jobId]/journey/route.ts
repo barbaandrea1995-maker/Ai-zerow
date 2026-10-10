@@ -928,7 +928,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (Date.parse(endsAt) <= Date.parse(startsAt)) return Response.json({ error: "planning_end_must_follow_start" }, { status: 400 });
       let canonicalResources: PlanningResource[];
       try {
-        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds, { startsAt, endsAt });
+        canonicalResources = await resolvePlanningResources(
+          context.tenantId,
+          input.resourceIds,
+          { startsAt, endsAt },
+          job.module === "mission" ? "mission" : "operations",
+        );
       } catch (error) {
         if (error instanceof PlanningRegistryError) return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
         throw error;
@@ -966,6 +971,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         priority: boundedText(input.priority, 24, "STANDARD").toUpperCase(),
         resources: canonicalResources,
         resourceIds: slot.resourceIds,
+        selectedResourceIds: stringIds(input.resourceIds).map((id) => id.slice(0, 160)).slice(0, 64),
         slots: [slot],
         evaluation,
         notes: boundedText(input.notes, 2_000),
@@ -1231,8 +1237,48 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
       if (action === "planning_publish") {
         if (domain !== "planning" || row.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition" }, { status: 409 });
+        const planData = planningData(row);
+        const selectedResourceIds = Array.isArray(payload.selectedResourceIds)
+          ? stringIds(payload.selectedResourceIds).slice(0, 64)
+          : [...planningResourceIds(payload)].slice(0, 64);
+        const window = planningWindow(payload);
+        if (!selectedResourceIds.length || !planData.slots.length || !window) {
+          return Response.json({ error: "planning_draft_requires_revalidation" }, { status: 409 });
+        }
+        let canonicalResources: PlanningResource[];
+        try {
+          canonicalResources = await resolvePlanningResources(
+            context.tenantId,
+            selectedResourceIds,
+            window,
+            job.module === "mission" ? "mission" : "operations",
+            row.id,
+          );
+        } catch (error) {
+          if (error instanceof PlanningRegistryError) {
+            return Response.json({ error: error.code, detail: error.message }, { status: 409 });
+          }
+          throw error;
+        }
+        if (canonicalResources.some((resource) => (resource.kind === "person" || resource.kind === "team")
+          && !hasCapability(context, "workforce.registry.read")
+          && !hasCapability(context, "workforce.read.all"))) {
+          return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
+        }
+        if (canonicalResources.some((resource) => (resource.kind === "asset" || resource.kind === "vehicle")
+          && !hasCapability(context, "asset.read"))) {
+          return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
+        }
+        const evaluation = evaluatePlanningAgainstTenant(
+          planData.slots,
+          canonicalResources,
+          (await activePlanningRows(context.tenantId)).filter((plan) => plan.id !== row.id),
+        );
+        if (!evaluation.feasible && input.allowConflicts !== true) {
+          return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
+        }
         status = "PUBLISHED";
-        payload = { ...payload, publishedAt: now, publishedBy: context.actorId };
+        payload = { ...payload, selectedResourceIds, resources: canonicalResources, evaluation, publishedAt: now, publishedBy: context.actorId };
         eventType = "planning.plan.published";
       } else if (action === "field_close") {
         if (domain !== "field" || row.status !== "OPEN") return Response.json({ error: "invalid_field_transition" }, { status: 409 });

@@ -163,6 +163,7 @@ function planPayload(input: JsonObject, now: string): JsonObject | null {
     priority: bounded(input.priority, 24, "STANDARD").toUpperCase(),
     startsAt: bounded(input.startsAt, 40, slots[0].startsAt),
     endsAt: bounded(input.endsAt, 40, slots[0].endsAt),
+    selectedResourceIds: [...new Set(slots.flatMap((slot) => slot.resourceIds))].slice(0, 64),
     resources,
     slots,
     notes: bounded(input.notes, 2_000),
@@ -343,7 +344,13 @@ export async function POST(request: Request, routeContext: RouteContext) {
       })();
       let canonicalResources: PlanningResource[];
       try {
-        canonicalResources = await resolvePlanningResources(context.tenantId, input.resourceIds, resourceWindow);
+        canonicalResources = await resolvePlanningResources(
+          context.tenantId,
+          input.resourceIds,
+          resourceWindow,
+          job.module === "mission" ? "mission" : "operations",
+          action === "revise" ? bounded(input.recordId, 120) : undefined,
+        );
       } catch (error) {
         if (error instanceof PlanningResourceError) {
           return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
@@ -431,9 +438,44 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (record.version !== expectedVersion) return Response.json({ error: "version_conflict", expectedVersion, currentVersion: record.version }, { status: 409 });
     if (record.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition", status: record.status }, { status: 409 });
     const data = planningData(record);
-    const evaluation = evaluateAgainstTenant(data.slots, data.resources, await activeTenantPlans(context.tenantId, record.id));
+    const selectedResourceIds = Array.isArray(data.payload.selectedResourceIds)
+      ? data.payload.selectedResourceIds.filter((value): value is string => typeof value === "string").slice(0, 64)
+      : [...new Set(data.slots.flatMap((slot) => slot.resourceIds))].slice(0, 64);
+    const startsAt = bounded(data.payload.startsAt, 40, data.slots[0]?.startsAt ?? "");
+    const endsAt = bounded(data.payload.endsAt, 40, data.slots[0]?.endsAt ?? "");
+    if (!selectedResourceIds.length || !startsAt || !endsAt
+      || !Number.isFinite(Date.parse(startsAt))
+      || !Number.isFinite(Date.parse(endsAt))
+      || Date.parse(endsAt) <= Date.parse(startsAt)) {
+      return Response.json({ error: "planning_draft_requires_revalidation" }, { status: 409 });
+    }
+    let canonicalResources: PlanningResource[];
+    try {
+      canonicalResources = await resolvePlanningResources(
+        context.tenantId,
+        selectedResourceIds,
+        { startsAt, endsAt },
+        job.module === "mission" ? "mission" : "operations",
+        record.id,
+      );
+    } catch (error) {
+      if (error instanceof PlanningResourceError) {
+        return Response.json({ error: error.code, detail: error.message }, { status: 409 });
+      }
+      throw error;
+    }
+    if (canonicalResources.some((resource) => (resource.kind === "person" || resource.kind === "team")
+      && !hasCapability(context, "workforce.registry.read")
+      && !hasCapability(context, "workforce.read.all"))) {
+      return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
+    }
+    if (canonicalResources.some((resource) => (resource.kind === "asset" || resource.kind === "vehicle")
+      && !hasCapability(context, "asset.read"))) {
+      return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
+    }
+    const evaluation = evaluateAgainstTenant(data.slots, canonicalResources, await activeTenantPlans(context.tenantId, record.id));
     if (!evaluation.feasible && input.allowConflicts !== true) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
-    const nextPayload = { ...data.payload, evaluation, publishedAt: now, publishedBy: context.actorId, status: "PUBLISHED" };
+    const nextPayload = { ...data.payload, selectedResourceIds, resources: canonicalResources, evaluation, publishedAt: now, publishedBy: context.actorId, status: "PUBLISHED" };
     const eventId = crypto.randomUUID();
     const publishUpdate = db.update(jobJourneyRecords).set({
       status: "PUBLISHED",
