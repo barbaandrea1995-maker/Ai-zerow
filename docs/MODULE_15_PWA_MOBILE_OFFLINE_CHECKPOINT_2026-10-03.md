@@ -17,8 +17,8 @@ La route è protetta da `pwa.read`. La `CommandMobileNav` resta disponibile solt
 
 - `public/manifest.webmanifest`: standalone, start `/command`, scope `/` e icone ufficiali.
 - `public/sw.js`: cache shell versionata, cleanup delle versioni precedenti, fallback `/offline`, esclusione di `POST` e `/api/` dalla cache.
-- `zerow-offline / queue`: IndexedDB locale, ordering FIFO, aggregate version e payload limitato alla signal locale.
-- Replay: `POST /api/events`, `x-idempotency-key`, rimozione solo dopo HTTP `2xx`, stop al primo errore e nessun successo simulato.
+- `zerow-offline / queue`: IndexedDB locale, ordering FIFO, chiave idempotente stabile per elemento e payload limitato alla signal diagnostica; aggregato e versione sono server-owned.
+- Replay: `POST /api/events`, chiave idempotente coerente tra body e `x-idempotency-key`, rimozione solo dopo readback HTTP `2xx`, stop al primo errore e nessun successo simulato.
 - Installabilità: il CTA si abilita solo su `beforeinstallprompt`; in assenza dell’evento lo stato resta `NOT OBSERVED`.
 - Device boundary: iOS/Android nativi, browser/device certification, push, GPS continuo e worker esterni restano esplicitamente `NOT RUN` o `DEFERRED`.
 
