@@ -84,7 +84,7 @@ export function windDirectionLabel(degrees: number | null) {
 }
 
 function runtimeSecret() {
-  const names = ["WEATHERAPI_API_KEY", "weather_api_key"] as const;
+  const names = ["WEATHER_API_KEY", "WEATHERAPI_API_KEY", "weather_api_key"] as const;
   const bindings = env as unknown as Record<string, unknown>;
   for (const name of names) {
     const bound = bindings[name];
