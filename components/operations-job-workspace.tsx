@@ -1161,7 +1161,6 @@ export default function OperationsJobWorkspace({
       : "Categoria da completare";
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
   const jobCode = valueOr(job.canonicalCode, jobId);
-  const contactLabel = payloadText("clientContact") || "Referente non registrato";
   const clientRows = [
     { icon: Users, label: "Referente", value: payloadText("clientContact") },
     { icon: Flag, label: "Riferimento cliente", value: valueOr(jobData.clientReference, "") },
@@ -1225,134 +1224,101 @@ export default function OperationsJobWorkspace({
         </header>
 
         <section className="overflow-hidden rounded-[26px] border border-lime-300/20 bg-[linear-gradient(145deg,rgba(22,34,26,.96),rgba(7,11,11,.98)_58%,rgba(12,20,18,.96))] shadow-[0_24px_70px_rgba(0,0,0,.28)]">
-          <div className="p-5 sm:p-7">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-lime-300/20 bg-lime-300/[.05] px-2.5 py-1 font-mono text-[9px] font-semibold text-lime-100">{jobCode}</span>
-                  <span className="text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">{openingType}</span>
-                  {sourceMode === "Da preventivo" && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/80">Da preventivo</span>}
-                  {priority !== "STANDARD" && <span className="rounded-full border border-amber-300/20 bg-amber-300/[.06] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100">Priorità {priority === "HIGH" ? "alta" : "bassa"}</span>}
+          <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-lime-300/20 bg-lime-300/[.05] px-2.5 py-1 font-mono text-[9px] font-semibold text-lime-100">{jobCode}</span>
+                <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold ${statusTone(job.status)}`}>{displayStatus(job.status)}</span>
+                {priority !== "STANDARD" && <span className="rounded-full border border-amber-300/20 bg-amber-300/[.06] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100">Priorità {priority === "HIGH" ? "alta" : "bassa"}</span>}
+                {sourceMode === "Da preventivo" && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/80">Da preventivo</span>}
+              </div>
+              <h1 className="mt-3 max-w-4xl break-words text-[26px] font-semibold leading-tight tracking-[-.04em] text-slate-50 sm:text-[34px]">{displayTitle}</h1>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-slate-400">
+                <span className="inline-flex min-w-0 items-center gap-1.5"><MapPin className="size-3.5 shrink-0 text-cyan-200" /><span className="break-words">{locationLabel}</span></span>
+                <span className="inline-flex min-w-0 items-center gap-1.5"><Users className="size-3.5 shrink-0 text-lime-200" /><span className="break-words">{clientName}</span></span>
+              </div>
+              {hasRealDescription && <p className="mt-3 max-w-3xl line-clamp-2 whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p>}
+              <div className="mt-5 max-w-3xl border-t border-white/[.08] pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-500">Avanzamento lavori</span>
+                  <span className="font-mono text-sm text-lime-100">{progress}%</span>
                 </div>
-                <h1 className="mt-3 max-w-4xl break-words text-[26px] font-semibold leading-tight tracking-[-.04em] text-slate-50 sm:text-[34px]">{displayTitle}</h1>
-              </div>
-              <span className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${statusTone(job.status)}`}>{displayStatus(job.status)}</span>
-            </div>
-
-            <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
-                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cliente</p>
-                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{clientName}</p>
-                <p className="mt-1 truncate text-[9px] text-slate-600">{contactLabel}</p>
-              </div>
-              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
-                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cantiere</p>
-                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{locationLabel}</p>
-                <p className={`mt-1 truncate text-[9px] ${locationVerified ? "text-lime-200/75" : "text-amber-200/75"}`}>{geofenceLabel}</p>
-              </div>
-              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
-                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Riferimento cliente</p>
-                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{valueOr(jobData.clientReference, "Non indicato")}</p>
-                <p className="mt-1 truncate text-[9px] text-slate-600">{[payloadText("cig") && `CIG ${payloadText("cig")}`, payloadText("cup") && `CUP ${payloadText("cup")}`].filter(Boolean).join(" · ") || "CIG / CUP non indicati"}</p>
-              </div>
-              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
-                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Scadenza prevista</p>
-                <p className="mt-1.5 text-[12px] font-medium text-slate-200">{dueDateLabel}</p>
-                <p className="mt-1 truncate text-[9px] text-slate-600">{scopeLabel}</p>
+                <div aria-label={`Avanzamento ${progress}%`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progress} className="mt-2 h-2 overflow-hidden rounded-full bg-black/60" role="progressbar">
+                  <div className="h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-200 transition-all" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[9px] text-slate-600"><span>{openingType}</span><span>Scadenza prevista · {dueDateLabel}</span></div>
               </div>
             </div>
 
-            <div className="mt-5 border-t border-white/[.08] pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[9px] font-semibold uppercase tracking-[.16em] text-slate-500">Avanzamento lavori</span>
-                <span className="font-mono text-sm text-lime-100">{progress}%</span>
-              </div>
-              <div aria-label={`Avanzamento ${progress}%`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progress} className="mt-2 h-2 overflow-hidden rounded-full bg-black/60" role="progressbar">
-                <div className="h-full rounded-full bg-gradient-to-r from-lime-300 to-cyan-200 transition-all" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
-              </div>
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              {canWriteReport && !reportLocked && <Button className="min-h-10 bg-cyan-200 px-4 text-[11px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={openReport} type="button"><Sparkles className="size-3.5" />{workspace.rapportino.status === "DRAFT" || workspace.rapportino.status === "CHANGES_REQUESTED" ? "Riprendi rapportino" : "Rapportino con Company AI"}</Button>}
-              {canReviewReport && workspace.rapportino.status === "SUBMITTED" && <Button className="min-h-10 bg-amber-200 px-4 text-[11px] font-semibold text-[#120d04] hover:bg-amber-100" onClick={openReport} type="button"><ClipboardCheck className="size-3.5" />Esamina rapportino</Button>}
+            <div className="flex flex-wrap gap-2 lg:max-w-[260px] lg:justify-end">
+              {canReviewReport && workspace.rapportino.status === "SUBMITTED" && <Button className="min-h-10 bg-amber-200 px-4 text-[10px] font-semibold text-[#120d04] hover:bg-amber-100" onClick={openReport} type="button"><ClipboardCheck className="size-3.5" />Esamina rapportino</Button>}
               {canWriteOperations && nextStatusAction && <Button className="min-h-10 border-lime-300/20 bg-lime-300/[.06] px-3 text-[10px] text-lime-100 hover:bg-lime-300/10" disabled={mutationBusy || (["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready)} onClick={() => void mutate("set_status", { statusCode: nextStatusAction.statusCode })} title={(["COMPLETED", "CLOSED"].includes(nextStatusAction.statusCode) && !workspace.completion.ready) ? "Completa i controlli obbligatori prima di avanzare" : undefined} type="button" variant="outline"><Send className="size-3.5" />{nextStatusAction.actionLabel}</Button>}
-              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={openDetails} type="button" variant="outline"><BriefcaseBusiness className="size-3.5" />Modifica commessa</Button>}
-              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={() => setActionOpen("progress")} type="button" variant="outline"><CircleGauge className="size-3.5" />Avanzamento</Button>}
+              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={openDetails} type="button" variant="outline"><BriefcaseBusiness className="size-3.5" />Modifica dati</Button>}
+              {canWriteOperations && <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[10px] text-slate-300 hover:border-white/20 hover:text-slate-100" onClick={() => setActionOpen("progress")} type="button" variant="outline"><CircleGauge className="size-3.5" />Aggiorna avanzamento</Button>}
             </div>
           </div>
         </section>
 
         <Tabs className="mt-4" onValueChange={(value) => setActiveSection(value as "overview" | "operations" | "reports")} value={activeSection}>
           <TabsList className={`grid h-12 w-full ${canWriteReport || canReviewReport ? "grid-cols-3" : "grid-cols-2"} rounded-2xl border border-white/[.08] bg-black/25 p-1`}>
-            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Scheda commerciale</TabsTrigger>
+            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Riepilogo</TabsTrigger>
             <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="operations"><Layers3 className="size-3.5" />Operatività</TabsTrigger>
             {(canWriteReport || canReviewReport) && <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-cyan-300/20 data-[state=active]:bg-cyan-300/[.08] data-[state=active]:text-cyan-100" value="reports"><Sparkles className="size-3.5" />Rapportini</TabsTrigger>}
           </TabsList>
 
           <TabsContent className="mt-4 space-y-4" value="overview">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,.8fr)]">
-              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">{quoteSummary ? "PREVENTIVO COLLEGATO" : "OGGETTO DELLA COMMESSA"}</p>
-                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">{quoteSummary ? "Oggetto e perimetro lavori" : "Descrizione registrata e lavorazioni"}</h2>
-                  </div>
-                  {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} voci{sourceMode === "Da preventivo" ? " · preventivo" : ""}</span>}
-                </div>
-                {quoteSummary ? <div className="mt-3 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3.5">
-                  <p className="text-[8px] font-semibold uppercase tracking-[.14em] text-cyan-100/60">Oggetto del preventivo</p>
-                  <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-100">{quoteSummary.object}</p>
-                  {quoteSummary.summary && <p className="mt-2 text-[10px] leading-5 text-slate-400">{quoteSummary.summary}</p>}
-                  <details className="mt-3 border-t border-white/[.06] pt-2.5">
-                    <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo registrato completo</summary>
-                    <p className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-white/[.06] bg-black/20 p-3 text-[10px] leading-5 text-slate-400">{jobDescription}</p>
-                  </details>
-                </div> : hasRealDescription ? <div className="mt-3 rounded-xl border border-white/[.06] bg-black/15 p-3">
-                  <p className="line-clamp-3 whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p>
-                  {jobDescription.length > 260 && <details className="mt-2 border-t border-white/[.06] pt-2">
-                    <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo completo</summary>
-                    <p className="mt-2 whitespace-pre-wrap break-words text-[10px] leading-5 text-slate-400">{jobDescription}</p>
-                  </details>}
-                </div> : <p className="mt-3 rounded-xl border border-dashed border-white/[.08] px-3 py-3 text-[10px] text-slate-500">Descrizione non registrata.</p>}
-                {workItems.length > 0 ? <div className="mt-4 space-y-2">
-                  {workItems.slice(0, 4).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
-                    <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
-                    <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Fonte: {item.source}{typeof item.confidence === "number" ? ` · confidenza ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
-                    {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
-                  </div>)}
-                  {workItems.length > 4 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 4} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(4).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
-                </div> : <p className="mt-3 text-[9px] leading-4 text-slate-600">Nessuna riga di lavorazione strutturata è collegata. Il preventivo originale resta disponibile nel testo registrato.</p>}
-              </section>
+            <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">PERIMETRO DEL LAVORO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">{quoteSummary ? "Lavori dal preventivo" : "Descrizione e lavorazioni"}</h2></div>
+                {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} lavorazioni</span>}
+              </div>
+              {quoteSummary ? <div className="mt-4 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3.5">
+                <p className="text-[8px] font-semibold uppercase tracking-[.14em] text-cyan-100/60">Oggetto del preventivo</p>
+                <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-100">{quoteSummary.object}</p>
+                {quoteSummary.summary && <p className="mt-2 text-[10px] leading-5 text-slate-400">{quoteSummary.summary}</p>}
+              </div> : hasRealDescription ? <p className="mt-3 max-w-4xl whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p> : <p className="mt-3 rounded-xl border border-dashed border-white/[.08] px-3 py-3 text-[10px] text-slate-500">La descrizione dei lavori non è stata registrata.</p>}
 
-              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">ANAGRAFICA CLIENTE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">{clientName}</h2></div><span className="rounded-full border border-white/[.08] bg-black/20 px-2.5 py-1 text-[9px] text-slate-400">Cliente</span></div>
-                {populatedClientRows.length > 0 ? <div className="mt-2 grid gap-x-5 sm:grid-cols-2">
-                  {populatedClientRows.map((row) => <InfoRow icon={row.icon} key={row.label} label={row.label} value={row.value} />)}
-                </div> : <p className="mt-3 text-[10px] leading-5 text-slate-500">I recapiti amministrativi non sono ancora registrati.</p>}
-                {missingClientRows.length > 0 && <details className="mt-3 rounded-xl border border-white/[.07] bg-black/15 px-3 py-2.5">
-                  <summary className="cursor-pointer list-none text-[9px] font-medium text-amber-100/75">Dati cliente da completare · {missingClientRows.length}</summary>
-                  <ul className="mt-2 grid gap-1.5 border-t border-white/[.06] pt-2 sm:grid-cols-2">{missingClientRows.map((row) => <li className="text-[9px] text-slate-500" key={row.label}>{row.label}</li>)}</ul>
-                </details>}
-              </section>
-            </div>
+              {workItems.length > 0 ? <div className="mt-4 divide-y divide-white/[.06] rounded-xl border border-white/[.06] bg-black/15 px-3">
+                {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 py-3" key={typeof item.id === "string" ? item.id : `work-${index}`}>
+                  <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
+                  <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Da {item.source}{typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
+                  {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
+                </div>)}
+                {workItems.length > 3 && <details className="border-t border-white/[.06] py-3"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-3 divide-y divide-white/[.06]">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[9px] text-slate-600">{item.detail}</p>}</div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
+              </div> : <p className="mt-3 text-[9px] leading-4 text-slate-600">Non ci sono lavorazioni separate. Il testo della commessa resta il riferimento operativo.</p>}
+              {jobDescription.length > 260 && <details className="mt-3 rounded-xl border border-white/[.06] bg-black/10 px-3 py-2.5">
+                <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo registrato completo</summary>
+                <p className="mt-2 whitespace-pre-wrap break-words border-t border-white/[.06] pt-2.5 text-[10px] leading-5 text-slate-400">{jobDescription}</p>
+              </details>}
+            </section>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <section className="rounded-[22px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(10,27,29,.62),rgba(7,12,13,.96))] p-4 sm:p-5">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">LUOGO DI INTERVENTO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Cantiere e accesso</h2></div><span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${locationVerified ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-amber-300/20 bg-amber-300/[.05] text-amber-100"}`}>{locationVerified ? "Verificato" : "Da verificare"}</span></div>
-                <InfoRow icon={MapPin} label="Indirizzo cantiere" value={locationLabel} />
-                <InfoRow icon={ShieldCheck} label="Geofence" value={geofenceLabel} />
-                <InfoRow icon={HardHat} label="Accesso e vincoli" value={valueOr(jobData.accessNotes, "Nessuna nota registrata")} />
-              </section>
-
-              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">CLASSIFICAZIONE E PIANO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Ambito e scadenza</h2></div><CalendarClock className="size-4 text-lime-200" /></div>
-                <InfoRow icon={BriefcaseBusiness} label="Ambito operativo" value={scopeLabel} />
-                <InfoRow icon={Flag} label="Tipologia apertura" value={openingType} />
-                <InfoRow icon={CircleGauge} label="Priorità" value={priority === "HIGH" ? "Alta" : priority === "LOW" ? "Bassa" : "Standard"} />
-                <InfoRow icon={CalendarClock} label="Scadenza prevista" value={dueDateLabel} />
-                <p className="mt-3 rounded-xl border border-white/[.06] bg-black/15 px-3 py-2.5 text-[9px] leading-4 text-slate-500">La pianificazione di attività, turni, squadre e risorse si gestisce nella sezione Operatività e viene riletta dai rispettivi registri.</p>
-              </section>
-            </div>
+            <details className="group overflow-hidden rounded-[22px] border border-white/[.08] bg-black/10">
+              <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-4 marker:hidden sm:px-5">
+                <span><span className="block text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">DATI DI RIFERIMENTO</span><span className="mt-1 block text-[13px] font-semibold text-slate-100">Cliente, cantiere e condizioni</span><span className="mt-1 block text-[10px] text-slate-500">Apri i dettagli amministrativi e logistici della commessa.</span></span>
+                <span className="rounded-lg border border-white/10 px-3 py-2 text-[9px] text-slate-400 group-open:hidden">Apri dettagli</span><span className="hidden rounded-lg border border-white/10 px-3 py-2 text-[9px] text-slate-400 group-open:inline-flex">Chiudi dettagli</span>
+              </summary>
+              <div className="grid gap-4 border-t border-white/[.07] p-4 sm:p-5 lg:grid-cols-3">
+                <section className="min-w-0">
+                  <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cliente</p>
+                  <h3 className="mt-1 text-[12px] font-semibold text-slate-200">{clientName}</h3>
+                  {populatedClientRows.length > 0 ? <div className="mt-2">{populatedClientRows.map((row) => <InfoRow icon={row.icon} key={row.label} label={row.label} value={row.value} />)}</div> : <p className="mt-2 text-[10px] leading-5 text-slate-500">Recapiti amministrativi non registrati.</p>}
+                  {missingClientRows.length > 0 && <p className="mt-2 rounded-lg border border-amber-300/10 bg-amber-300/[.025] px-2.5 py-2 text-[9px] leading-4 text-amber-100/70">Da completare: {missingClientRows.map((row) => row.label).join(", ")}.</p>}
+                </section>
+                <section className="min-w-0">
+                  <div className="flex items-center justify-between gap-2"><p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cantiere</p><span className={`rounded-full border px-2 py-1 text-[7px] font-semibold uppercase tracking-[.1em] ${locationVerified ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-amber-300/20 bg-amber-300/[.05] text-amber-100"}`}>{locationVerified ? "Luogo verificato" : "Da verificare"}</span></div>
+                  <InfoRow icon={MapPin} label="Indirizzo" value={locationLabel} />
+                  <InfoRow icon={ShieldCheck} label="Geofence" value={geofenceLabel} />
+                  <InfoRow icon={HardHat} label="Accesso e vincoli" value={valueOr(jobData.accessNotes, "Nessuna nota registrata")} />
+                </section>
+                <section className="min-w-0">
+                  <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Inquadramento</p>
+                  <InfoRow icon={BriefcaseBusiness} label="Ambito operativo" value={scopeLabel} />
+                  <InfoRow icon={Flag} label="Apertura e priorità" value={`${openingType} · ${priority === "HIGH" ? "Alta" : priority === "LOW" ? "Bassa" : "Standard"}`} />
+                  <InfoRow icon={CalendarClock} label="Scadenza prevista" value={dueDateLabel} />
+                  <p className="mt-3 rounded-xl border border-white/[.06] bg-black/15 px-3 py-2.5 text-[9px] leading-4 text-slate-500">Pianificazione, turni, squadre e risorse si gestiscono nei rispettivi moduli e compaiono in Operatività.</p>
+                </section>
+              </div>
+            </details>
           </TabsContent>
 
           <TabsContent className="mt-4 space-y-4" value="operations">
