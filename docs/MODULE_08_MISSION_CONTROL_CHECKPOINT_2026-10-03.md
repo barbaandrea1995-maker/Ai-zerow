@@ -84,3 +84,21 @@ superficie Sites/D1 e i vincoli server-side, non un provider esterno assente.
 - Site: https://ai-zerow-command.barba-andrea-1995.chatgpt.site
 - Accesso: custom owner-only invariato.
 - Versione: latest private Sites publication verificata dopo il checkpoint.
+
+## Riallineamento Missioni — 10 ottobre 2026
+
+- La conferma consegna compare solo quando l’autista è sulla tappa corrente,
+  la geofence l’ha agganciata e lo scarico è stato registrato. Rimossi i CTA
+  generici che aprivano il POD prima di questi passaggi.
+- Le azioni di carico/scarico sono mostrate solo a chi possiede
+  `mission.delivery.execute`; la revisione rapportino segue
+  `mission.report.review`, come il server.
+- Company AI verifica gli eventi richiesti per ogni tappa: un trasferimento
+  richiede carico e scarico, un rientro lo scarico, ogni consegna la propria
+  conferma e prova POD.
+- La scheda tratta legge lo stato tracking del readback missione e rinvia a
+  Control per posizione e geofence. Non dichiara più indisponibile un provider
+  senza consultare lo stato della missione.
+- ESLint: PASS, 0 errori e 7 warning preesistenti sulle immagini. Build
+  Sites/Vinext: PASS. `git diff --check`: PASS. Smoke autenticato browser e
+  certificazione device non eseguiti in questo passaggio.

@@ -132,18 +132,35 @@ function deliveryProofEntries(payload: JsonObject) {
 function requiredEventTypes(action: string) {
   if (action === "LOAD") return ["LOAD_CONFIRMED"];
   if (action === "UNLOAD") return ["UNLOAD_CONFIRMED"];
-  if (action === "RETURN") return ["UNLOAD_CONFIRMED", "LOAD_CONFIRMED"];
+  if (action === "RETURN") return ["UNLOAD_CONFIRMED"];
+  if (action === "TRANSFER") return ["LOAD_CONFIRMED", "UNLOAD_CONFIRMED"];
   return ["LOAD_CONFIRMED", "UNLOAD_CONFIRMED", "DELIVERY_CONFIRMED"];
 }
 
 function hasEventForStop(timeline: JsonObject[], stopId: string, action: string) {
-  const accepted = new Set(requiredEventTypes(action));
-  return timeline.some((event) => {
-    const type = text(event.type).toUpperCase();
-    if (!accepted.has(type)) return false;
+  const required = requiredEventTypes(action);
+  const recorded = new Set(timeline.flatMap((event) => {
     const eventStopId = text(event.stopId);
-    return eventStopId === stopId || (!eventStopId && !stopId);
-  });
+    return (eventStopId === stopId || (!eventStopId && !stopId))
+      ? [text(event.type).toUpperCase()]
+      : [];
+  }));
+  return required.every((type) => recorded.has(type));
+}
+
+function hasDeliveryEventForStop(timeline: JsonObject[], stopId: string) {
+  return timeline.some((event) =>
+    text(event.type).toUpperCase() === "DELIVERY_CONFIRMED"
+    && text(event.stopId) === stopId,
+  );
+}
+
+function missingActionDescription(action: string) {
+  if (action === "TRANSFER") return "carico e scarico";
+  if (action === "RETURN") return "scarico del rientro";
+  if (action === "LOAD") return "carico";
+  if (action === "UNLOAD") return "scarico";
+  return action.toLowerCase().replaceAll("_", " ");
 }
 
 function stopActionLines(stops: ReturnType<typeof routeStops>) {
@@ -185,16 +202,23 @@ export function buildMissionReportReadback(
     questions.push("Quali tappe sono state effettuate? La missione non ha una rotta leggibile.");
   }
   for (const stop of stops) {
-    const actions = stop.cargoActions.length ? stop.cargoActions : [{ action: stop.kind === "DELIVERY" ? "UNLOAD" : "LOAD" }];
+    const actions = stop.cargoActions.length
+      ? [...new Set(stop.cargoActions.map((item) => item.action))].map((action) => ({ action }))
+      : [{ action: stop.kind === "DELIVERY" || stop.kind === "RETURN" ? "UNLOAD" : stop.kind === "TRANSFER" ? "TRANSFER" : "LOAD" }];
     for (const action of actions) {
       if (!hasEventForStop(timeline, stop.id, action.action)) {
         missing.push(`stop_${stop.sequence}_${action.action.toLowerCase()}`);
-        questions.push(`Conferma l’azione “${action.action.toLowerCase()}” alla tappa ${stop.sequence}: ${stop.label}.`);
+        questions.push(`Conferma ${missingActionDescription(action.action)} alla tappa ${stop.sequence}: ${stop.label}.`);
       }
     }
   }
 
   const deliveryStops = stops.filter((stop) => stop.deliveryEvidenceRequired || stop.kind === "DELIVERY");
+  const missingDeliveryEventStops = deliveryStops.filter((stop) => !hasDeliveryEventForStop(timeline, stop.id));
+  for (const stop of missingDeliveryEventStops) {
+    missing.push(`delivery_event_${stop.sequence}`);
+    questions.push(`Registra la consegna della tappa ${stop.sequence}: ${stop.label} dopo lo scarico e prima di inviare il rapportino.`);
+  }
   const missingDeliveryProofStops = deliveryStops.filter((stop) => {
     const stopProof = proofEntries.find((entry) => text(entry.stopId) === stop.id)
       ?? (deliveryStops.length === 1 ? latestProof : null);
@@ -208,10 +232,6 @@ export function buildMissionReportReadback(
       missing.push(`delivery_evidence_${stop.sequence}`);
       questions.push(`Chi ha ricevuto la consegna alla tappa ${stop.sequence}: ${stop.label} e quale evidenza operativa la conferma? Registra DDT, firma, foto, QR oppure conferma autista.`);
     }
-  }
-  if (deliveryStops.length && !timeline.some((event) => text(event.type).toUpperCase() === "DELIVERY_CONFIRMED")) {
-    missing.push("delivery_event");
-    questions.push("Registra la conferma di consegna dalla tappa corretta prima di inviare il rapportino.");
   }
   const warehouseReadback = isRecord(payload.warehouseReadback) ? payload.warehouseReadback : null;
   const warehouseRequired = warehouseReadback?.required === true;
