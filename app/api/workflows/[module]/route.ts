@@ -15,6 +15,7 @@ import {
   W10_MODULES,
   type W10Module,
 } from "@/lib/w10-contract";
+import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -44,18 +45,40 @@ function jsonValue(value: string, fallback: Record<string, unknown> = {}) {
   }
 }
 
-function arrayValue(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 80).map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return { value: String(item ?? "") };
+type W10Line = {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitAmountMilli: number;
+};
+
+function decimalQuantity(value: unknown) {
+  const source = typeof value === "string" ? value.trim().replace(",", ".") : value;
+  if (typeof source !== "number" && typeof source !== "string") return null;
+  if (typeof source === "string" && !/^\d+(?:\.\d{1,3})?$/.test(source)) return null;
+  const quantity = Number(source);
+  if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1_000_000_000) return null;
+  const milli = Math.round(quantity * 1_000);
+  if (!Number.isSafeInteger(milli) || Math.abs(quantity * 1_000 - milli) > 1e-7) return null;
+  return milli / 1_000;
+}
+
+function arrayValue(value: unknown): W10Line[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 80) return null;
+  const lines: W10Line[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const record = item as Record<string, unknown>;
-    return {
-      description: textValue(record.description).slice(0, 180),
-      quantity: integerValue(record.quantity, 0),
-      unit: textValue(record.unit).slice(0, 24),
-      unitAmountMilli: integerValue(record.unitAmountMilli, 0),
-    };
-  });
+    const description = textValue(record.description);
+    const quantity = decimalQuantity(record.quantity);
+    const unit = textValue(record.unit) || "pz";
+    const unitAmountMilli = record.unitAmountMilli === undefined || record.unitAmountMilli === null || record.unitAmountMilli === ""
+      ? 0
+      : integerValue(record.unitAmountMilli, -1);
+    if (description.length < 2 || description.length > 180 || quantity === null || unit.length > 24 || unitAmountMilli < 0 || unitAmountMilli > 9_000_000_000_000) return null;
+    lines.push({ description, quantity, unit, unitAmountMilli });
+  }
+  return lines;
 }
 
 function jobForResponse(row: typeof s04Records.$inferSelect) {
@@ -88,12 +111,31 @@ async function findOperationJob(tenantId: string, reference: string) {
   return byCode && byCode.recordType !== "adapter-contract" ? byCode : null;
 }
 
-async function readOperationJobs(tenantId: string) {
+async function readOperationJobs(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>) {
   const rows = await getDb().select().from(s04Records).where(and(
-    eq(s04Records.tenantId, tenantId),
+    eq(s04Records.tenantId, context.tenantId),
     eq(s04Records.module, "operations"),
   )).orderBy(desc(s04Records.updatedAt)).limit(250);
-  return rows.filter((row) => row.recordType !== "adapter-contract").map(jobForResponse);
+  const operationalRows = rows.filter((row) => row.recordType !== "adapter-contract");
+  if (canReadAllOperations(context)) return operationalRows.map(jobForResponse);
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  const scopeTokens = teamScopeTokens(workforceRows, context);
+  return operationalRows.filter((row) => rowMatchesContext(row, context, scopeTokens)).map(jobForResponse);
+}
+
+async function canAccessOperationJob(
+  context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>,
+  job: typeof s04Records.$inferSelect,
+) {
+  if (canReadAllOperations(context)) return true;
+  const workforceRows = await getDb().select().from(s04Records).where(and(
+    eq(s04Records.tenantId, context.tenantId),
+    eq(s04Records.module, "workforce"),
+  )).limit(500);
+  return rowMatchesContext(job, context, teamScopeTokens(workforceRows, context));
 }
 
 function moduleFromRoute(routeContext: RouteContext) {
@@ -190,7 +232,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   if (denied) return denied;
   try {
     const workflows = await readWorkflows(context!, moduleKey);
-    const jobs = hasCapability(context!, "operations.read") ? await readOperationJobs(context!.tenantId) : [];
+    const jobs = hasCapability(context!, "operations.read") ? await readOperationJobs(context!) : [];
     return Response.json(envelope(context!, moduleKey, workflows, jobs), { headers: { "cache-control": "no-store" } });
   } catch {
     return Response.json({ error: "w10_readback_unavailable", module: moduleKey }, { status: 503 });
@@ -224,13 +266,14 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const title = textValue(payload.title);
     const detail = textValue(payload.detail);
     const currency = textValue(payload.currency, "EUR").toUpperCase();
-    const amountMilli = integerValue(payload.amountMilli, 0);
+    const amountMilli = payload.amountMilli === undefined ? 0 : integerValue(payload.amountMilli, -1);
     const jobReference = textValue(payload.jobId);
-    const supplier = textValue(payload.supplier).slice(0, 160);
-    const lines = arrayValue(payload.lines);
+    const supplier = textValue(payload.supplier);
+    const lines = moduleKey === "procurement" ? arrayValue(payload.lines) : [];
     if (title.length < 2 || title.length > 140) return Response.json({ error: "title_must_be_2_to_140_characters" }, { status: 400 });
     if (detail.length > 600 || supplier.length > 160 || !/^[A-Z]{3}$/.test(currency)) return Response.json({ error: "workflow_field_invalid" }, { status: 400 });
     if (amountMilli < 0 || amountMilli > 9_000_000_000_000) return Response.json({ error: "amount_out_of_range" }, { status: 400 });
+    if (!lines) return Response.json({ error: "procurement_lines_invalid", maxLines: 80, quantityPrecision: 3 }, { status: 400 });
 
     try {
       if (jobReference) {
@@ -239,6 +282,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       }
       const operationJob = jobReference ? await findOperationJob(context.tenantId, jobReference) : null;
       if (jobReference && !operationJob) return Response.json({ error: "w10_job_not_found" }, { status: 404 });
+      if (operationJob && !(await canAccessOperationJob(context, operationJob))) return Response.json({ error: "w10_job_not_found" }, { status: 404 });
       const jobId = operationJob?.id ?? null;
       const existing = await existingByIdempotency(context.tenantId, requestedIdempotencyKey);
       if (existing[0]) {

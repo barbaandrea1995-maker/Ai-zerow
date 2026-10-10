@@ -57,3 +57,12 @@ Il perimetro chiuso è Sites/D1: proposta, approval, versioning, idempotenza, ev
 ## Decisione checkpoint
 
 `W10 SITES TECHNICAL PASS` nel perimetro owner-only privato. Finance e Procurement sono pronti per il prossimo gate di integrazione, ma non sono certificati come ERP, contabilità o procurement provider-backed e la roadmap commerciale resta `NO_GO` finché i gate sopra non sono chiusi.
+
+## Hardening follow-up — 10 ottobre 2026
+
+- La richiesta di acquisto ora accetta più righe materiale (fino a 80), con quantità positive e precisione massima di tre decimali. Il server rifiuta righe incomplete, descrizioni/unità oltre il limite e quantità non rappresentabili invece di trasformarle in zero.
+- Le righe create prima della correzione che contengono quantità zero sono mostrate come `quantità da verificare`, senza inventare un valore storico.
+- Il catalogo commesse del W10 e il collegamento server-side rispettano lo scope operativo del chiamante; i ruoli standard che leggono Finance/Procurement restano back-office e mantengono il perimetro previsto.
+- La capability `approvals.review` è separata dalla lettura Governance: Auditor può consultare evidenze e voci W10 ma non approvarle. L’approvazione resta disponibile a Owner, Amministratore, Manager e Ufficio.
+- La risposta UI usa il campo API canonico `recordType`.
+- Build Vinext: PASS dopo le modifiche W10 e Authority. Lint e prove runtime non sono state eseguite in questo follow-up.

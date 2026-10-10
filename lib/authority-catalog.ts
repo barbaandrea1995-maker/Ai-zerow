@@ -43,7 +43,10 @@ const COMPANY_AI_READ = ["company_ai.read"];
 const COMMUNICATION_CRITICAL = ["communication.read", "communication.send", "communication.broadcast.critical"];
 const QR_READ = ["qr.read"];
 const QR_WRITE = ["qr.read", "qr.write"];
-const GOVERNANCE = ["governance.read", "approvals.review"];
+const GOVERNANCE_READ = ["governance.read"];
+// Keep approval authority separate so read-only governance roles cannot mutate approvals.
+const APPROVALS_REVIEW = ["approvals.review"];
+const GOVERNANCE = [...GOVERNANCE_READ, ...APPROVALS_REVIEW];
 const EXTERNALS = ["external_adapters.read"];
 const LOCATION_READ_CURRENT = ["location.read.current"];
 const LOCATION_READ_HISTORY = ["location.read.history"];
@@ -145,7 +148,7 @@ export const ROLE_CAPABILITIES = {
     OPERATIONS_READ, ["workforce.read", "workforce.read.all", "workforce.registry.read"], ATTENDANCE_READ,
     ["field.read"], WAREHOUSE_READ, MISSION_READ, DOCUMENTS_READ,
     PLANNING_READ, ASSET_READ, FINANCE_READ, PROCUREMENT_READ, QR_READ,
-    GOVERNANCE, EXTERNALS, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY, LOCATION_FLEET,
+    GOVERNANCE_READ, EXTERNALS, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY, LOCATION_FLEET,
     LOCATION_DRIVER_TIMELINE, LOCATION_AUDIT, LOCATION_EXPORT,
   ),
 } as const;
