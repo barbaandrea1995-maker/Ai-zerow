@@ -76,7 +76,7 @@ export async function GET(request: Request) {
       context: publicAuthorityContext(context),
       contract: { source: "sites-d1-warehouse-attendance-readback", geofence: "ENTRY_AND_EXIT_REQUIRE_INSIDE_ASSIGNED_WAREHOUSE", tracking: "NOT_REQUIRED_UNLESS_DRIVER_DUTY", assignment: "SERVER_SIDE_ONLY" },
       warehouseScope: scope,
-      records: records.map(recordForResponse),
+      records: records.filter((row) => parseJson(row.payloadJson).workerId === context.actorId).map(recordForResponse),
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {

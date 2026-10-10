@@ -2,9 +2,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { resolveAttendanceTargets, attendanceScopeTokens } from "@/lib/attendance-scope";
+import { resolveAttendanceTargets } from "@/lib/attendance-scope";
 import { parseJobPayload } from "@/lib/operations-contract";
-import { rowMatchesContext } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -78,9 +77,10 @@ export async function GET() {
     const jobById = new Map(jobs.map((job) => [job.id, job]));
     const warehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
     const canSeeAllAttendance = hasCapability(context, "workforce.read.all")
-      || hasCapability(context, "workforce.manage")
+      || hasCapability(context, "workforce.manage");
+    const canReadScopedAttendance = hasCapability(context, "attendance.read")
+      || hasCapability(context, "attendance.manage")
       || hasCapability(context, "attendance.approve");
-    const scopeTokens = attendanceScopeTokens(context, workforceRows);
     const targetJobIds = new Set(scope.targets.map((target) => target.jobId).filter((id): id is string => Boolean(id)));
     const records = attendance.filter((row) => jobById.has(row.jobId) || warehouseById.has(row.jobId)).map((row) => {
       const payload = parseJson(row.payloadJson);
@@ -106,8 +106,8 @@ export async function GET() {
       };
     }).filter((record) => {
       if (canSeeAllAttendance || record.workerId === context.actorId) return true;
-      const job = jobById.get(record.jobId);
-      if (job && targetJobIds.has(job.id) && rowMatchesContext(job, context, scopeTokens)) return true;
+      if (!canReadScopedAttendance) return false;
+      if (jobById.has(record.jobId) && targetJobIds.has(record.jobId)) return true;
       if (record.jobModule === "warehouse" && scope.warehouseScope.warehouseIds.includes(record.jobId)) return true;
       return false;
     });
