@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { assetAssignmentCustodyEnd, assetAssignmentStatus } from "@/lib/asset-contract";
 
 type AssignmentKind = "SHORT_TERM" | "LONG_TERM";
 
@@ -94,7 +95,9 @@ function assignmentConflict(assetId: string, assignments: ExistingAssignment[], 
     if (assignment.assetId !== assetId || ["RETURNED", "CANCELLED"].includes(assignmentStatus(assignment))) return false;
     const existingStart = Date.parse(assignment.startsAt ?? "");
     if (!Number.isFinite(existingStart)) return ["ACTIVE", "SCHEDULED"].includes(assignmentStatus(assignment));
-    const parsedExistingEnd = assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY;
+    const status = assetAssignmentStatus(assignment.status, assignment.startsAt);
+    const custodyEnd = assetAssignmentCustodyEnd(status, assignment.kind, assignment.startsAt, assignment.endsAt);
+    const parsedExistingEnd = custodyEnd ? Date.parse(custodyEnd) : Number.POSITIVE_INFINITY;
     const existingEnd = Number.isFinite(parsedExistingEnd) ? parsedExistingEnd : Number.POSITIVE_INFINITY;
     return requestedStart < existingEnd && existingStart < requestedEnd;
   }) ?? null;
@@ -103,9 +106,9 @@ function assignmentConflict(assetId: string, assignments: ExistingAssignment[], 
 function assignmentReason(assignment: ExistingAssignment | null) {
   if (!assignment) return "";
   const assignee = assignment.assignee?.name?.trim() || "una risorsa del tenant";
-  const until = assignment.kind?.toUpperCase() === "LONG_TERM" || !assignment.endsAt
+  const until = assignmentStatus(assignment) === "ACTIVE" || assignment.kind?.toUpperCase() === "LONG_TERM" || !assignment.endsAt
     ? "fino al rientro"
-    : `fino al ${new Date(assignment.endsAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}`;
+    : `rientro previsto ${new Date(assignment.endsAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}`;
   return `Affidato a ${assignee} · ${until}`;
 }
 

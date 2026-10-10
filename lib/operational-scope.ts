@@ -145,6 +145,13 @@ export function canReadAllOperations(context: AuthorityContext) {
     || context.capabilities.includes("workforce.read.all");
 }
 
+/** Asset register readers include warehouse managers, whose dispatch and
+ * custody duties need the tenant asset catalog without granting workforce
+ * or general operations read-all access. */
+export function canReadAllAssets(context: AuthorityContext) {
+  return canReadAllOperations(context) || context.roles.includes("warehouse_manager");
+}
+
 export function canReadAllMissions(context: AuthorityContext) {
   return context.roles.some((role) => ["owner", "admin", "manager", "office", "warehouse_manager", "auditor"].includes(role))
     || context.capabilities.includes("mission.manage");

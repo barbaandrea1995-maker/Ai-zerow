@@ -3,6 +3,8 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantMemberships } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { ROLE_METADATA, normalizeAuthorityRoles, type AuthorityRole } from "@/lib/authority-catalog";
+import { canReadAllAssets, rowMatchesContext } from "@/lib/operational-scope";
+import { assetAssignmentCustodyEnd, assetAssignmentStatus } from "@/lib/asset-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +13,7 @@ type AssignmentKind = "SHORT_TERM" | "LONG_TERM";
 type AssignmentStatus = "SCHEDULED" | "ACTIVE" | "RETURNED" | "CANCELLED";
 
 const TERMINAL_STATUSES = new Set<AssignmentStatus>(["RETURNED", "CANCELLED"]);
-const OPERATOR_ROLES: AuthorityRole[] = ["worker", "field_supervisor", "technical", "maintenance"];
+const OPERATOR_ROLES: AuthorityRole[] = ["worker", "field_supervisor", "technical", "maintenance", "warehouse_operator"];
 
 function isRecord(value: unknown): value is JsonObject {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -56,6 +58,13 @@ function isDriver(roles: readonly AuthorityRole[]) {
 
 function isOperator(roles: readonly AuthorityRole[]) {
   return roles.some((role) => OPERATOR_ROLES.includes(role));
+}
+
+function canReadAssigneeRegistry(context: NonNullable<Awaited<ReturnType<typeof getAuthorityContext>>>) {
+  return canReadAllAssets(context)
+    || hasCapability(context, "authority.read")
+    || hasCapability(context, "workforce.registry.read")
+    || hasCapability(context, "workforce.read.all");
 }
 
 function assetClass(payload: JsonObject) {
@@ -135,7 +144,7 @@ function assignmentForResponse(row: typeof jobJourneyRecords.$inferSelect) {
       roleLabels,
     },
     kind: upper(payload.assignmentKind) || "SHORT_TERM",
-    status: upper(row.status) as AssignmentStatus,
+    status: assetAssignmentStatus(row.status, payload.startsAt) as AssignmentStatus,
     startsAt: stringValue(payload.startsAt),
     endsAt: stringValue(payload.endsAt) || null,
     purpose: stringValue(payload.purpose),
@@ -264,16 +273,29 @@ export async function GET(request: Request) {
 
   try {
     const assetId = bounded(new URL(request.url).searchParams.get("assetId"), 160);
-    const [rows, members] = await Promise.all([
-      assignmentRows(context.tenantId, assetId || undefined),
+    const canReadTenantRegister = canReadAllAssets(context);
+    const [members, requestedAsset] = await Promise.all([
       hasCapability(context, "asset.write") || hasCapability(context, "authority.read")
         ? getDb().select().from(tenantMemberships).where(and(eq(tenantMemberships.tenantId, context.tenantId), eq(tenantMemberships.status, "active"))).orderBy(tenantMemberships.displayName)
         : Promise.resolve([] as (typeof tenantMemberships.$inferSelect)[]),
+      assetId ? findAsset(context.tenantId, assetId) : Promise.resolve(null),
     ]);
-    const assignees = members.map(assigneeForResponse).filter((member) => member.eligibleFor.length > 0);
+    if (assetId && !requestedAsset) return Response.json({ error: "asset_not_found" }, { status: 404 });
+    const allRows = await assignmentRows(context.tenantId, assetId ? requestedAsset!.id : undefined);
+    const visibleRows = canReadTenantRegister ? allRows : allRows.filter((row) => rowMatchesContext(row, context));
+    if (assetId && !canReadTenantRegister && requestedAsset
+      && !rowMatchesContext(requestedAsset, context)
+      && visibleRows.length === 0) {
+      return Response.json({ error: "asset_scope_forbidden" }, { status: 404 });
+    }
+    const canReadPeople = canReadAssigneeRegistry(context);
+    const assignees = members
+      .filter((member) => canReadPeople || member.actorId === context.actorId)
+      .map(assigneeForResponse)
+      .filter((member) => member.eligibleFor.length > 0);
     return Response.json({
       context: publicAuthorityContext(context),
-      assignments: rows.map(assignmentForResponse),
+      assignments: visibleRows.map(assignmentForResponse),
       assignees,
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
@@ -350,6 +372,9 @@ export async function POST(request: Request) {
       eq(tenantMemberships.status, "active"),
     )).limit(1);
     if (!member) return Response.json({ error: "assignee_not_found_or_inactive" }, { status: 404 });
+    if (!canReadAssigneeRegistry(context) && member.actorId !== context.actorId) {
+      return Response.json({ error: "assignee_scope_forbidden" }, { status: 403 });
+    }
     const roles = normalizeAuthorityRoles(member.rolesJson, member.role);
     for (const entry of assets) {
       if (entry.kindClass === "VEHICLE" && !isDriver(roles)) return Response.json({ error: "vehicle_assignee_driver_capability_required" }, { status: 422 });
@@ -365,8 +390,10 @@ export async function POST(request: Request) {
         const payload = parseJson(row.payloadJson);
         const existingWindow = dateRange(payload);
         if (!existingWindow) return false;
+        const custodyEnd = assetAssignmentCustodyEnd(status, payload.assignmentKind, payload.startsAt, payload.endsAt);
+        const custodyEndAt = custodyEnd && validDate(custodyEnd) ? Date.parse(custodyEnd) : Number.POSITIVE_INFINITY;
         return stringValue(payload.assetId, row.jobId) === entry.asset.id
-          && overlaps(requestedWindow, { start: existingWindow.start, end: existingWindow.end });
+          && overlaps(requestedWindow, { start: existingWindow.start, end: custodyEndAt });
       });
       if (conflict) {
         const conflictPayload = parseJson(conflict.payloadJson);
@@ -424,7 +451,9 @@ export async function POST(request: Request) {
         assetIds: resolvedAssetIds,
         assignmentGroupId,
         assetCode: entry.asset.canonicalCode,
-        assetTitle: entry.asset.title,
+        assetTitle: bounded(entry.asset.detail, 160)
+          || stringValue(entry.payload.description || entry.payload.title)
+          || entry.asset.title,
         entityType: upper(entry.payload.entityType) || "ASSET",
         assignmentClass: entry.kindClass,
         assignmentKind: kind,

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
-import { assetTransportCapabilities, assetUsageMode, vehicleCanTransport, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
+import { assetAssignmentCustodyEnd, assetAssignmentStatus, assetTransportCapabilities, assetUsageMode, vehicleCanTransport, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
 
 export type MissionResourceKind = "driver" | "vehicle" | "cargo";
 export type MissionAvailability = "READY" | "DATE_REQUIRED" | "NO_RESOURCES";
@@ -217,8 +217,11 @@ async function activeAssetCustody(tenantId: string) {
     const payload = parseJson(row.payloadJson);
     const assetId = stringValue(payload.assetId, row.jobId);
     const startsAt = stringValue(payload.startsAt);
-    const endsAt = stringValue(payload.endsAt) || null;
+    const plannedEndsAt = stringValue(payload.endsAt) || null;
     if (!assetId || !validDate(startsAt)) return [];
+    const assignmentKind = stringValue(payload.assignmentKind).toUpperCase() || (plannedEndsAt ? "SHORT_TERM" : "LONG_TERM");
+    const status = assetAssignmentStatus(row.status, startsAt);
+    const endsAt = assetAssignmentCustodyEnd(status, assignmentKind, startsAt, plannedEndsAt);
     return [{
       assignmentId: row.id,
       assetId,

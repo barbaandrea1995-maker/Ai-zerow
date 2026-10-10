@@ -13,6 +13,8 @@ export type AssetUsageMode = typeof ASSET_USAGE_MODES[number];
 export const TRANSPORT_CAPABILITIES = ["MATERIALS", "ASSETS", "PEOPLE"] as const;
 export type TransportCapability = typeof TRANSPORT_CAPABILITIES[number];
 
+export type AssetAssignmentStatus = "ACTIVE" | "SCHEDULED" | "RETURNED" | "CANCELLED";
+
 type JsonObject = Record<string, unknown>;
 
 function stringValue(value: unknown) {
@@ -21,6 +23,27 @@ function stringValue(value: unknown) {
 
 function upper(value: unknown) {
   return stringValue(value).toUpperCase();
+}
+
+/** A planned end is an expected return time, not proof of a hand-back. Once
+ * custody starts, the asset remains assigned until an explicit return event. */
+export function assetAssignmentStatus(status: unknown, startsAt: unknown, now = Date.now()): AssetAssignmentStatus {
+  const normalized = upper(status);
+  if (normalized === "RETURNED" || normalized === "CANCELLED") return normalized;
+  const start = typeof startsAt === "string" ? Date.parse(startsAt) : Number.NaN;
+  if (normalized === "ACTIVE" || (Number.isFinite(start) && start <= now)) return "ACTIVE";
+  return "SCHEDULED";
+}
+
+export function assetAssignmentCustodyEnd(
+  status: unknown,
+  assignmentKind: unknown,
+  startsAt: unknown,
+  plannedEndAt: unknown,
+  now = Date.now(),
+) {
+  if (upper(assignmentKind) === "LONG_TERM" || assetAssignmentStatus(status, startsAt, now) === "ACTIVE") return null;
+  return stringValue(plannedEndAt) || null;
 }
 
 function entityTypeOf(payload: JsonObject) {

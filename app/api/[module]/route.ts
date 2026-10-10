@@ -14,7 +14,7 @@ import {
 } from "@/lib/s04-adapter";
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
 import { canonicalPayload } from "@/lib/qr-adapter";
-import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { canReadAllAssets, canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import { assetTransportCapabilities as canonicalAssetTransportCapabilities, normalizeAssetUsageMode } from "@/lib/asset-contract";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +48,7 @@ async function scopedReadModel(
     : moduleKey === "mission"
       ? canReadAllMissions(context)
       : moduleKey === "assets"
-        ? canReadAllOperations(context)
+        ? canReadAllAssets(context)
         : moduleKey === "workforce"
           ? context.roles.some((role) => ["owner", "admin", "manager", "office", "auditor"].includes(role)) || context.capabilities.includes("workforce.read.all")
           : true;

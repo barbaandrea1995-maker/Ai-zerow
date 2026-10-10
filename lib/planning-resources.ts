@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantMemberships } from "@/db/schema";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
+import { assetAssignmentCustodyEnd, assetAssignmentStatus } from "@/lib/asset-contract";
 import type { PlanningResource, PlanningResourceKind } from "@/lib/planning-contract";
 
 export type PlanningAvailabilityWindow = {
@@ -90,13 +91,15 @@ function finiteCapacity(value: unknown) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(100, parsed) : 1;
 }
 
-function resourceKind(row: typeof s04Records.$inferSelect): PlanningResourceKind | null {
+function resourceKind(row: typeof s04Records.$inferSelect, payload = parsePayload(row.payloadJson)): PlanningResourceKind | null {
   const recordType = row.recordType.toLowerCase();
   if (row.module === "workforce") {
     if (recordType.includes("warehouse") && (recordType.includes("assignment") || recordType.includes("scope"))) return null;
     return recordType.includes("team") ? "team" : "person";
   }
-  if (row.module === "assets") return row.recordType.toLowerCase().includes("vehicle") ? "vehicle" : "asset";
+  if (row.module === "assets") {
+    return text(payload.entityType).toUpperCase() === "VEHICLE" || row.recordType.toLowerCase().includes("vehicle") ? "vehicle" : "asset";
+  }
   return null;
 }
 
@@ -168,7 +171,7 @@ function optionForRow(
   attachedAssets: PlanningAttachedAsset[] = [],
   assignmentCustody?: PlanningAssetCustody,
 ): PlanningResourceOption | null {
-  const kind = resourceKind(row);
+  const kind = resourceKind(row, parsePayload(row.payloadJson));
   if (!kind) return null;
   const payload = parsePayload(row.payloadJson);
   const status = text(payload.lifecycleStatus, row.status || "AVAILABLE").toUpperCase();
@@ -272,9 +275,11 @@ async function activeAssetCustody(tenantId: string) {
     const payload = parsePayload(row.payloadJson);
     const assetId = text(payload.assetId, row.jobId);
     const startsAt = text(payload.startsAt);
-    const endsAt = text(payload.endsAt) || null;
-    const assignmentKind = text(payload.assignmentKind).toUpperCase() || (endsAt ? "SHORT_TERM" : "LONG_TERM");
+    const plannedEndsAt = text(payload.endsAt) || null;
+    const assignmentKind = text(payload.assignmentKind).toUpperCase() || (plannedEndsAt ? "SHORT_TERM" : "LONG_TERM");
     if (!assetId || !startsAt || !Number.isFinite(Date.parse(startsAt))) return [];
+    const status = assetAssignmentStatus(row.status, startsAt);
+    const endsAt = assetAssignmentCustodyEnd(status, assignmentKind, startsAt, plannedEndsAt);
     return [{
       id: assetId,
       code: text(payload.assetCode) || null,

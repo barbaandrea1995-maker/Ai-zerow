@@ -361,10 +361,16 @@ function reportRecordOnDate(
   }
   const scheduledStart = payload.startsAt ?? payload.startAt;
   if (dayOf(scheduledStart)) {
-    const scheduledEnd = payload.endsAt ?? payload.endAt ?? payload.returnedAt ?? payload.cancelledAt;
-    const longTermAssetAssignment = (record.recordType ?? "").toUpperCase() === "ASSET_ASSIGNMENT"
-      && !dayOf(scheduledEnd);
-    return rangeContainsDate(scheduledStart, scheduledEnd, longTermAssetAssignment) === reportDate;
+    const isAssetAssignment = (record.recordType ?? "").toUpperCase() === "ASSET_ASSIGNMENT";
+    const assignmentStatus = (record.status ?? "").toUpperCase();
+    const actualClose = payload.returnedAt ?? payload.cancelledAt;
+    const assignmentStarted = dayOf(scheduledStart) <= reportDate;
+    const assetCustodyStillOpen = isAssetAssignment
+      && ["ACTIVE", "ASSIGNED", "IN_USE", "ALLOCATED", "SCHEDULED"].includes(assignmentStatus)
+      && !actualClose
+      && assignmentStarted;
+    const scheduledEnd = actualClose ?? (assetCustodyStillOpen ? undefined : payload.endsAt ?? payload.endAt);
+    return rangeContainsDate(scheduledStart, scheduledEnd, assetCustodyStillOpen) === reportDate;
   }
   const assignedStart = payload.assignedAt ?? payload.validFrom ?? payload.effectiveFrom;
   if (dayOf(assignedStart)) {
