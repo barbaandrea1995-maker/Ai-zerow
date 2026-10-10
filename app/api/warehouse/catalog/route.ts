@@ -1,8 +1,6 @@
-import { asc, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import { tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { INVENTORY_UNIT_CATALOG, warehouseForResponse } from "@/lib/inventory-contract";
+import { tenantWarehouseAccess } from "@/lib/warehouse-access";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +11,13 @@ export async function GET() {
     return Response.json({ error: "forbidden", capability: "warehouse.read" }, { status: 403 });
   }
   try {
-    const warehouses = await getDb().select().from(tenantWarehouses)
-      .where(eq(tenantWarehouses.tenantId, context.tenantId))
-      .orderBy(asc(tenantWarehouses.status), asc(tenantWarehouses.name));
+    const access = await tenantWarehouseAccess(context);
     return Response.json({
       context: publicAuthorityContext(context),
-      warehouses: warehouses.map(warehouseForResponse),
+      warehouses: access.warehouses.map(warehouseForResponse),
+      warehouseScope: access.scope,
       units: INVENTORY_UNIT_CATALOG,
-      readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
+      readback: { status: "verified", scope: access.scope.mode.toLowerCase(), checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {
     return Response.json({ error: "warehouse_catalog_unavailable" }, { status: 503 });

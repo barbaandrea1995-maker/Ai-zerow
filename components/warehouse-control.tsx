@@ -50,6 +50,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { WarehouseCodeScanner } from "@/components/warehouse-code-scanner";
+import { WarehouseRequestQueue } from "@/components/warehouse-request-queue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -59,7 +60,7 @@ import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/com
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type StockFilter = "ALL" | "ACTIVE" | "LOW_STOCK" | "OUT_OF_STOCK";
 type Modal = "register" | "movement" | null;
-type MovementAction = "receive" | "reserve" | "release" | "pick" | "load" | "consume" | "return" | "adjust";
+type MovementAction = "receive" | "adjust";
 type RegistrationMode = "barcode" | "qr";
 type MovementMode = "scan" | "catalog";
 
@@ -416,16 +417,10 @@ export default function WarehouseControl() {
   }, [items, query, selectedWarehouseId, shelfFilter, stockFilter, warehouseById]);
   const selected = items.find((item) => item.id === selectedId) ?? filteredItems[0] ?? null;
   const movementItem = items.find((item) => item.id === movementItemId) ?? null;
-  const movementNeedsAvailable = ["reserve", "pick", "load", "consume"].includes(movementAction);
-  const movementNeedsReserved = movementAction === "release";
-  const movementCatalogItems = useMemo(() => items.filter((item) => movementNeedsAvailable
-    ? item.available > 0 || item.id === movementItemId
-    : movementNeedsReserved
-      ? item.reserved > 0 || item.id === movementItemId
-      : true), [items, movementItemId, movementNeedsAvailable, movementNeedsReserved]);
-
+  const movementCatalogItems = items;
   const canWrite = capabilities.includes("warehouse.write");
   const canRegister = capabilities.includes("warehouse.register");
+  const canReview = capabilities.includes("warehouse.review");
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
   const totals = useMemo(() => items.reduce((result, item) => ({
     onHand: result.onHand + item.onHand,
@@ -508,7 +503,7 @@ export default function WarehouseControl() {
     }
     const body: Record<string, unknown> = modal === "register"
       ? { action, name: field("name"), barcode: registrationMode === "barcode" ? registrationBarcode : "", unit: field("unit"), warehouseId: field("warehouseId") || selectedWarehouseId, shelf: field("shelf"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
-      : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", warehouseId: selectedWarehouseId, expectedVersion: movementItem?.version, quantity: field("quantity"), jobId: field("jobId"), missionId: field("missionId"), note: field("note") };
+      : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", warehouseId: selectedWarehouseId, expectedVersion: movementItem?.version, quantity: field("quantity"), note: field("note") };
     body.idempotencyKey = "warehouse-" + action + "-" + crypto.randomUUID();
     setBusy(true);
     try {
@@ -561,6 +556,8 @@ export default function WarehouseControl() {
         </section>
 
         <section className="carbon-card-neon mt-4 rounded-2xl border border-cyan-300/15 p-4 sm:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">PRESENZE CENTRALIZZATE</p><p className="mt-1 text-[11px] text-slate-400">Il magazzino resta il registro operativo; entrata, pausa e uscita si eseguono nel modulo Presenze sul solo deposito assegnato.</p></div><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/[.06] px-3 py-2 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.12]" href="/presenze"><Clock3 className="size-3.5" />Apri Presenze</Link></div></section>
+
+        <WarehouseRequestQueue warehouses={warehouses} selectedWarehouseId={selectedWarehouseId} canReview={canReview} canFulfill={canWrite} onNotice={notify} onRefresh={refresh} />
 
         <section className="zw-module-hero relative overflow-hidden rounded-[26px] p-5 sm:p-7"><div className="relative z-[1] max-w-3xl"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Layers3 className="size-3.5" />CONTROL DECK / MATERIALS + WAREHOUSE</p><h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[46px]">Material flow<br /><span className="text-lime-300">ogni unità sotto controllo.</span></h1><p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Ogni deposito ha il suo registro server-side: anagrafiche, giacenze e movimenti restano separati. La commessa richiede, il magazzino verifica, la missione carica e il consumo resta riconciliato.</p><div className="mt-5 flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canRegister || !selectedWarehouseId} onClick={openRegistration} title={canRegister ? "Registra una nuova anagrafica nel deposito selezionato" : "Richiede la mansione Responsabile magazzino"}><PackagePlus className="size-3.5" />Nuovo materiale</Button><Button className="border-lime-300/25 bg-lime-300/[.05] text-[11px] text-lime-100 hover:bg-lime-300/10" onClick={() => navigate("/operations")} variant="outline"><BriefcaseBusiness className="size-3.5" />Apri commesse</Button></div>{!canRegister && <p className="mt-3 text-[10px] text-amber-200/70">La creazione anagrafica è riservata al Responsabile magazzino; puoi eseguire i movimenti autorizzati.</p>}</div><div className="absolute -right-12 -top-14 size-64 rounded-full bg-lime-300/[.07] blur-3xl" /><div className="absolute bottom-[-75px] right-[12%] size-56 rounded-full border border-lime-300/10 bg-lime-300/[.03] shadow-[0_0_80px_rgba(200,255,34,.12)]" /><div className="absolute right-6 top-6 hidden rounded-2xl border border-lime-300/20 bg-black/25 p-4 text-right sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-slate-600">READBACK</p><p className="mt-2 font-mono text-xl text-lime-200">{payload?.readback?.status === "verified" ? "VERIFIED" : "CHECKING"}</p><p className="mt-1 text-[10px] text-slate-600">{selectedWarehouse?.code ?? "warehouse"} · D1</p></div></section>
 
@@ -698,7 +695,7 @@ export default function WarehouseControl() {
                     <option className="bg-[#080c09]" disabled value="">Seleziona dal catalogo server-side</option>
                     {movementCatalogItems.map((item) => <option className="bg-[#080c09]" key={item.id} value={item.id}>{item.name} · {item.sku} · libero {formatQuantity(item.available, item.unit)}</option>)}
                   </select>
-                  <span className="mt-2 block text-[10px] text-slate-600">{movementNeedsAvailable ? "Disponibilità positiva riletta dal server." : movementNeedsReserved ? "Sono mostrati i materiali con prenotazione riletta dal server." : "Il server verificherà comunque saldo e versione al salvataggio."}</span>
+                  <span className="mt-2 block text-[10px] text-slate-600">Il server verifica deposito, saldo, versione e riferimento della missione al salvataggio.</span>
                 </label>
               )}
 
@@ -707,30 +704,16 @@ export default function WarehouseControl() {
                   Tipo movimento
                   <select aria-label="Tipo movimento" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-lime-300/40" name="action" onChange={(event) => setMovementAction(event.target.value as MovementAction)} value={movementAction}>
                     <option value="receive">Carico / ricezione</option>
-                    <option value="reserve">Prenota per commessa</option>
-                    <option value="release">Rilascia prenotazione</option>
-                    <option value="pick">Prelievo fisico</option>
-                    <option value="load">Carica missione</option>
-                    <option value="consume">Consumo su commessa</option>
-                    <option value="return">Reso da commessa</option>
-                    <option value="adjust">Rettifica inventariale (+/-)</option>
+                    {canRegister && <option value="adjust">Rettifica inventariale (+/-)</option>}
                   </select>
                 </label>
                 <label className="text-xs text-slate-400">
                   Quantità
                   <Input autoFocus={movementMode === "catalog"} className="mt-2 border-white/10 bg-black/30 text-slate-100" min={movementAction === "adjust" ? undefined : "0.001"} name="quantity" step="0.001" type="number" required />
                 </label>
-                <label className="text-xs text-slate-400">
-                  Commessa / job ID
-                  <Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="jobId" placeholder={["reserve", "release", "pick", "load", "consume", "return"].includes(movementAction) ? "Richiesto per questo movimento" : "Opzionale"} />
-                </label>
-                <label className="text-xs text-slate-400">
-                  Missione ID
-                  <Input className="mt-2 border-white/10 bg-black/30 font-mono text-slate-100" name="missionId" placeholder={movementAction === "load" ? "Richiesto per il carico" : "Solo per carico missione"} />
-                </label>
                 <label className="text-xs text-slate-400 sm:col-span-2">
                   Nota di tracciabilità
-                  <Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder="Motivo, documento o riferimento operativo…" required={movementAction !== "receive"} />
+                  <Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" name="note" placeholder={movementAction === "receive" ? "Documento di trasporto, fornitore o provenienza…" : "Motivo e riferimento della rettifica…"} required />
                 </label>
               </div>
             </div>

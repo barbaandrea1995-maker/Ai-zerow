@@ -288,7 +288,7 @@ export async function GET() {
       } : null;
       const warehouseReadback = buildMissionWarehouseReadback(
         storedPayload,
-        inventoryMovementRows.filter((movement) => movement.jobId === mission.jobId && (!movement.missionId || movement.missionId === mission.id)).map((movement) => ({
+        inventoryMovementRows.filter((movement) => movement.jobId === mission.jobId && movement.missionId === mission.id).map((movement) => ({
           itemId: movement.itemId,
           movementType: movement.movementType,
           quantityMilli: movement.quantityMilli,

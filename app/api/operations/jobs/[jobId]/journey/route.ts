@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   geofences,
@@ -31,6 +31,7 @@ import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload,
 import { normalizeMissionException, storedMissionException, type MissionExceptionType } from "@/lib/mission-exception-contract";
 import { missionPodEvidenceComplete, normalizeMissionPodEvidence, storedMissionPodEvidence } from "@/lib/mission-pod-contract";
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
+import { tenantWarehouseAccess, warehouseIdIsAllowed } from "@/lib/warehouse-access";
 import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
@@ -54,8 +55,7 @@ const ACTION_CAPABILITY = {
   field_open: "field.write",
   field_close: "field.write",
   material_request: "warehouse.request",
-  material_review: "warehouse.write",
-  material_fulfill: "warehouse.write",
+  material_review: "warehouse.review",
   mission_create: "mission.manage",
   mission_dispatch: "mission.execute",
   mission_load: "mission.delivery.execute",
@@ -437,7 +437,7 @@ function actionAccess(context: AuthorityContext) {
 
 async function journeyReadback(context: AuthorityContext, job: typeof s04Records.$inferSelect) {
   const db = getDb();
-  const [records, documents, movements] = await Promise.all([
+  const [records, documents, rawMovements, warehouseAccess] = await Promise.all([
     db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, job.id),
@@ -454,19 +454,28 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
         eq(inventoryMovements.jobId, job.id),
       )).orderBy(desc(inventoryMovements.createdAt)).limit(250)
       : Promise.resolve([]),
+    hasCapability(context, DOMAIN_READ_CAPABILITY.warehouse)
+      ? tenantWarehouseAccess(context)
+      : Promise.resolve(null),
   ]);
 
   const visibleRecords = records.filter((record) => {
     const domain = record.domain as JourneyDomain;
     return domain in DOMAIN_READ_CAPABILITY && hasCapability(context, DOMAIN_READ_CAPABILITY[domain]);
   });
-  const itemIds = [...new Set(movements.map((movement) => movement.itemId))];
-  const items = itemIds.length
+  const queriedItemIds = [...new Set(rawMovements.map((movement) => movement.itemId))];
+  const queriedItems = queriedItemIds.length
     ? await db.select().from(inventoryItems).where(and(
       eq(inventoryItems.tenantId, context.tenantId),
-      inArray(inventoryItems.id, itemIds),
+      inArray(inventoryItems.id, queriedItemIds),
     ))
     : [];
+  const queriedItemById = new Map(queriedItems.map((item) => [item.id, item]));
+  const movements = rawMovements.filter((movement) => {
+    const warehouseId = queriedItemById.get(movement.itemId)?.warehouseId;
+    return Boolean(warehouseId && warehouseAccess && warehouseIdIsAllowed(warehouseAccess, warehouseId));
+  });
+  const items = queriedItems.filter((item) => Boolean(item.warehouseId && warehouseAccess && warehouseIdIsAllowed(warehouseAccess, item.warehouseId)));
   const itemById = new Map(items.map((item) => [item.id, item]));
   const grouped = (domain: JourneyDomain) => visibleRecords
     .filter((record) => record.domain === domain)
@@ -486,7 +495,7 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
       const missionPayload = parseJson(record.payloadJson);
       const warehouseReadback = buildMissionWarehouseReadback(
         missionPayload,
-        movements.filter((movement) => movement.jobId === job.id && (!movement.missionId || movement.missionId === record.id)).map((movement) => ({
+        movements.filter((movement) => movement.jobId === job.id && movement.missionId === record.id).map((movement) => ({
           itemId: movement.itemId,
           movementType: movement.movementType,
           quantityMilli: movement.quantityMilli,
@@ -647,6 +656,7 @@ async function readMissionWarehouseReadback(
   tenantId: string,
   jobId: string,
   payload: JsonObject,
+  missionId: string,
   checkedAt = new Date().toISOString(),
 ): Promise<MissionWarehouseReadback> {
   const lines = missionMaterialLines(payload);
@@ -657,6 +667,7 @@ async function readMissionWarehouseReadback(
       db.select().from(inventoryMovements).where(and(
         eq(inventoryMovements.tenantId, tenantId),
         eq(inventoryMovements.jobId, jobId),
+        eq(inventoryMovements.missionId, missionId),
         inArray(inventoryMovements.itemId, itemIds),
       )).orderBy(inventoryMovements.createdAt).limit(500),
       db.select({ id: inventoryItems.id, sku: inventoryItems.sku, name: inventoryItems.name, unit: inventoryItems.unit, warehouseId: inventoryItems.warehouseId })
@@ -733,6 +744,7 @@ async function prepareMissionInventoryEffects({
     db.select().from(inventoryMovements).where(and(
       eq(inventoryMovements.tenantId, tenantId),
       eq(inventoryMovements.jobId, jobId),
+      eq(inventoryMovements.missionId, missionId),
       inArray(inventoryMovements.itemId, itemIds),
     )),
   ]);
@@ -917,6 +929,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let missionActionRoutePlanId = "";
     let missionActionEvent: JsonObject | null = null;
     let missionInventoryStatements: never[] = [];
+    const inventoryReservationUpdateIndexes: number[] = [];
+    const inventoryReservationGuards: Array<{ itemId: string; version: number; reservedMilli: number; sideKey: string }> = [];
 
     if (action === "planning_create") {
       domain = "planning";
@@ -1294,17 +1308,23 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const decision = boundedText(input.decision, 16).toUpperCase();
         if (decision !== "APPROVED" && decision !== "MODIFIED" && decision !== "REJECTED") return Response.json({ error: "approval_decision_required" }, { status: 400 });
         status = decision === "MODIFIED" ? "APPROVED" : decision;
+        const reviewNote = boundedText(input.note, 2_000);
         if (decision === "REJECTED") {
+          if (reviewNote.length < 4) return Response.json({ error: "material_rejection_reason_required" }, { status: 400 });
           payload = {
             ...payload,
             reviewedAt: now,
             reviewedBy: context.actorId,
             reviewOutcome: "REJECTED",
-            reviewNote: boundedText(input.note, 2_000),
+            reviewNote,
           };
         } else {
           const warehouseId = boundedText(input.warehouseId, 120);
           if (!warehouseId) return Response.json({ error: "warehouse_required_for_approval" }, { status: 400 });
+          const access = await tenantWarehouseAccess(context);
+          if (!warehouseIdIsAllowed(access, warehouseId)) {
+            return Response.json({ error: "warehouse_assignment_required" }, { status: 403 });
+          }
           const [warehouse] = await db.select().from(tenantWarehouses).where(and(
             eq(tenantWarehouses.tenantId, context.tenantId),
             eq(tenantWarehouses.id, warehouseId),
@@ -1312,19 +1332,160 @@ export async function POST(request: Request, routeContext: RouteContext) {
           )).limit(1);
           if (!warehouse) return Response.json({ error: "warehouse_not_found" }, { status: 404 });
           const originalLines = normalizeLines(payload.requestedLines ?? payload.lines);
-          const reviewedLines = decision === "MODIFIED" ? normalizeLines(input.lines) : normalizeLines(payload.lines);
+          // Even an unchanged approval must map each requested description to a
+          // canonical item in the selected depot before stock can be reserved.
+          const reviewedLines = normalizeLines(input.lines);
           if (!originalLines || !reviewedLines) return Response.json({ error: "valid_material_lines_required", maxLines: 50 }, { status: 400 });
-          if (!(await inventoryLinesExist(context.tenantId, reviewedLines))) {
-            return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
+          const originalLineIds = originalLines.map((line) => line.id);
+          const reviewedLineIds = reviewedLines.map((line) => line.id);
+          if (new Set(originalLineIds).size !== originalLineIds.length
+            || new Set(reviewedLineIds).size !== reviewedLineIds.length
+            || originalLineIds.length !== reviewedLineIds.length
+            || originalLineIds.some((lineId) => !reviewedLineIds.includes(lineId))) {
+            return Response.json({ error: "material_review_must_preserve_requested_lines" }, { status: 409 });
+          }
+          if (reviewedLines.some((line) => !line.itemId)) {
+            return Response.json({ error: "material_catalog_item_required", message: "Associa ogni riga a un materiale del registro del magazzino selezionato." }, { status: 422 });
+          }
+          const reviewedItemIds = [...new Set(reviewedLines.flatMap((line) => line.itemId ? [line.itemId] : []))];
+          const reviewedItems = reviewedItemIds.length
+            ? await db.select().from(inventoryItems).where(and(
+              eq(inventoryItems.tenantId, context.tenantId),
+              eq(inventoryItems.warehouseId, warehouse.id),
+              inArray(inventoryItems.id, reviewedItemIds),
+            ))
+            : [];
+          const originalItemIds = [...new Set(originalLines.flatMap((line) => line.itemId ? [line.itemId] : []))];
+          const originalItems = originalItemIds.length
+            ? await db.select({ id: inventoryItems.id, name: inventoryItems.name }).from(inventoryItems).where(and(
+              eq(inventoryItems.tenantId, context.tenantId),
+              inArray(inventoryItems.id, originalItemIds),
+            ))
+            : [];
+          const originalItemById = new Map(originalItems.map((item) => [item.id, item]));
+          const reviewedItemById = new Map(reviewedItems.map((item) => [item.id, item]));
+          if (reviewedItemById.size !== reviewedItemIds.length) {
+            return Response.json({ error: "inventory_item_not_in_selected_warehouse", warehouseId: warehouse.id }, { status: 409 });
+          }
+          const canonicalLines = reviewedLines.map((line) => {
+            const item = line.itemId ? reviewedItemById.get(line.itemId) : null;
+            if (!item || item.unit !== line.unit) return null;
+            return { ...line, description: item.name, unit: item.unit };
+          });
+          if (canonicalLines.some((line) => !line)) {
+            return Response.json({ error: "inventory_unit_mismatch", message: "L’unità richiesta deve coincidere con quella del materiale registrato." }, { status: 409 });
+          }
+          const verifiedLines = canonicalLines as NonNullable<(typeof canonicalLines)[number]>[];
+          const requestByLineId = new Map(originalLines.map((line) => [line.id, line]));
+          if (verifiedLines.some((line) => requestByLineId.get(line.id)?.unit !== line.unit)) {
+            return Response.json({ error: "material_unit_change_not_supported", message: "L’unità di misura richiesta deve restare invariata." }, { status: 409 });
+          }
+          const fulfilledMaterialChanged = verifiedLines.length !== originalLines.length || verifiedLines.some((line) => {
+            const requested = requestByLineId.get(line.id);
+            if (!requested || requested.quantity !== line.quantity) return true;
+            const originalItem = requested.itemId ? originalItemById.get(requested.itemId) : null;
+            const requestedMaterial = (originalItem?.name ?? requested.description).trim().toLocaleLowerCase("it-IT");
+            const fulfilledMaterial = line.description.trim().toLocaleLowerCase("it-IT");
+            return requestedMaterial !== fulfilledMaterial;
+          });
+          if (decision === "APPROVED" && fulfilledMaterialChanged) {
+            return Response.json({ error: "material_change_requires_modified_decision" }, { status: 409 });
+          }
+          if (decision === "MODIFIED" && reviewNote.length < 4) {
+            return Response.json({ error: "material_modification_reason_required" }, { status: 400 });
+          }
+          const reservationByItem = new Map<string, { item: typeof inventoryItems.$inferSelect; quantityMilli: number }>();
+          for (const line of verifiedLines) {
+            const item = reviewedItemById.get(line.itemId!)!;
+            const quantityMilli = quantityToMilli(line.quantity);
+            if (quantityMilli === null) return Response.json({ error: "valid_material_lines_required" }, { status: 400 });
+            const current = reservationByItem.get(item.id);
+            reservationByItem.set(item.id, {
+              item,
+              quantityMilli: (current?.quantityMilli ?? 0) + quantityMilli,
+            });
+          }
+          const insufficient = [...reservationByItem.values()].flatMap(({ item, quantityMilli }) => {
+            const availableMilli = item.onHandMilli - item.reservedMilli;
+            return availableMilli < quantityMilli
+              ? [{ itemId: item.id, sku: item.sku, name: item.name, available: milliToQuantity(Math.max(0, availableMilli)), requested: milliToQuantity(quantityMilli), unit: item.unit }]
+              : [];
+          });
+          if (insufficient.length) {
+            return Response.json({ error: "insufficient_available_stock", items: insufficient, message: "Riduci le quantità, scegli un sostituto disponibile oppure respingi la richiesta." }, { status: 422 });
+          }
+          for (const { item, quantityMilli } of reservationByItem.values()) {
+            const nextVersion = item.version + 1;
+            const nextReserved = item.reservedMilli + quantityMilli;
+            const nextStatus = item.onHandMilli === 0
+              ? "OUT_OF_STOCK"
+              : item.onHandMilli - nextReserved < item.minStockMilli ? "LOW_STOCK" : "ACTIVE";
+            const sideKey = `material-request:${row.id}:reserve:${item.id}`.slice(0, 160);
+            const inventoryEventId = crypto.randomUUID();
+            inventoryReservationUpdateIndexes.push(missionInventoryStatements.length);
+            inventoryReservationGuards.push({ itemId: item.id, version: nextVersion, reservedMilli: nextReserved, sideKey });
+            missionInventoryStatements.push(db.update(inventoryItems).set({
+              reservedMilli: nextReserved,
+              status: nextStatus,
+              version: nextVersion,
+              updatedAt: now,
+            }).where(and(
+              eq(inventoryItems.tenantId, context.tenantId),
+              eq(inventoryItems.id, item.id),
+              eq(inventoryItems.version, item.version),
+              eq(inventoryItems.warehouseId, warehouse.id),
+              exists(db.select({ id: jobJourneyRecords.id }).from(jobJourneyRecords).where(and(
+                eq(jobJourneyRecords.tenantId, context.tenantId),
+                eq(jobJourneyRecords.id, row.id),
+                eq(jobJourneyRecords.version, row.version),
+                eq(jobJourneyRecords.status, "REQUESTED"),
+              ))),
+              sql`${inventoryItems.onHandMilli} - ${inventoryItems.reservedMilli} >= ${quantityMilli}`,
+            )).returning() as never);
+            const movementId = crypto.randomUUID();
+            missionInventoryStatements.push(db.run(sql`
+              INSERT INTO inventory_movements
+                (id, tenant_id, item_id, job_id, mission_id, movement_type, quantity_milli,
+                 before_on_hand_milli, after_on_hand_milli, before_reserved_milli, after_reserved_milli,
+                 note, idempotency_key, actor_id, created_at)
+              SELECT ${movementId}, ${context.tenantId}, ${item.id}, ${job.id}, NULL, 'RESERVE', ${quantityMilli},
+                ${item.onHandMilli}, ${item.onHandMilli}, ${item.reservedMilli}, ${nextReserved},
+                ${`Prenotazione richiesta ${row.id} · ${title}`}, ${sideKey}, ${context.actorId}, ${now}
+              WHERE changes() = 1
+            `) as never);
+            missionInventoryStatements.push(db.run(sql`
+              INSERT INTO s06_events
+                (event_id, tenant_id, event_type, schema_version, actor_type, actor_id, source,
+                 occurred_at, observed_at, aggregate_type, aggregate_id, aggregate_version, payload_json,
+                 correlation_id, causation_id, idempotency_key, status, created_at)
+              SELECT ${inventoryEventId}, ${context.tenantId}, 'warehouse.inventory.reserve', '1', 'human', ${context.actorId},
+                'sites-warehouse-request-review', ${now}, ${now}, 'inventory.item', ${item.id}, ${nextVersion},
+                ${JSON.stringify({ action: "RESERVE", itemId: item.id, jobId: job.id, materialRequestId: row.id, warehouseId: warehouse.id, quantityMilli, version: nextVersion })},
+                ${correlationId}, NULL, ${sideKey}, 'COMMITTED_SITES_READBACK', ${now}
+              WHERE EXISTS (SELECT 1 FROM inventory_movements WHERE tenant_id = ${context.tenantId} AND idempotency_key = ${sideKey})
+            `) as never);
+            missionInventoryStatements.push(db.run(sql`
+              INSERT INTO s06_outbox (id, tenant_id, event_id, topic, status, attempts, created_at, updated_at)
+              SELECT ${crypto.randomUUID()}, ${context.tenantId}, ${inventoryEventId}, 'zerow.warehouse.inventory.reserve',
+                'PENDING_EXTERNAL_CONSUMER', 0, ${now}, ${now}
+              WHERE EXISTS (SELECT 1 FROM s06_events WHERE tenant_id = ${context.tenantId} AND event_id = ${inventoryEventId})
+            `) as never);
+            missionInventoryStatements.push(db.run(sql`
+              INSERT INTO s06_reconciliations
+                (id, tenant_id, aggregate_type, aggregate_id, expected_version, observed_version, status, detail, created_at, updated_at)
+              SELECT ${crypto.randomUUID()}, ${context.tenantId}, 'inventory.item', ${item.id}, ${nextVersion}, ${nextVersion},
+                'SITES_READBACK_VERIFIED', ${`Riserva della richiesta materiali ${row.id} registrata nel ledger del deposito ${warehouse.code}.`}, ${now}, ${now}
+              WHERE EXISTS (SELECT 1 FROM s06_events WHERE tenant_id = ${context.tenantId} AND event_id = ${inventoryEventId})
+            `) as never);
           }
           payload = {
             ...payload,
             requestedLines: originalLines,
-            lines: reviewedLines,
+            lines: verifiedLines,
             reviewedAt: now,
             reviewedBy: context.actorId,
             reviewOutcome: decision,
-            reviewNote: boundedText(input.note, 2_000),
+            reviewNote,
             warehouseId: warehouse.id,
             warehouse: {
               id: warehouse.id,
@@ -1332,18 +1493,15 @@ export async function POST(request: Request, routeContext: RouteContext) {
               name: warehouse.name,
               locationLabel: warehouse.locationLabel,
             },
+            stockReservation: {
+              status: "RESERVED",
+              reservedAt: now,
+              reservedBy: context.actorId,
+              items: [...reservationByItem.values()].map(({ item, quantityMilli }) => ({ itemId: item.id, sku: item.sku, name: item.name, quantity: milliToQuantity(quantityMilli), unit: item.unit })),
+            },
           };
         }
         eventType = `warehouse.material_request.${decision.toLowerCase()}`;
-      } else if (action === "material_fulfill") {
-        if (domain !== "warehouse" || row.recordType !== "MATERIAL_REQUEST" || row.status !== "APPROVED") {
-          return Response.json({ error: "invalid_material_request_transition" }, { status: 409 });
-        }
-        const missionId = boundedText(input.missionId, 120) || boundedText(payload.missionId, 120);
-        if (!missionId) return Response.json({ error: "material_request_must_be_scheduled_first" }, { status: 409 });
-        status = "FULFILLED";
-        payload = { ...payload, fulfilledAt: now, fulfilledBy: context.actorId, missionId };
-        eventType = "warehouse.material_request.fulfilled";
       } else if (action === "mission_exception") {
         if (domain !== "mission" || row.recordType !== "TRANSPORT") {
           return Response.json({ error: "invalid_mission_exception_target" }, { status: 409 });
@@ -1661,7 +1819,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "mission_stop_asset_set_incomplete", stopId: selectedMissionStop.id, plannedAssetIds, requestedAssetIds: deliveryAssetIds }, { status: 409 });
         }
         const deliveryAssetId = deliveryAssetIds[0] ?? null;
-        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
           return Response.json({
             error: "mission_material_unload_required",
@@ -1811,7 +1969,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const reconciliationNote = boundedText(input.note, 2_000);
         if (reconciliationNote.length < 2) return Response.json({ error: "reconciliation_note_required" }, { status: 400 });
-        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
           return Response.json({
             error: "mission_material_reconciliation_required",
@@ -1839,7 +1997,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         }
         const reportText = boundedText(input.text, 4_000);
         if (reportText.length < 2) return Response.json({ error: "mission_report_text_required" }, { status: 400 });
-        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         payload = { ...payload, warehouseReadback };
         const reportReadback = buildMissionReportReadback(payload, { textOverride: reportText });
         if (action === "mission_report_submit" && !reportReadback.completeness.ready) {
@@ -1883,7 +2041,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (boundedText(report.submittedBy, 160, boundedText(report.updatedBy, 160)) === context.actorId) {
           return Response.json({ error: "mission_report_self_review_forbidden", message: "Chi invia il rapportino non può approvare la propria missione." }, { status: 403 });
         }
-        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         const reportReadback = buildMissionReportReadback({ ...payload, warehouseReadback });
         if (!reportReadback.completeness.ready) {
           return Response.json({
@@ -1922,7 +2080,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (domain !== "mission" || row.recordType !== "TRANSPORT" || row.status !== "RECONCILED") {
           return Response.json({ error: "invalid_mission_close_transition" }, { status: 409 });
         }
-        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload);
+        const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         if (warehouseReadback.required && warehouseReadback.status !== "DELIVERED") {
           return Response.json({
             error: "mission_material_reconciliation_required",
@@ -2008,6 +2166,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.jobId, job.id),
         eq(jobJourneyRecords.id, recordId),
         eq(jobJourneyRecords.version, existing.version),
+        ...inventoryReservationGuards.map(({ sideKey }) => exists(db.select({ id: inventoryMovements.id }).from(inventoryMovements).where(and(
+          eq(inventoryMovements.tenantId, context.tenantId),
+          eq(inventoryMovements.idempotencyKey, sideKey),
+        )))),
       )).returning()
       : db.insert(jobJourneyRecords).values({
         id: recordId,
@@ -2026,9 +2188,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         updatedAt: now,
       }).returning();
 
-    const statements = [
-      mutation,
-      db.insert(s06Events).values({
+    const eventWrite = action === "material_review"
+      ? db.run(sql`
+        INSERT INTO s06_events
+          (event_id, tenant_id, event_type, schema_version, actor_type, actor_id, source,
+           occurred_at, observed_at, aggregate_type, aggregate_id, aggregate_version, payload_json,
+           correlation_id, causation_id, idempotency_key, status, created_at)
+        SELECT ${eventId}, ${context.tenantId}, ${eventType}, '1', 'human', ${context.actorId}, 'sites-job-journey',
+          ${now}, ${now}, ${`job.journey.${domain}`}, ${recordId}, ${nextVersion}, ${eventPayload},
+          ${correlationId}, NULL, ${idempotencyKey}, 'COMMITTED_SITES_READBACK', ${now}
+        WHERE EXISTS (SELECT 1 FROM job_journey_records WHERE tenant_id = ${context.tenantId} AND id = ${recordId} AND version = ${nextVersion} AND status = ${status})
+      `)
+      : db.insert(s06Events).values({
         eventId,
         tenantId: context.tenantId,
         eventType,
@@ -2047,22 +2218,42 @@ export async function POST(request: Request, routeContext: RouteContext) {
         idempotencyKey,
         status: "COMMITTED_SITES_READBACK",
         createdAt: now,
-      }),
-      db.insert(s06Outbox).values({
+      });
+    const outboxWrite = action === "material_review"
+      ? db.run(sql`
+        INSERT INTO s06_outbox (id, tenant_id, event_id, topic, status, attempts, created_at, updated_at)
+        SELECT ${crypto.randomUUID()}, ${context.tenantId}, ${eventId}, ${`zerow.${eventType}`}, 'PENDING_EXTERNAL_CONSUMER', 0, ${now}, ${now}
+        WHERE EXISTS (SELECT 1 FROM s06_events WHERE tenant_id = ${context.tenantId} AND event_id = ${eventId})
+      `)
+      : db.insert(s06Outbox).values({
         id: crypto.randomUUID(), tenantId: context.tenantId, eventId,
         topic: `zerow.${eventType}`, status: "PENDING_EXTERNAL_CONSUMER",
         attempts: 0, createdAt: now, updatedAt: now,
-      }),
-      db.insert(s06Reconciliations).values({
+      });
+    const reconciliationWrite = action === "material_review"
+      ? db.run(sql`
+        INSERT INTO s06_reconciliations
+          (id, tenant_id, aggregate_type, aggregate_id, expected_version, observed_version, status, detail, created_at, updated_at)
+        SELECT ${crypto.randomUUID()}, ${context.tenantId}, ${`job.journey.${domain}`}, ${recordId}, ${nextVersion}, ${nextVersion},
+          'SITES_READBACK_VERIFIED', 'Passaggio della journey persistito con controllo versione e outbox.', ${now}, ${now}
+        WHERE EXISTS (SELECT 1 FROM s06_events WHERE tenant_id = ${context.tenantId} AND event_id = ${eventId})
+      `)
+      : db.insert(s06Reconciliations).values({
         id: crypto.randomUUID(), tenantId: context.tenantId,
         aggregateType: `job.journey.${domain}`, aggregateId: recordId,
         expectedVersion: nextVersion, observedVersion: nextVersion,
         status: "SITES_READBACK_VERIFIED",
         detail: "Passaggio della journey persistito con controllo versione e outbox.",
         createdAt: now, updatedAt: now,
-      }),
+      });
+    const statements = [
+      ...missionInventoryStatements,
+      mutation,
+      eventWrite,
+      outboxWrite,
+      reconciliationWrite,
     ] as unknown as never[];
-    statements.push(...missionInventoryStatements);
+    const missionInventoryStatementOffset = 0;
     if (routeProjection) {
       for (const temporary of routeProjection.temporaryLocations) {
         statements.push(db.insert(geoLocations).values(temporary.location) as never);
@@ -2142,7 +2333,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
       )) as never);
     }
     const results = await db.batch(statements as [never, ...never[]]);
-    const changed = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
+    const reservationConflict = inventoryReservationUpdateIndexes.some((index) => {
+      const result = results[missionInventoryStatementOffset + index];
+      return !Array.isArray(result) || result.length === 0;
+    });
+    if (reservationConflict) return Response.json({ error: "inventory_reservation_conflict", message: "Le giacenze sono cambiate durante la revisione. Rileggi il deposito e ripeti la verifica." }, { status: 409 });
+    const changed = (results[missionInventoryStatements.length] as (typeof jobJourneyRecords.$inferSelect)[])[0];
     if (!changed) return Response.json({ error: "version_conflict" }, { status: 409 });
     if (materialRequest) {
       const [linkedRequest] = await db.select().from(jobJourneyRecords).where(and(
