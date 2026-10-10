@@ -93,6 +93,7 @@ const ROLE_LABELS: Record<string, string> = {
   warehouse_manager: "Responsabile magazzino",
   warehouse_operator: "Magazziniere",
   driver: "Autista",
+  delivery_driver: "Autista di consegna",
   maintenance: "Manutentore",
   auditor: "Auditor",
   operator: "Operatore",

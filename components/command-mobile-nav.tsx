@@ -34,6 +34,7 @@ const OPERATIONAL_ROLES = new Set([
   "warehouse_manager",
   "warehouse_operator",
   "driver",
+  "delivery_driver",
   "maintenance",
 ]);
 
@@ -65,7 +66,7 @@ export function CommandMobileNav({
   const canSettings = can("settings");
   const canCommunications = can("communications");
   const scoped = ![...effectiveRoles].some((value) => SUPERVISORY_ROLES.has(value));
-  const isDriver = effectiveRoles.has("driver");
+  const isDriver = effectiveRoles.has("driver") || effectiveRoles.has("delivery_driver");
   const isWarehouse = effectiveRoles.has("warehouse_operator") || effectiveRoles.has("warehouse_manager");
   const isWorker = effectiveRoles.has("worker") || effectiveRoles.has("maintenance");
 
