@@ -11,6 +11,7 @@ import {
 import {
   ArrowLeft,
   BriefcaseBusiness,
+  CalendarClock,
   Check,
   CheckCircle2,
   ClipboardCheck,
@@ -49,6 +50,9 @@ import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-type
 
 type WorkspaceRecord = {
   id: string;
+  canonicalCode?: string;
+  createdAt?: string;
+  updatedAt?: string;
   module: string;
   recordType: string;
   title: string;
@@ -384,15 +388,6 @@ function formatCommercialDate(value: unknown) {
     month: "long",
     year: "numeric",
   }).format(parsed);
-}
-
-function looksLikeAddress(value: string, location: string) {
-  const normalizedValue = value.trim().toLocaleLowerCase("it-IT");
-  const normalizedLocation = location.trim().toLocaleLowerCase("it-IT");
-  return (
-    normalizedValue === normalizedLocation ||
-    /^(via|viale|corso|piazza|largo|strada|contrada|km)\b/i.test(value.trim())
-  );
 }
 
 function InfoRow({
@@ -1129,10 +1124,9 @@ export default function OperationsJobWorkspace({
   const hasRealDescription = Boolean(
     typeof jobData.description === "string" && jobData.description.trim(),
   );
-  const displayTitle =
-    hasRealDescription && looksLikeAddress(job.title, locationLabel)
-      ? compactDescription(jobDescription, 100)
-      : job.title;
+  // Keep the registered commessa name in the title. A worksite-looking name
+  // is still a valid project identity; descriptive text belongs below it.
+  const displayTitle = job.title;
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
@@ -1155,6 +1149,7 @@ export default function OperationsJobWorkspace({
       ? `${jobScope.sectionTitle} / ${jobScope.groupTitle} / ${jobScope.subgroupTitle}`
       : "Categoria da completare";
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
+  const jobCode = valueOr(job.canonicalCode, jobId);
   const contactLabel =
     payloadText("clientContact") ||
     payloadText("clientEmail") ||
@@ -1215,32 +1210,41 @@ export default function OperationsJobWorkspace({
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COMMESSA · {openingType}</span>
+                  <span className="rounded-full border border-lime-300/20 bg-lime-300/[.05] px-2.5 py-1 font-mono text-[9px] font-semibold text-lime-100">{jobCode}</span>
+                  <span className="text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">{openingType}</span>
                   {sourceMode === "Da preventivo" && <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[.05] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/80">Da preventivo</span>}
                   {priority !== "STANDARD" && <span className="rounded-full border border-amber-300/20 bg-amber-300/[.06] px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100">Priorità {priority === "HIGH" ? "alta" : "bassa"}</span>}
                 </div>
-                <h1 className="mt-3 max-w-4xl break-words text-[28px] font-semibold leading-tight tracking-[-.045em] text-slate-50 sm:text-[38px]">{displayTitle}</h1>
+                <h1 className="mt-3 max-w-4xl break-words text-[26px] font-semibold leading-tight tracking-[-.04em] text-slate-50 sm:text-[34px]">{displayTitle}</h1>
+                {hasRealDescription && <p className="mt-2 line-clamp-2 max-w-4xl text-[12px] leading-5 text-slate-400">{jobSummary}</p>}
                 <p className="mt-3 flex items-start gap-2 text-[12px] leading-5 text-slate-300">
                   <MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" />
                   <span>{locationLabel}{locationVerified && <span className="ml-2 inline-flex rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[.1em] text-lime-100">Luogo verificato</span>}</span>
                 </p>
-                {hasRealDescription && <p className="mt-3 max-w-3xl text-[12px] leading-5 text-slate-400">{jobSummary}</p>}
               </div>
               <span className={`shrink-0 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${statusTone(job.status)}`}>{displayStatus(job.status)}</span>
             </div>
 
-            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+            <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
                 <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cliente</p>
                 <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{clientName}</p>
+                <p className="mt-1 truncate text-[9px] text-slate-600">{contactLabel}</p>
+              </div>
+              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
+                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Cantiere</p>
+                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{locationLabel}</p>
+                <p className={`mt-1 truncate text-[9px] ${locationVerified ? "text-lime-200/75" : "text-amber-200/75"}`}>{geofenceLabel}</p>
+              </div>
+              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
+                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Riferimento cliente</p>
+                <p className="mt-1.5 truncate text-[12px] font-medium text-slate-200">{valueOr(jobData.clientReference, "Non indicato")}</p>
+                <p className="mt-1 truncate text-[9px] text-slate-600">{[payloadText("cig") && `CIG ${payloadText("cig")}`, payloadText("cup") && `CUP ${payloadText("cup")}`].filter(Boolean).join(" · ") || "CIG / CUP non indicati"}</p>
               </div>
               <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
                 <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Scadenza prevista</p>
                 <p className="mt-1.5 text-[12px] font-medium text-slate-200">{dueDateLabel}</p>
-              </div>
-              <div className="rounded-xl border border-white/[.07] bg-black/20 px-3.5 py-3">
-                <p className="text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">Ambito</p>
-                <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-200">{scopeLabel}</p>
+                <p className="mt-1 truncate text-[9px] text-slate-600">{scopeLabel}</p>
               </div>
             </div>
 
@@ -1266,97 +1270,64 @@ export default function OperationsJobWorkspace({
 
         <Tabs className="mt-4" onValueChange={(value) => setActiveSection(value as "overview" | "operations" | "reports")} value={activeSection}>
           <TabsList className={`grid h-12 w-full ${canWriteReport || canReviewReport ? "grid-cols-3" : "grid-cols-2"} rounded-2xl border border-white/[.08] bg-black/25 p-1`}>
-            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Panoramica</TabsTrigger>
+            <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Scheda commerciale</TabsTrigger>
             <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="operations"><Layers3 className="size-3.5" />Operatività</TabsTrigger>
             {(canWriteReport || canReviewReport) && <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-cyan-300/20 data-[state=active]:bg-cyan-300/[.08] data-[state=active]:text-cyan-100" value="reports"><Sparkles className="size-3.5" />Rapportini</TabsTrigger>}
           </TabsList>
 
           <TabsContent className="mt-4 space-y-4" value="overview">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(290px,.65fr)]">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,.8fr)]">
               <section className="carbon-card rounded-[22px] p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">LAVORAZIONI PREVISTE</p>
-                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Cosa va realizzato</h2>
+                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">OGGETTO DELLA COMMESSA</p>
+                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Descrizione e lavorazioni</h2>
                   </div>
                   {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} voci{sourceMode === "Da preventivo" ? " · preventivo" : ""}</span>}
                 </div>
-                <p className="mt-3 text-[11px] leading-5 text-slate-400">{jobSummary}</p>
+                <p className="mt-3 line-clamp-4 text-[11px] leading-5 text-slate-400">{jobSummary}</p>
                 {workItems.length > 0 ? <div className="mt-4 space-y-2">
-                  {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
+                  {workItems.slice(0, 4).map((item, index) => <div className="flex items-start gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-${index}`}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
-                    <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.detail}</p>}</div>
-                    {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
+                    <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Fonte: {item.source}{typeof item.confidence === "number" ? ` · confidenza ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
+                    {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                   </div>)}
-                  {workItems.length > 3 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
-                </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] bg-black/15 px-3 py-4 text-[10px] leading-5 text-slate-500">Non ci sono voci di preventivo collegate. La descrizione della commessa resta il riferimento del lavoro.</div>}
+                  {workItems.length > 4 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 4} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(4).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
+                </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] bg-black/15 px-3 py-4 text-[10px] leading-5 text-slate-500">Nessuna lavorazione strutturata è collegata alla commessa. La descrizione resta disponibile come riferimento.</div>}
               </section>
 
-              <section className="rounded-[22px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(10,27,29,.72),rgba(7,12,13,.96))] p-4 sm:p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">GIORNATA OPERATIVA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Turno e consuntivo</h2></div>
-                  <span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${statusTone(workspace.rapportino.status)}`}>{rapportinoStatusLabel(workspace.rapportino.status)}</span>
+              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">ANAGRAFICA CLIENTE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Contatti e riferimenti</h2></div><span className="rounded-full border border-white/[.08] bg-black/20 px-2.5 py-1 text-[9px] text-slate-400">{clientName}</span></div>
+                <div className="mt-3 grid gap-x-5 sm:grid-cols-2">
+                  <InfoRow icon={Users} label="Referente" value={contactLabel} />
+                  <InfoRow icon={Flag} label="Riferimento cliente" value={valueOr(jobData.clientReference, "Non indicato")} />
+                  <InfoRow icon={BriefcaseBusiness} label="Codice fiscale / P. IVA" value={valueOr(jobData.clientTaxId, "Non indicato")} />
+                  <InfoRow icon={BriefcaseBusiness} label="Telefono" value={valueOr(jobData.clientPhone, "Non indicato")} />
+                  <InfoRow icon={BriefcaseBusiness} label="E-mail" value={valueOr(jobData.clientEmail, "Non indicata")} />
+                  <InfoRow icon={MapPin} label="Indirizzo cliente / fatturazione" value={valueOr(jobData.clientAddress, "Non indicato")} />
+                  <InfoRow icon={Flag} label="CIG" value={valueOr(jobData.cig, "Non indicato")} />
+                  <InfoRow icon={Flag} label="CUP" value={valueOr(jobData.cup, "Non indicato")} />
                 </div>
-                <p className="mt-2 text-[10px] leading-5 text-slate-500">Presenze, attività, risorse e materiali arrivano dai registri dei rispettivi moduli. Il responsabile aggiunge solo ciò che quei registri non possono sapere.</p>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Attività</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.activities.count}</p></div>
-                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Risorse</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.resources.status === "deferred" ? "—" : workspace.sections.resources.count}</p></div>
-                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Materiali</p><p className="mt-1.5 font-mono text-lg text-slate-100">{workspace.sections.materials.status === "deferred" ? "—" : workspace.sections.materials.count}</p></div>
-                  <div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.13em] text-slate-600">Data rapportino</p><p className="mt-1.5 text-[11px] font-medium text-slate-200">{formatCommercialDate(workspace.rapportino.reportDate)}</p></div>
-                </div>
-                {reportQuestionCount > 0 && (canWriteReport || canReviewReport) && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2 text-[9px] leading-4 text-amber-100/80">{reportQuestionCount} elementi da verificare prima dell’invio.</p>}
-                {(canWriteReport || canReviewReport) && <Button className="mt-4 min-h-10 w-full bg-cyan-200 text-[10px] font-semibold text-[#061012] hover:bg-cyan-100" onClick={() => canReviewReport && workspace.rapportino.status === "SUBMITTED" ? openReport() : setActiveSection("reports")} type="button"><Sparkles className="size-3.5" />{canReviewReport && workspace.rapportino.status === "SUBMITTED" ? "Apri revisione" : "Apri rapportini"}</Button>}
               </section>
             </div>
 
-            <section className="carbon-card rounded-[22px] p-4 sm:p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">ATTIVITÀ REGISTRATE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Lavoro pianificato per la commessa</h2></div>
-                {canWriteOperations && <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Nuova attività</Button>}
-              </div>
-              {workspace.sections.activities.records.length > 0 ? <div className="mt-4 space-y-2">
-                {workspace.sections.activities.records.slice(0, 4).map((record) => {
-                  const activityId = typeof record.payload?.id === "string" ? record.payload.id : null;
-                  return <div className="flex items-center gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={record.id}>
-                    <span className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}><CheckCircle2 className="size-3.5" /></span>
-                    <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium text-slate-200">{record.title}</p><p className="mt-0.5 truncate text-[9px] text-slate-500">{record.detail || displayRecordType(record.recordType)}</p></div>
-                    <span className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase sm:inline-flex ${statusTone(record.status)}`}>{displayStatus(record.status)}</span>
-                    {canWriteOperations && activityId && record.status !== "DONE" && <button aria-label={`Completa ${record.title}`} className="grid size-8 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-100 hover:bg-lime-300/10" onClick={() => void mutate("complete_activity", { activityId })} type="button"><Check className="size-3.5" /></button>}
-                  </div>;
-                })}
-                {workspace.sections.activities.count > 4 && <p className="pt-1 text-right text-[9px] text-slate-600">Mostrate 4 di {workspace.sections.activities.count} attività. Il registro completo resta in Pianificazione.</p>}
-              </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] px-3 py-4 text-center text-[10px] text-slate-500">Nessuna attività operativa registrata per questa commessa.</div>}
-              {canWriteOperations && <div className="mt-3 flex flex-wrap gap-2">
-                <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna squadra</Button>
-                <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Aggiungi evidenza</Button>
-              </div>}
-            </section>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <section className="rounded-[22px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(10,27,29,.62),rgba(7,12,13,.96))] p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/65">LUOGO DI INTERVENTO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Cantiere e accesso</h2></div><span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${locationVerified ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-amber-300/20 bg-amber-300/[.05] text-amber-100"}`}>{locationVerified ? "Verificato" : "Da verificare"}</span></div>
+                <InfoRow icon={MapPin} label="Indirizzo cantiere" value={locationLabel} />
+                <InfoRow icon={ShieldCheck} label="Geofence" value={geofenceLabel} />
+                <InfoRow icon={HardHat} label="Accesso e vincoli" value={valueOr(jobData.accessNotes, "Nessuna nota registrata")} />
+              </section>
 
-            <details className="group overflow-hidden rounded-[20px] border border-white/[.08] bg-black/10">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 marker:hidden">
-                <span><span className="block text-[8px] font-semibold uppercase tracking-[.16em] text-slate-600">SCHEDA</span><span className="mt-1 block text-[11px] font-medium text-slate-200">Dettagli e controlli di chiusura</span></span>
-                <span className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:hidden">Mostra</span><span className="hidden rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:inline-flex">Nascondi</span>
-              </summary>
-              <div className="grid gap-3 border-t border-white/[.07] p-4 sm:grid-cols-2">
-                <InfoRow icon={Users} label="Referente" value={contactLabel} />
-                <InfoRow icon={Flag} label="Riferimento cliente" value={valueOr(jobData.clientReference, "Non indicato")} />
-                {payloadText("clientTaxId") && <InfoRow icon={BriefcaseBusiness} label="Codice fiscale / P. IVA" value={payloadText("clientTaxId")} />}
-                {payloadText("clientPhone") && <InfoRow icon={BriefcaseBusiness} label="Telefono cliente" value={payloadText("clientPhone")} />}
-                {payloadText("clientEmail") && <InfoRow icon={BriefcaseBusiness} label="E-mail cliente" value={payloadText("clientEmail")} />}
-                {payloadText("cig") && <InfoRow icon={Flag} label="CIG" value={payloadText("cig")} />}
-                {payloadText("cup") && <InfoRow icon={Flag} label="CUP" value={payloadText("cup")} />}
-                {payloadText("clientAddress") && <InfoRow icon={MapPin} label="Indirizzo del cliente" value={payloadText("clientAddress")} />}
-                {payloadText("accessNotes") && <InfoRow icon={HardHat} label="Accesso al cantiere" value={payloadText("accessNotes")} />}
-                <InfoRow icon={MapPin} label="Perimetro geofence" value={geofenceLabel} />
-                {canWriteOperations && <details className="group rounded-xl border border-white/[.06] bg-black/15 sm:col-span-2">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 marker:hidden">
-                    <span><span className="block text-[9px] font-medium text-slate-200">Controlli per chiudere la commessa</span><span className="mt-1 block text-[9px] text-slate-500">{workspace.completion.ready ? "Requisiti completi, pronta per verifica." : `${workspace.completion.requirements.filter((requirement) => !requirement.complete).length} requisiti ancora aperti.`}</span></span>
-                    <span className="shrink-0 rounded-lg border border-amber-300/15 px-2.5 py-1.5 text-[8px] text-amber-100/80 group-open:hidden">Mostra</span><span className="hidden shrink-0 rounded-lg border border-white/10 px-2.5 py-1.5 text-[8px] text-slate-500 group-open:inline-flex">Nascondi</span>
-                  </summary>
-                  <div className="border-t border-white/[.06] p-3"><CompletionGate completion={workspace.completion} /></div>
-                </details>}
-              </div>
-            </details>
+              <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">CLASSIFICAZIONE E PIANO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Ambito e scadenza</h2></div><CalendarClock className="size-4 text-lime-200" /></div>
+                <InfoRow icon={BriefcaseBusiness} label="Ambito operativo" value={scopeLabel} />
+                <InfoRow icon={Flag} label="Tipologia apertura" value={openingType} />
+                <InfoRow icon={CircleGauge} label="Priorità" value={priority === "HIGH" ? "Alta" : priority === "LOW" ? "Bassa" : "Standard"} />
+                <InfoRow icon={CalendarClock} label="Scadenza prevista" value={dueDateLabel} />
+                <p className="mt-3 rounded-xl border border-white/[.06] bg-black/15 px-3 py-2.5 text-[9px] leading-4 text-slate-500">La pianificazione di attività, turni, squadre e risorse si gestisce nella sezione Operatività e viene riletta dai rispettivi registri.</p>
+              </section>
+            </div>
           </TabsContent>
 
           <TabsContent className="mt-4 space-y-4" value="operations">
@@ -1364,6 +1335,32 @@ export default function OperationsJobWorkspace({
               <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/70">FLUSSI OPERATIVI COLLEGATI</p>
               <p className="mt-1 text-[10px] leading-5 text-slate-400">Questa sezione coordina le azioni collegate alla commessa. Presenze, pianificazione, magazzino, missioni e documenti mantengono ciascuno il proprio registro.</p>
             </section>
+
+            <CompletionGate completion={workspace.completion} />
+
+            <section className="carbon-card rounded-[22px] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">ATTIVITÀ REGISTRATE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Lavoro pianificato per la commessa</h2><p className="mt-1 text-[10px] text-slate-500">Le modifiche restano nello storico della commessa con versione e rilettura server.</p></div>
+                {canWriteOperations && <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Nuova attività</Button>}
+              </div>
+              {workspace.sections.activities.records.length > 0 ? <div className="mt-4 space-y-2">
+                {workspace.sections.activities.records.slice(0, 6).map((record) => {
+                  const activityId = typeof record.payload?.id === "string" ? record.payload.id : null;
+                  return <div className="flex items-center gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={record.id}>
+                    <span className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}><CheckCircle2 className="size-3.5" /></span>
+                    <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium text-slate-200">{record.title}</p><p className="mt-0.5 truncate text-[9px] text-slate-500">{record.detail || displayRecordType(record.recordType)}</p></div>
+                    <span className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase sm:inline-flex ${statusTone(record.status)}`}>{displayStatus(record.status)}</span>
+                    {canWriteOperations && activityId && record.status !== "DONE" && <button aria-label={`Completa ${record.title}`} className="grid size-9 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-100 hover:bg-lime-300/10" onClick={() => void mutate("complete_activity", { activityId })} type="button"><Check className="size-3.5" /></button>}
+                  </div>;
+                })}
+                {workspace.sections.activities.count > 6 && <p className="pt-1 text-right text-[9px] text-slate-600">Mostrate 6 di {workspace.sections.activities.count} attività. Il registro completo resta in Pianificazione.</p>}
+              </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] px-3 py-5 text-center text-[10px] text-slate-500">Nessuna attività operativa collegata. Le opzioni di pianificazione e assegnazione arrivano dal server.</div>}
+              {canWriteOperations && <div className="mt-3 flex flex-wrap gap-2">
+                <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna squadra</Button>
+                <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Aggiungi evidenza</Button>
+              </div>}
+            </section>
+
             <JobCommercialJourney jobId={jobId} />
           </TabsContent>
 
