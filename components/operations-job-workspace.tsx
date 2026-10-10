@@ -372,6 +372,21 @@ function compactDescription(value: string, maxLength = 260) {
   return `${normalized.slice(0, cutoff).trim()}…`;
 }
 
+function quoteSummaryFromDescription(value: string) {
+  const lines = value.split(/\r?\n/).map((line) => line.trim());
+  const objectHeading = lines.findIndex((line) => /^OGGETTO(?: DEL PREVENTIVO)?$/i.test(line));
+  if (objectHeading < 0) return null;
+  const objectLine = lines.findIndex((line, index) => index > objectHeading && line.length > 0);
+  if (objectLine < 0) return null;
+  const sectionHeading = lines.findIndex((line, index) => index > objectLine && /^DESCRIZIONE DELLE LAVORAZIONI$/i.test(line));
+  const summaryEnd = sectionHeading >= 0 ? sectionHeading : Math.min(lines.length, objectLine + 3);
+  const summary = lines.slice(objectLine + 1, summaryEnd).filter(Boolean).join(" ");
+  return {
+    object: lines[objectLine].slice(0, 240),
+    summary: summary.slice(0, 700),
+  };
+}
+
 function valueOr(value: unknown, fallback = "—") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -1130,6 +1145,7 @@ export default function OperationsJobWorkspace({
     payloadText("sourceMode") === "COMPANY_AI"
       ? "Da preventivo"
       : "Inserimento manuale";
+  const quoteSummary = sourceMode === "Da preventivo" ? quoteSummaryFromDescription(jobDescription) : null;
   const priority = payloadText("priority", "STANDARD");
   const rawScope = jobData.scope;
   const jobScope =
@@ -1278,12 +1294,20 @@ export default function OperationsJobWorkspace({
               <section className="carbon-card rounded-[22px] p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">OGGETTO DELLA COMMESSA</p>
-                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">Descrizione registrata e lavorazioni</h2>
+                    <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">{quoteSummary ? "PREVENTIVO COLLEGATO" : "OGGETTO DELLA COMMESSA"}</p>
+                    <h2 className="mt-1 text-[15px] font-semibold text-slate-100">{quoteSummary ? "Oggetto e perimetro lavori" : "Descrizione registrata e lavorazioni"}</h2>
                   </div>
                   {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} voci{sourceMode === "Da preventivo" ? " · preventivo" : ""}</span>}
                 </div>
-                {hasRealDescription ? <div className="mt-3 rounded-xl border border-white/[.06] bg-black/15 p-3">
+                {quoteSummary ? <div className="mt-3 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3.5">
+                  <p className="text-[8px] font-semibold uppercase tracking-[.14em] text-cyan-100/60">Oggetto del preventivo</p>
+                  <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-100">{quoteSummary.object}</p>
+                  {quoteSummary.summary && <p className="mt-2 text-[10px] leading-5 text-slate-400">{quoteSummary.summary}</p>}
+                  <details className="mt-3 border-t border-white/[.06] pt-2.5">
+                    <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo registrato completo</summary>
+                    <p className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-white/[.06] bg-black/20 p-3 text-[10px] leading-5 text-slate-400">{jobDescription}</p>
+                  </details>
+                </div> : hasRealDescription ? <div className="mt-3 rounded-xl border border-white/[.06] bg-black/15 p-3">
                   <p className="line-clamp-3 whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p>
                   {jobDescription.length > 260 && <details className="mt-2 border-t border-white/[.06] pt-2">
                     <summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/75">Leggi il testo completo</summary>
@@ -1297,7 +1321,7 @@ export default function OperationsJobWorkspace({
                     {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                   </div>)}
                   {workItems.length > 4 && <details className="rounded-xl border border-white/[.06] bg-black/15 px-3 py-2"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 4} lavorazioni</summary><div className="mt-2 space-y-2">{workItems.slice(4).map((item, index) => <div className="flex items-start justify-between gap-3 border-t border-white/[.06] pt-2" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p><p className="mt-0.5 text-[9px] text-slate-600">{valueOr(item.detail, "")}</p></div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
-                </div> : <p className="mt-3 text-[9px] text-slate-600">Nessuna riga di lavorazione strutturata collegata.</p>}
+                </div> : <p className="mt-3 text-[9px] leading-4 text-slate-600">Nessuna riga di lavorazione strutturata è collegata. Il preventivo originale resta disponibile nel testo registrato.</p>}
               </section>
 
               <section className="carbon-card rounded-[22px] p-4 sm:p-5">
