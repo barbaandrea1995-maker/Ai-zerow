@@ -58,3 +58,15 @@ La pubblicazione resta privata e owner-only. Questo checkpoint certifica il peri
 ## Decisione checkpoint
 
 `W09 SITES TECHNICAL PASS` nel perimetro owner-only privato. Non promuovere a certificazione commerciale o GA: i gate esterni sopra restano bloccanti.
+
+## Addendum di coerenza e autorizzazioni — 10 ottobre 2026
+
+L'audit di continuità ha corretto tre discrepanze tra la scheda e i contratti server:
+
+- il readback `GET /api/documents/:documentId/security` applica ora lo stesso accesso per commessa del catalogo e del download; un documento fuori dallo scope operativo restituisce `404`;
+- una chiave di idempotenza già usata per un altro documento non viene più accettata come replay valido;
+- l'interfaccia dichiara esplicitamente che `queue_scan` mette il file in hold e lo segna in attesa del provider, senza affermare che la scansione sia partita. Provider malware e consumer dell'outbox restano non configurati.
+
+Ricerca e lettura sono state rese coerenti: hash incluso nella ricerca, categorie visualizzate in italiano, filtri che includono quarantena e revisione, e stato non scansionato indicato come bloccato al download. Nessun esito CLEAN viene inferito dalla firma del file o dall'hash.
+
+La build e il lint successivi a questo addendum sono registrati nel commit di avanzamento; il rilascio rimane privato e owner-only.

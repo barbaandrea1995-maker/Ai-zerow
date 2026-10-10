@@ -81,6 +81,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   try {
     const row = await findDocument(context.tenantId, id);
     if (!row) return Response.json({ error: "document_not_found" }, { status: 404 });
+    if (!(await canAccessDocument(context, row))) return Response.json({ error: "document_not_found" }, { status: 404 });
     return Response.json({
       document: responseDocument(row),
       contract: {
@@ -146,7 +147,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existingEvent[0]) {
-      if (existingEvent[0].aggregateType !== "operational.document.security") return Response.json({ error: "document_security_idempotency_conflict" }, { status: 409 });
+      if (existingEvent[0].aggregateType !== "operational.document.security" || existingEvent[0].aggregateId !== current.id) {
+        return Response.json({ error: "document_security_idempotency_conflict" }, { status: 409 });
+      }
       const existing = await findDocument(tenantId, id);
       if (!existing) return Response.json({ error: "document_security_readback_unavailable" }, { status: 503 });
       return Response.json({ document: responseDocument(existing), eventId: existingEvent[0].eventId, idempotent: true, readback: { status: "verified", scope: "tenant", version: existing.version } }, { headers: { "cache-control": "private, no-store" } });
