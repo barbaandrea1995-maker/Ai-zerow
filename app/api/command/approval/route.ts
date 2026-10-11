@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { hasCapability } from "@/lib/authority-context";
 import {
   getS07Context,
   getS07Ledger,
@@ -51,13 +52,33 @@ export async function POST(request: Request) {
       eq(s07AiLedger.entryType, "approval_decision"),
     )).limit(1);
     if (existingDecision[0]) {
-      const rows = await getS07Ledger(context!.tenantId);
-      return Response.json({ ...s07Envelope(context!, rows), decision: {
+      let recordedDecision: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(existingDecision[0].payloadJson) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) recordedDecision = parsed as Record<string, unknown>;
+      } catch {
+        return Response.json({ error: "approval_readback_unavailable" }, { status: 503 });
+      }
+      if (recordedDecision.decision !== decision || recordedDecision.note !== note) {
+        return Response.json({ error: "approval_decision_conflict" }, { status: 409 });
+      }
+      const decisionReceipt = {
         id: existingDecision[0].id,
         actionId: original.id,
         status: existingDecision[0].status,
         directWrite: false,
-      }, idempotent: true }, { headers: { "cache-control": "no-store" } });
+      };
+      if (hasCapability(context!, "command.read")) {
+        const rows = await getS07Ledger(context!.tenantId);
+        return Response.json({ ...s07Envelope(context!, rows), decision: decisionReceipt, idempotent: true }, {
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      return Response.json({
+        decision: decisionReceipt,
+        readback: { status: "ok", checkedAt: existingDecision[0].createdAt },
+        idempotent: true,
+      }, { headers: { "cache-control": "no-store" } });
     }
 
     const now = new Date().toISOString();
@@ -133,13 +154,24 @@ export async function POST(request: Request) {
       eq(s07AiLedger.id, decisionId),
     )).limit(1);
     if (!entry) return Response.json({ error: "approval_readback_unavailable" }, { status: 503 });
-    const rows = await getS07Ledger(context!.tenantId);
-    return Response.json({ ...s07Envelope(context!, rows), decision: {
+    const decisionReceipt = {
       id: entry.id,
       actionId: original.id,
       status: entry.status,
       directWrite: false,
-    } , idempotent: false }, { status: 201, headers: { "cache-control": "no-store" } });
+    };
+    if (hasCapability(context!, "command.read")) {
+      const rows = await getS07Ledger(context!.tenantId);
+      return Response.json({ ...s07Envelope(context!, rows), decision: decisionReceipt, idempotent: false }, {
+        status: 201,
+        headers: { "cache-control": "no-store" },
+      });
+    }
+    return Response.json({
+      decision: decisionReceipt,
+      readback: { status: "ok", checkedAt: entry.createdAt },
+      idempotent: false,
+    }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE") || message.includes("unique")) {

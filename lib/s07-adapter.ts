@@ -10,8 +10,12 @@ import {
 
 export function s07AccessDenied(context: AuthorityContext | null, operation: "read" | "write" | "approve"): Response | null {
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  const capability = operation === "approve" ? "approvals.review" : "command.read";
-  if (!hasCapability(context, capability) && !(operation !== "approve" && hasCapability(context, "company_ai.read"))) return Response.json({ error: "forbidden", operation }, { status: 403 });
+  const allowed = operation === "approve"
+    ? hasCapability(context, "approvals.review")
+    : operation === "read"
+      ? hasCapability(context, "command.read")
+      : hasCapability(context, "command.read") || hasCapability(context, "company_ai.read");
+  if (!allowed) return Response.json({ error: "forbidden", operation }, { status: 403 });
   return null;
 }
 

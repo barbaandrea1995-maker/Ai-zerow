@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import {
-  eventForResponse,
   getS06Context,
   getS06Snapshot,
   s06AccessDenied,
@@ -55,33 +54,42 @@ export async function POST(request: Request) {
   const rawIdempotencyKey = bodyIdempotencyKey || headerIdempotencyKey;
   const idempotencyKey = rawIdempotencyKey.slice(0, 160);
   const isPwaDiagnosticSignal = eventType === "pwa.diagnostics.signal";
+  const isAuditNote = eventType === "command.audit.note";
+  if (!isPwaDiagnosticSignal && !isAuditNote) {
+    return Response.json({ error: "unsupported_manual_event_type" }, { status: 400 });
+  }
   const denied = s06AccessDenied(context, isPwaDiagnosticSignal ? "diagnostic" : "write");
   if (denied) return denied;
   if (isPwaDiagnosticSignal && rawIdempotencyKey.length > 80) {
     return Response.json({ error: "pwa_idempotency_key_too_long" }, { status: 400 });
   }
-  // PWA diagnostics are non-operational telemetry. The server owns their
-  // aggregate identity so a queued client event cannot claim a mission,
-  // attendance or stock aggregate.
-  const aggregateType = isPwaDiagnosticSignal
-    ? "pwa_diagnostics"
-    : safeText(payload.aggregateType).slice(0, 80);
-  const aggregateId = isPwaDiagnosticSignal
-    ? `signal:${idempotencyKey}`
-    : safeText(payload.aggregateId).slice(0, 120);
-  const aggregateVersion = isPwaDiagnosticSignal
-    ? 1
-    : typeof payload.aggregateVersion === "number" && Number.isInteger(payload.aggregateVersion)
-      ? payload.aggregateVersion
-      : 0;
+  if (isAuditNote && rawIdempotencyKey.length > 115) {
+    return Response.json({ error: "audit_note_idempotency_key_too_long" }, { status: 400 });
+  }
+  // Only the two bounded event types below can enter through this API. Their
+  // identities are server-owned so a caller cannot impersonate a canonical
+  // attendance, warehouse, mission or other business aggregate.
   const submittedPayload = isRecord(payload.payload) ? payload.payload : {};
-  const eventPayload = isPwaDiagnosticSignal
-    ? { signal: "pwa-mobile-control", build: safeText(submittedPayload.build, "unknown").slice(0, 120) }
-    : submittedPayload;
+  let eventPayload: Record<string, unknown>;
+  if (isPwaDiagnosticSignal) {
+    eventPayload = { signal: "pwa-mobile-control", build: safeText(submittedPayload.build, "unknown").slice(0, 120) };
+  } else {
+    const note = safeText(submittedPayload.note);
+    const reference = safeText(submittedPayload.reference);
+    if (!note) return Response.json({ error: "audit_note_required" }, { status: 400 });
+    if (note.length > 2_000) return Response.json({ error: "audit_note_too_long" }, { status: 400 });
+    if (reference.length > 120) return Response.json({ error: "audit_reference_too_long" }, { status: 400 });
+    eventPayload = { note, ...(reference ? { reference } : {}) };
+  }
+  const eventSource = isPwaDiagnosticSignal ? "sites-pwa-diagnostics" : "sites-command-audit";
+  // Keep this payload marker stable so queued PWA keys from earlier builds replay cleanly.
   const serializedPayload = JSON.stringify({ ...eventPayload, source: "sites-s06-adapter" });
+  const aggregateType = isPwaDiagnosticSignal ? "pwa_diagnostics" : "command_audit_note";
+  const aggregateId = isPwaDiagnosticSignal ? `signal:${idempotencyKey}` : `note:${idempotencyKey}`;
+  const aggregateVersion = 1;
 
-  if (eventType.length < 2 || aggregateType.length < 2 || aggregateId.length < 1 || idempotencyKey.length < 4 || aggregateVersion < 1) {
-    return Response.json({ error: "event_type_aggregate_and_positive_version_required" }, { status: 400 });
+  if (idempotencyKey.length < 4) {
+    return Response.json({ error: "idempotency_key_required" }, { status: 400 });
   }
   if (rawIdempotencyKey.length > 160) {
     return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
@@ -90,7 +98,7 @@ export async function POST(request: Request) {
 
   const now = new Date().toISOString();
   const eventId = crypto.randomUUID();
-  const correlationId = safeText(payload.correlationId).slice(0, 120) || crypto.randomUUID();
+  const correlationId = `${isPwaDiagnosticSignal ? "pwa" : "audit"}:${idempotencyKey}`;
 
   try {
     const db = getDb();
@@ -99,20 +107,14 @@ export async function POST(request: Request) {
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existing[0]) {
-      if (existing[0].eventType !== eventType || existing[0].aggregateType !== aggregateType || existing[0].aggregateId !== aggregateId || existing[0].aggregateVersion !== aggregateVersion) {
+      if (existing[0].eventType !== eventType || existing[0].aggregateType !== aggregateType || existing[0].aggregateId !== aggregateId || existing[0].aggregateVersion !== aggregateVersion || existing[0].payloadJson !== serializedPayload) {
         return Response.json({ error: "s06_idempotency_key_conflict" }, { status: 409 });
       }
-      if (isPwaDiagnosticSignal) {
-        return Response.json({
-          created: { eventId: existing[0].eventId, eventType: existing[0].eventType, status: existing[0].status },
-          readback: { status: "ok", checkedAt: existing[0].createdAt },
-          idempotent: true,
-        }, { headers: { "cache-control": "no-store" } });
-      }
-      const snapshot = await getS06Snapshot(context!.tenantId);
-      return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(existing[0]), idempotent: true }, {
-        headers: { "cache-control": "no-store" },
-      });
+      return Response.json({
+        created: { eventId: existing[0].eventId, eventType: existing[0].eventType, status: existing[0].status },
+        readback: { status: "ok", checkedAt: existing[0].createdAt },
+        idempotent: true,
+      }, { headers: { "cache-control": "no-store" } });
     }
 
     const eventValues = {
@@ -122,7 +124,7 @@ export async function POST(request: Request) {
       schemaVersion: "1",
       actorType: "human",
       actorId: context!.actorId,
-      source: "sites-command",
+      source: eventSource,
       occurredAt: now,
       observedAt: now,
       aggregateType,
@@ -130,7 +132,7 @@ export async function POST(request: Request) {
       aggregateVersion,
       payloadJson: serializedPayload,
       correlationId,
-      causationId: safeText(payload.causationId).slice(0, 120) || null,
+      causationId: null,
       idempotencyKey,
       status: "COMMITTED_SITES_READBACK",
       createdAt: now,
@@ -171,19 +173,11 @@ export async function POST(request: Request) {
     )).limit(1);
     if (!event) throw new Error("s06_event_readback_missing");
 
-    if (isPwaDiagnosticSignal) {
-      return Response.json({
-        created: { eventId: event.eventId, eventType: event.eventType, status: event.status },
-        readback: { status: "ok", checkedAt: event.createdAt },
-        idempotent: false,
-      }, { status: 201, headers: { "cache-control": "no-store" } });
-    }
-
-    const snapshot = await getS06Snapshot(context!.tenantId);
-    return Response.json({ ...s06Envelope(context!, snapshot), created: eventForResponse(event), idempotent: false }, {
-      status: 201,
-      headers: { "cache-control": "no-store" },
-    });
+    return Response.json({
+      created: { eventId: event.eventId, eventType: event.eventType, status: event.status },
+      readback: { status: "ok", checkedAt: event.createdAt },
+      idempotent: false,
+    }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = s06Error(error);
     if (message === "s06_duplicate_event") {

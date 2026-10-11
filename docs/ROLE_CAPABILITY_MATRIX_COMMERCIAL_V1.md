@@ -30,8 +30,10 @@ Nelle superfici protette la sessione Neon autenticata e l'identita primaria anch
 - `authority.manage` e `onboarding.manage`: Owner e Amministratore;
 - `authority.read`: Owner, Amministratore, Manager, Ufficio e Auditor;
 - `command.customize`: solo ruoli operativi con Command; Auditor escluso;
-- `events.write`: Owner, Amministratore e Manager;
+- `events.write`: Owner, Amministratore e Manager; in W11 permette note di audit limitate e transizioni locali dell’outbox, non la creazione di eventi operativi. Presenze, magazzino, missioni e altri domini passano dalle API canoniche;
 - `pwa.signal`: consente solo di registrare una signal diagnostica PWA; non abilita la scrittura generica degli eventi né la lettura del registro;
+- `company_ai.read`: consente interrogazioni Company AI nel perimetro assegnato e restituisce solo il risultato della richiesta dell’attore; la lettura del ledger tenant-wide richiede `command.read`;
+- `command.read`: abilita il readback tenant-wide di Command e del ledger Company AI; i receipt di preview e approval non concedono da soli accesso al ledger;
 - `approvals.review`: Owner, Amministratore, Manager e Ufficio; Auditor mantiene accesso in sola lettura e non può approvare;
 - `operations.write`: Owner, Amministratore, Manager, Ufficio e Tecnico; i profili field in sola lettura non vedono le CTA di mutazione;
 - `warehouse.request`: separata da `warehouse.write`; Operatore, Collaboratore, Tecnico, Caposquadra e Manutentore possono richiedere materiale senza alterare i saldi;

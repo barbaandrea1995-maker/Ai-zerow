@@ -50,7 +50,6 @@ import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 
 type EventRow = {
@@ -156,17 +155,6 @@ const navItems: NavItem[] = [
   { id: "externals", label: "ADAPTER", path: "/externals", capability: "external_adapters.read", icon: Network },
   { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: SlidersHorizontal },
 ];
-
-const eventTemplates = [
-  { value: "operation.signal", label: "Segnale operativo", aggregate: "operations" },
-  { value: "workforce.attendance.observed", label: "Presenza osservata", aggregate: "workforce" },
-  { value: "warehouse.movement.recorded", label: "Movimento magazzino", aggregate: "warehouse" },
-  { value: "mission.status.changed", label: "Stato missione", aggregate: "mission" },
-  { value: "document.security.changed", label: "Sicurezza documento", aggregate: "documents" },
-  { value: "finance.workflow.changed", label: "Workflow finance", aggregate: "finance" },
-  { value: "procurement.workflow.changed", label: "Workflow procurement", aggregate: "procurement" },
-  { value: "command.audit.note", label: "Nota di audit", aggregate: "command" },
-] as const;
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
@@ -296,7 +284,7 @@ export default function EventsControlPage() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [toast, setToast] = useState("");
-  const [form, setForm] = useState<{ eventType: string; aggregateType: string; aggregateId: string; aggregateVersion: string; idempotencyKey: string; payload: string }>({ eventType: eventTemplates[0].value, aggregateType: eventTemplates[0].aggregate, aggregateId: "", aggregateVersion: "1", idempotencyKey: "", payload: "{\"source\":\"command\"}" });
+  const [form, setForm] = useState({ note: "", reference: "" });
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -355,26 +343,20 @@ export default function EventsControlPage() {
   async function appendEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canWrite) { setToast("Il ruolo corrente non può scrivere eventi."); return; }
-    let payload: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(form.payload) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("payload");
-      payload = parsed as Record<string, unknown>;
-    } catch {
-      setToast("Payload JSON non valido.");
-      return;
-    }
-    if (!form.aggregateId.trim()) { setToast("Inserisci l’ID dell’aggregato da osservare."); return; }
+    const note = form.note.trim();
+    const reference = form.reference.trim();
+    if (!note) { setToast("Scrivi la nota da registrare."); return; }
+    if (note.length > 2_000 || reference.length > 120) { setToast("La nota o il riferimento supera la lunghezza consentita."); return; }
     setBusy("append");
     try {
-      const idempotencyKey = form.idempotencyKey.trim() || `ui:event:${crypto.randomUUID()}`;
-      const response = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventType: form.eventType, aggregateType: form.aggregateType, aggregateId: form.aggregateId, aggregateVersion: Number(form.aggregateVersion), idempotencyKey, payload }) });
+      const idempotencyKey = `ui:audit-note:${crypto.randomUUID()}`;
+      const response = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventType: "command.audit.note", idempotencyKey, payload: { note, reference } }) });
       const data = await response.json() as EventsPayload & { error?: string };
       if (!response.ok) throw new Error(data.error || "event_append_failed");
       setComposerOpen(false);
-      setForm({ ...form, aggregateId: "", idempotencyKey: "" });
-      setToast("Evento append-only registrato e rilettura verificata.");
-      await load();
+      setForm({ note: "", reference: "" });
+      setToast("Nota di audit registrata e riletta.");
+      if (capabilities.includes("events.read")) await load();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Evento non registrato.");
     } finally {
@@ -484,7 +466,7 @@ export default function EventsControlPage() {
 <p className="mt-5 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">Ledger append-only, delivery boundary e read model Company Twin in un’unica superficie. Ogni fatto resta rileggibile; nessun consumer esterno viene dato per eseguito.</p>
 <div className="mt-6 flex flex-wrap gap-2">
 <Button className="h-10 bg-lime-300 px-4 text-xs font-semibold text-[#050705] shadow-[0_0_24px_rgba(200,255,34,.18)] hover:bg-lime-200" disabled={!canWrite} onClick={() => setComposerOpen(true)}>
-<Plus className="size-3.5" />Nuovo evento</Button>
+<Plus className="size-3.5" />Nuova nota di audit</Button>
 <Button className="h-10 border-white/10 bg-black/25 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => setView("twin")} variant="outline">
 <Database className="size-3.5" />Apri Twin read model</Button>
 <span className="flex h-10 items-center rounded-xl border border-amber-300/20 bg-amber-300/[.04] px-3 text-[10px] text-amber-100/80">
@@ -726,30 +708,18 @@ export default function EventsControlPage() {
 <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
 <form className="space-y-4" onSubmit={appendEvent}>
 <DialogHeader>
-<DialogTitle>Registra evento governato</DialogTitle>
-<DialogDescription className="text-slate-500">L’evento entra nello stream append-only; tenant, actor, correlation e timestamp vengono assegnati dal server.</DialogDescription>
+<DialogTitle>Registra una nota di audit</DialogTitle>
+<DialogDescription className="text-slate-500">La nota viene aggiunta al registro append-only con tenant, autore, orario e identità evento assegnati dal server. Non modifica presenze, scorte, missioni o stati operativi.</DialogDescription>
 </DialogHeader>
-<div className="grid gap-4 sm:grid-cols-2">
-<label className="text-xs text-slate-400">Tipo evento<select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" onChange={(event) => { const template = eventTemplates.find((item) => item.value === event.target.value); setForm({ ...form, eventType: event.target.value, aggregateType: template?.aggregate ?? form.aggregateType }); }} value={form.eventType}>{eventTemplates.map((template) => <option key={template.value} value={template.value}>{template.label}</option>)}</select>
-</label>
-<label className="text-xs text-slate-400">Tipo aggregato<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, aggregateType: event.target.value })} value={form.aggregateType} />
-</label>
-<label className="text-xs text-slate-400 sm:col-span-2">ID aggregato<Input autoFocus className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, aggregateId: event.target.value })} placeholder="ID commessa, missione, asset o dominio" value={form.aggregateId} required />
-</label>
-<label className="text-xs text-slate-400">Versione aggregato<Input className="mt-2 border-white/10 bg-black/30" inputMode="numeric" min="1" onChange={(event) => setForm({ ...form, aggregateVersion: event.target.value })} type="number" value={form.aggregateVersion} required />
-</label>
-<label className="text-xs text-slate-400">Idempotency key<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setForm({ ...form, idempotencyKey: event.target.value })} placeholder="Generata se vuota" value={form.idempotencyKey} />
-</label>
-<label className="text-xs text-slate-400 sm:col-span-2">Payload JSON<Textarea className="mt-2 min-h-28 border-white/10 bg-black/30 font-mono text-xs" onChange={(event) => setForm({ ...form, payload: event.target.value })} value={form.payload} />
-</label>
-</div>
+<label className="block text-xs text-slate-400">Nota<Input autoFocus className="mt-2 border-white/10 bg-black/30" maxLength={2_000} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Descrivi il fatto o la decisione da annotare" value={form.note} required /></label>
+<label className="block text-xs text-slate-400">Riferimento facoltativo<Input className="mt-2 border-white/10 bg-black/30" maxLength={120} onChange={(event) => setForm({ ...form, reference: event.target.value })} placeholder="Es. ticket, protocollo o documento" value={form.reference} /></label>
 <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] leading-5 text-amber-100/80">
-<LockKeyhole className="mr-1.5 inline size-3.5" />Commit locale, outbox e reconciliation sono atomici su D1. Il consumer esterno resta differito.</div>
+<LockKeyhole className="mr-1.5 inline size-3.5" />La chiave idempotente, l’aggregato nota e la versione sono generati dal server. L’evento alimenta outbox e reconciliation senza creare una transizione di dominio.</div>
 <DialogFooter>
 <DialogClose asChild>
 <Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button>
 </DialogClose>
-<Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy === "append" || !canWrite} type="submit">{busy === "append" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Commit e rileggi</Button>
+<Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy === "append" || !canWrite || !form.note.trim()} type="submit">{busy === "append" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Registra nota</Button>
 </DialogFooter>
 </form>
 </DialogContent>

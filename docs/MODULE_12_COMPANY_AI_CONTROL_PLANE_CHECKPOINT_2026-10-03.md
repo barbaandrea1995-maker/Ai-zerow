@@ -10,6 +10,10 @@
 
 La pubblicazione resta privata e owner-only. Il checkpoint chiude la superficie di governance e i readback disponibili; non chiude i gate provider, runtime autenticati o sign-off commerciale.
 
+## Addendum W12 — separazione tra query Company AI e ledger — 10 ottobre 2026
+
+`company_ai.read` abilita le query operative nel perimetro dati assegnato e restituisce soltanto il risultato della richiesta corrente. `GET /api/command/overview` e la lettura tenant-wide del ledger richiedono `command.read`. Il replay di una preview richiede corrispondenza di attore, prompt, azione e stato approval; una chiave riusata per una richiesta diversa viene rifiutata. Le API di approval restituiscono un receipt limitato quando l’approvatore non possiede `command.read` e rifiutano replay con decisione o nota differenti.
+
 ## Contratto collegato
 
 - `GET /api/governance/ai-readiness` resta capability-gated su `governance.read` e mostra gate, authority, runtime metadata, ledger, registry provider e blocchi commerciali.
@@ -63,3 +67,7 @@ La pubblicazione resta privata e owner-only. Il checkpoint chiude la superficie 
 ## Decisione checkpoint
 
 `W12 SITES TECHNICAL PASS` nel perimetro owner-only privato. La control deck è pubblicata per validazione del prodotto, ma la piattaforma resta `COMMERCIAL NO-GO` finché i gate esterni e umani sopra non risultano verificati.
+
+## Addendum — stato approval derivato dal ledger — 11 ottobre 2026
+
+La vista Approval ledger collega le entry `approval_decision` alla preview originale tramite `relatedActionId`. Il conteggio delle richieste pendenti e i pulsanti Approva/Rifiuta escludono le preview già decise; il badge della preview mostra l’esito collegato e la UI presenta timestamp e approvatore. Le entry restano append-only: la schermata calcola lo stato corrente senza riscrivere la preview storica. La decisione approvata continua a indicare esecuzione esterna differita.

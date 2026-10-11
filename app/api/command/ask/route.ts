@@ -64,24 +64,25 @@ export async function POST(request: Request) {
   if (!hasCapability(context!, "command.read") && !["query", "read", "overview"].includes(actionType.toLowerCase())) {
     return Response.json({ error: "operational_ai_is_read_only" }, { status: 403 });
   }
-  const requestedIdempotencyKey = typeof payload.idempotencyKey === "string" ? payload.idempotencyKey.trim().slice(0, 160) : "";
+  const requestedIdempotencyKey = typeof payload.idempotencyKey === "string" ? payload.idempotencyKey.trim() : "";
   if (command.length < 2 || command.length > 500) {
     return Response.json({ error: "prompt_must_be_2_to_500_characters" }, { status: 400 });
   }
-  if (typeof payload.idempotencyKey === "string" && payload.idempotencyKey.trim().length > 160) {
-    return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
-  }
+  if (requestedIdempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
+  if (requestedIdempotencyKey.length > 160) return Response.json({ error: "idempotency_key_too_long" }, { status: 400 });
 
   try {
     const now = new Date().toISOString();
-    const idempotencyKey = requestedIdempotencyKey || `s07:preview:${crypto.randomUUID()}`;
+    const idempotencyKey = requestedIdempotencyKey;
     const db = getDb();
     const existingEvent = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context!.tenantId),
       eq(s06Events.idempotencyKey, idempotencyKey),
     )).limit(1);
     if (existingEvent[0]) {
-      if (existingEvent[0].aggregateType !== "s07.command.preview") {
+      if (existingEvent[0].eventType !== "command.preview.created"
+        || existingEvent[0].aggregateType !== "s07.command.preview"
+        || existingEvent[0].actorId !== context!.actorId) {
         return Response.json({ error: "command_idempotency_key_conflict" }, { status: 409 });
       }
       const [existingRow] = await db.select().from(s07AiLedger).where(and(
@@ -89,25 +90,38 @@ export async function POST(request: Request) {
         eq(s07AiLedger.id, existingEvent[0].aggregateId),
       )).limit(1);
       if (!existingRow) return Response.json({ error: "command_preview_readback_unavailable" }, { status: 503 });
+      if (existingRow.entryType !== "command_preview"
+        || existingRow.requestedBy !== context!.actorId
+        || existingRow.command !== command
+        || existingRow.actionType !== actionType
+        || Boolean(existingRow.approvalRequired) !== approvalRequired) {
+        return Response.json({ error: "command_idempotency_key_conflict" }, { status: 409 });
+      }
       const existingPayload = parseObject(existingRow.payloadJson);
       const existingAnswer = typeof existingPayload.answer === "string" ? existingPayload.answer : "";
-      const rows = await getS07Ledger(context!.tenantId);
-      return Response.json({
-        ...s07Envelope(context!, rows),
-        result: {
-          actionId: existingRow.id,
-          status: existingRow.status,
-          approvalRequired: Boolean(existingRow.approvalRequired),
-          directWrite: false,
-          message: existingAnswer || (existingRow.approvalRequired
-            ? "Preview già registrata. Serve una decisione di approvazione prima di qualsiasi adapter esterno."
-            : "Preview già registrata. Nessuna scrittura è stata eseguita."),
-          aiRuntime: isRecord(existingPayload.aiRuntime) ? existingPayload.aiRuntime : undefined,
-          suggestedActions: Array.isArray(existingPayload.suggestedActions) ? existingPayload.suggestedActions : [],
-          limitations: Array.isArray(existingPayload.limitations) ? existingPayload.limitations : [],
-        },
-        idempotent: true,
-      }, { headers: { "cache-control": "no-store" } });
+      const result = {
+        actionId: existingRow.id,
+        status: existingRow.status,
+        approvalRequired: Boolean(existingRow.approvalRequired),
+        directWrite: false,
+        message: existingAnswer || (existingRow.approvalRequired
+          ? "Preview già registrata. Serve una decisione di approvazione prima di qualsiasi adapter esterno."
+          : "Preview già registrata. Nessuna scrittura è stata eseguita."),
+        aiRuntime: isRecord(existingPayload.aiRuntime) ? existingPayload.aiRuntime : undefined,
+        suggestedActions: Array.isArray(existingPayload.suggestedActions) ? existingPayload.suggestedActions : [],
+        limitations: Array.isArray(existingPayload.limitations) ? existingPayload.limitations : [],
+      };
+      if (hasCapability(context!, "command.read")) {
+        const rows = await getS07Ledger(context!.tenantId);
+        return Response.json({
+          ...s07Envelope(context!, rows),
+          result,
+          idempotent: true,
+        }, { headers: { "cache-control": "no-store" } });
+      }
+      return Response.json({ result, readback: { status: "ok", checkedAt: existingRow.createdAt }, idempotent: true }, {
+        headers: { "cache-control": "no-store" },
+      });
     }
 
     const rateLimit = await consumeCompanyAiRateLimit({
@@ -120,7 +134,6 @@ export async function POST(request: Request) {
 
     const id = crypto.randomUUID();
     const eventId = crypto.randomUUID();
-    const requestedPayload = payload.payload && isRecord(payload.payload) ? payload.payload : {};
     const readableModules = [
       { module: "operations", capability: "operations.read" },
       { module: "assets", capability: "asset.read" },
@@ -202,7 +215,6 @@ export async function POST(request: Request) {
       }),
       knowledgeHintIds: knowledgeHints.map((hint) => hint.id),
       idempotencyKey,
-      requestedPayload,
     };
     const serializedPayload = JSON.stringify(ledgerPayload);
     if (serializedPayload.length > 12_000) return Response.json({ error: "payload_too_large" }, { status: 400 });
@@ -268,22 +280,29 @@ export async function POST(request: Request) {
       eq(s07AiLedger.id, id),
     )).limit(1);
     if (!row) return Response.json({ error: "command_preview_readback_unavailable" }, { status: 503 });
-    const rows = await getS07Ledger(context!.tenantId);
-    return Response.json({
-      ...s07Envelope(context!, rows),
-        result: {
-        actionId: id,
-        status: row.status,
-          approvalRequired,
-          directWrite: false,
-          message: answer,
-          aiRuntime,
-          citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
-          suggestedActions: aiOutcome.result?.suggestedActions ?? [],
-          limitations: aiOutcome.result?.limitations ?? [],
-        },
-      idempotent: false,
-    }, { status: 201, headers: { "cache-control": "no-store" } });
+    const result = {
+      actionId: id,
+      status: row.status,
+      approvalRequired,
+      directWrite: false,
+      message: answer,
+      aiRuntime,
+      citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
+      suggestedActions: aiOutcome.result?.suggestedActions ?? [],
+      limitations: aiOutcome.result?.limitations ?? [],
+    };
+    if (hasCapability(context!, "command.read")) {
+      const rows = await getS07Ledger(context!.tenantId);
+      return Response.json({
+        ...s07Envelope(context!, rows),
+        result,
+        idempotent: false,
+      }, { status: 201, headers: { "cache-control": "no-store" } });
+    }
+    return Response.json({ result, readback: { status: "ok", checkedAt: row.createdAt }, idempotent: false }, {
+      status: 201,
+      headers: { "cache-control": "no-store" },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("UNIQUE") || message.includes("unique")) {

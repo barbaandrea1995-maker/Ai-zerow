@@ -13,12 +13,12 @@ La pubblicazione resta privata e owner-only. Il checkpoint chiude il perimetro S
 ## Contratto implementato
 
 - `GET /api/events` legge eventi, outbox e reconciliation tenant-scoped attraverso il contratto S06.
-- `POST /api/events` conserva EventEnvelope, actor, source, aggregate, schema version, correlation, causation, idempotency e aggregate-version uniqueness server-side.
+- `POST /api/events` ammette solo note di audit e segnali diagnostici PWA; actor, source, aggregate, schema version, correlation, causation, idempotency e aggregate-version sono controllati dal server.
 - Evento, outbox e reconciliation vengono creati nello stesso batch D1; il readback è la fonte visibile dell’esito.
 - `/api/events/outbox` espone solo transizioni governate `retry`, `requeue`, `block` e `dead_letter`; il worker esterno non viene simulato e Sites non dichiara `DELIVERED`.
 - Il read model Company Twin è derivato dagli eventi, dalle versioni aggregate, dall’outbox e dalle reconciliation riletti; è marcato come proiezione locale e non come Twin canonico.
 - `/api/command/timeline-detail` alimenta il Command ledger quando il ruolo dispone di `command.read`; preview, approval e readback restano separati e `directWrite: false`.
-- La composizione manuale usa template di eventi controllati; tenant, actor, timestamp, correlation e provenance restano server-owned.
+- La composizione manuale registra esclusivamente note di audit; il client non può dichiarare tipo/identità/versione di un aggregato operativo.
 
 ## Superficie UI/UX
 
@@ -62,3 +62,9 @@ La pubblicazione resta privata e owner-only. Il checkpoint chiude il perimetro S
 L’integrazione offline aveva un contratto incoerente: la PWA mandava la chiave idempotente nell’header, mentre `/api/events` la cercava solo nel body e richiedeva aggregati che il client non deve poter dichiarare per un segnale diagnostico. Il replay ora accetta la chiave dal body o dall’header e rifiuta valori discordanti. `pwa.diagnostics.signal` usa la capability dedicata `pwa.signal`, aggregato e versione server-owned derivati dalla chiave idempotente e un payload limitato al build; non può dichiarare eventi di commessa, missione, presenza o magazzino. La risposta contiene soltanto la conferma del singolo segnale, senza esporre il registro eventi a chi non ha `events.read`. Gli altri eventi mantengono il gate `events.write` e il contratto standard.
 
 La coda rimuove l’elemento solo dopo questo readback positivo. Restano da eseguire il replay offline/online su browser autenticato e la certificazione device reale; il consumer esterno continua a essere differito.
+
+## Addendum W11 — separazione tra note manuali ed eventi di dominio — 10 ottobre 2026
+
+La console W11 non permette più di creare eventi di presenza, magazzino, missione o altri workflow tramite JSON libero. `POST /api/events` accetta soltanto `command.audit.note` con testo e riferimento limitati, oppure `pwa.diagnostics.signal` con payload diagnostico ridotto. Per entrambi il server assegna aggregate, versione e correlazione; il tenant, l’autore, l’orario, la provenance, l’outbox e la reconciliation restano server-side. Gli eventi operativi devono provenire dalle API canoniche del rispettivo modulo. Le risposte di queste due scritture restituiscono soltanto la conferma del singolo evento.
+
+Anche `POST /api/events/outbox` ora richiede una chiave idempotente esplicita di almeno 8 caratteri, confronta body e header e rifiuta il riuso della stessa chiave con diversa azione, destinazione o nota. `/api/events` applica lo stesso vincolo all’intero payload del replay. Le scritture restituiscono solo receipt limitati; il registro completo resta accessibile esclusivamente tramite endpoint di lettura con `events.read`.
