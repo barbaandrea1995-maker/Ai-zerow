@@ -341,6 +341,34 @@ body {
   right: 0.75rem;
   bottom: auto;
   left: 0.75rem;
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* Keep the signal count on the map row; only the filter list scrolls on narrow screens. */
+.zerow-map-frame > .absolute.bottom-3.left-3.right-3 > [data-slot="tabs"] {
+  min-width: 0;
+  flex: 1 1 0%;
+  overflow: hidden;
+}
+
+.zerow-map-frame > .absolute.bottom-3.left-3.right-3 [data-slot="tabs-list"] {
+  max-width: 100%;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.zerow-map-frame > .absolute.bottom-3.left-3.right-3 [data-slot="tabs-list"]::-webkit-scrollbar {
+  display: none;
+}
+
+.zerow-map-frame > .absolute.bottom-3.left-3.right-3 > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 @media (min-width: 640px) {
