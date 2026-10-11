@@ -23,8 +23,8 @@ export async function GET() {
     configured: geocoding.configured,
     status: geocoding.configured ? "READY" : "NOT_CONFIGURED",
     tileUrl: geocoding.configured ? "/api/location/tiles/{z}/{x}/{y}" : null,
-    attribution: "Powered by Geoapify · © OpenStreetMap contributors",
-    baseMap: "GEOAPIFY_DARK_MATTER",
+    attribution: "Powered by Geoapify · © OpenMapTiles · © OpenStreetMap contributors",
+    baseMap: "GEOAPIFY_OSM_BRIGHT",
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   }, { headers: { "cache-control": "private, no-store" } });
 }

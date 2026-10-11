@@ -132,13 +132,13 @@ body {
 
 /* The operational map keeps the geographic context readable while matching the carbon command surface. */
 .zerow-map-surface .leaflet-container {
-  background: #050706;
+  background: #eef2ef;
   color: var(--zw-text);
   font-family: var(--font-sans);
 }
 
 .zerow-map-surface .zerow-map-tiles {
-  filter: brightness(0.62) saturate(0.72) contrast(1.12);
+  filter: none;
 }
 
 .zerow-map-surface .leaflet-control-attribution {

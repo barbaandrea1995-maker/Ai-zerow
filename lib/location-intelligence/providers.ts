@@ -2,7 +2,9 @@ import { env } from "cloudflare:workers";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 const GEOAPIFY_GEOCODING_URL = "https://api.geoapify.com/v1/geocode/search";
-const GEOAPIFY_TILE_URL = "https://maps.geoapify.com/v1/tile/dark-matter";
+// Keep the operational basemap bright so roads, place labels, and worksite pins
+// remain legible in both daylight and dark application themes.
+const GEOAPIFY_TILE_URL = "https://maps.geoapify.com/v1/tile/osm-bright";
 export const ACTIVE_GEOCODING_PROVIDER = "GEOAPIFY" as const;
 
 function runtimeSecret(name: string) {
