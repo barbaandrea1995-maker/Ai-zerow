@@ -39,7 +39,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
 type JourneyDomain = "planning" | "field" | "warehouse" | "mission";
-const FIELD_ASSIGNABLE_ROLES = new Set(["technical", "field_supervisor", "worker", "driver", "delivery_driver", "maintenance", "manager", "office"]);
+const FIELD_ACTIVITY_ROLES = new Set(["owner", "admin", "manager", "technical", "field_supervisor", "worker", "driver", "maintenance"]);
+const FIELD_SUPERVISOR_ROLES = new Set(["owner", "admin", "manager", "technical", "field_supervisor"]);
 
 const DOMAIN_READ_CAPABILITY: Record<JourneyDomain | "documents", string> = {
   planning: "planning.read",
@@ -207,27 +208,35 @@ async function fieldWorkforceOptions(context: AuthorityContext) {
   const canReadRegistry = hasCapability(context, "workforce.registry.read")
     || hasCapability(context, "workforce.read.all")
     || hasCapability(context, "workforce.manage");
-  if (!canReadRegistry) return { people: [], teams: [] };
+  if (!canReadRegistry) return { people: [], supervisors: [], teams: [] };
   const [memberships, workforceRows] = await Promise.all([
     getDb().select({ id: tenantMemberships.id, actorId: tenantMemberships.actorId, displayName: tenantMemberships.displayName, role: tenantMemberships.role, rolesJson: tenantMemberships.rolesJson })
       .from(tenantMemberships).where(and(eq(tenantMemberships.tenantId, context.tenantId), eq(tenantMemberships.status, "active"))),
     getDb().select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "workforce"))).limit(500),
   ]);
-  const activeIds = new Set(memberships.map((membership) => membership.id));
+  const rolesByMembershipId = new Map(memberships.map((membership) => [
+    membership.id,
+    normalizeAuthorityRoles(membership.rolesJson, membership.role),
+  ]));
   const people = memberships.flatMap((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
-    return roles.some((role) => FIELD_ASSIGNABLE_ROLES.has(role)) ? [{ id: membership.id, label: membership.displayName }] : [];
+    return roles.some((role) => FIELD_ACTIVITY_ROLES.has(role)) ? [{ id: membership.id, label: membership.displayName }] : [];
+  });
+  const supervisors = memberships.flatMap((membership) => {
+    const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
+    return roles.some((role) => FIELD_SUPERVISOR_ROLES.has(role)) ? [{ id: membership.id, label: membership.displayName }] : [];
   });
   const teams = workforceRows.flatMap((row) => {
     const data = parseJson(row.payloadJson);
     const kind = boundedText(data.entityType ?? data.resourceKind ?? data.kind, 40, row.recordType).toLowerCase();
     const status = boundedText(data.statusCode ?? data.status, 32, row.status).toUpperCase();
-    const memberIds = stringIds(data.memberMembershipIds).filter((id) => activeIds.has(id));
+    const memberIds = stringIds(data.memberMembershipIds).filter((id) => (rolesByMembershipId.get(id) ?? [])
+      .some((role) => FIELD_ACTIVITY_ROLES.has(role)));
     return kind === "team" && memberIds.length && !["INACTIVE", "SUSPENDED", "ARCHIVED", "CANCELLED"].includes(status)
       ? [{ id: row.id, label: row.title }]
       : [];
   });
-  return { people, teams };
+  return { people, supervisors, teams };
 }
 
 function stringIds(value: unknown) {
@@ -424,7 +433,7 @@ function documentForResponse(row: typeof operationalDocuments.$inferSelect) {
 }
 
 function actionAccess(context: AuthorityContext) {
-  return {
+  const access = {
     ...Object.fromEntries(Object.entries(ACTION_CAPABILITY).map(([action, capability]) => [
       action,
       hasCapability(context, capability),
@@ -433,6 +442,9 @@ function actionAccess(context: AuthorityContext) {
     document_upload: hasCapability(context, "documents.write"),
     document_security: hasCapability(context, "documents.write"),
   };
+  access.mission_create = hasCapability(context, "mission.manage")
+    && hasCapability(context, "mission.resources.read");
+  return access;
 }
 
 async function journeyReadback(context: AuthorityContext, job: typeof s04Records.$inferSelect) {
@@ -488,7 +500,7 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
   const payload = parseJobPayload(job.payloadJson);
   const workforce = hasCapability(context, "field.write")
     ? await fieldWorkforceOptions(context)
-    : { people: [], teams: [] };
+    : { people: [], supervisors: [], teams: [] };
   const missionReports = visibleRecords
     .filter((record) => record.domain === "mission" && record.recordType === "TRANSPORT")
     .map((record) => {
@@ -511,6 +523,7 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
       };
     });
   const missionMaterialRequests = hasCapability(context, ACTION_CAPABILITY.mission_create)
+    && hasCapability(context, "mission.resources.read")
     ? records.flatMap((record) => {
       if (record.domain !== "warehouse" || record.recordType !== "MATERIAL_REQUEST" || record.status !== "APPROVED") return [];
       const requestPayload = parseJson(record.payloadJson);
@@ -564,6 +577,12 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
       inventoryUnits: INVENTORY_UNIT_CATALOG,
       workforce,
       missionMaterialRequests,
+      catalogAuthority: {
+        documentCategories: "SERVER_CONTRACT",
+        inventoryUnits: "SERVER_CONTRACT",
+        workforce: "TENANT_AUTHORITY_REGISTRY",
+        missionMaterialRequests: "TENANT_JOURNEY_REGISTRY",
+      },
     },
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   };
@@ -587,16 +606,6 @@ function normalizeLines(value: unknown) {
     };
   });
   return lines.every(Boolean) ? lines as NonNullable<(typeof lines)[number]>[] : null;
-}
-
-async function inventoryLinesExist(tenantId: string, lines: Array<{ itemId: string | null }>) {
-  const referencedIds = lines.flatMap((line) => line.itemId ? [line.itemId] : []);
-  if (!referencedIds.length) return true;
-  const found = await getDb().select({ id: inventoryItems.id }).from(inventoryItems).where(and(
-    eq(inventoryItems.tenantId, tenantId),
-    inArray(inventoryItems.id, referencedIds),
-  ));
-  return new Set(found.map((item) => item.id)).size === new Set(referencedIds).size;
 }
 
 class MissionInventoryError extends Error {
@@ -1011,8 +1020,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
       recordType = "FIELD_SESSION";
       title = boundedText(input.title, 160, "Sessione di cantiere");
       status = "OPEN";
-      const startedAt = boundedText(input.startedAt, 40, now);
-      if (!validDateTime(startedAt)) return Response.json({ error: "valid_field_start_required" }, { status: 400 });
+      if (Object.prototype.hasOwnProperty.call(input, "startedAt")) {
+        return Response.json({ error: "field_start_time_is_server_owned" }, { status: 400 });
+      }
       const teamId = boundedText(input.teamId, 160);
       const supervisorMembershipId = boundedText(input.supervisorMembershipId, 160);
       if (boundedText(input.team, 160) || boundedText(input.supervisor, 160)) {
@@ -1020,11 +1030,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
       }
       const workforce = await fieldWorkforceOptions(context);
       const team = teamId ? workforce.teams.find((item) => item.id === teamId) : null;
-      const supervisor = supervisorMembershipId ? workforce.people.find((item) => item.id === supervisorMembershipId) : null;
+      const supervisor = supervisorMembershipId ? workforce.supervisors.find((item) => item.id === supervisorMembershipId) : null;
       if (teamId && !team) return Response.json({ error: "field_team_not_assignable" }, { status: 409 });
       if (supervisorMembershipId && !supervisor) return Response.json({ error: "field_supervisor_not_assignable" }, { status: 409 });
       payload = {
-        startedAt,
+        startedAt: now,
         team: team?.label ?? "",
         ...(team ? { teamId: team.id } : {}),
         supervisor: supervisor?.label ?? "",
@@ -1038,8 +1048,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
       title = boundedText(input.title, 160, "Richiesta materiali");
       const lines = normalizeLines(input.lines);
       if (!lines) return Response.json({ error: "valid_material_lines_required", maxLines: 50 }, { status: 400 });
-      if (!(await inventoryLinesExist(context.tenantId, lines))) {
-        return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
+      if (lines.some((line) => line.itemId)) {
+        return Response.json({
+          error: "material_request_must_use_description",
+          message: "La richiesta di cantiere descrive il fabbisogno; il magazzino associa l’articolo canonico durante la revisione.",
+        }, { status: 400 });
       }
       const jobPayload = parseJobPayload(job.payloadJson);
       const canonicalDeliveryPoint = boundedText(jobPayload.worksite || jobPayload.location, 240);
@@ -1326,10 +1339,13 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eventType = "planning.plan.published";
       } else if (action === "field_close") {
         if (domain !== "field" || row.status !== "OPEN") return Response.json({ error: "invalid_field_transition" }, { status: 409 });
+        if (Object.prototype.hasOwnProperty.call(input, "endedAt")) {
+          return Response.json({ error: "field_end_time_is_server_owned" }, { status: 400 });
+        }
+        const summary = boundedText(input.summary, 4_000);
+        if (summary.length < 4) return Response.json({ error: "field_close_summary_required" }, { status: 400 });
         status = "CLOSED";
-        const endedAt = boundedText(input.endedAt, 40, now);
-        if (!validDateTime(endedAt)) return Response.json({ error: "valid_field_end_required" }, { status: 400 });
-        payload = { ...payload, endedAt, summary: boundedText(input.summary, 4_000) };
+        payload = { ...payload, endedAt: now, summary };
         eventType = "field.session.closed";
       } else if (action === "material_review") {
         if (domain !== "warehouse" || row.recordType !== "MATERIAL_REQUEST" || row.status !== "REQUESTED") {

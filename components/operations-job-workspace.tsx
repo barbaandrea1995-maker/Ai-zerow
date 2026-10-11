@@ -134,9 +134,9 @@ type WorkspacePayload = {
         }>;
       };
       assignment?: {
-        people: Array<{ id: string; actorId: string; label: string; role: string }>;
-        teams: Array<{ id: string; label: string }>;
-        roles: Array<{ value: string; label: string }>;
+        people: Array<{ id: string; actorId: string; label: string; role: string; roles: string[]; eligibleRoleCodes: string[] }>;
+        teams: Array<{ id: string; label: string; eligibleRoleCodes: string[] }>;
+        roles: Array<{ value: string; label: string; target: "person" | "team" }>;
       };
     };
     statusTransitions?: Array<{ statusCode: string; label: string; actionLabel: string }>;
@@ -1101,6 +1101,8 @@ export default function OperationsJobWorkspace({
   const jobData = job.payload ?? {};
   const commercialCatalog = workspace.options?.commercial;
   const assignmentCatalog = workspace.options?.assignment;
+  const assignmentPeople = (assignmentCatalog?.people ?? []).filter((person) => person.eligibleRoleCodes.includes(assignmentRole));
+  const assignmentTeams = (assignmentCatalog?.teams ?? []).filter((team) => team.eligibleRoleCodes.includes(assignmentRole));
   const selectedScopeSection = commercialCatalog?.scopeSections.find((section) => section.id === commercialDetails.scopeSectionId);
   const selectedScopeGroup = selectedScopeSection?.groups.find((group) => group.id === commercialDetails.scopeGroupId);
   const payloadText = (key: string, fallback = "") =>
@@ -1586,7 +1588,7 @@ export default function OperationsJobWorkspace({
                       onChange={(event) =>
                         setActivityDueDate(event.target.value)
                       }
-                      placeholder="YYYY-MM-DD"
+                      type="date"
                       value={activityDueDate}
                     />
                   </label>
@@ -1594,22 +1596,22 @@ export default function OperationsJobWorkspace({
               )}
               {actionOpen === "assign" && (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-2 text-xs text-slate-400">
+                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
+                    Ruolo nella commessa
+                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => { setAssignmentRole(event.target.value); setAssignmentSelection(""); }} value={assignmentRole}>
+                      {(assignmentCatalog?.roles ?? []).map((option) => <option className="bg-[#080c09]" key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
                     Responsabile
                     <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setAssignmentSelection(event.target.value)} value={assignmentSelection}>
                       <option className="bg-[#080c09]" value="">Seleziona responsabile o squadra</option>
                       <optgroup label="Persone">
-                        {(assignmentCatalog?.people ?? []).map((person) => <option className="bg-[#080c09]" key={person.id} value={`person:${person.id}`}>{person.label} · {person.role.replaceAll("_", " ")}</option>)}
+                        {assignmentPeople.map((person) => <option className="bg-[#080c09]" key={person.id} value={`person:${person.id}`}>{person.label} · {person.role.replaceAll("_", " ")}</option>)}
                       </optgroup>
                       <optgroup label="Squadre">
-                        {(assignmentCatalog?.teams ?? []).map((selectedTeam) => <option className="bg-[#080c09]" key={selectedTeam.id} value={`team:${selectedTeam.id}`}>{selectedTeam.label}</option>)}
+                        {assignmentTeams.map((selectedTeam) => <option className="bg-[#080c09]" key={selectedTeam.id} value={`team:${selectedTeam.id}`}>{selectedTeam.label}</option>)}
                       </optgroup>
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
-                    Ruolo
-                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setAssignmentRole(event.target.value)} value={assignmentRole}>
-                      {(assignmentCatalog?.roles ?? []).map((option) => <option className="bg-[#080c09]" key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
                 </div>

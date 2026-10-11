@@ -47,15 +47,23 @@ type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
 type WorkspaceSectionStatus = "readback" | "empty" | "deferred";
 
-const ASSIGNABLE_ROLES = new Set([
-  "technical", "field_supervisor", "worker", "driver", "delivery_driver", "maintenance", "manager", "office",
+const COMMESSA_ACTIVITY_ROLES = new Set([
+  "owner", "admin", "manager", "office", "technical", "field_supervisor", "worker", "driver", "maintenance",
 ]);
 const ASSIGNMENT_ROLE_OPTIONS = [
-  { value: "RESPONSABILE_OPERATIVO", label: "Responsabile operativo" },
-  { value: "CAPOSQUADRA", label: "Caposquadra" },
-  { value: "RESPONSABILE_CANTIERE", label: "Responsabile di cantiere" },
-  { value: "REFERENTE_TECNICO", label: "Referente tecnico" },
+  { value: "RESPONSABILE_OPERATIVO", label: "Responsabile operativo", target: "person", allowedRoles: ["owner", "admin", "manager", "office", "technical", "field_supervisor"] },
+  { value: "CAPOSQUADRA", label: "Caposquadra", target: "person", allowedRoles: ["owner", "admin", "manager", "field_supervisor"] },
+  { value: "RESPONSABILE_CANTIERE", label: "Responsabile di cantiere", target: "person", allowedRoles: ["owner", "admin", "manager", "technical", "field_supervisor"] },
+  { value: "REFERENTE_TECNICO", label: "Referente tecnico", target: "person", allowedRoles: ["owner", "admin", "manager", "office", "technical"] },
+  { value: "SQUADRA_OPERATIVA", label: "Squadra operativa", target: "team", allowedRoles: [] },
 ] as const;
+
+function eligibleAssignmentRoleCodes(roles: readonly string[]) {
+  return ASSIGNMENT_ROLE_OPTIONS.flatMap((option) => option.target === "person"
+    && option.allowedRoles.some((role) => roles.includes(role))
+    ? [option.value]
+    : []);
+}
 const STATUS_ACTION_LABELS: Record<string, string> = {
   PROPOSED: "Invia in proposta",
   APPROVED: "Approva commessa",
@@ -92,14 +100,20 @@ async function assignmentOptions(
     eq(tenantMemberships.tenantId, context.tenantId),
     eq(tenantMemberships.status, "active"),
   ));
+  const membershipRoles = new Map(memberships.map((membership) => [
+    membership.id,
+    normalizeAuthorityRoles(membership.rolesJson, membership.role),
+  ]));
   const people = memberships.flatMap((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
-    if (!roles.some((role) => ASSIGNABLE_ROLES.has(role))) return [];
+    if (!roles.some((role) => COMMESSA_ACTIVITY_ROLES.has(role))) return [];
     return [{
       id: membership.id,
       actorId: membership.actorId,
       label: membership.displayName,
       role: roles[0] ?? membership.role,
+      roles,
+      eligibleRoleCodes: eligibleAssignmentRoleCodes(roles),
     }];
   });
   const activeMembershipIds = new Set(memberships.map((membership) => membership.id));
@@ -109,10 +123,11 @@ async function assignmentOptions(
     const rawMembers = Array.isArray(payload.memberMembershipIds)
       ? payload.memberMembershipIds.filter((value): value is string => typeof value === "string")
       : [];
-    const memberMembershipIds = [...new Set(rawMembers.filter((id) => activeMembershipIds.has(id)))];
+    const memberMembershipIds = [...new Set(rawMembers.filter((id) => activeMembershipIds.has(id)
+      && (membershipRoles.get(id) ?? []).some((role) => COMMESSA_ACTIVITY_ROLES.has(role))))];
     const status = safeText(payload.statusCode ?? payload.status, row.status).toUpperCase();
     if (!memberMembershipIds.length || ["INACTIVE", "SUSPENDED", "ARCHIVED", "CANCELLED"].includes(status)) return [];
-    return [{ id: row.id, label: row.title, memberMembershipIds }];
+    return [{ id: row.id, label: row.title, memberMembershipIds, eligibleRoleCodes: ["SQUADRA_OPERATIVA"] }];
   });
   return { people, teams };
 }
@@ -134,6 +149,11 @@ function safeText(value: unknown, fallback = "") {
 
 function boundedText(value: unknown, max: number, fallback = "") {
   return safeText(value, fallback).slice(0, max);
+}
+
+function validDateOnly(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(`${value}T00:00:00.000Z`));
 }
 
 function isRecord(value: unknown): value is JsonObject {
@@ -654,8 +674,8 @@ async function workspaceResponse(
         },
         assignment: {
           people: assignments.people,
-          teams: assignments.teams.map(({ id, label }) => ({ id, label })),
-          roles: ASSIGNMENT_ROLE_OPTIONS,
+          teams: assignments.teams.map(({ id, label, eligibleRoleCodes }) => ({ id, label, eligibleRoleCodes })),
+          roles: ASSIGNMENT_ROLE_OPTIONS.map(({ value, label, target }) => ({ value, label, target })),
         },
       } : undefined,
       statusTransitions,
@@ -1053,6 +1073,10 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         if (person) activityOwner = { label: person.label, id: person.id, kind: "person" };
         if (selectedTeam) activityOwner = { label: selectedTeam.label, id: selectedTeam.id, kind: "team" };
       }
+      const activityDueDate = boundedText(input.dueDate, 10);
+      if (activityDueDate && !validDateOnly(activityDueDate)) {
+        return Response.json({ error: "activity_due_date_invalid" }, { status: 400 });
+      }
       const activity: JobActivity = {
         id: `activity-${crypto.randomUUID().slice(0, 8)}`,
         title,
@@ -1060,7 +1084,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         state: input.state === "active" || input.state === "done" || input.state === "blocked" ? input.state : "queued",
         owner: activityOwner.label,
         ...(activityOwner.id && activityOwner.kind ? { ownerResourceId: activityOwner.id, ownerResourceKind: activityOwner.kind } : {}),
-        dueDate: boundedText(input.dueDate, 40, "—"),
+        dueDate: activityDueDate || "—",
         progress: clampJobProgress(input.progress),
         createdAt: now,
         updatedAt: now,
@@ -1097,7 +1121,13 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       if (teamId && !teamOption) return Response.json({ error: "assignment_team_not_assignable" }, { status: 409 });
       const roleCode = boundedText(input.role, 80);
       const roleOption = ASSIGNMENT_ROLE_OPTIONS.find((option) => option.value === roleCode);
-      if (!roleOption) return Response.json({ error: "assignment_role_invalid", allowed: ASSIGNMENT_ROLE_OPTIONS }, { status: 400 });
+      if (!roleOption) return Response.json({ error: "assignment_role_invalid", allowed: ASSIGNMENT_ROLE_OPTIONS.map(({ value, label, target }) => ({ value, label, target })) }, { status: 400 });
+      if (responsibleOption && !responsibleOption.eligibleRoleCodes.includes(roleOption.value)) {
+        return Response.json({ error: "assignment_role_not_allowed_for_person", role: roleOption.value }, { status: 409 });
+      }
+      if (teamOption && !teamOption.eligibleRoleCodes.includes(roleOption.value)) {
+        return Response.json({ error: "assignment_role_not_allowed_for_team", role: roleOption.value }, { status: 409 });
+      }
       const responsible = responsibleOption?.label ?? "Da assegnare";
       const team = teamOption?.label ?? "Da assegnare";
       next.assignment = {

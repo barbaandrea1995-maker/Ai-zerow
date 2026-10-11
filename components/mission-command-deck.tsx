@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -1062,6 +1062,8 @@ export default function MissionCommandDeck() {
   const handoffPlanId = searchParams.get("planId") ?? "";
   const handoffJobId = searchParams.get("jobId") ?? "";
   const openMissionId = searchParams.get("missionId") ?? "";
+  const createRequested = searchParams.get("create") === "1";
+  const createFromJobHandled = useRef("");
   const [payload, setPayload] = useState<MissionPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "forbidden" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -1258,7 +1260,7 @@ export default function MissionCommandDeck() {
     setRouteStops([{ kind: "PICKUP", locationId: "" }, { kind: "DELIVERY", locationId: jobLocationId }]);
   }
 
-  function openCreate(request: MaterialRequest | null = null, handoff: PlanningHandoff | null = null) {
+  function openCreate(request: MaterialRequest | null = null, handoff: PlanningHandoff | null = null, jobOverride = "") {
     const planResources = Array.isArray(handoff?.payload.resources)
       ? handoff.payload.resources.flatMap((resource) => resource && typeof resource === "object" && !Array.isArray(resource) ? [resource as Record<string, unknown>] : [])
       : [];
@@ -1276,7 +1278,7 @@ export default function MissionCommandDeck() {
         : plannedCargoAssetIds.length && enabledTransportModes.includes("ASSET_TRANSFER")
           ? "ASSET_TRANSFER"
           : enabledTransportModes[0] ?? "";
-    const targetJobId = request?.jobId ?? handoff?.jobId ?? "";
+    const targetJobId = request?.jobId ?? handoff?.jobId ?? jobOverride;
     setCreateJobId(targetJobId);
     setActivePlanningPlanId(handoff?.id ?? "");
     setMissionTitle(handoff?.title ? `Missione · ${handoff.title}` : request?.title ? `Consegna · ${request.title}` : "Missione di trasporto");
@@ -1301,6 +1303,24 @@ export default function MissionCommandDeck() {
     setRouteStops([{ kind: "PICKUP", locationId: warehouseLocationId, materialLines, materialItemIds }, { kind: "DELIVERY", locationId: jobLocationId, materialLines, materialItemIds }]);
     setModal("create");
   }
+
+  useEffect(() => {
+    if (!createRequested || !handoffJobId || handoffPlanId || state !== "ready") return;
+    const requestIdentity = `job:${handoffJobId}`;
+    if (createFromJobHandled.current === requestIdentity) return;
+    createFromJobHandled.current = requestIdentity;
+    if (!jobs.some((job) => job.id === handoffJobId)) {
+      const missingTimer = window.setTimeout(() => notify("La commessa non è disponibile nel perimetro Missioni corrente."), 0);
+      return () => window.clearTimeout(missingTimer);
+    }
+    const timer = window.setTimeout(() => {
+      openCreate(null, null, handoffJobId);
+      notify("Commessa collegata: completa tappe, carichi e risorse usando i cataloghi verificati dal server.");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  // L’apertura guidata dipende dal contratto URL; openCreate idrata il form con i cataloghi già riletti.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createRequested, handoffJobId, handoffPlanId, jobs, notify, state]);
 
   function openMissionReport() {
     const readback = selected ? missionReport(selected.payload) : null;
