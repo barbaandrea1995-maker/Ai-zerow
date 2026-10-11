@@ -27,7 +27,7 @@ type WarehousePayload = {
 };
 
 type LocationCandidate = {
-  provider: "MAPBOX";
+  provider: "GEOAPIFY";
   providerPlaceId: string;
   formattedAddress: string;
   latitude: number;
@@ -221,7 +221,7 @@ export default function TenantWarehouseControl({
                 <label className="grid gap-2 text-xs text-slate-400" htmlFor="warehouse-location">Indirizzo o luogo operativo<Input id="warehouse-location" name="locationQuery" onChange={(event) => { setLocationQuery(event.target.value); setSelectedLocation(null); setLocationCandidates([]); }} placeholder="Es. Via Catullo 93, Pomezia" required value={locationQuery} /></label>
                 <div className="mt-2 flex flex-wrap gap-2"><Button className="h-10 border border-cyan-300/20 bg-cyan-300/[.05] text-xs text-cyan-100 hover:bg-cyan-300/10" disabled={locationBusy || locationQuery.trim().length < 5} onClick={() => void searchLocation()} type="button"><Search className={locationBusy ? "size-3.5 animate-pulse" : "size-3.5"} />{locationBusy ? "Riconosco dal server…" : "Riconosci luogo"}</Button>{selectedLocation && <span className="inline-flex items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.06] px-3 py-2 text-[10px] font-semibold text-lime-100"><CheckCircle2 className="size-3.5" />Luogo confermato</span>}</div>
                 {locationCandidates.length > 0 && <div className="mt-3 space-y-2" role="listbox" aria-label="Risultati luogo server-side">{locationCandidates.map((candidate) => <button className={`w-full rounded-xl border p-3 text-left transition ${selectedLocation?.providerPlaceId === candidate.providerPlaceId ? "border-lime-300/50 bg-lime-300/[.08]" : "border-white/10 bg-black/20 hover:border-cyan-300/30"}`} key={candidate.providerPlaceId} onClick={() => setSelectedLocation(candidate)} type="button"><span className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-200" /><span className="min-w-0"><span className="block text-xs font-semibold text-slate-100">{candidate.formattedAddress}</span><span className="mt-1 block text-[10px] text-slate-500">{candidate.city}{candidate.province ? ` · ${candidate.province}` : ""} · coordinate server-side · attendibilità {Math.round(candidate.confidence * 100)}%</span></span></span></button>)}</div>}
-                {selectedLocation && <div className="mt-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3 text-[10px] leading-5 text-lime-100/80"><span className="font-semibold">Luogo canonico:</span> {selectedLocation.formattedAddress}<br /><span className="text-slate-500">{selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)} · provider MAPBOX · selezione riletta dal server al salvataggio</span></div>}
+                {selectedLocation && <div className="mt-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3 text-[10px] leading-5 text-lime-100/80"><span className="font-semibold">Luogo canonico:</span> {selectedLocation.formattedAddress}<br /><span className="text-slate-500">{selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)} · provider Geoapify · selezione riletta dal server al salvataggio</span></div>}
               </div>
               <label className="grid gap-2 text-xs text-slate-400 sm:col-span-2" htmlFor="warehouse-radius">Raggio geofence in metri<Input id="warehouse-radius" defaultValue="100" min="25" max="5000" name="geofenceRadiusMeters" type="number" required /></label>
             </div>

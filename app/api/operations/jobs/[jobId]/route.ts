@@ -30,7 +30,7 @@ import {
 } from "@/lib/operations-contract";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import { COMPANY_AI_SCOPE_TAXONOMY, COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
-import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius } from "@/lib/location-intelligence/repository";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -1392,11 +1392,11 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         if (!providerPlaceId) {
           return Response.json({ error: "worksite_location_confirmation_required", message: "Riconosci e seleziona dal risultato server-side il nuovo indirizzo prima di salvare." }, { status: 409 });
         }
-        const geocode = await geocodeWithMapbox(requestedWorksite);
-        if (geocode.status === "not_configured") return Response.json({ error: "worksite_geocoder_not_configured", provider: "MAPBOX" }, { status: 503 });
-        if (geocode.status === "unavailable") return Response.json({ error: "worksite_geocoder_unavailable", provider: "MAPBOX" }, { status: 503 });
-        const candidate = geocode.candidates.find((item) => item.provider === "MAPBOX" && item.providerPlaceId === providerPlaceId);
-        if (!candidate) return Response.json({ error: "worksite_location_candidate_mismatch", provider: "MAPBOX" }, { status: 409 });
+        const geocode = await geocodeAddress(requestedWorksite);
+        if (geocode.status === "not_configured") return Response.json({ error: "worksite_geocoder_not_configured", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 503 });
+        if (geocode.status === "unavailable") return Response.json({ error: "worksite_geocoder_unavailable", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 503 });
+        const candidate = geocode.candidates.find((item) => item.provider === ACTIVE_GEOCODING_PROVIDER && item.providerPlaceId === providerPlaceId);
+        if (!candidate) return Response.json({ error: "worksite_location_candidate_mismatch", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 409 });
 
         const db = getDb();
         const [geoLocation] = await db.select().from(geoLocations).where(and(

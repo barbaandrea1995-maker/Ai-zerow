@@ -1,6 +1,5 @@
 "use client";
 
-import "mapbox-gl/dist/mapbox-gl.css";
 import "leaflet/dist/leaflet.css";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -24,7 +23,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { missionExceptionLabel } from "@/lib/mission-exception-contract";
-import type { GeoJSONSource, Map as MapboxMap, StyleSpecification } from "mapbox-gl";
 import type { LayerGroup, Map as LeafletMap } from "leaflet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -143,28 +141,10 @@ type MapFeature = {
 };
 type FeatureCollection = { type: "FeatureCollection"; features: MapFeature[] };
 type LiveMapStatus = "loading" | "ready" | "fallback" | "unavailable";
-
-const FALLBACK_MAP_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    "zerow-open-map": {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors",
-    },
-  },
-  layers: [{ id: "zerow-open-map", type: "raster", source: "zerow-open-map", paint: { "raster-opacity": 0.78 } }],
-};
-
-const FALLBACK_TOKEN = "__zerow_open_map__";
+type MapConfig = { provider?: string; configured?: boolean; tileUrl?: string | null; attribution?: string };
 
 function IconButton({ label, children, onClick, className = "", disabled = false }: { label: string; children: ReactNode; onClick: () => void; className?: string; disabled?: boolean }) {
   return <button aria-label={label} className={`grid size-9 place-items-center rounded-lg border border-white/10 bg-black/20 text-slate-500 transition hover:border-lime-300/35 hover:bg-lime-300/10 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300 disabled:cursor-not-allowed disabled:opacity-50 ${className}`} disabled={disabled} onClick={onClick} type="button">{children}</button>;
-}
-
-function emptyFeatureCollection(): FeatureCollection {
-  return { type: "FeatureCollection", features: [] };
 }
 
 function circlePolygon(center: Point, radiusMeters: number) {
@@ -249,11 +229,6 @@ function toLiveFeatures(data: OperationalMapLivePayload, filter: OperationalMapF
     vehicles: { type: "FeatureCollection", features: vehicleFeatures } satisfies FeatureCollection,
     geofences: { type: "FeatureCollection", features: geofenceFeatures } satisfies FeatureCollection,
   };
-}
-
-function setGeoJsonData(map: MapboxMap, sourceId: string, data: FeatureCollection) {
-  const source = map.getSource(sourceId) as GeoJSONSource | undefined;
-  source?.setData(data as never);
 }
 
 function mapCoordinates(data: OperationalMapLivePayload) {
@@ -349,7 +324,7 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
   const [liveData, setLiveData] = useState<OperationalMapLivePayload | null>(null);
   const [lastRead, setLastRead] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [useLegacyRenderer, setUseLegacyRenderer] = useState(false);
+  const [baseProvider, setBaseProvider] = useState<"GEOAPIFY" | "OPEN_STREET_MAP">("GEOAPIFY");
 
   const loadMapData = async (silent = false) => {
     if (!silent) setRefreshing(true);
@@ -379,19 +354,30 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
     let cancelled = false;
-    void import("leaflet").then((module) => {
+    void Promise.all([
+      import("leaflet"),
+      fetch("/api/location/map-config", { cache: "no-store" }),
+    ]).then(async ([module, configResponse]) => {
       if (cancelled || !mapContainerRef.current) return;
+      const config = configResponse.ok ? await configResponse.json() as MapConfig : null;
+      const geoapifyReady = config?.provider === "GEOAPIFY" && config.configured === true && Boolean(config.tileUrl);
+      const tileUrl = geoapifyReady ? config!.tileUrl! : "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+      const attribution = geoapifyReady
+        ? "Powered by <a href=\"https://www.geoapify.com/\" target=\"_blank\" rel=\"noreferrer\">Geoapify</a> · © <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a>"
+        : "© <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a>";
       const L = module.default;
       leafletRef.current = module;
       const map = L.map(mapContainerRef.current, { zoomControl: false, preferCanvas: true, minZoom: 2, maxZoom: 19 }).setView([41.9028, 12.4964], 5.2);
-      const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, crossOrigin: true, className: "zerow-map-tiles", attribution: "© OpenStreetMap contributors" }).addTo(map);
+      const tiles = L.tileLayer(tileUrl, { maxZoom: 19, crossOrigin: true, className: "zerow-map-tiles", attribution }).addTo(map);
       tiles.on("tileerror", () => setTileError(true));
+      tiles.on("tileload", () => setTileError(false));
       const layers = L.layerGroup().addTo(map);
       mapRef.current = map;
       layersRef.current = layers;
+      setBaseProvider(geoapifyReady ? "GEOAPIFY" : "OPEN_STREET_MAP");
       setMapBaseReady(true);
       window.setTimeout(() => map.invalidateSize(), 80);
-    }).catch(() => setUseLegacyRenderer(true));
+    }).catch(() => setMapStatus("unavailable"));
     return () => {
       cancelled = true;
       mapRef.current?.remove();
@@ -457,15 +443,11 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
   const canManageGeofences = Boolean(liveData?.context?.capabilities?.includes("location.manage.geofences"));
   const visibleSignals = featureData ? featureData.locations.features.length + featureData.vehicles.features.length + featureData.geofences.features.length : 0;
 
-  if (useLegacyRenderer) {
-    return <MapboxLiveMapSurface mapFilter={mapFilter} onFilterChange={onFilterChange} onSelectMarker={onSelectMarker} selectedMarker={selectedMarker} />;
-  }
-
   return <div className="zerow-map-surface relative overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)]" ref={mapSurfaceRef}>
     <div className="zerow-map-frame relative min-h-[360px] pt-[360px] sm:min-h-[430px] sm:pt-[430px]">
     <div className="absolute inset-x-0 top-0 h-[360px] sm:h-[430px]" ref={mapContainerRef} />
     <div className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[linear-gradient(180deg,rgba(1,4,2,.04),rgba(1,3,2,.18))] sm:h-[430px]" />
-    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/88 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-200">MAPPA LIVE · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-500 sm:inline">{formatTime(lastRead)}</span>}</div>
+    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/88 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-200">{baseProvider === "GEOAPIFY" ? "GEOAPIFY" : "OPENSTREETMAP"} · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-500 sm:inline">{formatTime(lastRead)}</span>}</div>
     {((liveData?.activeSessions?.length) ?? 0) > 0 && <div className="absolute left-3 top-14 flex items-center gap-2 rounded-lg border border-lime-300/25 bg-[#050706]/90 px-2.5 py-2 shadow-[0_0_20px_rgba(200,255,34,.12)] backdrop-blur"><span className="size-1.5 animate-pulse rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" /><span className="text-[9px] font-semibold uppercase tracking-[.12em] text-lime-100">{liveData?.activeSessions?.length ?? 0} tracking attivi</span>{(liveData?.activeSessions?.length ?? 0) > (liveData?.vehicles?.length ?? 0) && <span className="text-[9px] text-slate-500">posizione in attesa</span>}</div>}
     <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur"><IconButton disabled={refreshing} label="Aggiorna mappa" onClick={() => void loadMapData()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10">{refreshing ? <RefreshCw className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</IconButton><IconButton label="Zoom in" onClick={() => mapRef.current?.zoomIn()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" onClick={() => mapRef.current?.zoomOut()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra vista" onClick={focusAll} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton><IconButton label="Schermo intero" onClick={() => { if (mapSurfaceRef.current?.requestFullscreen) void mapSurfaceRef.current.requestFullscreen(); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><PanelRight className="size-3.5" /></IconButton></div>
     {!mapBaseReady && <div className="absolute inset-x-0 top-0 grid h-[360px] place-items-center bg-[#050706]/55 sm:h-[430px]"><div className="rounded-xl border border-lime-300/20 bg-[#070b08]/92 px-4 py-3 text-center text-xs text-lime-100"><RefreshCw className="mx-auto size-4 animate-spin text-lime-300" /><p className="mt-2">Caricamento mappa…</p></div></div>}
@@ -476,169 +458,6 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
     <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/92 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/92 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
     </div>
     {selectedLocation && canManageGeofences && ["CANTIERE", "COMMESSA"].includes(selectedLocation.entityType) && selectedFence?.shapeType === "CIRCLE" && selectedFence.radiusMeters !== null && <GeofenceQuickAction entityType={selectedLocation.entityType} entityId={selectedLocation.entityId} label={selectedLocation.label} currentRadius={selectedFence.radiusMeters} version={selectedFence.version} onUpdated={() => loadMapData()} />}
-    <MissionExceptionSignals exceptions={liveData?.missionExceptions ?? []} />
-  </div>;
-}
-
-function MapboxLiveMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilterChange }: LiveMapSurfaceProps) {
-  const mapSurfaceRef = useRef<HTMLDivElement>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapboxMap | null>(null);
-  const onSelectMarkerRef = useRef(onSelectMarker);
-  const didFitRef = useRef(false);
-  const [mapToken, setMapToken] = useState("");
-  const [mapStyle, setMapStyle] = useState<string | StyleSpecification>("mapbox://styles/mapbox/dark-v11");
-  const [mapStatus, setMapStatus] = useState<LiveMapStatus>("loading");
-  const [liveData, setLiveData] = useState<OperationalMapLivePayload | null>(null);
-  const [lastRead, setLastRead] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
-
-  useEffect(() => { onSelectMarkerRef.current = onSelectMarker; }, [onSelectMarker]);
-
-  const loadMapData = async (silent = false) => {
-    if (!silent) setRefreshing(true);
-    try {
-      const [configResponse, dataResponse] = await Promise.all([
-        fetch("/api/location/map-config", { cache: "no-store" }),
-        fetch("/api/command/map", { cache: "no-store" }),
-      ]);
-      const config = await configResponse.json() as { token?: string | null; style?: string; configured?: boolean };
-      const payload = await dataResponse.json() as OperationalMapLivePayload & { error?: string };
-      if (!dataResponse.ok) throw new Error(payload.error || "map_readback_unavailable");
-      setLiveData(payload);
-      setLastRead(payload.readback?.checkedAt ?? new Date().toISOString());
-      setMapToken(config.configured && config.token ? config.token : FALLBACK_TOKEN);
-      setMapStyle(FALLBACK_MAP_STYLE);
-      setMapStatus("fallback");
-    } catch {
-      setMapStatus("unavailable");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    const initialLoad = window.setTimeout(() => { void loadMapData(); }, 0);
-    const interval = window.setInterval(() => { void loadMapData(true); }, 30_000);
-    return () => {
-      window.clearTimeout(initialLoad);
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!mapToken || !mapContainerRef.current || mapRef.current) return;
-    let cancelled = false;
-    let styleLoaded = false;
-    let fallbackApplied = false;
-    let fallbackTimer = 0;
-    void import("mapbox-gl").then((module) => {
-      if (cancelled || !mapContainerRef.current) return;
-      const mapboxgl = module.default;
-      mapboxgl.accessToken = mapToken === FALLBACK_TOKEN ? "" : mapToken;
-      const map = new mapboxgl.Map({ container: mapContainerRef.current, style: mapStyle, center: [12.4964, 41.9028], zoom: 5.2, attributionControl: true, pitchWithRotate: false, dragRotate: false });
-      mapRef.current = map;
-      const activateFallback = () => {
-        if (cancelled || fallbackApplied || mapStyle === FALLBACK_MAP_STYLE) return;
-        fallbackApplied = true;
-        styleLoaded = false;
-        setMapReady(false);
-        didFitRef.current = false;
-        setMapStatus("fallback");
-        map.setStyle(FALLBACK_MAP_STYLE);
-      };
-      const installOperationalLayers = () => {
-        if (cancelled || !map.isStyleLoaded()) return;
-        styleLoaded = true;
-        window.clearTimeout(fallbackTimer);
-        if (!map.getSource("zerow-map-locations")) map.addSource("zerow-map-locations", { type: "geojson", data: emptyFeatureCollection() as never });
-        if (!map.getSource("zerow-map-vehicles")) map.addSource("zerow-map-vehicles", { type: "geojson", data: emptyFeatureCollection() as never });
-        if (!map.getSource("zerow-map-geofences")) map.addSource("zerow-map-geofences", { type: "geojson", data: emptyFeatureCollection() as never });
-        if (!map.getLayer("zerow-map-geofences-fill")) map.addLayer({ id: "zerow-map-geofences-fill", type: "fill", source: "zerow-map-geofences", paint: { "fill-color": "#c8ff22", "fill-opacity": 0.07 } });
-        if (!map.getLayer("zerow-map-geofences-line")) map.addLayer({ id: "zerow-map-geofences-line", type: "line", source: "zerow-map-geofences", paint: { "line-color": "#c8ff22", "line-opacity": 0.46, "line-width": 1.5, "line-dasharray": [2, 2] } });
-        if (!map.getLayer("zerow-map-locations")) map.addLayer({ id: "zerow-map-locations", type: "circle", source: "zerow-map-locations", paint: { "circle-color": ["match", ["get", "entityType"], "MAGAZZINO", "#59d9ff", "CANTIERE", "#c8ff22", "#dfff5c"], "circle-radius": ["case", ["boolean", ["get", "selected"], false], 9, 6], "circle-stroke-color": "#020403", "circle-stroke-width": 2, "circle-opacity": 0.95 } });
-        if (!map.getLayer("zerow-map-locations-labels")) map.addLayer({ id: "zerow-map-locations-labels", type: "symbol", source: "zerow-map-locations", layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.45], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#efffc8", "text-halo-color": "#020403", "text-halo-width": 1.5 } });
-        if (!map.getLayer("zerow-map-vehicles")) map.addLayer({ id: "zerow-map-vehicles", type: "circle", source: "zerow-map-vehicles", paint: { "circle-color": ["match", ["get", "state"], "LIVE", "#c8ff22", "RECENT", "#59d9ff", "STALE", "#ffb52e", "#ff5538"], "circle-radius": ["case", ["boolean", ["get", "selected"], false], 10, 7], "circle-stroke-color": "#050706", "circle-stroke-width": 3, "circle-opacity": 1 } });
-        if (!map.getLayer("zerow-map-vehicles-labels")) map.addLayer({ id: "zerow-map-vehicles-labels", type: "symbol", source: "zerow-map-vehicles", layout: { "text-field": ["get", "label"], "text-size": 11, "text-offset": [0, 1.5], "text-anchor": "top", "text-allow-overlap": false }, paint: { "text-color": "#ffffff", "text-halo-color": "#050706", "text-halo-width": 1.6 } });
-        setMapReady(true);
-        window.setTimeout(() => map.resize(), 50);
-      };
-      map.on("load", installOperationalLayers);
-      map.on("style.load", installOperationalLayers);
-      map.on("error", activateFallback);
-      map.on("click", (event) => {
-        const features = map.queryRenderedFeatures(event.point, { layers: ["zerow-map-locations", "zerow-map-vehicles"] });
-        const id = features[0]?.properties?.id;
-        if (typeof id === "string") onSelectMarkerRef.current(id);
-      });
-      map.on("mousemove", (event) => {
-        const features = map.queryRenderedFeatures(event.point, { layers: ["zerow-map-locations", "zerow-map-vehicles"] });
-        map.getCanvas().style.cursor = features.length ? "pointer" : "";
-      });
-      fallbackTimer = window.setTimeout(() => {
-        if (!styleLoaded) activateFallback();
-      }, 8_000);
-    }).catch(() => setMapStatus("unavailable"));
-    return () => {
-      cancelled = true;
-      window.clearTimeout(fallbackTimer);
-      mapRef.current?.remove();
-      mapRef.current = null;
-      setMapReady(false);
-    };
-  }, [mapToken, mapStyle]);
-
-  const featureData = useMemo(() => liveData ? toLiveFeatures(liveData, mapFilter, selectedMarker) : null, [liveData, mapFilter, selectedMarker]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapReady || !map || !featureData || !map.isStyleLoaded()) return;
-    setGeoJsonData(map, "zerow-map-locations", featureData.locations);
-    setGeoJsonData(map, "zerow-map-vehicles", featureData.vehicles);
-    setGeoJsonData(map, "zerow-map-geofences", featureData.geofences);
-    if (!didFitRef.current && liveData) {
-      const coordinates = mapCoordinates(liveData);
-      if (coordinates.length === 1) map.flyTo({ center: [coordinates[0].longitude, coordinates[0].latitude], zoom: 12, duration: 500 });
-      if (coordinates.length > 1) {
-        const longitudes = coordinates.map((point) => point.longitude);
-        const latitudes = coordinates.map((point) => point.latitude);
-        map.fitBounds([[Math.min(...longitudes), Math.min(...latitudes)], [Math.max(...longitudes), Math.max(...latitudes)]], { padding: 64, maxZoom: 13, duration: 700 });
-      }
-      didFitRef.current = true;
-    }
-  }, [featureData, liveData, mapReady]);
-
-  const focusAll = () => {
-    onSelectMarker("");
-    didFitRef.current = false;
-    const map = mapRef.current;
-    if (!map || !liveData) return;
-    const coordinates = mapCoordinates(liveData);
-    if (coordinates.length === 1) map.flyTo({ center: [coordinates[0].longitude, coordinates[0].latitude], zoom: 12, duration: 650 });
-    if (coordinates.length > 1) {
-      const longitudes = coordinates.map((point) => point.longitude);
-      const latitudes = coordinates.map((point) => point.latitude);
-      map.fitBounds([[Math.min(...longitudes), Math.min(...latitudes)], [Math.max(...longitudes), Math.max(...latitudes)]], { padding: 64, maxZoom: 13, duration: 700 });
-    }
-    didFitRef.current = true;
-  };
-
-  const selectedLocation = liveData?.locations.find((location) => `location:${location.id}` === selectedMarker);
-  const selectedVehicle = liveData?.vehicles.find((vehicle) => `vehicle:${vehicle.id}` === selectedMarker);
-  const visibleSignals = featureData ? featureData.locations.features.length + featureData.vehicles.features.length + featureData.geofences.features.length : 0;
-
-  return <div className="relative min-h-[360px] overflow-hidden rounded-xl border border-lime-300/20 bg-[#050706] shadow-[inset_0_0_50px_rgba(200,255,34,.04)] sm:min-h-[430px]" ref={mapSurfaceRef}>
-    <div className="absolute inset-0" ref={mapContainerRef} />
-    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_44%,rgba(200,255,34,.08),transparent_34%),linear-gradient(180deg,rgba(1,4,2,.14),rgba(1,3,2,.42))]" />
-    <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-[#050706]/85 px-2.5 py-2 backdrop-blur"><Navigation className="size-3.5 text-lime-300" /><span className="text-[10px] font-medium text-slate-300">MAPPA LIVE · SERVER READBACK</span>{lastRead && <span className="hidden font-mono text-[9px] text-slate-600 sm:inline">{formatTime(lastRead)}</span>}</div>
-    {((liveData?.activeSessions?.length) ?? 0) > 0 && <div className="absolute left-3 top-14 flex items-center gap-2 rounded-lg border border-lime-300/25 bg-[#050706]/90 px-2.5 py-2 shadow-[0_0_20px_rgba(200,255,34,.12)] backdrop-blur"><span className="size-1.5 animate-pulse rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" /><span className="text-[9px] font-semibold uppercase tracking-[.12em] text-lime-100">{liveData?.activeSessions?.length ?? 0} tracking attivi</span>{(liveData?.activeSessions?.length ?? 0) > (liveData?.vehicles?.length ?? 0) && <span className="text-[9px] text-slate-500">posizione in attesa</span>}</div>}
-    <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur"><IconButton disabled={refreshing} label="Aggiorna mappa" onClick={() => void loadMapData()} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10">{refreshing ? <RefreshCw className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}</IconButton><IconButton label="Zoom in" onClick={() => mapRef.current?.zoomIn({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomIn className="size-3.5" /></IconButton><IconButton label="Zoom out" onClick={() => mapRef.current?.zoomOut({ duration: 250 })} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><ZoomOut className="size-3.5" /></IconButton><div className="mx-1 h-px bg-white/10" /><IconButton label="Centra vista" onClick={focusAll} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><LocateFixed className="size-3.5" /></IconButton><IconButton label="Schermo intero" onClick={() => { if (mapSurfaceRef.current?.requestFullscreen) void mapSurfaceRef.current.requestFullscreen(); }} className="size-8 rounded-md border-0 bg-transparent hover:bg-white/10"><PanelRight className="size-3.5" /></IconButton></div>
-    {mapStatus === "loading" && <div className="absolute inset-0 grid place-items-center bg-[#050706]/40 backdrop-blur-[2px]"><div className="rounded-xl border border-lime-300/20 bg-[#070b08]/90 px-4 py-3 text-center text-xs text-lime-100"><RefreshCw className="mx-auto size-4 animate-spin text-lime-300" /><p className="mt-2">Connessione alla mappa operativa…</p></div></div>}
-    {mapStatus === "unavailable" && <div className="absolute inset-x-4 top-1/2 mx-auto max-w-sm -translate-y-1/2 rounded-2xl border border-rose-300/20 bg-[#070b08]/92 p-4 text-center backdrop-blur"><MapIcon className="mx-auto size-7 text-rose-200" /><p className="mt-3 text-sm font-semibold text-slate-100">Mappa temporaneamente non disponibile</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Il readback non è stato completato. Usa Aggiorna per riprovare.</p></div>}
-    {selectedLocation && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-lime-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(200,255,34,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-lime-300/70">{selectedLocation.entityType}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedLocation.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedLocation.address || "Indirizzo non valorizzato"}</p></div><button aria-label="Chiudi dettaglio sede" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-lime-100/75">{selectedLocation.latestEvent?.eventType ? `${selectedLocation.latestEvent.eventType} · ${formatTime(selectedLocation.latestEvent.occurredAt)}` : selectedLocation.verified ? "Coordinate verificate" : "Coordinate da verificare"}</p></div>}
-    {selectedVehicle && <div className="absolute bottom-14 left-3 max-w-[min(360px,calc(100%-24px))] rounded-xl border border-cyan-300/25 bg-[#070b08]/92 p-3 shadow-[0_0_28px_rgba(89,217,255,.12)] backdrop-blur-xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">MEZZO · {selectedVehicle.state}</p><p className="mt-1 text-xs font-semibold text-slate-100">{selectedVehicle.label}</p><p className="mt-1 truncate text-[10px] text-slate-500">{selectedVehicle.deviceLabel} · ultimo segnale {formatTime(selectedVehicle.recordedAt)}</p></div><button aria-label="Chiudi dettaglio mezzo" className="text-slate-500 hover:text-white" onClick={() => onSelectMarker("")} type="button">×</button></div><p className="mt-2 text-[10px] text-cyan-100/75">{selectedVehicle.speedKmh !== null ? `${selectedVehicle.speedKmh} km/h` : "Velocità non disponibile"}{selectedVehicle.accuracyM !== null ? ` · precisione ${selectedVehicle.accuracyM} m` : ""}</p></div>}
-    <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2"><Tabs value={mapFilter} onValueChange={(value) => onFilterChange(value as OperationalMapFilter)}><TabsList className="h-9 rounded-lg border border-white/10 bg-[#050706]/90 p-1 backdrop-blur" aria-label="Filtri mappa"><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ASSET">Mezzi</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TEAM">Team</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="LAVORI">Cantieri</TabsTrigger><TabsTrigger className="h-7 rounded-md px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="GEOFENCE">Geofence</TabsTrigger></TabsList></Tabs><span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-[#050706]/90 px-2.5 py-1.5 text-[9px] uppercase tracking-[0.1em] text-slate-400"><Crosshair className="size-3 text-lime-300" />{visibleSignals} segnali · {liveData?.vehicles.length ?? 0} mezzi</span></div>
     <MissionExceptionSignals exceptions={liveData?.missionExceptions ?? []} />
   </div>;
 }

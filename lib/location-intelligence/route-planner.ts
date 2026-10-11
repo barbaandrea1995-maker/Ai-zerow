@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { geoLocations, geofences, routePlans, routeStops } from "@/db/schema";
-import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius, geofenceForEngine, parseJsonObject } from "@/lib/location-intelligence/repository";
 
 export type MissionStopKind = "PICKUP" | "DELIVERY" | "TRANSFER" | "RETURN";
@@ -118,17 +118,17 @@ async function resolveTemporaryLocation(input: MissionStopInput, sequence: numbe
   const provider = text(candidate?.provider, 24).toUpperCase();
   const providerPlaceId = text(candidate?.providerPlaceId, 160);
   if (!address) throw new MissionRouteError("mission_route_temporary_address_required", { sequence });
-  if (provider !== "MAPBOX" || !providerPlaceId) {
+  if (provider !== ACTIVE_GEOCODING_PROVIDER || !providerPlaceId) {
     throw new MissionRouteError("mission_route_temporary_confirmation_required", { sequence });
   }
-  const result = await geocodeWithMapbox(address);
+  const result = await geocodeAddress(address);
   if (result.status === "not_configured") {
-    throw new MissionRouteError("mission_route_geocoder_not_configured", { sequence, provider: "MAPBOX" });
+    throw new MissionRouteError("mission_route_geocoder_not_configured", { sequence, provider: ACTIVE_GEOCODING_PROVIDER });
   }
   if (result.status === "unavailable") {
-    throw new MissionRouteError("mission_route_geocoder_unavailable", { sequence, provider: "MAPBOX" });
+    throw new MissionRouteError("mission_route_geocoder_unavailable", { sequence, provider: ACTIVE_GEOCODING_PROVIDER });
   }
-  const matched = result.candidates.find((item) => item.provider === "MAPBOX" && item.providerPlaceId === providerPlaceId);
+  const matched = result.candidates.find((item) => item.provider === ACTIVE_GEOCODING_PROVIDER && item.providerPlaceId === providerPlaceId);
   if (!matched) throw new MissionRouteError("mission_route_temporary_confirmation_mismatch", { sequence });
   return matched;
 }

@@ -1,6 +1,6 @@
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { getLocationPostgisReadback, LocationPostgisReadbackError } from "@/lib/location-intelligence/postgis-readback";
-import { getLocationProviderStatus, probeMapboxRuntime, probeTraccarRuntime } from "@/lib/location-intelligence/providers";
+import { getLocationProviderStatus, probeGeocodingRuntime, probeTraccarRuntime } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,10 @@ export async function GET(request: Request) {
   }
   const providers = getLocationProviderStatus();
   const probe = new URL(request.url).searchParams.get("probe");
-  const mapboxProbeRequested = probe === "mapbox";
+  const geoapifyProbeRequested = probe === "geoapify";
   const traccarProbeRequested = probe === "traccar";
-  const mapboxProbe = mapboxProbeRequested && providers.geocoding.configured
-    ? await probeMapboxRuntime()
+  const geoapifyProbe = geoapifyProbeRequested && providers.geocoding.configured
+    ? await probeGeocodingRuntime()
     : null;
   const traccarProbe = traccarProbeRequested
     ? await probeTraccarRuntime()
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     version: "1.0.0",
     status: "IMPLEMENTATION_SPEC",
     providers,
-    mapboxProbe,
+    geoapifyProbe,
     traccarProbe,
     postgisReadback: postgisReadback ?? (postgisError ? { status: "DEGRADED", error: postgisError } : null),
     contracts: {
@@ -56,11 +56,11 @@ export async function GET(request: Request) {
       audit: "LOCATION_READS_APPEND_ONLY",
     },
     runtimeGates: {
-      mapProvider: mapboxProbe?.status === "READY"
+      mapProvider: geoapifyProbe?.status === "READY"
         ? "LIVE_READY"
-        : mapboxProbeRequested
-          ? "LIVE_CHECK_FAILED"
-          : "UNKNOWN_UNTIL_MAPBOX_RUNTIME_CHECK",
+        : geoapifyProbeRequested
+          ? providers.geocoding.configured ? "LIVE_CHECK_FAILED" : "NOT_CONFIGURED"
+          : "UNKNOWN_UNTIL_GEOAPIFY_RUNTIME_CHECK",
       trackingProvider: traccarProbe?.status === "READY" && traccarProbe.webhookSignature === "READY"
         ? "LIVE_READY"
         : traccarProbe?.status === "READY"

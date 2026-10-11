@@ -1,5 +1,5 @@
 export type GeocodeCandidate = {
-  provider: "MAPBOX" | "MANUAL";
+  provider: "GEOAPIFY" | "MANUAL";
   providerPlaceId: string;
   formattedAddress: string;
   street: string;

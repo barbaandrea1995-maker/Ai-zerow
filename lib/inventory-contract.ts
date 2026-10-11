@@ -38,7 +38,9 @@ export function warehouseForResponse(row: typeof tenantWarehouses.$inferSelect) 
       status: "configured",
     },
     locationSource: row.locationSource,
-    locationStatus: row.locationSource === "MAPBOX" ? "SERVER_VERIFIED_MAPBOX_LOCATION" as const : "SERVER_VALIDATED_COORDINATES" as const,
+    locationStatus: row.locationSource && row.locationSource.toUpperCase() !== "MANUAL"
+      ? "SERVER_VERIFIED_PROVIDER_LOCATION" as const
+      : "SERVER_VALIDATED_COORDINATES" as const,
     status: row.status,
     version: row.version,
     createdAt: row.createdAt,

@@ -93,7 +93,7 @@ const legacyUnboundControls = unboundIconButtons(legacyCommand, "app/page-client
 
 const allSource = await Promise.all(sourceFiles.map(read)).then((sources) => sources.join("\n"));
 const gpsBrowserApi = /navigator\.geolocation|getCurrentPosition|watchPosition/.test(allSource);
-const mapProvider = /mapbox|maplibre|leaflet|google\s*maps|googlemaps|maptiler|tomtom/i.test(allSource);
+const mapProvider = /geoapify|maplibre|leaflet|google\s*maps|googlemaps|maptiler|tomtom/i.test(allSource);
 const openAiAdapter = /askCompanyAiWithOpenAi/.test(allSource);
 const pwaArtifacts = {
   manifest: await fs.access(path.join(root, "public/manifest.webmanifest")).then(() => true).catch(() => false),

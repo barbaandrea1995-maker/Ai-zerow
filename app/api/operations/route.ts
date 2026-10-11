@@ -21,7 +21,7 @@ import {
 } from "@/lib/operations-contract";
 import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledge, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
-import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
@@ -54,9 +54,9 @@ function requestedGeocodeCandidate(value: unknown) {
   const providerPlaceId = boundedText(value.providerPlaceId, 160);
   const latitude = Number(coordinates.latitude);
   const longitude = Number(coordinates.longitude);
-  if (provider !== "MAPBOX" || !providerPlaceId || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (provider !== ACTIVE_GEOCODING_PROVIDER || !providerPlaceId || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
-  return { provider: "MAPBOX" as const, providerPlaceId, latitude, longitude };
+  return { provider: ACTIVE_GEOCODING_PROVIDER, providerPlaceId, latitude, longitude };
 }
 
 function normalizeWorkItems(value: unknown): JobWorkItem[] {
@@ -239,16 +239,16 @@ export async function POST(request: Request) {
       });
     }
 
-    const geocode = await geocodeWithMapbox(worksite);
+    const geocode = await geocodeAddress(worksite);
     if (geocode.status === "not_configured") {
-      return Response.json({ error: "worksite_geocoder_not_configured", provider: "MAPBOX" }, { status: 503 });
+      return Response.json({ error: "worksite_geocoder_not_configured", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 503 });
     }
     if (geocode.status === "unavailable") {
-      return Response.json({ error: "worksite_geocoder_unavailable", provider: "MAPBOX" }, { status: 503 });
+      return Response.json({ error: "worksite_geocoder_unavailable", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 503 });
     }
     const serverWorksiteLocation = geocode.candidates.find((candidate) => candidate.providerPlaceId === requestedWorksiteLocation.providerPlaceId);
     if (!serverWorksiteLocation) {
-      return Response.json({ error: "worksite_location_candidate_mismatch", provider: "MAPBOX" }, { status: 409 });
+      return Response.json({ error: "worksite_location_candidate_mismatch", provider: ACTIVE_GEOCODING_PROVIDER }, { status: 409 });
     }
 
     assertTenantScope(context, context.tenantId);

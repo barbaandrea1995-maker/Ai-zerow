@@ -136,7 +136,7 @@ export async function POST(request: Request) {
   if (!coordinates) return Response.json({ error: "confirmed_coordinates_required" }, { status: 400 });
   if (!verifiedByUser) return Response.json({ error: "location_user_confirmation_required" }, { status: 400 });
   if (!isGeofenceShape(shapeType)) return Response.json({ error: "unsupported_geofence_shape" }, { status: 400 });
-  if (!(provider === "MANUAL" || provider === "MAPBOX" || provider === "NATIVE_DEVICE")) return Response.json({ error: "unsupported_location_provider" }, { status: 400 });
+  if (!(provider === "MANUAL" || provider === "GEOAPIFY" || provider === "NATIVE_DEVICE")) return Response.json({ error: "unsupported_location_provider" }, { status: 400 });
   if (shapeType === "CIRCLE" && (!Number.isInteger(radiusValue) || radiusValue < 20 || radiusValue > 5_000)) {
     return Response.json({ error: "geofence_radius_must_be_20_to_5000_meters" }, { status: 400 });
   }

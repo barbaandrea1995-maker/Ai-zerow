@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
-const MAPBOX_GEOCODING_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places";
+const GEOAPIFY_GEOCODING_URL = "https://api.geoapify.com/v1/geocode/search";
+const GEOAPIFY_TILE_URL = "https://maps.geoapify.com/v1/tile/dark-matter";
+export const ACTIVE_GEOCODING_PROVIDER = "GEOAPIFY" as const;
 
 function runtimeSecret(name: string) {
   const bound = (env as unknown as Record<string, unknown>)[name];
@@ -10,89 +12,86 @@ function runtimeSecret(name: string) {
   return typeof local === "string" ? local.trim() : "";
 }
 
-/**
- * Mapbox client tokens are public by design, but only a public `pk.` token is
- * safe to hand to the browser. Secret tokens stay server-side and keep the
- * map surface explicitly unavailable until a client token is configured.
- */
-export function getMapboxClientToken() {
-  const token = runtimeSecret("MAPBOX_ACCESS_TOKEN");
-  return token.startsWith("pk.") ? token : "";
-}
-
 function baseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
 
 export type LocationProviderStatus = {
-  geocoding: { provider: "MAPBOX"; configured: boolean; status: "READY" | "NOT_CONFIGURED" };
+  geocoding: { provider: typeof ACTIVE_GEOCODING_PROVIDER; configured: boolean; status: "READY" | "NOT_CONFIGURED" };
   tracking: { provider: "TRACCAR"; configured: boolean; status: "READY" | "NOT_CONFIGURED" };
   storage: { controlPlane: "D1"; postgis: "NOT_CONNECTED" | "CONFIGURED_UNVERIFIED" | "CONNECTED_READBACK_VERIFIED" | "DEGRADED" };
 };
 
 export function getLocationProviderStatus(): LocationProviderStatus {
-  const mapboxConfigured = Boolean(runtimeSecret("MAPBOX_ACCESS_TOKEN"));
+  const geoapifyConfigured = Boolean(runtimeSecret("GEOAPIFY_API_KEY"));
   const traccarConfigured = Boolean(runtimeSecret("TRACCAR_BASE_URL") && runtimeSecret("TRACCAR_API_TOKEN"));
   const postgisConfigured = Boolean(runtimeSecret("LOCATION_DATABASE_URL"));
   return {
-    geocoding: { provider: "MAPBOX", configured: mapboxConfigured, status: mapboxConfigured ? "READY" : "NOT_CONFIGURED" },
+    geocoding: { provider: ACTIVE_GEOCODING_PROVIDER, configured: geoapifyConfigured, status: geoapifyConfigured ? "READY" : "NOT_CONFIGURED" },
     tracking: { provider: "TRACCAR", configured: traccarConfigured, status: traccarConfigured ? "READY" : "NOT_CONFIGURED" },
     storage: { controlPlane: "D1", postgis: postgisConfigured ? "CONFIGURED_UNVERIFIED" : "NOT_CONNECTED" },
   };
 }
 
-function mapboxContext(context: unknown[]) {
-  const find = (prefixes: string[]) => {
-    const item = context.find((candidate) => {
-      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-      const id = (candidate as Record<string, unknown>).id;
-      return typeof id === "string" && prefixes.some((prefix) => id.startsWith(prefix));
-    });
-    return item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>).text : "";
-  };
-  return {
-    city: String(find(["place.", "locality."]) || "").slice(0, 120),
-    province: String(find(["region."]) || "").slice(0, 120),
-    postalCode: String(find(["postcode."]) || "").slice(0, 24),
-    country: String(find(["country."]) || "IT").slice(0, 64),
-  };
+function providerText(value: unknown, max: number) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-export async function geocodeWithMapbox(address: string): Promise<{
+export function geoapifyTileUrl(z: number, x: number, y: number) {
+  const apiKey = runtimeSecret("GEOAPIFY_API_KEY");
+  if (!apiKey) return null;
+  const url = new URL(`${GEOAPIFY_TILE_URL}/${z}/${x}/${y}.png`);
+  url.searchParams.set("apiKey", apiKey);
+  return url.toString();
+}
+
+export async function geocodeAddress(address: string): Promise<{
   status: "used" | "not_configured" | "unavailable";
   candidates: GeocodeCandidate[];
 }> {
-  const token = runtimeSecret("MAPBOX_ACCESS_TOKEN");
-  if (!token) return { status: "not_configured", candidates: [] };
+  const apiKey = runtimeSecret("GEOAPIFY_API_KEY");
+  if (!apiKey) return { status: "not_configured", candidates: [] };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const url = `${MAPBOX_GEOCODING_URL}/${encodeURIComponent(address)}.json?access_token=${encodeURIComponent(token)}&language=it&limit=5&country=it`;
+    const url = new URL(GEOAPIFY_GEOCODING_URL);
+    url.searchParams.set("text", address);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("lang", "it");
+    url.searchParams.set("limit", "5");
+    url.searchParams.set("filter", "countrycode:it");
+    url.searchParams.set("apiKey", apiKey);
     const response = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
     if (!response.ok) return { status: "unavailable", candidates: [] };
-    const payload = await response.json() as { features?: unknown[] };
-    const candidates = Array.isArray(payload.features) ? payload.features.flatMap((feature): GeocodeCandidate[] => {
-      if (!feature || typeof feature !== "object" || Array.isArray(feature)) return [];
-      const row = feature as Record<string, unknown>;
-      const center = Array.isArray(row.center) ? row.center : [];
-      const longitude = Number(center[0]);
-      const latitude = Number(center[1]);
+    const payload = await response.json() as { results?: unknown[] };
+    const seen = new Set<string>();
+    const candidates = Array.isArray(payload.results) ? payload.results.flatMap((result): GeocodeCandidate[] => {
+      if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+      const row = result as Record<string, unknown>;
+      const longitude = Number(row.lon);
+      const latitude = Number(row.lat);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
-      const context = Array.isArray(row.context) ? row.context : [];
-      const parsedContext = mapboxContext(context);
+      const providerPlaceId = providerText(row.place_id, 160);
+      if (!providerPlaceId || seen.has(providerPlaceId)) return [];
+      seen.add(providerPlaceId);
+      const rank = row.rank && typeof row.rank === "object" && !Array.isArray(row.rank)
+        ? row.rank as Record<string, unknown>
+        : {};
+      const confidenceValue = Number(rank.confidence ?? rank.importance ?? 0);
+      const confidence = Number.isFinite(confidenceValue) ? Math.min(1, Math.max(0, confidenceValue)) : 0;
       return [{
-        provider: "MAPBOX",
-        providerPlaceId: typeof row.id === "string" ? row.id.slice(0, 160) : "",
-        formattedAddress: typeof row.place_name === "string" ? row.place_name.slice(0, 240) : address.slice(0, 240),
+        provider: ACTIVE_GEOCODING_PROVIDER,
+        providerPlaceId,
+        formattedAddress: providerText(row.formatted, 240) || address.slice(0, 240),
         latitude,
         longitude,
-        street: typeof row.text === "string" ? row.text.slice(0, 160) : "",
-        streetNumber: typeof row.address === "string" ? row.address.slice(0, 24) : "",
-        city: parsedContext.city,
-        province: parsedContext.province,
-        postalCode: parsedContext.postalCode,
-        country: parsedContext.country,
-        confidence: typeof row.relevance === "number" ? Math.min(1, Math.max(0, row.relevance)) : 0,
+        street: providerText(row.street ?? row.address_line1, 160),
+        streetNumber: providerText(row.housenumber, 24),
+        city: providerText(row.city ?? row.town ?? row.village ?? row.municipality, 120),
+        province: providerText(row.county ?? row.state, 120),
+        postalCode: providerText(row.postcode, 24),
+        country: providerText(row.country_code, 8).toUpperCase() || providerText(row.country, 64) || "IT",
+        confidence,
       }];
     }) : [];
     return { status: "used", candidates };
@@ -108,12 +107,12 @@ export async function geocodeWithMapbox(address: string): Promise<{
  * probe deliberately uses a neutral public address and returns no coordinates
  * or provider payload to the caller.
  */
-export async function probeMapboxRuntime(): Promise<{
+export async function probeGeocodingRuntime(): Promise<{
   status: "READY" | "NOT_CONFIGURED" | "UNAVAILABLE";
   candidateCount: number;
   checkedAt: string;
 }> {
-  const result = await geocodeWithMapbox("Roma, Italia");
+  const result = await geocodeAddress("Roma, Italia");
   return {
     status: result.status === "not_configured"
       ? "NOT_CONFIGURED"

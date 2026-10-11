@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { warehouseForResponse } from "@/lib/inventory-contract";
-import { geocodeWithMapbox } from "@/lib/location-intelligence/providers";
+import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { allocateServerName } from "@/lib/server-naming";
 
 export const dynamic = "force-dynamic";
@@ -83,12 +83,12 @@ export async function POST(request: Request) {
 
   if (name.length < 2) return Response.json({ error: "warehouse_name_required" }, { status: 400 });
   if (locationQuery.length < 5) return Response.json({ error: "warehouse_location_required" }, { status: 400 });
-  if (provider !== "MAPBOX" || !providerPlaceId) return Response.json({ error: "warehouse_server_location_required" }, { status: 400 });
+  if (provider !== ACTIVE_GEOCODING_PROVIDER || !providerPlaceId) return Response.json({ error: "warehouse_server_location_required" }, { status: 400 });
   if (!Number.isInteger(radius) || radius < 25 || radius > 5_000) {
     return Response.json({ error: "geofence_radius_must_be_25_to_5000_meters" }, { status: 400 });
   }
 
-  const geocoded = await geocodeWithMapbox(locationQuery);
+  const geocoded = await geocodeAddress(locationQuery);
   if (geocoded.status === "not_configured") return Response.json({ error: "warehouse_geocoder_not_configured" }, { status: 503 });
   if (geocoded.status !== "used") return Response.json({ error: "warehouse_geocoder_unavailable" }, { status: 503 });
   const candidate = geocoded.candidates.find((item) => item.providerPlaceId === providerPlaceId);
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
   const locationLabel = candidate.formattedAddress;
   const latitude = candidate.latitude;
   const longitude = candidate.longitude;
-  const locationSource = "MAPBOX";
+  const locationSource = ACTIVE_GEOCODING_PROVIDER;
 
   const now = new Date().toISOString();
   const warehouseId = crypto.randomUUID();
@@ -125,7 +125,7 @@ export async function POST(request: Request) {
       locationSource,
       providerPlaceId: candidate.providerPlaceId,
       geocodeConfidence: candidate.confidence,
-      locationStatus: "SERVER_VERIFIED_MAPBOX_LOCATION",
+      locationStatus: "SERVER_VERIFIED_GEOAPIFY_LOCATION",
     });
 
     await db.batch([
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
         country: candidate.country,
         latitudeE6: Math.round(latitude * 1_000_000),
         longitudeE6: Math.round(longitude * 1_000_000),
-        provider: "MAPBOX",
+        provider: ACTIVE_GEOCODING_PROVIDER,
         providerPlaceId: candidate.providerPlaceId,
         geocodeConfidenceMilli: Math.round(Math.min(1, Math.max(0, candidate.confidence)) * 1_000),
         verifiedByUser: 1,

@@ -1,5 +1,5 @@
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
-import { geocodeWithMapbox, getLocationProviderStatus } from "@/lib/location-intelligence/providers";
+import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress, getLocationProviderStatus } from "@/lib/location-intelligence/providers";
 
 export const dynamic = "force-dynamic";
 
@@ -32,22 +32,22 @@ export async function POST(request: Request) {
   const address = bounded(payload.address ?? payload.query, 320);
   if (address.length < 5) return Response.json({ error: "address_required" }, { status: 400 });
 
-  const result = await geocodeWithMapbox(address);
+  const result = await geocodeAddress(address);
   if (result.status === "not_configured") {
     return Response.json({
       error: "geocoder_not_configured",
-      provider: "MAPBOX",
+      provider: ACTIVE_GEOCODING_PROVIDER,
       status: "NOT_CONFIGURED",
       providers: getLocationProviderStatus(),
       context: publicAuthorityContext(context),
     }, { status: 503 });
   }
   if (result.status === "unavailable") {
-    return Response.json({ error: "geocoder_unavailable", provider: "MAPBOX", status: "UNAVAILABLE" }, { status: 503 });
+    return Response.json({ error: "geocoder_unavailable", provider: ACTIVE_GEOCODING_PROVIDER, status: "UNAVAILABLE" }, { status: 503 });
   }
   return Response.json({
     context: publicAuthorityContext(context),
-    provider: "MAPBOX",
+    provider: ACTIVE_GEOCODING_PROVIDER,
     status: "READY",
     candidates: result.candidates,
     confirmationRequired: result.candidates.length !== 1 || (result.candidates[0]?.confidence ?? 0) < 0.8,

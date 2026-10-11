@@ -896,7 +896,7 @@ export default function OperationsJobWorkspace({
       setWorksiteCandidates(candidates);
       if (!candidates.length) notify("Il server non ha trovato un luogo: controlla l’indirizzo e riprova.");
     } catch (error) {
-      notify(error instanceof Error && error.message === "geocoder_not_configured" ? "Il provider Mapbox non è configurato." : "Non riesco a riconoscere il luogo. Riprova tra poco.");
+      notify(error instanceof Error && error.message === "geocoder_not_configured" ? "Il provider Geoapify non è configurato." : "Non riesco a riconoscere il luogo. Riprova tra poco.");
     } finally {
       setWorksiteGeocoding(false);
     }
@@ -1540,7 +1540,7 @@ export default function OperationsJobWorkspace({
                       <span className="block px-1 text-[9px] font-semibold uppercase tracking-[.14em] text-cyan-200/70">Seleziona il luogo verificato dal server</span>
                       {worksiteCandidates.map((candidate) => <button className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition ${selectedWorksite?.providerPlaceId === candidate.providerPlaceId ? "border-lime-300/40 bg-lime-300/[.07]" : "border-white/[.07] bg-black/20 hover:border-cyan-300/25"}`} key={candidate.providerPlaceId} onClick={() => setSelectedWorksite(candidate)} type="button">
                         {selectedWorksite?.providerPlaceId === candidate.providerPlaceId ? <Check className="mt-0.5 size-3.5 shrink-0 text-lime-200" /> : <MapPin className="mt-0.5 size-3.5 shrink-0 text-cyan-200" />}
-                        <span className="min-w-0"><span className="block text-[10px] font-medium text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[9px] text-slate-600">{candidate.city}{candidate.province ? ` · ${candidate.province}` : ""} · coordinate Mapbox · attendibilità {Math.round(candidate.confidence * 100)}%</span></span>
+                        <span className="min-w-0"><span className="block text-[10px] font-medium text-slate-200">{candidate.formattedAddress}</span><span className="mt-1 block text-[9px] text-slate-600">{candidate.city}{candidate.province ? ` · ${candidate.province}` : ""} · coordinate Geoapify · attendibilità {Math.round(candidate.confidence * 100)}%</span></span>
                       </button>)}
                     </span>}
                     <span className="block text-[9px] leading-4 text-slate-600">Se cambi l’indirizzo, il server aggiorna insieme luogo canonico e geofence della commessa.</span>

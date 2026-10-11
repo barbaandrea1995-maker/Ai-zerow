@@ -221,7 +221,7 @@ export async function GET() {
         label: warehouse.name,
         address: warehouse.locationLabel,
         coordinates: { latitude: roundedCoordinate(warehouse.latitudeE6), longitude: roundedCoordinate(warehouse.longitudeE6) },
-        provider: warehouse.locationSource === "mapbox" ? "MAPBOX" : "SERVER_VALIDATED",
+        provider: warehouse.locationSource.toUpperCase() === "GEOAPIFY" ? "GEOAPIFY" : "SERVER_VALIDATED",
         verified: true,
         status: warehouse.status,
         updatedAt: warehouse.updatedAt,
