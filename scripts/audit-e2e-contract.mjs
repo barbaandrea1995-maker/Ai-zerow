@@ -22,15 +22,17 @@ async function read(relative) {
 }
 
 function requireContract(source, pattern, label) {
-  assert.match(source, pattern, `Missing contract: ${label}`);
+  assert.ok(pattern.test(source), `Missing contract: ${label}`);
 }
 
 const teamRoute = await read("app/api/authority/teams/route.ts");
 const onboarding = await read("app/onboarding/page.tsx");
 const resourceLibrary = await read("lib/planning-resources.ts");
+const missionResourceLibrary = await read("lib/mission-resources.ts");
 const resourceRoute = await read("app/api/operations/jobs/[jobId]/planning/resource-options/route.ts");
+const planningOverviewRoute = await read("app/api/planning/route.ts");
 const resourceFields = await read("components/planning-resource-fields.tsx");
-const operationsPlanning = await read("app/operations/page.tsx");
+const planningSurface = await read("components/planning-control.tsx");
 const planningWriteRoute = await read("app/api/operations/jobs/[jobId]/planning/route.ts");
 const authorityContext = await read("lib/authority-context.ts");
 const authorityCatalog = await read("lib/authority-catalog.ts");
@@ -43,6 +45,10 @@ const warehouseControl = await read("components/warehouse-control.tsx");
 const legacyS04Page = await read("components/s04-module-page.tsx");
 const assetNamingDialog = await read("components/server-naming-dialog.tsx");
 const genericS04Route = await read("app/api/[module]/route.ts");
+const communicationsSurface = await read("components/communications-control.tsx");
+const settingsSurface = await read("app/settings/settings-client.tsx");
+const commandMapRoute = await read("app/api/command/map/route.ts");
+const operationalMapSurface = await read("components/operational-map-board.tsx");
 
 requireContract(teamRoute, /hasCapability\(context, "authority\.read"\)/, "team read capability gate");
 requireContract(teamRoute, /hasCapability\(context, "authority\.manage"\)/, "team write capability gate");
@@ -59,23 +65,48 @@ requireContract(onboarding, /Crea squadra/, "team create control");
 requireContract(onboarding, /teamMemberIds\.length/, "team UI requires real members");
 
 requireContract(resourceLibrary, /jobJourneyRecords/, "planning active plan source");
-requireContract(resourceLibrary, /inArray\(jobJourneyRecords\.status, \["DRAFT", "PUBLISHED"\]\)/, "planning active plan status filter");
+requireContract(resourceLibrary, /eq\(jobJourneyRecords\.status, "PUBLISHED"\)/, "only published plans reserve resources");
+requireContract(resourceLibrary, /readAllById/, "planning catalogs and reservations read beyond the first page");
+requireContract(resourceLibrary, /gt\(jobJourneyRecords\.id, afterId\)/, "planning ledgers use stable keyset pagination");
+requireContract(resourceLibrary, /gt\(s04Records\.id, afterId\)/, "resource catalogs use stable keyset pagination");
 requireContract(resourceLibrary, /availableForWindow/, "planning server availability field");
 requireContract(resourceLibrary, /overlaps\(window, assignment\)/, "planning server interval overlap");
+requireContract(missionResourceLibrary, /readAllById/, "mission catalogs read beyond the first page");
+requireContract(missionResourceLibrary, /gt\(jobJourneyRecords\.id, afterId\)/, "mission assignments use stable keyset pagination");
+requireContract(missionResourceLibrary, /gt\(s04Records\.id, afterId\)/, "mission resources use stable keyset pagination");
+requireContract(missionResourceLibrary, /row\.domain === "planning" && status !== "PUBLISHED"/, "draft plans do not reserve mission resources");
 requireContract(resourceRoute, /searchParams\.get\("startsAt"\)/, "planning start window query");
 requireContract(resourceRoute, /searchParams\.get\("endsAt"\)/, "planning end window query");
 requireContract(resourceRoute, /unavailableForWindow/, "planning unavailable readback");
-requireContract(resourceRoute, /server-window-lifecycle-and-tenant-active-plans/, "planning server guard contract");
+requireContract(resourceRoute, /server-window-lifecycle-role-profile-and-published-plans/, "planning server guard contract");
+requireContract(resourceRoute, /Drafts do not reserve resources/, "draft plans do not block resource availability");
 requireContract(resourceFields, /startsAt: string/, "planning UI start prop");
 requireContract(resourceFields, /endsAt: string/, "planning UI end prop");
 requireContract(resourceFields, /params\.set\("startsAt"/, "planning UI sends start window");
 requireContract(resourceFields, /params\.set\("endsAt"/, "planning UI sends end window");
 requireContract(resourceFields, /disabled=\{!available\}/, "planning UI blocks occupied resources");
-requireContract(operationsPlanning, /startsAt=\{planningStartsAt\}/, "operations planning passes start window");
-requireContract(operationsPlanning, /endsAt=\{planningEndsAt\}/, "operations planning passes end window");
-requireContract(operationsPlanning, /resource-options\$\{query \? `\?\$\{query\}` : ""\}/, "operations planning server availability query");
+requireContract(planningOverviewRoute, /readAllById/, "planning overview reads all tenant pages");
+requireContract(planningOverviewRoute, /gt\(jobJourneyRecords\.id, afterId\)/, "planning readback paginates event and plan ledgers");
+requireContract(planningOverviewRoute, /gt\(s04Records\.id, afterId\)/, "planning readback paginates server catalogs");
+requireContract(planningSurface, /<PlanningResourceFields[\s\S]*?startsAt=\{startsAt\}/, "planning editor passes start window");
+requireContract(planningSurface, /<PlanningResourceFields[\s\S]*?endsAt=\{endsAt\}/, "planning editor passes end window");
+requireContract(resourceFields, /resource-options\$\{query \? `\?\$\{query\}` : ""\}/, "planning resource selector queries server availability");
 requireContract(planningWriteRoute, /resolvePlanningResources/, "planning server canonical resource resolution");
 requireContract(planningWriteRoute, /evaluateAgainstTenant/, "planning server tenant conflict evaluation");
+requireContract(communicationsSurface, /CommandMobileNav active="communications"/, "operational navigation in communications");
+requireContract(communicationsSurface, /getAllowedCommandNavigation\(capabilities\)/, "communications navigation is capability filtered");
+requireContract(settingsSurface, /CommandMobileNav active="settings"/, "operational navigation in settings");
+requireContract(commandMapRoute, /MAP_READ_PAGE_SIZE/, "control map pages all canonical records");
+requireContract(commandMapRoute, /max\(locationSamples\.recordedAt\)/, "control map reads the latest GPS point per vehicle");
+requireContract(commandMapRoute, /eq\(trackingSessions\.status, "ACTIVE"\)/, "control map only reads positions from active attendance tracking sessions");
+requireContract(commandMapRoute, /eq\(locationSamples\.trackingSessionId, sample\.trackingSessionId\)/, "control map cannot mix a prior tracking session position into the current session");
+requireContract(commandMapRoute, /eq\(geoLocations\.status, "TEMPORARY"\)/, "control map reads explicitly temporary mission places");
+requireContract(commandMapRoute, /temporaryPlaces: temporaryStops/, "control map returns temporary delivery stops separately from canonical locations");
+requireContract(commandMapRoute, /eq\(routePlans\.tenantId, context\.tenantId\)/, "control map scopes route readback to the current tenant");
+requireContract(operationalMapSurface, /setInterval\(refreshWhenVisible, 15_000\)/, "control map refreshes live readback every 15 seconds while visible");
+requireContract(operationalMapSurface, /value="MISSIONI">Missioni/, "control map offers a dedicated mission filter");
+requireContract(operationalMapSurface, /TAPPA TEMPORANEA/, "control map distinguishes temporary stop details");
+requireContract(operationalMapSurface, /MEZZO IN TRACKING/, "control map exposes selected driver vehicle tracking details");
 
 requireContract(authorityContext, /context\.tenantId/, "authority tenant context");
 requireContract(authorityContext, /assertTenantScope/, "authority tenant assertion");
@@ -94,7 +125,7 @@ requireContract(warehouseRoute, /warehouse\.location\.created/, "warehouse locat
 requireContract(warehouseRoute, /zerow\.warehouse\.location\.created/, "warehouse location outbox");
 requireContract(warehouseRoute, /SITES_READBACK_VERIFIED/, "warehouse location reconciliation");
 requireContract(warehouseCatalogRoute, /INVENTORY_UNIT_CATALOG/, "server unit catalog");
-requireContract(warehouseCatalogRoute, /tenantWarehouses/, "tenant warehouse catalog readback");
+requireContract(warehouseCatalogRoute, /tenantWarehouseAccess/, "tenant warehouse catalog readback");
 requireContract(inventoryRoute, /hasCapability\(context, "warehouse\.register"\)/, "material registration capability gate");
 const registrationGateIndex = inventoryRoute.indexOf('if (action === "register_item" && !hasCapability(context, "warehouse.register"))');
 const inventoryIdempotencyIndex = inventoryRoute.indexOf("const [existingEvent]");
@@ -182,6 +213,8 @@ console.log(JSON.stringify({
   contracts: {
     authorityTeams: "PASS",
     planningAvailability: "PASS",
+    controlMapDriverTracking: "PASS",
+    temporaryMissionPlaces: "PASS",
     tenantAndRoleGuards: "PASS",
     readbackLedger: "PASS",
   },
@@ -201,6 +234,7 @@ console.log(JSON.stringify({
       "warehouse operator movement allowed → material registration denied by warehouse.register",
       "multi-role membership → unioned capabilities → tenant-scoped access",
       "planning window → server resource-options → occupied resource disabled → planning write guard",
+      "active driver attendance session → live control map → temporary mission stop/geofence → removed from operational map at route/mission close",
       "role capability deny/allow → tenant A/B isolation",
     ],
   },

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { assetAssignmentCustodyEnd, assetAssignmentStatus, assetTransportCapabilities, assetUsageMode, vehicleCanTransport, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
@@ -29,6 +29,21 @@ export type MissionResource = {
 };
 
 type JsonObject = Record<string, unknown>;
+
+const RESOURCE_READ_PAGE_SIZE = 500;
+
+async function readAllById<T extends { id: string }>(fetchPage: (afterId?: string) => Promise<T[]>) {
+  const rows: T[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const page = await fetchPage(afterId);
+    rows.push(...page);
+    if (page.length < RESOURCE_READ_PAGE_SIZE) return rows;
+    const lastId = page[page.length - 1]?.id;
+    if (!lastId || lastId === afterId) throw new Error("mission_resource_page_cursor_stalled");
+    afterId = lastId;
+  }
+}
 
 export class MissionResourceError extends Error {
   constructor(
@@ -177,61 +192,81 @@ function referencesForRecord(payload: JsonObject) {
 }
 
 async function activeAssignments(tenantId: string, excludeRecordId?: string) {
-  const rows = await getDb().select().from(jobJourneyRecords).where(and(
-    eq(jobJourneyRecords.tenantId, tenantId),
-    inArray(jobJourneyRecords.domain, ["mission", "planning"]),
-  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1000);
+  const rows = await readAllById((afterId) => getDb().select().from(jobJourneyRecords).where(afterId
+    ? and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      inArray(jobJourneyRecords.domain, ["mission", "planning"]),
+      gt(jobJourneyRecords.id, afterId),
+    )
+    : and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      inArray(jobJourneyRecords.domain, ["mission", "planning"]),
+    )).orderBy(asc(jobJourneyRecords.id)).limit(RESOURCE_READ_PAGE_SIZE));
 
-  return rows.flatMap((row) => {
-    if (row.id === excludeRecordId) return [];
-    if (["DELIVERED", "POD_VERIFIED", "RECONCILED", "CLOSED", "CANCELLED", "REJECTED"].includes(row.status.toUpperCase())) return [];
-    const payload = parseJson(row.payloadJson);
-    const startValue = stringValue(payload.plannedAt || payload.startsAt);
-    if (!validDate(startValue)) return [];
-    let window: { startsAt: string; endsAt: string };
-    try {
-      window = normalizedMissionWindow(startValue, stringValue(payload.plannedEndAt || payload.endsAt) || undefined);
-    } catch {
-      return [];
-    }
-    const references = referencesForRecord(payload);
-    if (!references.length) return [];
-    return [{
-      recordId: row.id,
-      title: row.title,
-      startsAt: window.startsAt,
-      endsAt: window.endsAt,
-      references,
-    }];
-  });
+  return rows
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+    .flatMap((row) => {
+      const status = row.status.toUpperCase();
+      if (row.id === excludeRecordId) return [];
+      if (row.domain === "planning" && status !== "PUBLISHED") return [];
+      if (["DELIVERED", "POD_VERIFIED", "RECONCILED", "CLOSED", "CANCELLED", "REJECTED"].includes(status)) return [];
+      const payload = parseJson(row.payloadJson);
+      const startValue = stringValue(payload.plannedAt || payload.startsAt);
+      if (!validDate(startValue)) return [];
+      let window: { startsAt: string; endsAt: string };
+      try {
+        window = normalizedMissionWindow(startValue, stringValue(payload.plannedEndAt || payload.endsAt) || undefined);
+      } catch {
+        return [];
+      }
+      const references = referencesForRecord(payload);
+      if (!references.length) return [];
+      return [{
+        recordId: row.id,
+        title: row.title,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        references,
+      }];
+    });
 }
 
 async function activeAssetCustody(tenantId: string) {
-  const rows = await getDb().select().from(jobJourneyRecords).where(and(
-    eq(jobJourneyRecords.tenantId, tenantId),
-    eq(jobJourneyRecords.domain, "assets"),
-    eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
-    inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
-  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1000);
-  return rows.flatMap((row) => {
-    const payload = parseJson(row.payloadJson);
-    const assetId = stringValue(payload.assetId, row.jobId);
-    const startsAt = stringValue(payload.startsAt);
-    const plannedEndsAt = stringValue(payload.endsAt) || null;
-    if (!assetId || !validDate(startsAt)) return [];
-    const assignmentKind = stringValue(payload.assignmentKind).toUpperCase() || (plannedEndsAt ? "SHORT_TERM" : "LONG_TERM");
-    const status = assetAssignmentStatus(row.status, startsAt);
-    const endsAt = assetAssignmentCustodyEnd(status, assignmentKind, startsAt, plannedEndsAt);
-    return [{
-      assignmentId: row.id,
-      assetId,
-      assigneeName: stringValue(payload.assigneeName, "Persona assegnata"),
-      assigneeActorId: stringValue(payload.assigneeActorId),
-      assigneeMembershipId: stringValue(payload.assigneeMembershipId),
-      startsAt: new Date(Date.parse(startsAt)).toISOString(),
-      endsAt: endsAt && validDate(endsAt) ? new Date(Date.parse(endsAt)).toISOString() : null,
-    }];
-  });
+  const rows = await readAllById((afterId) => getDb().select().from(jobJourneyRecords).where(afterId
+    ? and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "assets"),
+      eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+      inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
+      gt(jobJourneyRecords.id, afterId),
+    )
+    : and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "assets"),
+      eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+      inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
+    )).orderBy(asc(jobJourneyRecords.id)).limit(RESOURCE_READ_PAGE_SIZE));
+  return rows
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+    .flatMap((row) => {
+      const payload = parseJson(row.payloadJson);
+      const assetId = stringValue(payload.assetId, row.jobId);
+      const startsAt = stringValue(payload.startsAt);
+      const plannedEndsAt = stringValue(payload.endsAt) || null;
+      if (!assetId || !validDate(startsAt)) return [];
+      const assignmentKind = stringValue(payload.assignmentKind).toUpperCase() || (plannedEndsAt ? "SHORT_TERM" : "LONG_TERM");
+      const status = assetAssignmentStatus(row.status, startsAt);
+      const endsAt = assetAssignmentCustodyEnd(status, assignmentKind, startsAt, plannedEndsAt);
+      return [{
+        assignmentId: row.id,
+        assetId,
+        assigneeName: stringValue(payload.assigneeName, "Persona assegnata"),
+        assigneeActorId: stringValue(payload.assigneeActorId),
+        assigneeMembershipId: stringValue(payload.assigneeMembershipId),
+        startsAt: new Date(Date.parse(startsAt)).toISOString(),
+        endsAt: endsAt && validDate(endsAt) ? new Date(Date.parse(endsAt)).toISOString() : null,
+      }];
+    });
 }
 
 export async function getMissionResourceCatalog(args: {
@@ -241,8 +276,19 @@ export async function getMissionResourceCatalog(args: {
   excludeRecordId?: string;
   transportMode?: string;
 }) {
-  const rows = await getDb().select().from(s04Records).where(eq(s04Records.tenantId, args.tenantId)).orderBy(desc(s04Records.updatedAt)).limit(1000);
-  const resources = rows.flatMap((row) => {
+  const rows = await readAllById((afterId) => getDb().select().from(s04Records).where(afterId
+    ? and(
+      eq(s04Records.tenantId, args.tenantId),
+      inArray(s04Records.module, ["assets", "workforce"]),
+      gt(s04Records.id, afterId),
+    )
+    : and(
+      eq(s04Records.tenantId, args.tenantId),
+      inArray(s04Records.module, ["assets", "workforce"]),
+    )).orderBy(asc(s04Records.id)).limit(RESOURCE_READ_PAGE_SIZE));
+  const resources = rows
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+    .flatMap((row) => {
     const kind = resourceKind(row, parseJson(row.payloadJson));
     return kind ? [resourceFromRow(row, kind)] : [];
   });

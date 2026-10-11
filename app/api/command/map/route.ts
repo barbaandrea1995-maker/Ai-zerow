@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, max, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   geofences,
@@ -6,7 +6,10 @@ import {
   jobJourneyRecords,
   locationEvents,
   locationSamples,
+  routePlans,
+  routeStops,
   s04Records,
+  tenantMemberships,
   tenantWarehouses,
   trackingDevices,
   trackingSessions,
@@ -19,6 +22,38 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import { canReadAllLocations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
+
+const MAP_READ_PAGE_SIZE = 500;
+const MAP_READ_BATCH_SIZE = 100;
+
+async function readAllById<T extends { id: string }>(fetchPage: (afterId?: string) => Promise<T[]>) {
+  const rows: T[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const page = await fetchPage(afterId);
+    rows.push(...page);
+    if (page.length < MAP_READ_PAGE_SIZE) return rows;
+    const lastId = page[page.length - 1]?.id;
+    if (!lastId || lastId === afterId) throw new Error("command_map_readback_page_cursor_stalled");
+    afterId = lastId;
+  }
+}
+
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+async function readInBatches<T, R>(items: T[], size: number, readBatch: (batch: T[]) => Promise<R[]>) {
+  const batches = chunks(items, size);
+  const results: R[] = [];
+  for (let index = 0; index < batches.length; index += 8) {
+    const pages = await Promise.all(batches.slice(index, index + 8).map(readBatch));
+    results.push(...pages.flat());
+  }
+  return results;
+}
 
 function roundedCoordinate(valueE6: number) {
   return Math.round((valueE6 / 1_000_000) * 10_000) / 10_000;
@@ -90,6 +125,10 @@ function sampleState(recordedAt: string) {
   return "STALE" as const;
 }
 
+function terminalStatus(value: string | null | undefined) {
+  return ["CLOSED", "COMPLETED", "CANCELLED", "CANCELED", "EXPIRED", "ARCHIVED"].includes(String(value ?? "").toUpperCase());
+}
+
 export async function GET() {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -103,27 +142,33 @@ export async function GET() {
 
   const canViewFleet = hasCapability(context, "location.view.fleet") || hasCapability(context, "location.audit.read");
   const canReadMissions = hasCapability(context, "mission.read");
-  const capability = canViewFleet ? "location.view.fleet" : "location.read.current";
+  const capability = ([
+    "location.view.fleet",
+    "location.audit.read",
+    "location.read.current",
+    "location.read.history",
+    "location.manage.geofences",
+  ] as const).find((candidate) => hasCapability(context, candidate)) ?? "location.read.current";
 
   try {
     const db = getDb();
     const [locationRows, fenceRows, warehouseRows, catalogRows, eventRows, sessionRows, missionRows] = await Promise.all([
-      db.select().from(geoLocations)
-        .where(and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE")))
-        .orderBy(asc(geoLocations.entityType), asc(geoLocations.updatedAt))
-        .limit(500),
-      db.select().from(geofences)
-        .where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.status, "ACTIVE")))
-        .orderBy(asc(geofences.entityType), asc(geofences.updatedAt))
-        .limit(500),
-      db.select().from(tenantWarehouses)
-        .where(and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.status, "active")))
-        .orderBy(asc(tenantWarehouses.name))
-        .limit(200),
-      db.select().from(s04Records)
-        .where(and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, ["operations", "assets", "warehouse"])))
-        .orderBy(desc(s04Records.updatedAt))
-        .limit(800),
+      readAllById((afterId) => db.select().from(geoLocations).where(afterId
+        ? and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE"), gt(geoLocations.id, afterId))
+        : and(eq(geoLocations.tenantId, context.tenantId), eq(geoLocations.status, "ACTIVE")))
+        .orderBy(asc(geoLocations.id)).limit(MAP_READ_PAGE_SIZE)),
+      readAllById((afterId) => db.select().from(geofences).where(afterId
+        ? and(eq(geofences.tenantId, context.tenantId), eq(geofences.status, "ACTIVE"), gt(geofences.id, afterId))
+        : and(eq(geofences.tenantId, context.tenantId), eq(geofences.status, "ACTIVE")))
+        .orderBy(asc(geofences.id)).limit(MAP_READ_PAGE_SIZE)),
+      readAllById((afterId) => db.select().from(tenantWarehouses).where(afterId
+        ? and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.status, "active"), gt(tenantWarehouses.id, afterId))
+        : and(eq(tenantWarehouses.tenantId, context.tenantId), eq(tenantWarehouses.status, "active")))
+        .orderBy(asc(tenantWarehouses.id)).limit(MAP_READ_PAGE_SIZE)),
+      readAllById((afterId) => db.select().from(s04Records).where(afterId
+        ? and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, ["operations", "assets", "warehouse"]), gt(s04Records.id, afterId))
+        : and(eq(s04Records.tenantId, context.tenantId), inArray(s04Records.module, ["operations", "assets", "warehouse"])))
+        .orderBy(asc(s04Records.id)).limit(MAP_READ_PAGE_SIZE)),
       db.select().from(locationEvents)
         .where(and(
           eq(locationEvents.tenantId, context.tenantId),
@@ -131,21 +176,31 @@ export async function GET() {
         ))
         .orderBy(desc(locationEvents.occurredAt))
         .limit(500),
-      db.select().from(trackingSessions)
-        .where(and(
+      readAllById((afterId) => db.select().from(trackingSessions).where(afterId
+        ? and(
           eq(trackingSessions.tenantId, context.tenantId),
           eq(trackingSessions.status, "ACTIVE"),
           ...(canViewFleet ? [] : [eq(trackingSessions.employeeId, context.actorId)]),
-        ))
-        .orderBy(desc(trackingSessions.startedAt))
-        .limit(500),
+          gt(trackingSessions.id, afterId),
+        )
+        : and(
+          eq(trackingSessions.tenantId, context.tenantId),
+          eq(trackingSessions.status, "ACTIVE"),
+          ...(canViewFleet ? [] : [eq(trackingSessions.employeeId, context.actorId)]),
+        )).orderBy(asc(trackingSessions.id)).limit(MAP_READ_PAGE_SIZE)),
       canReadMissions
-        ? db.select().from(jobJourneyRecords)
-          .where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.domain, "mission")))
-          .orderBy(desc(jobJourneyRecords.updatedAt))
-          .limit(500)
+        ? readAllById((afterId) => db.select().from(jobJourneyRecords).where(afterId
+          ? and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.domain, "mission"), gt(jobJourneyRecords.id, afterId))
+          : and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.domain, "mission")))
+          .orderBy(asc(jobJourneyRecords.id)).limit(MAP_READ_PAGE_SIZE))
         : Promise.resolve([]),
     ]);
+    locationRows.sort((left, right) => left.entityType.localeCompare(right.entityType) || left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id));
+    fenceRows.sort((left, right) => left.entityType.localeCompare(right.entityType) || left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id));
+    warehouseRows.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+    catalogRows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    sessionRows.sort((left, right) => right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id));
+    missionRows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
 
     const allLocationsVisible = canReadAllLocations(context);
     const scopeTokens = teamScopeTokens(catalogRows, context);
@@ -156,6 +211,79 @@ export async function GET() {
     const visibleMissionRows = canReadMissions
       ? missionRows.filter((mission) => canViewFleet || visibleCatalogIds.has(mission.jobId))
       : [];
+
+    // Mission routes are read only through the already-authorized mission set.
+    // Temporary delivery places are projected separately below; they never
+    // enter the canonical `locations` collection.
+    const operationalMissions = visibleMissionRows.filter((mission) => !terminalStatus(mission.status));
+    const routePlanRows = operationalMissions.length
+      ? await readInBatches(operationalMissions.map((mission) => mission.id), MAP_READ_BATCH_SIZE, (batch) => db.select().from(routePlans).where(and(
+        eq(routePlans.tenantId, context.tenantId),
+        inArray(routePlans.missionId, batch),
+      )).orderBy(asc(routePlans.id)))
+      : [];
+    const operationalRoutePlans = routePlanRows.filter((plan) => !terminalStatus(plan.status));
+    const routeStopRows = operationalRoutePlans.length
+      ? await readInBatches(operationalRoutePlans.map((plan) => plan.id), MAP_READ_BATCH_SIZE, (batch) => db.select().from(routeStops).where(and(
+        eq(routeStops.tenantId, context.tenantId),
+        inArray(routeStops.routePlanId, batch),
+      )).orderBy(asc(routeStops.sequence)))
+      : [];
+    const temporaryLocationIds = [...new Set(routeStopRows.map((stop) => stop.locationId).filter(Boolean))];
+    const temporaryLocationRows = temporaryLocationIds.length
+      ? await readInBatches(temporaryLocationIds, MAP_READ_BATCH_SIZE, (batch) => db.select().from(geoLocations).where(and(
+        eq(geoLocations.tenantId, context.tenantId),
+        eq(geoLocations.status, "TEMPORARY"),
+        inArray(geoLocations.id, batch),
+      )))
+      : [];
+    const temporaryLocationIdSet = new Set(temporaryLocationRows.map((location) => location.id));
+    const temporaryFenceRows = temporaryLocationRows.length
+      ? await readInBatches(temporaryLocationRows.map((location) => location.id), MAP_READ_BATCH_SIZE, (batch) => db.select().from(geofences).where(and(
+        eq(geofences.tenantId, context.tenantId),
+        eq(geofences.status, "TEMPORARY"),
+        inArray(geofences.locationId, batch),
+      )))
+      : [];
+    const temporaryLocationById = new Map(temporaryLocationRows.map((location) => [location.id, location] as const));
+    const temporaryFenceByLocationId = new Map(temporaryFenceRows.map((fence) => [fence.locationId, fence] as const));
+    const missionById = new Map(visibleMissionRows.map((mission) => [mission.id, mission] as const));
+    const routePlanById = new Map(operationalRoutePlans.map((plan) => [plan.id, plan] as const));
+    const routePlanByMissionId = new Map(operationalRoutePlans.flatMap((plan) => plan.missionId ? [[plan.missionId, plan] as const] : []));
+    const stopsByRoutePlan = new Map<string, typeof routeStops.$inferSelect[]>();
+    for (const stop of routeStopRows) stopsByRoutePlan.set(stop.routePlanId, [...(stopsByRoutePlan.get(stop.routePlanId) ?? []), stop]);
+    const temporaryStops = routeStopRows.flatMap((stop) => {
+      if (!temporaryLocationIdSet.has(stop.locationId)) return [];
+      const plan = routePlanById.get(stop.routePlanId);
+      const mission = plan?.missionId ? missionById.get(plan.missionId) : null;
+      const location = temporaryLocationById.get(stop.locationId);
+      if (!plan || !mission || !location) return [];
+      const metadata = parseJson(stop.evidenceJson);
+      const job = visibleCatalogRows.find((row) => row.id === mission.jobId);
+      return [{
+        id: stop.id,
+        routePlanId: plan.id,
+        missionId: mission.id,
+        missionTitle: mission.title,
+        jobTitle: job?.title ?? null,
+        missionStatus: mission.status,
+        routeStatus: plan.status,
+        sequence: stop.sequence,
+        kind: payloadText(metadata, "kind").toUpperCase() || "STOP",
+        label: payloadText(metadata, "label") || location.formattedAddress || `Tappa ${stop.sequence}`,
+        address: location.formattedAddress,
+        locationId: location.id,
+        coordinates: { latitude: roundedCoordinate(location.latitudeE6), longitude: roundedCoordinate(location.longitudeE6) },
+        status: stop.status,
+        deliveryStatus: stop.deliveryStatus,
+        expectedArrivalAt: stop.expectedArrivalAt,
+        arrivedAt: stop.arrivedAt,
+        departedAt: stop.departedAt,
+        geofenceId: payloadText(metadata, "geofenceId") || temporaryFenceByLocationId.get(location.id)?.id || null,
+        geofenceRadiusMeters: temporaryFenceByLocationId.get(location.id)?.radiusMeters ?? null,
+        temporary: true as const,
+      }];
+    });
     const eventLocationIds = new Set(eventRows.map((event) => event.locationId).filter((value): value is string => Boolean(value)));
     const visibleLocationRows = allLocationsVisible
       ? locationRows
@@ -167,6 +295,7 @@ export async function GET() {
     const visibleFenceRows = allLocationsVisible
       ? fenceRows
       : fenceRows.filter((fence) => visibleLocationRows.some((location) => location.id === fence.locationId));
+    const visibleGeofenceRows = [...visibleFenceRows, ...temporaryFenceRows];
     const records = new Map(visibleCatalogRows.map((row) => {
       const parsed = recordForResponse(row);
       return [parsed.id, parsed] as const;
@@ -229,28 +358,69 @@ export async function GET() {
     });
 
     const mergedLocations = [...locations, ...warehouseLocations];
-    const visibleSessionIds = new Set(sessionRows.map((session) => session.id));
-    const sampleFilters = [
-      eq(locationSamples.tenantId, context.tenantId),
-      ...(canViewFleet ? [] : visibleSessionIds.size ? [inArray(locationSamples.trackingSessionId, [...visibleSessionIds])] : [eq(locationSamples.trackingSessionId, "__NO_VISIBLE_SESSION__")]),
-    ];
-    const sampleRows = await db.select().from(locationSamples)
-      .where(and(...sampleFilters))
-      .orderBy(desc(locationSamples.recordedAt))
-      .limit(1_000);
+    const latestSessionByVehicle = new Map<string, typeof trackingSessions.$inferSelect>();
+    for (const session of sessionRows) if (!latestSessionByVehicle.has(session.vehicleId)) latestSessionByVehicle.set(session.vehicleId, session);
+    const currentSessions = [...latestSessionByVehicle.values()];
+    const sampleSessions = chunks(currentSessions.map((session) => session.id), MAP_READ_BATCH_SIZE);
+    const latestRecordedAtBySession = new Map<string, { vehicleId: string; recordedAt: string }>();
+    for (const sessionBatch of sampleSessions) {
+      if (sessionBatch.length === 0) continue;
+      const latestTimes = await db.select({
+        trackingSessionId: locationSamples.trackingSessionId,
+        vehicleId: locationSamples.vehicleId,
+        recordedAt: max(locationSamples.recordedAt),
+      }).from(locationSamples).where(and(
+        eq(locationSamples.tenantId, context.tenantId),
+        inArray(locationSamples.trackingSessionId, sessionBatch),
+      )).groupBy(locationSamples.trackingSessionId, locationSamples.vehicleId);
+      for (const row of latestTimes) {
+        if (!row.recordedAt || !row.trackingSessionId) continue;
+        latestRecordedAtBySession.set(row.trackingSessionId, { vehicleId: row.vehicleId, recordedAt: row.recordedAt });
+      }
+    }
+    const latestSamplePairs = [...latestRecordedAtBySession].map(([trackingSessionId, sample]) => ({ trackingSessionId, ...sample }));
+    const sampleRows = await readInBatches(latestSamplePairs, MAP_READ_BATCH_SIZE, (sampleBatch) => db.select().from(locationSamples).where(and(
+        eq(locationSamples.tenantId, context.tenantId),
+        or(...sampleBatch.map((sample) => and(
+          eq(locationSamples.trackingSessionId, sample.trackingSessionId),
+          eq(locationSamples.vehicleId, sample.vehicleId),
+          eq(locationSamples.recordedAt, sample.recordedAt),
+        ))),
+      )).orderBy(desc(locationSamples.recordedAt), desc(locationSamples.id)));
 
     const deviceIds = [...new Set(sampleRows.map((sample) => sample.trackingDeviceId).filter(Boolean))];
     const devices = deviceIds.length
-      ? await db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), inArray(trackingDevices.id, deviceIds))).limit(500)
+      ? await readInBatches(deviceIds, MAP_READ_BATCH_SIZE, (batch) => db.select().from(trackingDevices)
+        .where(and(eq(trackingDevices.tenantId, context.tenantId), inArray(trackingDevices.id, batch))))
       : [];
     const deviceById = new Map(devices.map((device) => [device.id, device] as const));
-    const sessionByVehicle = new Map(sessionRows.map((session) => [session.vehicleId, session] as const));
+    const sessionByVehicle = latestSessionByVehicle;
+    const driverIds = [...new Set(currentSessions.map((session) => session.employeeId))];
+    const driverRows = driverIds.length
+      ? await readInBatches(driverIds, MAP_READ_BATCH_SIZE, (batch) => db.select().from(tenantMemberships).where(and(
+        eq(tenantMemberships.tenantId, context.tenantId),
+        eq(tenantMemberships.status, "active"),
+        inArray(tenantMemberships.actorId, batch),
+      )))
+      : [];
+    const driverNameById = new Map(driverRows.map((driver) => [driver.actorId, driver.displayName] as const));
     const latestByVehicle = new Map<string, typeof sampleRows[number]>();
     for (const sample of sampleRows) if (!latestByVehicle.has(sample.vehicleId)) latestByVehicle.set(sample.vehicleId, sample);
 
     const vehicles = [...latestByVehicle.values()].map((sample) => {
       const session = sessionByVehicle.get(sample.vehicleId);
       const device = deviceById.get(sample.trackingDeviceId);
+      const sessionState = session ? parseJson(session.engineStateJson) : {};
+      const operationalContext = sessionState.__operationalContext && typeof sessionState.__operationalContext === "object" && !Array.isArray(sessionState.__operationalContext)
+        ? sessionState.__operationalContext as Record<string, unknown>
+        : {};
+      const missionId = payloadText(operationalContext, "missionId");
+      const mission = missionId ? missionById.get(missionId) : null;
+      const plan = missionId ? routePlanByMissionId.get(missionId) : null;
+      const currentStop = plan
+        ? (stopsByRoutePlan.get(plan.id) ?? []).find((stop) => !["COMPLETED", "DEPARTED"].includes(stop.status.toUpperCase()))
+        : null;
+      const currentStopMetadata = currentStop ? parseJson(currentStop.evidenceJson) : {};
       return {
         id: sample.vehicleId,
         label: assetLabel(sample.vehicleId, records),
@@ -262,6 +432,16 @@ export async function GET() {
         heading: sample.heading,
         trackingSessionId: sample.trackingSessionId,
         employeeId: session?.employeeId ?? null,
+        driverName: session ? driverNameById.get(session.employeeId) ?? null : null,
+        missionId: mission?.id ?? null,
+        missionTitle: mission?.title ?? null,
+        nextStop: currentStop ? {
+          sequence: currentStop.sequence,
+          label: payloadText(currentStopMetadata, "label") || null,
+          kind: payloadText(currentStopMetadata, "kind").toUpperCase() || null,
+          status: currentStop.status,
+          deliveryStatus: currentStop.deliveryStatus,
+        } : null,
         trackingDeviceId: sample.trackingDeviceId,
         deviceLabel: device?.label ?? sample.trackingDeviceId,
         provider: sample.provider,
@@ -278,8 +458,8 @@ export async function GET() {
       capability,
       action: "READ_CURRENT_MAP",
       resourceType: "COMMAND_OPERATIONAL_MAP",
-      purpose: "Visualizzazione della mappa operativa con sedi canoniche e ultima posizione GPS autorizzata.",
-      metadata: { locationCount: mergedLocations.length, vehicleCount: vehicles.length, missionExceptionCount: missionExceptions.length, fleetVisible: canViewFleet },
+      purpose: "Visualizzazione della mappa operativa con sedi canoniche, tracking da sessioni attive e tappe temporanee delle missioni autorizzate.",
+      metadata: { locationCount: mergedLocations.length, vehicleCount: vehicles.length, temporaryPlaceCount: temporaryStops.length, missionExceptionCount: missionExceptions.length, fleetVisible: canViewFleet },
     });
 
     return Response.json({
@@ -289,7 +469,8 @@ export async function GET() {
         ...location,
         latestEvent: latestEventByLocation.get(location.id) ? eventForResponse(latestEventByLocation.get(location.id)!) : null,
       })),
-      geofences: visibleFenceRows.map((fence) => ({
+      temporaryPlaces: temporaryStops,
+      geofences: visibleGeofenceRows.map((fence) => ({
         id: fence.id,
         locationId: fence.locationId,
         entityType: fence.entityType,
@@ -304,6 +485,8 @@ export async function GET() {
         polygon: (() => {
           try { return JSON.parse(fence.polygonJson) as unknown; } catch { return []; }
         })(),
+        temporary: temporaryLocationIdSet.has(fence.locationId),
+        routeStopId: temporaryStops.find((stop) => stop.locationId === fence.locationId)?.id ?? null,
       })),
       vehicles: vehicles.map((vehicle) => ({ ...vehicle, latestEvent: latestEventByVehicle.get(vehicle.id) ? eventForResponse(latestEventByVehicle.get(vehicle.id)!) : null })),
       activeSessions: sessionRows.map((session) => ({ id: session.id, employeeId: session.employeeId, vehicleId: session.vehicleId, trackingDeviceId: session.trackingDeviceId, startedAt: session.startedAt, source: session.trackingSource })),

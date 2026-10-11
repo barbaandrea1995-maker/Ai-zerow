@@ -83,7 +83,7 @@ import type {
 
 type Tone = "lime" | "amber" | "cyan" | "red";
 type ReadbackStatus = "loading" | "online" | "partial" | "empty" | "error";
-type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "GEOFENCE";
+type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "MISSIONI" | "GEOFENCE";
 type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
 type AssetTab = "OPERATIVI" | "MANUTENZIONE" | "TUTTI";
 type AiRuntimeStatus = "checking" | "ready" | "not_configured" | "unavailable";

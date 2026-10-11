@@ -1,4 +1,5 @@
 import { hasCapability } from "@/lib/authority-context";
+import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 import { requirePageCapability } from "@/lib/page-access";
 import SettingsClient from "./settings-client";
 
@@ -14,6 +15,9 @@ export default async function SettingsPage() {
         name: authority.actorName,
       }}
       canManageLocation={hasCapability(authority, "location.manage.tracking.devices")}
+      allowedNavigation={getAllowedCommandNavigation(authority.capabilities).map((item) => item.id)}
+      role={authority.role}
+      roles={authority.roles}
     />
   );
 }

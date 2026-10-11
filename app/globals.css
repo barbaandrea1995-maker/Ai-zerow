@@ -131,6 +131,27 @@ body {
 }
 
 /* The operational map keeps the geographic context readable while matching the carbon command surface. */
+.zerow-map-frame {
+  isolation: isolate;
+}
+
+.zerow-map-frame > div:first-child {
+  z-index: 0;
+}
+
+.zerow-map-frame > .absolute {
+  z-index: 20;
+}
+
+.zerow-map-frame > .pointer-events-none {
+  z-index: 1;
+}
+
+.zerow-map-frame > .absolute.right-3.top-3,
+.zerow-map-frame > .absolute.bottom-3.left-3.right-3 {
+  z-index: 30;
+}
+
 .zerow-map-surface .leaflet-container {
   background: #eef2ef;
   color: var(--zw-text);
@@ -154,13 +175,149 @@ body {
   color: rgba(200, 255, 34, 0.86);
 }
 
-.zerow-map-surface .zerow-map-marker {
-  transition: filter 160ms ease, stroke-width 160ms ease;
+.zerow-map-surface .zerow-map-marker-icon {
+  overflow: visible;
+  border: 0;
+  background: transparent;
 }
 
-.zerow-map-surface .zerow-map-marker-selected {
-  filter: drop-shadow(0 0 8px rgba(200, 255, 34, 0.72));
-  stroke-width: 3px;
+.zerow-map-surface .zerow-map-marker {
+  --marker-color: #d8e4d9;
+  --marker-fill: rgba(8, 16, 11, 0.96);
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 50px;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.72));
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.zerow-map-surface .zerow-map-marker--warehouse {
+  --marker-color: #59d9ff;
+  --marker-fill: rgba(4, 31, 40, 0.96);
+}
+
+.zerow-map-surface .zerow-map-marker--site {
+  --marker-color: #c8ff22;
+  --marker-fill: rgba(26, 40, 5, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--customer {
+  --marker-color: #82e7ff;
+  --marker-fill: rgba(7, 27, 35, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--location {
+  --marker-color: #d8e4d9;
+  --marker-fill: rgba(15, 23, 18, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--temporary,
+.zerow-map-surface .zerow-map-marker--stale {
+  --marker-color: #ffb52e;
+  --marker-fill: rgba(44, 27, 4, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--live {
+  --marker-color: #c8ff22;
+  --marker-fill: rgba(26, 40, 5, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--recent {
+  --marker-color: #59d9ff;
+  --marker-fill: rgba(4, 31, 40, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker--unknown {
+  --marker-color: #ff6d5f;
+  --marker-fill: rgba(44, 12, 11, 0.97);
+}
+
+.zerow-map-surface .zerow-map-marker__pin {
+  position: absolute;
+  inset: 0;
+  width: 44px;
+  height: 50px;
+}
+
+.zerow-map-surface .zerow-map-marker__pin path {
+  fill: var(--marker-fill);
+  stroke: var(--marker-color);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.zerow-map-surface .zerow-map-marker__glyph {
+  position: absolute;
+  top: 9px;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--marker-color);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.zerow-map-surface .zerow-map-marker--selected {
+  z-index: 1000 !important;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--marker-color), transparent 20%));
+  transform: scale(1.12);
+}
+
+.zerow-map-surface .zerow-map-marker--selected .zerow-map-marker__pin path {
+  stroke-width: 2.4;
+}
+
+.zerow-map-surface .zerow-map-marker--live::before {
+  position: absolute;
+  top: 5px;
+  left: 9px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid color-mix(in srgb, var(--marker-color), transparent 20%);
+  border-radius: 9999px;
+  content: "";
+  animation: zw-marker-pulse 1800ms ease-out infinite;
+}
+
+.zerow-map-surface .leaflet-tooltip.zerow-map-tooltip {
+  max-width: min(260px, calc(100vw - 48px));
+  padding: 8px 10px;
+  border: 1px solid rgba(200, 255, 34, 0.28);
+  border-radius: 10px;
+  background: rgba(5, 9, 6, 0.96);
+  color: #f5f8f2;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  white-space: normal;
+  backdrop-filter: blur(12px);
+}
+
+.zerow-map-surface .leaflet-tooltip.zerow-map-tooltip::before {
+  border-top-color: rgba(5, 9, 6, 0.96);
+}
+
+.zerow-map-surface .zerow-map-tooltip-content {
+  display: grid;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.zerow-map-surface .zerow-map-tooltip-content strong {
+  color: #f5f8f2;
+  font-size: 11px;
+}
+
+.zerow-map-surface .zerow-map-tooltip-content span {
+  color: #aeb9ad;
+}
+
+.zerow-map-surface .leaflet-marker-icon:focus-visible {
+  outline: 2px solid #c8ff22;
+  outline-offset: 3px;
+  border-radius: 12px;
 }
 
 /* Selection details belong to the document flow, below the map, especially on touch devices. */
@@ -193,8 +350,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .zerow-map-surface .zerow-map-marker {
+  .zerow-map-surface .zerow-map-marker,
+  .zerow-map-surface .zerow-map-marker--live::before {
     transition: none;
+    animation: none;
   }
 }
 

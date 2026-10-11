@@ -43,7 +43,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readback } from "@/lib/client-readback";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
 
-type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "GEOFENCE";
+type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "MISSIONI" | "GEOFENCE";
 type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
 type AssetTab = "OPERATIVI" | "MANUTENZIONE" | "TUTTI";
 type Tone = "lime" | "amber" | "cyan" | "red";

@@ -290,6 +290,10 @@ assert(jobWorkspace.includes("canWriteOperations"), "Job workspace mutation cont
 
 const mobileNavigation = await readFile(join(root, "components", "command-mobile-nav.tsx"), "utf8");
 assert(mobileNavigation.includes("canOpenCommand"), "Mobile navigation must hide Command-only destinations from field roles");
+const communicationsMobileSurface = await readFile(join(root, "components", "communications-control.tsx"), "utf8");
+assert(communicationsMobileSurface.includes('CommandMobileNav active="communications"') && communicationsMobileSurface.includes("getAllowedCommandNavigation(capabilities)"), "Communications must retain capability-filtered operational mobile navigation");
+const settingsMobileSurface = await readFile(join(root, "app", "settings", "settings-client.tsx"), "utf8");
+assert(settingsMobileSurface.includes('CommandMobileNav active="settings"'), "Settings must retain operational mobile navigation");
 
 const preferencesRoute = await readFile(join(root, "app", "api", "command", "preferences", "route.ts"), "utf8");
 assert(preferencesRoute.includes("context.tenantId"), "Preference writes must derive tenant from authority context");
@@ -409,19 +413,19 @@ assert(planningOptionsRoute.includes('hasCapability(context, "planning.read")'),
 assert(planningOptionsRoute.includes("unavailableAssets"), "Planning resource options must expose unavailable assets");
 assert(planningOptionsRoute.includes("startsAt") && planningOptionsRoute.includes("endsAt") && planningOptionsRoute.includes("unavailableForWindow"), "Planning resource options must expose server-side window availability readback");
 const planningResources = await readFile(join(root, "lib", "planning-resources.ts"), "utf8");
-assert(planningResources.includes("activePlanningAssignments") && planningResources.includes("DRAFT") && planningResources.includes("PUBLISHED") && planningResources.includes("availableForWindow"), "Planning resource registry must evaluate active tenant assignments server-side");
+assert(planningResources.includes("activePlanningAssignments") && planningResources.includes('eq(jobJourneyRecords.status, "PUBLISHED")') && planningResources.includes("availableForWindow") && planningResources.includes("readAllById") && planningResources.includes("gt(jobJourneyRecords.id, afterId)"), "Planning resource registry must evaluate every published tenant assignment server-side");
 const planningSurface = await readFile(join(root, "components", "planning-control.tsx"), "utf8");
 assert(planningSurface.includes("/api/planning") && planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: \"draft\"'), "Planning module must provide a central readback and canonical resource draft flow");
 assert(planningSurface.includes("openMissionFromPlan") && planningSurface.includes("Prepara missione") && planningSurface.includes("Apri missione") && planningSurface.includes("linkedMission"), "Published transport plans must expose a controlled handoff and linked mission readback");
 const planningResourceFields = await readFile(join(root, "components", "planning-resource-fields.tsx"), "utf8");
 assert(planningResourceFields.includes("startsAt") && planningResourceFields.includes("endsAt") && planningResourceFields.includes("disabled={!available}"), "Planning UI must consume server-side availability and disable occupied resources");
 const planningIndexRoute = await readFile(join(root, "app", "api", "planning", "route.ts"), "utf8");
-assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId") && planningIndexRoute.includes("linkedMissionByPlan") && planningIndexRoute.includes("missionExecutionStatus"), "Central planning readback must be capability-gated, tenant-scoped and expose mission execution state");
+assert(planningIndexRoute.includes('hasCapability(context, "planning.read")') && planningIndexRoute.includes("tenantId") && planningIndexRoute.includes("linkedMissionByPlan") && planningIndexRoute.includes("missionExecutionStatus") && planningIndexRoute.includes("readAllById") && planningIndexRoute.includes("gt(jobJourneyRecords.id, afterId)") && planningIndexRoute.includes("gt(s04Records.id, afterId)"), "Central planning readback must be capability-gated, tenant-scoped, complete across pages and expose mission execution state");
 assert(planningIndexRoute.includes("jobModule") && planningIndexRoute.includes("routeProgressForMission") && planningIndexRoute.includes("missionScheduleReadback") && planningIndexRoute.includes("missionExceptionReadback") && planningIndexRoute.includes("exceptionsOpen") && planningSurface.includes("Esecuzione") && planningSurface.includes("executionStatus") && planningSurface.includes("completedStops") && planningSurface.includes("Finestra") && planningSurface.includes("missionExceptionLabel"), "Planning readback must identify the owning operational domain and render mission execution, route progress, schedule coherence and exceptions");
 
 const commandMapRoute = await readFile(join(root, "app", "api", "command", "map", "route.ts"), "utf8");
 const operationalMapSurface = await readFile(join(root, "components", "operational-map-board.tsx"), "utf8");
-assert(commandMapRoute.includes("jobJourneyRecords") && commandMapRoute.includes('hasCapability(context, "mission.read")') && commandMapRoute.includes("storedMissionException") && commandMapRoute.includes("missionExceptions") && commandMapRoute.includes("missionExceptionCount"), "Control map readback must expose tenant-scoped mission exceptions from the governed mission ledger");
+assert(commandMapRoute.includes("jobJourneyRecords") && commandMapRoute.includes('hasCapability(context, "mission.read")') && commandMapRoute.includes("storedMissionException") && commandMapRoute.includes("missionExceptions") && commandMapRoute.includes("missionExceptionCount") && commandMapRoute.includes("readAllById") && commandMapRoute.includes("max(locationSamples.recordedAt)"), "Control map readback must page canonical tenant records and expose latest GPS positions and governed mission exceptions");
 assert(operationalMapSurface.includes("MissionExceptionSignals") && operationalMapSurface.includes("MISSIONI / ECCEZIONI") && operationalMapSurface.includes("missionExceptionLabel"), "Control map must render mission exceptions below the map without exposing raw GPS data");
 
 const teamsRoute = await readFile(join(root, "app", "api", "authority", "teams", "route.ts"), "utf8");
@@ -476,7 +480,7 @@ assert(tenantProfileRoute.includes('hasCapability(context, "tenant.manage")') &&
 const tenantSchema = await readFile(join(root, "db", "schema.ts"), "utf8");
 assert(tenantSchema.includes("operatingTransportModesJson"), "Tenant schema must persist transport mode configuration");
 const missionResourceContract = await readFile(join(root, "lib", "mission-resources.ts"), "utf8");
-assert(missionResourceContract.includes("activeAssignments") && missionResourceContract.includes("normalizedMissionWindow"), "Mission resource registry must evaluate tenant-scoped time-window conflicts");
+assert(missionResourceContract.includes("activeAssignments") && missionResourceContract.includes("normalizedMissionWindow") && missionResourceContract.includes("readAllById") && missionResourceContract.includes("gt(jobJourneyRecords.id, afterId)") && missionResourceContract.includes("gt(s04Records.id, afterId)") && missionResourceContract.includes('row.domain === "planning" && status !== "PUBLISHED"'), "Mission resource registry must evaluate all tenant-scoped catalog records and only published planning reservations");
 const missionResourceRoute = await readFile(join(root, "app", "api", "mission", "resources", "route.ts"), "utf8");
 assert(missionResourceRoute.includes("server_validated_ids_only") && missionResourceRoute.includes("tenant_scoped_lifecycle_and_time_window"), "Mission resource options must expose the server validation contract");
 const missionResourceFields = await readFile(join(root, "components", "mission-resource-fields.tsx"), "utf8");
@@ -484,12 +488,11 @@ assert(missionResourceFields.includes("/api/mission/resources") && missionResour
 assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
 assert(missionResourceFields.includes("onCargoAssetsChange") && missionResourceFields.includes("Seleziona uno o più asset reali"), "Mission resource selector must support multiple assets with readable identity");
 const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
-assert(planningJourney.includes("PlanningResourceFields") && planningJourney.includes("resourceIds: planningResourceIds") && planningJourney.includes("startsAt={planningStartsAt}") && planningJourney.includes("endsAt={planningEndsAt}"), "Planning UI must select canonical resource IDs and server-window availability");
-assert(!planningJourney.includes('name="responsible"') && planningJourney.includes("Attività della giornata"), "Planning UI must not reintroduce a free-text responsible field");
-assert(planningJourney.includes("transportMode") && planningJourney.includes("TRANSPORT_MODE_CATALOG"), "Journey transport UI must expose tenant-enabled transport modes");
+assert(!planningJourney.includes('name="responsible"'), "Planning UI must not reintroduce a free-text responsible field");
+assert(missionControl.includes("transportMode") && missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes("operatingTransportModes"), "Mission UI must expose only tenant-enabled transport modes");
+assert(planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: "draft"') && planningSurface.includes("startsAt={startsAt}") && planningSurface.includes("endsAt={endsAt}"), "Central planning UI must select canonical resource IDs and send the server availability window");
 const operationsPlanningPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
-assert(operationsPlanningPage.includes("savePlanningDraft") && operationsPlanningPage.includes("PlanningResourceFields"), "Operations planning surface must persist a real draft with canonical resources");
-assert(operationsPlanningPage.includes("startsAt={planningStartsAt}") && operationsPlanningPage.includes("endsAt={planningEndsAt}") && operationsPlanningPage.includes("unavailableForWindow"), "Operations planning surface must consume server-side window availability");
+assert(operationsPlanningPage.includes("/planning/resource-options") && operationsPlanningPage.includes("planningReadbackKey"), "Operations workspace must load server-side resource availability for the selected job");
 const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
 assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");
 

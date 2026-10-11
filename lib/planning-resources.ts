@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantMemberships } from "@/db/schema";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
@@ -245,14 +245,38 @@ function overlaps(left: PlanningAvailabilityWindow, right: PlanningAvailabilityW
     && leftStart < rightEnd && rightStart < leftEnd;
 }
 
+const RESOURCE_READ_PAGE_SIZE = 500;
+
+async function readAllById<T extends { id: string }>(fetchPage: (afterId?: string) => Promise<T[]>) {
+  const rows: T[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const page = await fetchPage(afterId);
+    rows.push(...page);
+    if (page.length < RESOURCE_READ_PAGE_SIZE) return rows;
+    const lastId = page[page.length - 1]?.id;
+    if (!lastId || lastId === afterId) throw new Error("planning_resource_page_cursor_stalled");
+    afterId = lastId;
+  }
+}
+
 async function activePlanningAssignments(tenantId: string, excludedId?: string) {
-  const rows = await getDb().select().from(jobJourneyRecords).where(and(
-    eq(jobJourneyRecords.tenantId, tenantId),
-    eq(jobJourneyRecords.domain, "planning"),
-    eq(jobJourneyRecords.status, "PUBLISHED"),
-  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+  const db = getDb();
+  const rows = await readAllById((afterId) => db.select().from(jobJourneyRecords).where(afterId
+    ? and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "planning"),
+      eq(jobJourneyRecords.status, "PUBLISHED"),
+      gt(jobJourneyRecords.id, afterId),
+    )
+    : and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "planning"),
+      eq(jobJourneyRecords.status, "PUBLISHED"),
+    )).orderBy(asc(jobJourneyRecords.id)).limit(RESOURCE_READ_PAGE_SIZE));
 
   return rows
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
     .filter((row) => row.id !== excludedId)
     .flatMap((row) => {
       const payload = parsePayload(row.payloadJson);
@@ -269,12 +293,22 @@ async function activePlanningAssignments(tenantId: string, excludedId?: string) 
 }
 
 async function activeAssetCustody(tenantId: string) {
-  const rows = await getDb().select().from(jobJourneyRecords).where(and(
-    eq(jobJourneyRecords.tenantId, tenantId),
-    eq(jobJourneyRecords.domain, "assets"),
-    eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
-    inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
-  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1_000);
+  const db = getDb();
+  const rows = await readAllById((afterId) => db.select().from(jobJourneyRecords).where(afterId
+    ? and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "assets"),
+      eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+      inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
+      gt(jobJourneyRecords.id, afterId),
+    )
+    : and(
+      eq(jobJourneyRecords.tenantId, tenantId),
+      eq(jobJourneyRecords.domain, "assets"),
+      eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+      inArray(jobJourneyRecords.status, ["ACTIVE", "SCHEDULED"]),
+    )).orderBy(asc(jobJourneyRecords.id)).limit(RESOURCE_READ_PAGE_SIZE));
+  rows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
   return rows.flatMap((row) => {
     const payload = parsePayload(row.payloadJson);
     const assetId = text(payload.assetId, row.jobId);
@@ -307,11 +341,18 @@ export async function getPlanningResourceOptions(
   profile: PlanningResourceProfile,
   excludedPlanId?: string,
 ) {
+  const db = getDb();
   const [rows, assignments, activeMembershipRows, custodyRows] = await Promise.all([
-    getDb().select().from(s04Records)
-    .where(eq(s04Records.tenantId, tenantId))
-    .orderBy(desc(s04Records.updatedAt))
-    .limit(500),
+    readAllById((afterId) => db.select().from(s04Records).where(afterId
+      ? and(
+        eq(s04Records.tenantId, tenantId),
+        inArray(s04Records.module, ["assets", "workforce"]),
+        gt(s04Records.id, afterId),
+      )
+      : and(
+        eq(s04Records.tenantId, tenantId),
+        inArray(s04Records.module, ["assets", "workforce"]),
+      )).orderBy(asc(s04Records.id)).limit(RESOURCE_READ_PAGE_SIZE)),
     window ? activePlanningAssignments(tenantId, excludedPlanId) : Promise.resolve([]),
     getDb().select({
       id: tenantMemberships.id,
@@ -326,6 +367,7 @@ export async function getPlanningResourceOptions(
     )),
     activeAssetCustody(tenantId),
   ]);
+  rows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
   const activeMembershipIds = new Set(activeMembershipRows.map((membership) => membership.id));
   const planningMembershipIds = new Set(activeMembershipRows.filter((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);

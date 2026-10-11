@@ -7,11 +7,19 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, KeyRound, LogOut, Mail, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
+import { CommandMobileNav } from "@/components/command-mobile-nav";
 import GpsProviderControl from "@/components/gps-provider-control";
+import type { CommandNavigationId } from "@/lib/command-dashboard";
 
 const authClient = createAuthClient();
 
-export default function SettingsClient({ actor, canManageLocation }: { actor: AccountActor; canManageLocation: boolean }) {
+export default function SettingsClient({ actor, canManageLocation, allowedNavigation, role, roles }: {
+  actor: AccountActor;
+  canManageLocation: boolean;
+  allowedNavigation: CommandNavigationId[];
+  role: string;
+  roles: string[];
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<"password" | "signOut" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -244,6 +252,7 @@ export default function SettingsClient({ actor, canManageLocation }: { actor: Ac
           </span>
         </footer>
       </div>
+      <CommandMobileNav active="settings" allowedNavigation={allowedNavigation} role={role} roles={roles} />
     </main>
   );
 }

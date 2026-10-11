@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, routePlans, routeStops, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
@@ -8,6 +8,41 @@ import { planningCatalog } from "@/lib/planning-catalog";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
+
+const READ_PAGE_SIZE = 500;
+const RELATED_ID_BATCH_SIZE = 100;
+const RELATED_ID_BATCH_CONCURRENCY = 8;
+
+async function readAllById<T extends { id: string }>(fetchPage: (afterId?: string) => Promise<T[]>) {
+  const rows: T[] = [];
+  let afterId: string | undefined;
+  while (true) {
+    const page = await fetchPage(afterId);
+    rows.push(...page);
+    if (page.length < READ_PAGE_SIZE) return rows;
+    const lastId = page[page.length - 1]?.id;
+    if (!lastId || lastId === afterId) throw new Error("planning_readback_page_cursor_stalled");
+    afterId = lastId;
+  }
+}
+
+async function readRelatedById<T extends { id: string }>(
+  ids: string[],
+  fetchPage: (batch: string[], afterId?: string) => Promise<T[]>,
+) {
+  const batches: string[][] = [];
+  for (let index = 0; index < ids.length; index += RELATED_ID_BATCH_SIZE) {
+    batches.push(ids.slice(index, index + RELATED_ID_BATCH_SIZE));
+  }
+  const rows: T[] = [];
+  for (let index = 0; index < batches.length; index += RELATED_ID_BATCH_CONCURRENCY) {
+    const batchRows = await Promise.all(batches
+      .slice(index, index + RELATED_ID_BATCH_CONCURRENCY)
+      .map((batch) => readAllById((afterId) => fetchPage(batch, afterId))));
+    rows.push(...batchRows.flat());
+  }
+  return rows;
+}
 
 function parseJson(value: string) {
   try {
@@ -200,39 +235,79 @@ export async function GET() {
   try {
     const db = getDb();
     const missionRowsQuery = hasCapability(context, "mission.read")
-      ? db.select().from(jobJourneyRecords).where(and(
-        eq(jobJourneyRecords.tenantId, context.tenantId),
-        eq(jobJourneyRecords.domain, "mission"),
-      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500)
+      ? readAllById((afterId) => db.select().from(jobJourneyRecords).where(afterId
+        ? and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.domain, "mission"),
+          gt(jobJourneyRecords.id, afterId),
+        )
+        : and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.domain, "mission"),
+        )).orderBy(asc(jobJourneyRecords.id)).limit(READ_PAGE_SIZE))
       : Promise.resolve([]);
     const [jobs, plans, workforceRows, missionRows] = await Promise.all([
-      db.select().from(s04Records).where(and(
-        eq(s04Records.tenantId, context.tenantId),
-        inArray(s04Records.module, allowedModules),
-      )).orderBy(desc(s04Records.updatedAt)).limit(500),
-      db.select().from(jobJourneyRecords).where(and(
-        eq(jobJourneyRecords.tenantId, context.tenantId),
-        eq(jobJourneyRecords.domain, "planning"),
-      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500),
-      db.select().from(s04Records).where(and(
-        eq(s04Records.tenantId, context.tenantId),
-        eq(s04Records.module, "workforce"),
-      )).limit(500),
+      readAllById((afterId) => db.select().from(s04Records).where(afterId
+        ? and(
+          eq(s04Records.tenantId, context.tenantId),
+          inArray(s04Records.module, allowedModules),
+          gt(s04Records.id, afterId),
+        )
+        : and(
+          eq(s04Records.tenantId, context.tenantId),
+          inArray(s04Records.module, allowedModules),
+        )).orderBy(asc(s04Records.id)).limit(READ_PAGE_SIZE)),
+      readAllById((afterId) => db.select().from(jobJourneyRecords).where(afterId
+        ? and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.domain, "planning"),
+          gt(jobJourneyRecords.id, afterId),
+        )
+        : and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.domain, "planning"),
+        )).orderBy(asc(jobJourneyRecords.id)).limit(READ_PAGE_SIZE)),
+      readAllById((afterId) => db.select().from(s04Records).where(afterId
+        ? and(
+          eq(s04Records.tenantId, context.tenantId),
+          eq(s04Records.module, "workforce"),
+          gt(s04Records.id, afterId),
+        )
+        : and(
+          eq(s04Records.tenantId, context.tenantId),
+          eq(s04Records.module, "workforce"),
+        )).orderBy(asc(s04Records.id)).limit(READ_PAGE_SIZE)),
       missionRowsQuery,
     ]);
+    jobs.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    plans.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    missionRows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
     const missionIds = missionRows.map((mission) => mission.id);
     const routePlanRows = missionIds.length
-      ? await db.select().from(routePlans).where(and(
-        eq(routePlans.tenantId, context.tenantId),
-        inArray(routePlans.missionId, missionIds),
-      )).limit(500)
+      ? await readRelatedById(missionIds, (batch, afterId) => db.select().from(routePlans).where(afterId
+        ? and(
+          eq(routePlans.tenantId, context.tenantId),
+          inArray(routePlans.missionId, batch),
+          gt(routePlans.id, afterId),
+        )
+        : and(
+          eq(routePlans.tenantId, context.tenantId),
+          inArray(routePlans.missionId, batch),
+        )).orderBy(asc(routePlans.id)).limit(READ_PAGE_SIZE))
       : [];
     const routeStopRows = routePlanRows.length
-      ? await db.select().from(routeStops).where(and(
-        eq(routeStops.tenantId, context.tenantId),
-        inArray(routeStops.routePlanId, routePlanRows.map((plan) => plan.id)),
-      )).limit(1_000)
+      ? await readRelatedById(routePlanRows.map((plan) => plan.id), (batch, afterId) => db.select().from(routeStops).where(afterId
+        ? and(
+          eq(routeStops.tenantId, context.tenantId),
+          inArray(routeStops.routePlanId, batch),
+          gt(routeStops.id, afterId),
+        )
+        : and(
+          eq(routeStops.tenantId, context.tenantId),
+          inArray(routeStops.routePlanId, batch),
+        )).orderBy(asc(routeStops.id)).limit(READ_PAGE_SIZE))
       : [];
+    routePlanRows.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
     const scopeTokens = teamScopeTokens(workforceRows, context);
     const broadRead = canReadAllOperations(context);
     const visibleJobs = jobs.filter((job) => job.recordType !== "adapter-contract" && (broadRead || rowMatchesContext(job, context, scopeTokens)));
@@ -240,7 +315,12 @@ export async function GET() {
     const visiblePlans = plans.filter((plan) => allowedJobIds.has(plan.jobId) || broadRead || rowMatchesContext(plan, context, scopeTokens));
     const visiblePlanIds = new Set(visiblePlans.map((plan) => plan.id));
     const planningPayloadById = new Map(visiblePlans.map((plan) => [plan.id, parseJson(plan.payloadJson)]));
-    const routePlanByMission = new Map(routePlanRows.filter((plan) => typeof plan.missionId === "string").map((plan) => [plan.missionId as string, plan]));
+    const routePlanByMission = new Map<string, typeof routePlans.$inferSelect>();
+    for (const plan of routePlanRows) {
+      if (typeof plan.missionId === "string" && !routePlanByMission.has(plan.missionId)) {
+        routePlanByMission.set(plan.missionId, plan);
+      }
+    }
     const linkedMissionByPlan = new Map<string, {
       id: string;
       title: string;

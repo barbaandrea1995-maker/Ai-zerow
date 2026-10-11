@@ -37,6 +37,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TenantSwitcher } from "@/components/tenant-switcher";
+import { CommandMobileNav } from "@/components/command-mobile-nav";
+import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 
 type Tone = "lime" | "cyan" | "amber" | "red";
 type ViewKey = "inbox" | "compose" | "acknowledgements" | "voice";
@@ -58,7 +60,7 @@ type RecordItem = {
   updatedAt: string;
 };
 
-type AuthorityContext = { actorName?: string; role?: string; capabilities?: string[]; operatingDomains?: string[] };
+type AuthorityContext = { actorName?: string; role?: string; roles?: string[]; capabilities?: string[]; operatingDomains?: string[] };
 type ApiResponse = { records?: RecordItem[]; context?: AuthorityContext; readback?: { count?: number; checkedAt?: string }; error?: string };
 type OperationJob = { id: string; canonicalCode?: string; title: string; status?: string };
 type OperationsResponse = { records?: OperationJob[]; error?: string };
@@ -101,6 +103,8 @@ const viewItems: Array<{ id: ViewKey; label: string; icon: LucideIcon }> = [
   { id: "acknowledgements", label: "Acknowledgement", icon: CheckCircle2 },
   { id: "voice", label: "Voice boundary", icon: Mic },
 ];
+
+const EMPTY_CAPABILITIES: string[] = [];
 
 const toneClass: Record<Tone, { icon: string; badge: string; bar: string }> = {
   lime: { icon: "text-lime-200", badge: "border-lime-300/25 bg-lime-300/10 text-lime-200", bar: "bg-lime-300" },
@@ -184,7 +188,8 @@ export default function CommunicationsControl() {
   const [toast, setToast] = useState("");
   const [form, setForm] = useState<FormState>({ recordType: "TEAM_BROADCAST", channel: "IN_APP", audienceType: "TENANT", audienceRef: "", jobId: "", title: "", detail: "", requiresAcknowledgement: false });
 
-  const capabilities = context.capabilities ?? [];
+  const capabilities = context.capabilities ?? EMPTY_CAPABILITIES;
+  const allowedMobileNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
   const canSend = capabilities.includes("communication.send");
   const canReadJobs = capabilities.includes("operations.read");
   const allowedNavigation = navItems.filter((item) => item.href === "/communications" || !item.capability || capabilities.includes(item.capability));
@@ -318,5 +323,5 @@ export default function CommunicationsControl() {
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.08] py-5 text-[10px] text-slate-600"><button className="flex items-center gap-2 transition hover:text-lime-200" onClick={() => navigate("/command")} type="button"><ArrowLeft className="size-3.5" />Torna a Command</button><span>AI-ZEROW COMMAND · W13 / COMMUNICATIONS CONTROL</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300" />tenant scoped · no raw audio · external delivery deferred</span></footer>
       </div>
     </section>
-  </div>{toast ? <button aria-label="Chiudi messaggio" className="fixed bottom-5 right-5 z-50 flex max-w-[380px] items-center gap-3 rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl" onClick={() => setToast("")} type="button">{toast}<X className="size-3.5 shrink-0" /></button> : null}</main>;
+  </div><CommandMobileNav active="communications" allowedNavigation={allowedMobileNavigation} role={context.role} roles={context.roles} />{toast ? <button aria-label="Chiudi messaggio" className="fixed bottom-5 right-5 z-50 flex max-w-[380px] items-center gap-3 rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-left text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl" onClick={() => setToast("")} type="button">{toast}<X className="size-3.5 shrink-0" /></button> : null}</main>;
 }
