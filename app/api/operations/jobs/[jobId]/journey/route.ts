@@ -510,6 +510,20 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
         readback: buildMissionReportReadback({ ...missionPayload, warehouseReadback }),
       };
     });
+  const missionMaterialRequests = hasCapability(context, ACTION_CAPABILITY.mission_create)
+    ? records.flatMap((record) => {
+      if (record.domain !== "warehouse" || record.recordType !== "MATERIAL_REQUEST" || record.status !== "APPROVED") return [];
+      const requestPayload = parseJson(record.payloadJson);
+      if (boundedText(requestPayload.missionId, 120)) return [];
+      const warehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
+      return [{
+        id: record.id,
+        title: record.title,
+        deliveryPoint: boundedText(requestPayload.deliveryPoint, 240),
+        warehouseLocation: boundedText(warehouse?.locationLabel, 240),
+      }];
+    })
+    : [];
 
   return {
     context: publicAuthorityContext(context),
@@ -549,6 +563,7 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
       documentCategories: OPERATIONAL_DOCUMENT_CATEGORIES,
       inventoryUnits: INVENTORY_UNIT_CATALOG,
       workforce,
+      missionMaterialRequests,
     },
     readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
   };
@@ -1026,10 +1041,17 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (!(await inventoryLinesExist(context.tenantId, lines))) {
         return Response.json({ error: "inventory_item_not_found" }, { status: 404 });
       }
+      const jobPayload = parseJobPayload(job.payloadJson);
+      const canonicalDeliveryPoint = boundedText(jobPayload.worksite || jobPayload.location, 240);
+      if (!canonicalDeliveryPoint) return Response.json({ error: "job_canonical_location_required" }, { status: 422 });
+      const neededAt = boundedText(input.neededAt, 40);
+      if (neededAt && !validDateTime(neededAt)) return Response.json({ error: "valid_material_needed_at_required" }, { status: 400 });
       status = "REQUESTED";
       payload = {
-        neededAt: boundedText(input.neededAt, 40),
-        deliveryPoint: boundedText(input.deliveryPoint, 240),
+        neededAt,
+        deliveryPoint: canonicalDeliveryPoint,
+        deliveryPointSource: "JOB_CANONICAL_LOCATION",
+        deliveryInstructions: boundedText(input.deliveryInstructions, 500),
         notes: boundedText(input.notes, 2_000),
         lines,
         requestedLines: lines,
@@ -1065,7 +1087,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         planningPlan = candidatePlan;
       }
       let pickup = boundedText(input.pickup, 240);
-      const dropoff = boundedText(input.dropoff, 240);
+      let dropoff = boundedText(input.dropoff, 240);
       const plannedAt = boundedText(input.plannedAt, 40);
       const plannedEndAtInput = boundedText(input.plannedEndAt, 40);
       const driverId = boundedText(input.driverId, 120);
@@ -1097,11 +1119,19 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const requestPayload = parseJson(requestRow.payloadJson);
         if (boundedText(requestPayload.missionId, 120)) return Response.json({ error: "material_request_already_scheduled" }, { status: 409 });
         const warehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
-        if (!pickup && warehouse) pickup = boundedText(warehouse.locationLabel, 240);
+        const warehouseLocation = boundedText(warehouse?.locationLabel, 240);
+        if (!warehouseLocation) return Response.json({ error: "fulfillment_warehouse_location_required" }, { status: 422 });
+        pickup = warehouseLocation;
         materialRequest = requestRow;
       }
       if (transportMode === "WAREHOUSE_TO_JOB" && !materialRequestId) {
         return Response.json({ error: "approved_material_request_required" }, { status: 409 });
+      }
+      if (transportMode === "WAREHOUSE_TO_JOB") {
+        const jobPayload = parseJobPayload(job.payloadJson);
+        const canonicalDropoff = boundedText(jobPayload.worksite || jobPayload.location, 240);
+        if (!canonicalDropoff) return Response.json({ error: "job_canonical_location_required" }, { status: 422 });
+        dropoff = canonicalDropoff;
       }
       if (!pickup || !dropoff || !validDateTime(plannedAt)) return Response.json({ error: "mission_route_and_valid_date_required" }, { status: 400 });
       if (!driverId || !vehicleId) return Response.json({ error: "mission_driver_and_vehicle_required" }, { status: 400 });

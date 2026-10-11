@@ -1331,25 +1331,25 @@ export default function OperationsJobWorkspace({
 
             <section className="carbon-card rounded-[22px] p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">ATTIVITÀ REGISTRATE</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Lavoro pianificato per la commessa</h2><p className="mt-1 text-[10px] text-slate-500">Le modifiche restano nello storico della commessa con versione e rilettura server.</p></div>
-                {canWriteOperations && <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Nuova attività</Button>}
+                <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">GOVERNANCE OPERATIVA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Responsabilità ed evidenze</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Le fasi descrittive appartengono alla scheda commessa. I turni e le risorse pianificate, i materiali e i trasporti hanno registri operativi dedicati nel percorso qui sotto.</p></div>
+                {canWriteOperations && <div className="flex flex-wrap gap-2">
+                  <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Aggiungi fase commessa</Button>
+                  <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna responsabile o squadra</Button>
+                  <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Registra evidenza</Button>
+                </div>}
               </div>
-              {workspace.sections.activities.records.length > 0 ? <div className="mt-4 space-y-2">
-                {workspace.sections.activities.records.slice(0, 6).map((record) => {
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Responsabile della commessa</p><p className="mt-1 truncate text-[10px] font-medium text-slate-200">{workspace.sections.planning.records.find((record) => record.recordType === "assignment")?.title ?? "Da assegnare"}</p><p className="mt-0.5 text-[9px] text-slate-600">Registro assegnazioni server-side</p></div>
+                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Fasi descrittive</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.activities.count} {workspace.sections.activities.count === 1 ? "fase" : "fasi"}</p><p className="mt-0.5 text-[9px] text-slate-600">Obiettivi e attività generali della commessa</p></div>
+                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Evidenze archiviate</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.evidence.count} {workspace.sections.evidence.count === 1 ? "elemento" : "elementi"}</p><p className="mt-0.5 text-[9px] text-slate-600">Archivio della commessa · rilettura server</p></div>
+              </div>
+              {workspace.sections.activities.records.length > 0 && <details className="group mt-3 rounded-xl border border-white/[.06] bg-black/15">
+                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 marker:hidden"><span className="text-[9px] font-semibold text-slate-400">Attività descrittive della commessa · {workspace.sections.activities.count}</span><span className="text-[8px] text-slate-600 group-open:hidden">Apri</span><span className="hidden text-[8px] text-slate-600 group-open:inline">Chiudi</span></summary>
+                <div className="space-y-2 border-t border-white/[.06] p-3">{workspace.sections.activities.records.slice(0, 8).map((record) => {
                   const activityId = typeof record.payload?.id === "string" ? record.payload.id : null;
-                  return <div className="flex items-center gap-3 rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5" key={record.id}>
-                    <span className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}><CheckCircle2 className="size-3.5" /></span>
-                    <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium text-slate-200">{record.title}</p><p className="mt-0.5 truncate text-[9px] text-slate-500">{record.detail || displayRecordType(record.recordType)}</p></div>
-                    <span className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase sm:inline-flex ${statusTone(record.status)}`}>{displayStatus(record.status)}</span>
-                    {canWriteOperations && activityId && record.status !== "DONE" && <button aria-label={`Completa ${record.title}`} className="grid size-9 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-100 hover:bg-lime-300/10" onClick={() => void mutate("complete_activity", { activityId })} type="button"><Check className="size-3.5" /></button>}
-                  </div>;
-                })}
-                {workspace.sections.activities.count > 6 && <p className="pt-1 text-right text-[9px] text-slate-600">Mostrate 6 di {workspace.sections.activities.count} attività. Il registro completo resta in Pianificazione.</p>}
-              </div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.09] px-3 py-5 text-center text-[10px] text-slate-500">Nessuna attività operativa collegata. Le opzioni di pianificazione e assegnazione arrivano dal server.</div>}
-              {canWriteOperations && <div className="mt-3 flex flex-wrap gap-2">
-                <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna squadra</Button>
-                <Button className="min-h-10 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Aggiungi evidenza</Button>
-              </div>}
+                  return <div className="flex items-center gap-3 rounded-lg border border-white/[.06] bg-black/20 px-3 py-2" key={record.id}><span className={`grid size-7 shrink-0 place-items-center rounded-lg border ${statusTone(record.status)}`}><CheckCircle2 className="size-3.5" /></span><div className="min-w-0 flex-1"><p className="truncate text-[10px] font-medium text-slate-200">{record.title}</p><p className="mt-0.5 truncate text-[9px] text-slate-500">{record.detail || displayRecordType(record.recordType)}</p></div><span className={`hidden rounded-full border px-2 py-1 text-[8px] font-semibold uppercase sm:inline-flex ${statusTone(record.status)}`}>{displayStatus(record.status)}</span>{canWriteOperations && activityId && record.status !== "DONE" && <button aria-label={`Completa ${record.title}`} className="grid size-9 shrink-0 place-items-center rounded-lg border border-lime-300/20 text-lime-100 hover:bg-lime-300/10" onClick={() => void mutate("complete_activity", { activityId })} type="button"><Check className="size-3.5" /></button>}</div>;
+                })}</div>
+              </details>}
             </section>
 
             <JobCommercialJourney jobId={jobId} />

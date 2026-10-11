@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock, Check, CheckCircle2, FileArchive, GitBranch as GitBranchIcon, HardHat, LoaderCircle, LockKeyhole, PackageCheck, Play, RefreshCw, Send, ShieldCheck, Truck, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,10 @@ import { TRANSPORT_MODE_CATALOG, type TransportMode } from "@/lib/tenant-operati
 
 type JourneyRecord = { id: string; domain: string; recordType: string; title: string; status: string; version: number; payload: Record<string, unknown>; updatedAt: string };
 type JourneySection = { access: "granted" | "restricted"; count: number; records: JourneyRecord[] };
+type MissionMaterialRequestOption = { id: string; title: string; deliveryPoint: string; warehouseLocation: string };
 type JourneyPayload = {
-  context?: { operatingTransportModes?: string[] };
-  job: { id: string; code: string | null; title: string; status: string };
+  context?: { operatingDomains?: string[]; operatingTransportModes?: string[] };
+  job: { id: string; code: string | null; title: string; status: string; location?: string | null };
   sections: {
     planning: JourneySection;
     field: JourneySection;
@@ -31,6 +32,7 @@ type JourneyPayload = {
       people: Array<{ id: string; label: string }>;
       teams: Array<{ id: string; label: string }>;
     };
+    missionMaterialRequests?: MissionMaterialRequestOption[];
   };
   readback?: { status: string; checkedAt?: string };
   mutation?: { action: string; eventId?: string; record?: JourneyRecord; idempotent?: boolean };
@@ -38,10 +40,10 @@ type JourneyPayload = {
 type ModalKind = "planning" | "field" | "material" | "mission" | "delivery" | "document" | null;
 
 const MODULES = [
-  { key: "planning", label: "Pianificazione", eyebrow: "AGENDA", icon: CalendarClock, create: "planning" as ModalKind, capability: "planning_create" },
-  { key: "field", label: "Campo", eyebrow: "CANTIERE", icon: HardHat, create: "field" as ModalKind, capability: "field_open" },
-  { key: "warehouse", label: "Materiali", eyebrow: "MAGAZZINO", icon: PackageCheck, create: "material" as ModalKind, capability: "material_request" },
-  { key: "mission", label: "Trasporti", eyebrow: "TRASPORTI", icon: Truck, create: "mission" as ModalKind, capability: "mission_create" },
+  { key: "planning", label: "Pianificazione", eyebrow: "01 · PROGRAMMAZIONE", description: "Piani, date e risorse confermati nel registro aziendale.", domains: ["operations", "warehouse", "transport"], icon: CalendarClock, create: "planning" as ModalKind, capability: "planning_create" },
+  { key: "field", label: "Cantiere e attività", eyebrow: "02 · ESECUZIONE", description: "Sessioni operative e avanzamento collegati alla commessa.", domains: ["operations"], icon: HardHat, create: "field" as ModalKind, capability: "field_open" },
+  { key: "warehouse", label: "Materiali", eyebrow: "03 · APPROVVIGIONAMENTO", description: "Richieste, approvazioni e movimenti del magazzino.", domains: ["warehouse"], icon: PackageCheck, create: "material" as ModalKind, capability: "material_request" },
+  { key: "mission", label: "Trasporti e consegne", eyebrow: "04 · LOGISTICA", description: "Missioni, tappe ed evidenze di consegna registrate dal server.", domains: ["transport"], icon: Truck, create: "mission" as ModalKind, capability: "mission_create" },
 ] as const;
 
 function field(form: FormData, name: string) {
@@ -106,6 +108,88 @@ function displayMovementType(value: string) {
   return labels[value.trim().toUpperCase()] ?? value.replaceAll("_", " ");
 }
 
+function displayJourneyDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime())
+    ? parsed.toLocaleString("it-IT", { timeZone: "Europe/Rome", dateStyle: "short", timeStyle: "short" })
+    : value;
+}
+
+function toServerDateTime(value: string) {
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
+function journeyErrorMessage(code: string | undefined) {
+  if (code === "job_canonical_location_required") return "Registra prima l’indirizzo ufficiale della commessa.";
+  if (code === "fulfillment_warehouse_location_required") return "Registra l’indirizzo del deposito selezionato prima di pianificare la missione.";
+  if (code === "valid_material_needed_at_required") return "Controlla la data entro cui serve il materiale.";
+  if (code === "version_conflict") return "Il record è stato aggiornato da un altro utente. Ho riletto i dati più recenti.";
+  return "Operazione non completata. Controlla i dati e riprova.";
+}
+
+function recordSummary(record: JourneyRecord) {
+  const payload = record.payload;
+  const values: string[] = [];
+  if (record.domain === "planning") {
+    const resources = Array.isArray(payload.resources) ? payload.resources.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const resource = entry as Record<string, unknown>;
+      const label = textValue(resource.label ?? resource.name, "");
+      return label ? [label] : [];
+    }) : [];
+    if (resources.length) values.push(resources.slice(0, 3).join(" · "));
+  }
+  if (record.domain === "field") {
+    const team = textValue(payload.team, "");
+    const supervisor = textValue(payload.supervisor, "");
+    if (team || supervisor) values.push([team, supervisor].filter(Boolean).join(" · "));
+  }
+  if (record.domain === "warehouse") {
+    const lines = Array.isArray(payload.lines) ? payload.lines.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const line = entry as Record<string, unknown>;
+      const description = textValue(line.description ?? line.name, "Materiale");
+      const quantity = line.quantity === undefined ? "" : `${String(line.quantity)} ${textValue(line.unit, "")}`.trim();
+      return [`${description}${quantity ? ` · ${quantity}` : ""}`];
+    }) : [];
+    if (lines.length) values.push(lines.slice(0, 2).join("; "));
+    const deliveryPoint = textValue(payload.deliveryPoint, "");
+    if (deliveryPoint) values.push(`Consegna: ${deliveryPoint}`);
+    const deliveryInstructions = textValue(payload.deliveryInstructions, "");
+    if (deliveryInstructions) values.push(`Istruzioni: ${deliveryInstructions}`);
+  }
+  if (record.domain === "mission") {
+    const routeStops = Array.isArray(payload.routeStops) ? payload.routeStops.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const stop = entry as Record<string, unknown>;
+      const label = textValue(stop.label ?? stop.title ?? stop.locationLabel, "");
+      return label ? [label] : [];
+    }) : [];
+    const pickup = textValue(payload.pickup, "");
+    const dropoff = textValue(payload.dropoff, "");
+    if (routeStops.length) values.push(`Tappe: ${routeStops.slice(0, 3).join(" → ")}`);
+    else if (pickup || dropoff) values.push(`${pickup || "Partenza da definire"} → ${dropoff || "Destinazione da definire"}`);
+    const resourceSnapshot = payload.resourceSnapshot && typeof payload.resourceSnapshot === "object" && !Array.isArray(payload.resourceSnapshot)
+      ? payload.resourceSnapshot as Record<string, unknown>
+      : {};
+    const driverSnapshot = resourceSnapshot.driver && typeof resourceSnapshot.driver === "object" && !Array.isArray(resourceSnapshot.driver)
+      ? resourceSnapshot.driver as Record<string, unknown>
+      : {};
+    const vehicleSnapshot = resourceSnapshot.vehicle && typeof resourceSnapshot.vehicle === "object" && !Array.isArray(resourceSnapshot.vehicle)
+      ? resourceSnapshot.vehicle as Record<string, unknown>
+      : {};
+    const driver = textValue(payload.driverName ?? payload.driverLabel ?? driverSnapshot.label, "");
+    const vehicle = textValue(payload.vehicleName ?? payload.vehicleLabel ?? vehicleSnapshot.label, "");
+    if (driver || vehicle) values.push([driver, vehicle].filter(Boolean).join(" · "));
+  }
+  const notes = textValue(payload.notes, "");
+  if (notes) values.push(notes);
+  return values;
+}
+
 type JourneyDocument = JourneyPayload["sections"]["documents"]["records"][number];
 
 function DocumentSecurityActions({ document, allowed, busy, onAction }: { document: JourneyDocument; allowed: boolean; busy: boolean; onAction: (action: "queue_scan" | "manual_review") => void }) {
@@ -145,6 +229,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   const [driverId, setDriverId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [cargoAssetId, setCargoAssetId] = useState("");
+  const [selectedMaterialRequestId, setSelectedMaterialRequestId] = useState("");
   const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
   const [transportMode, setTransportMode] = useState<TransportMode | "">("");
 
@@ -163,7 +248,9 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/journey`, { cache: "no-store" });
       if (response.status === 403) { setState("forbidden"); return; }
       if (!response.ok) throw new Error("journey_unavailable");
-      setPayload(await response.json() as JourneyPayload);
+      const nextPayload = await response.json() as JourneyPayload;
+      if (nextPayload.readback?.status !== "verified") throw new Error("journey_readback_unverified");
+      setPayload(nextPayload);
       setState("ready");
     } catch { setState("error"); }
   }, [jobId]);
@@ -179,7 +266,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/journey`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, idempotencyKey: key, ...body }) });
       const result = await response.json() as JourneyPayload & { error?: string };
       if (!response.ok) {
-        notify(result.error === "version_conflict" ? "Il record è cambiato: scheda aggiornata." : "Operazione non completata. Riprova.");
+        notify(journeyErrorMessage(result.error));
         if (response.status === 409) await refresh();
         if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity);
         return false;
@@ -278,7 +365,10 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       return;
     }
     if (modal === "field") await mutate("field_open", { title: field(form, "title"), startedAt: field(form, "startedAt"), teamId: field(form, "teamId"), supervisorMembershipId: field(form, "supervisorMembershipId"), notes: field(form, "notes") });
-    if (modal === "material") await mutate("material_request", { title: field(form, "title"), neededAt: field(form, "neededAt"), deliveryPoint: field(form, "deliveryPoint"), notes: field(form, "notes"), lines: [{ description: field(form, "description"), quantity: field(form, "quantity"), unit: field(form, "unit") }] });
+    if (modal === "material") {
+      if (!payload?.job.location) { notify("Registra prima l’indirizzo ufficiale del cantiere nella scheda commessa."); return; }
+      await mutate("material_request", { title: field(form, "title"), neededAt: toServerDateTime(field(form, "neededAt")), deliveryInstructions: field(form, "deliveryInstructions"), notes: field(form, "notes"), lines: [{ description: field(form, "description"), quantity: field(form, "quantity"), unit: field(form, "unit") }] });
+    }
     if (modal === "mission") {
       if (!field(form, "driverId") || !field(form, "vehicleId")) {
         notify("Seleziona autista e mezzo realmente disponibili.");
@@ -287,6 +377,10 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       const requestId = field(form, "materialRequestId");
       if (field(form, "transportMode") === "WAREHOUSE_TO_JOB" && !requestId) {
         notify("Per il trasporto verso la commessa seleziona una richiesta materiali approvata.");
+        return;
+      }
+      if (field(form, "transportMode") === "WAREHOUSE_TO_JOB" && (!payload?.job.location || !selectedMaterialRequest?.warehouseLocation)) {
+        notify("Completa l’indirizzo ufficiale della commessa e quello del deposito prima di pianificare il trasporto.");
         return;
       }
       await mutate("mission_create", { title: field(form, "title"), pickup: field(form, "pickup"), dropoff: field(form, "dropoff"), plannedAt: field(form, "plannedAt"), plannedEndAt: field(form, "plannedEndAt"), driverId: field(form, "driverId"), vehicleId: field(form, "vehicleId"), cargoAssetId: field(form, "cargoAssetId"), transportMode: field(form, "transportMode"), materialRequestId: requestId, notes: field(form, "notes") });
@@ -319,49 +413,56 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
     }
   };
 
-  const totalRecords = useMemo(() => payload ? MODULES.reduce((sum, module) => sum + payload.sections[module.key].count, 0) + payload.sections.documents.count : 0, [payload]);
   if (state === "loading") return <section className="mt-4 carbon-card rounded-[24px] p-6"><div className="flex items-center gap-3 text-xs text-slate-500"><LoaderCircle className="size-4 animate-spin text-lime-300" />Caricamento percorso della commessa…</div></section>;
   if (state === "forbidden") return null;
   if (state === "error" || !payload) return <section className="mt-4 rounded-[24px] border border-amber-300/15 bg-amber-300/[0.035] p-5"><p className="text-xs text-amber-100">Il percorso della commessa non è momentaneamente disponibile.</p><Button variant="outline" className="mt-3 border-white/10 bg-black/20 text-xs" onClick={() => void refresh()}><RefreshCw className="size-3.5" />Riprova</Button></section>;
 
+  const configuredDomains = payload.context?.operatingDomains;
+  const modules = MODULES.filter((module) => !configuredDomains?.length || module.domains.some((domain) => configuredDomains.includes(domain)));
+  const visibleRecordCount = modules.reduce((sum, module) => sum + payload.sections[module.key].count, 0) + payload.sections.documents.count;
+  const approvedMaterialRequests = payload.options?.missionMaterialRequests ?? [];
+  const selectedMaterialRequest = approvedMaterialRequests.find((record) => record.id === selectedMaterialRequestId) ?? null;
+  const approvedPickup = selectedMaterialRequest?.warehouseLocation ?? "";
+
   return <section className="relative mt-4 overflow-hidden rounded-[28px] border border-lime-300/20 bg-[linear-gradient(150deg,rgba(12,18,14,0.98),rgba(3,6,5,0.99)_54%,rgba(18,28,19,0.96))] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.38)] sm:p-6">
     <div className="pointer-events-none absolute -right-40 -top-48 size-[30rem] rounded-full bg-lime-300/[0.06] blur-3xl" /><div className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-lime-300/70 to-transparent" />
-    <div className="relative flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><span className="grid size-11 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/[0.09] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.10)]"><ShieldCheck className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70">Percorso commessa</p><h2 className="mt-1 text-lg font-semibold tracking-[-0.025em] text-lime-50">Dalla pianificazione alla consegna</h2><p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-500">Segui ogni passaggio operativo, dalle risorse disponibili alla chiusura della consegna.</p></div></div><div className="flex items-center gap-2"><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 font-mono text-[9px] text-lime-200">{totalRecords} ELEMENTI</span><button aria-label="Aggiorna percorso commessa" className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200" onClick={() => void refresh()} type="button"><RefreshCw className="size-4" /></button></div></div>
+    <div className="relative flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><span className="grid size-11 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/[0.09] text-lime-200 shadow-[0_0_28px_rgba(190,255,60,0.10)]"><ShieldCheck className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/70">Percorso operativo</p><h2 className="mt-1 text-lg font-semibold tracking-[-0.025em] text-lime-50">Dalla pianificazione alla consegna</h2><p className="mt-1 max-w-2xl text-[11px] leading-5 text-slate-500">Ogni fase mostra il registro aziendale che la conferma, il suo stato e il passaggio successivo disponibile per il tuo ruolo.</p>{payload.job.location && <p className="mt-2 flex items-start gap-1.5 text-[10px] text-slate-400"><span className="font-semibold text-slate-300">Cantiere:</span><span>{payload.job.location}</span></p>}</div></div><div className="flex items-center gap-2"><span className="rounded-full border border-lime-300/20 bg-lime-300/[0.06] px-3 py-1.5 font-mono text-[9px] text-lime-200">{visibleRecordCount} REGISTRI</span><span className="hidden text-[8px] text-slate-600 sm:inline">Server · {displayJourneyDate(payload.readback?.checkedAt)}</span><button aria-label="Aggiorna percorso commessa" className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200" onClick={() => void refresh()} type="button"><RefreshCw className="size-4" /></button></div></div>
 
-    <div className="relative mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {MODULES.map((module) => {
+    <div className="relative mt-6 space-y-3">
+      <div className="pointer-events-none absolute bottom-8 left-[1.15rem] top-8 w-px bg-gradient-to-b from-lime-300/35 via-cyan-300/20 to-transparent" />
+      {modules.map((module, index) => {
         const section = payload.sections[module.key];
         const Icon = module.icon;
         const enabledTransport = payload.context?.operatingTransportModes ?? [];
         const canCreateTransport = module.create !== "mission" || enabledTransport.length > 0;
         return (
-          <article className="rounded-[20px] border border-white/[0.075] bg-[linear-gradient(155deg,rgba(18,25,19,0.82),rgba(4,7,5,0.92))] p-4" key={module.key}>
-            <div className="flex items-start justify-between gap-3">
-              <span className="grid size-9 place-items-center rounded-xl border border-lime-300/18 bg-lime-300/[0.065] text-lime-200"><Icon className="size-4" /></span>
-              <span className="rounded-full border border-white/[0.08] bg-black/25 px-2 py-1 font-mono text-[8px] text-slate-500">{section.access === "restricted" ? "LIMITATO" : `${section.count} ELEMENTI`}</span>
+          <article className="relative ml-0 rounded-[20px] border border-white/[0.075] bg-[linear-gradient(155deg,rgba(18,25,19,0.82),rgba(4,7,5,0.92))] p-4 pl-14 sm:p-5 sm:pl-[4.25rem]" key={module.key}>
+            <span className="absolute left-2 top-4 z-10 grid size-7 place-items-center rounded-full border border-lime-300/25 bg-[#0a100b] font-mono text-[9px] font-semibold text-lime-200 sm:left-3 sm:top-5">{String(index + 1).padStart(2, "0")}</span>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl border border-lime-300/18 bg-lime-300/[0.065] text-lime-200"><Icon className="size-4" /></span><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-lime-300/55">{module.eyebrow}</p><h3 className="mt-1 text-sm font-semibold text-slate-100">{module.label}</h3><p className="mt-1 text-[10px] leading-4 text-slate-500">{module.description}</p></div></div>
+              <span className="rounded-full border border-white/[0.08] bg-black/25 px-2.5 py-1.5 font-mono text-[8px] text-slate-500">{section.access === "restricted" ? "LIMITATO DAL RUOLO" : `${section.count} REGISTRI`}</span>
             </div>
-            <p className="mt-4 text-[9px] font-semibold uppercase tracking-[0.18em] text-lime-300/55">{module.eyebrow}</p>
-            <h3 className="mt-1 text-sm font-semibold text-slate-100">{module.label}</h3>
             {section.access === "restricted" ? (
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/20 px-3 py-3 text-[10px] text-slate-600"><LockKeyhole className="size-3.5" />Non visibile al ruolo corrente</div>
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/20 px-3 py-3 text-[10px] text-slate-600"><LockKeyhole className="size-3.5" />Registro non visibile al ruolo corrente</div>
             ) : (
               <>
-                <div className="mt-4 space-y-2">
+                <div className="mt-4 grid gap-2 xl:grid-cols-2">
                   {section.records.slice(0, 3).map((record) => (
                     <div className="rounded-xl border border-white/[0.07] bg-black/25 p-3" key={record.id}>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-[11px] font-medium text-slate-200">{record.title}</p>
-                          <p className="mt-1 truncate text-[9px] text-slate-600">{textValue(record.payload.startsAt ?? record.payload.plannedAt ?? record.payload.startedAt ?? record.payload.neededAt, displayRecordType(record.recordType))}</p>
+                          <p className="mt-1 text-[9px] text-slate-600">{displayJourneyDate(record.payload.startsAt ?? record.payload.plannedAt ?? record.payload.startedAt ?? record.payload.neededAt ?? record.payload.deliveredAt) || displayRecordType(record.recordType)}{record.updatedAt ? ` · registro aggiornato ${displayJourneyDate(record.updatedAt)}` : ""}</p>
                         </div>
                         <span className={`shrink-0 rounded-full border px-2 py-1 text-[7px] font-semibold ${statusTone(record.status)}`}>{displayJourneyStatus(record.status)}</span>
                       </div>
+                      {recordSummary(record).length > 0 && <div className="mt-2 space-y-1 border-t border-white/[0.05] pt-2">{recordSummary(record).map((line, lineIndex) => <p className="line-clamp-2 text-[9px] leading-4 text-slate-500" key={`${record.id}:${lineIndex}`}>{line}</p>)}</div>}
                       <div className="mt-2"><RecordActions record={record} can={payload.can} mutate={mutate} deliver={(next) => { setSelected(next); setModal("delivery"); }} /></div>
                     </div>
                   ))}
-                  {section.records.length === 0 && <p className="rounded-xl border border-dashed border-lime-300/[0.09] px-3 py-4 text-center text-[10px] text-slate-600">Nessun elemento collegato</p>}
+                  {section.records.length === 0 && <p className="rounded-xl border border-dashed border-lime-300/[0.09] px-3 py-4 text-[10px] leading-5 text-slate-600 xl:col-span-2">Nessun record registrato in questa fase. Quando previsto, avvia il passaggio da qui: il server verifica ruolo, dati e perimetro della commessa prima di salvarlo.</p>}
                 </div>
-                {payload.can[module.capability] && canCreateTransport && <Button variant="outline" className="mt-3 h-9 w-full border-lime-300/18 bg-lime-300/[0.04] text-[10px] text-lime-100 hover:bg-lime-300/[0.09]" onClick={() => { if (module.create === "mission") { setPlannedAt(""); setPlannedEndAt(""); setDriverId(""); setVehicleId(""); setCargoAssetId(""); const preferred = enabledTransport.includes("WAREHOUSE_TO_JOB") ? "WAREHOUSE_TO_JOB" : enabledTransport[0] ?? ""; setTransportMode(preferred as TransportMode | ""); } if (module.create === "planning") { setPlanningStartsAt(""); setPlanningEndsAt(""); setPlanningResourceIds([]); } setModal(module.create); }}><span className="text-base leading-none">+</span>Nuovo</Button>}
+                {payload.can[module.capability] && canCreateTransport && <Button variant="outline" className="mt-3 h-10 border-lime-300/18 bg-lime-300/[0.04] px-4 text-[10px] text-lime-100 hover:bg-lime-300/[0.09]" onClick={() => { if (module.create === "mission") { setPlannedAt(""); setPlannedEndAt(""); setDriverId(""); setVehicleId(""); setCargoAssetId(""); setSelectedMaterialRequestId(""); const preferred = enabledTransport.includes("WAREHOUSE_TO_JOB") ? "WAREHOUSE_TO_JOB" : enabledTransport[0] ?? ""; setTransportMode(preferred as TransportMode | ""); } if (module.create === "planning") { setPlanningStartsAt(""); setPlanningEndsAt(""); setPlanningResourceIds([]); } setModal(module.create); }}><span className="text-base leading-none">+</span>{module.create === "planning" ? "Crea piano operativo" : module.create === "field" ? "Apri attività di cantiere" : module.create === "material" ? "Richiedi materiali" : "Pianifica trasporto"}</Button>}
                 {module.create === "mission" && !canCreateTransport && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.03] px-3 py-2 text-[9px] text-amber-200/80">Nessuna modalità di trasporto disponibile per questa azienda.</p>}
               </>
             )}
@@ -392,8 +493,19 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
     <Dialog open={modal !== null} onOpenChange={(open) => !open && setModal(null)}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[600px]"><DialogHeader><DialogTitle>{modal === "planning" ? "Nuovo piano operativo" : modal === "field" ? "Apri sessione di cantiere" : modal === "material" ? "Richiesta materiali" : modal === "mission" ? "Nuova missione di trasporto" : modal === "delivery" ? "Prova di consegna" : "Carica documento"}</DialogTitle><DialogDescription className="text-slate-500">Le informazioni vengono validate prima di essere confermate nella commessa.</DialogDescription></DialogHeader><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
       {modal === "planning" && <><label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Attività operativa" required /></label><label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" name="startsAt" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label><label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" name="endsAt" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label><PlanningResourceFields jobId={jobId} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} /><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
       {modal === "field" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Sessione di cantiere" required /></label><label className="text-xs text-slate-400">Apertura<Input className="mt-2 border-white/10 bg-black/30" name="startedAt" type="datetime-local" required /></label><label className="text-xs text-slate-400">Squadra<select aria-label="Squadra di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="teamId" defaultValue=""><option value="">Non assegnata</option>{(payload.options?.workforce?.teams ?? []).map((team) => <option key={team.id} value={team.id}>{team.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Supervisore<select aria-label="Supervisore di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="supervisorMembershipId" defaultValue=""><option value="">Non assegnato</option>{(payload.options?.workforce?.people ?? []).map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
-      {modal === "material" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Richiesta materiali" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Materiale<Input className="mt-2 border-white/10 bg-black/30" name="description" placeholder="Descrizione materiale" required /></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" min="0.001" name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Unità<select aria-label="Unità materiale" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="unit" required defaultValue="PZ">{(payload.options?.inventoryUnits ?? []).map((unit) => <option key={unit.code} value={unit.code}>{unit.label} ({unit.symbol})</option>)}</select></label><label className="text-xs text-slate-400">Necessario entro<Input className="mt-2 border-white/10 bg-black/30" name="neededAt" type="datetime-local" /></label><label className="text-xs text-slate-400">Punto consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveryPoint" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
-      {modal === "mission" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Missione di trasporto" required /></label><label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => setTransportMode(event.target.value as TransportMode)} required value={transportMode}>{(payload.context?.operatingTransportModes ?? []).map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode as TransportMode]?.label ?? mode}</option>)}</select></label>{transportMode === "WAREHOUSE_TO_JOB" && <label className="text-xs text-slate-400 sm:col-span-2">Richiesta materiali approvata<select aria-label="Richiesta materiali approvata" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="materialRequestId" required><option value="">Seleziona richiesta</option>{payload.sections.warehouse.records.filter((record) => record.recordType === "MATERIAL_REQUEST" && record.status === "APPROVED" && !record.payload.missionId).map((record) => <option key={record.id} value={record.id}>{record.title} · {textValue(record.payload.deliveryPoint, "Punto consegna da definire")}</option>)}</select></label>}{transportMode === "WAREHOUSE_TO_JOB" && !payload.sections.warehouse.records.some((record) => record.recordType === "MATERIAL_REQUEST" && record.status === "APPROVED" && !record.payload.missionId) && <p className="rounded-xl border border-amber-300/15 bg-amber-300/[0.03] p-3 text-[10px] text-amber-100 sm:col-span-2">Prima di programmare il trasporto, il responsabile deve approvare una richiesta materiali.</p>}<label className="text-xs text-slate-400">Partenza<Input className="mt-2 border-white/10 bg-black/30" name="pickup" required /></label><label className="text-xs text-slate-400">Destinazione<Input className="mt-2 border-white/10 bg-black/30" name="dropoff" required /></label><label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" type="datetime-local" onChange={(event) => setPlannedAt(event.target.value)} required value={plannedAt} /></label><label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" type="datetime-local" onChange={(event) => setPlannedEndAt(event.target.value)} value={plannedEndAt} /></label><MissionResourceFields plannedAt={plannedAt} plannedEndAt={plannedEndAt} transportMode={transportMode} driverId={driverId} vehicleId={vehicleId} cargoAssetId={cargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} onCargoAssetChange={setCargoAssetId} /><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
+      {modal === "material" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Richiesta materiali" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Materiale richiesto<Input className="mt-2 border-white/10 bg-black/30" name="description" placeholder="Es. tubo corrugato Ø 40, cemento…" required /><span className="mt-1 block text-[9px] leading-4 text-slate-600">La descrizione viene registrata subito. Il responsabile del magazzino la associa all’articolo del deposito prima di approvare e prenotare le scorte.</span></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" min="0.001" name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Unità<select aria-label="Unità materiale" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="unit" required defaultValue="PZ">{(payload.options?.inventoryUnits ?? []).map((unit) => <option key={unit.code} value={unit.code}>{unit.label} ({unit.symbol})</option>)}</select></label><label className="text-xs text-slate-400">Necessario entro<Input className="mt-2 border-white/10 bg-black/30" name="neededAt" type="datetime-local" /></label>{payload.job.location ? <div className="sm:col-span-2"><span className="block text-xs text-slate-400">Punto di consegna · cantiere ufficiale</span><div className="mt-2 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3 py-3 text-[11px] leading-5 text-slate-200">{payload.job.location}</div><p className="mt-1 text-[9px] text-slate-600">Il server collega la richiesta all’indirizzo registrato nella scheda commessa.</p></div> : <p className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] leading-5 text-amber-100 sm:col-span-2">Registra prima l’indirizzo ufficiale del cantiere nella scheda commessa: la richiesta userà quel punto di consegna.</p>}<label className="text-xs text-slate-400 sm:col-span-2">Indicazioni per il deposito<Textarea className="mt-2 border-white/10 bg-black/30" name="deliveryInstructions" placeholder="Ingresso da Via…, scarico nell’area…" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note interne<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
+      {modal === "mission" && <>
+        <label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Missione di trasporto" required /></label>
+        <label className="text-xs text-slate-400">Modalità trasporto<select aria-label="Modalità trasporto" className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 focus:ring-2 focus:ring-lime-300/10" name="transportMode" onChange={(event) => { const mode = event.target.value as TransportMode; setTransportMode(mode); if (mode !== "WAREHOUSE_TO_JOB") setSelectedMaterialRequestId(""); }} required value={transportMode}>{(payload.context?.operatingTransportModes ?? []).map((mode) => <option key={mode} value={mode}>{TRANSPORT_MODE_CATALOG[mode as TransportMode]?.label ?? mode}</option>)}</select></label>
+        {transportMode === "WAREHOUSE_TO_JOB" && <label className="text-xs text-slate-400 sm:col-span-2">Richiesta materiali approvata<select aria-label="Richiesta materiali approvata" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="materialRequestId" onChange={(event) => setSelectedMaterialRequestId(event.target.value)} required value={selectedMaterialRequestId}><option value="">Seleziona richiesta</option>{approvedMaterialRequests.map((record) => <option key={record.id} value={record.id}>{record.title} · {textValue(record.deliveryPoint, "Punto consegna da definire")}</option>)}</select></label>}
+        {transportMode === "WAREHOUSE_TO_JOB" && approvedMaterialRequests.length === 0 && <p className="rounded-xl border border-amber-300/15 bg-amber-300/[0.03] p-3 text-[10px] text-amber-100 sm:col-span-2">Serve una richiesta materiali approvata dal magazzino prima di creare questa missione.</p>}
+        {transportMode === "WAREHOUSE_TO_JOB" && selectedMaterialRequest && approvedPickup ? <div className="sm:col-span-2"><span className="block text-xs text-slate-400">Partenza · deposito di evasione</span><div className="mt-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] px-3 py-3 text-[11px] text-slate-200">{approvedPickup}</div><input name="pickup" type="hidden" value={approvedPickup} /><p className="mt-1 text-[9px] text-slate-600">Il server rilegge il deposito associato alla richiesta approvata.</p></div> : transportMode === "WAREHOUSE_TO_JOB" && selectedMaterialRequest ? <p className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] text-amber-100 sm:col-span-2">Il deposito di evasione non ha un indirizzo registrato. Aggiorna la sua scheda prima di pianificare il trasporto.</p> : transportMode === "WAREHOUSE_TO_JOB" ? <p className="rounded-xl border border-white/[.07] bg-black/20 p-3 text-[10px] text-slate-600 sm:col-span-2">Seleziona la richiesta per usare il deposito scelto dal magazzino come partenza.</p> : <label className="text-xs text-slate-400">Partenza<Input className="mt-2 border-white/10 bg-black/30" name="pickup" required /></label>}
+        {transportMode === "WAREHOUSE_TO_JOB" && payload.job.location ? <div className="sm:col-span-2"><span className="block text-xs text-slate-400">Destinazione · cantiere ufficiale</span><div className="mt-2 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3 py-3 text-[11px] leading-5 text-slate-200">{payload.job.location}</div><input name="dropoff" type="hidden" value={payload.job.location} /><p className="mt-1 text-[9px] text-slate-600">Il server collega la missione all’indirizzo della commessa.</p></div> : transportMode === "WAREHOUSE_TO_JOB" ? <p className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] text-amber-100 sm:col-span-2">Registra prima l’indirizzo ufficiale nella scheda commessa.</p> : <label className="text-xs text-slate-400">Destinazione<Input className="mt-2 border-white/10 bg-black/30" name="dropoff" placeholder="Indirizzo verificabile" required /></label>}
+        <label className="text-xs text-slate-400">Inizio pianificato<Input className="mt-2 border-white/10 bg-black/30" name="plannedAt" type="datetime-local" onChange={(event) => setPlannedAt(event.target.value)} required value={plannedAt} /></label>
+        <label className="text-xs text-slate-400">Fine pianificata <span className="text-slate-600">(opzionale)</span><Input className="mt-2 border-white/10 bg-black/30" name="plannedEndAt" type="datetime-local" onChange={(event) => setPlannedEndAt(event.target.value)} value={plannedEndAt} /></label>
+        <MissionResourceFields plannedAt={plannedAt} plannedEndAt={plannedEndAt} transportMode={transportMode} driverId={driverId} vehicleId={vehicleId} cargoAssetId={cargoAssetId} onDriverChange={setDriverId} onVehicleChange={setVehicleId} onCargoAssetChange={setCargoAssetId} />
+        <label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label>
+      </>}
       {modal === "delivery" && <><label className="text-xs text-slate-400 sm:col-span-2">Ricevente<Input className="mt-2 border-white/10 bg-black/30" name="recipient" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Data consegna<Input className="mt-2 border-white/10 bg-black/30" name="deliveredAt" type="datetime-local" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Nota POD<Textarea className="mt-2 border-white/10 bg-black/30" name="note" /></label></>}
       {modal === "document" && <><label className="text-xs text-slate-400 sm:col-span-2">Categoria<select aria-label="Categoria documento" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="category" defaultValue="COMMESSA" required>{(payload.options?.documentCategories ?? []).map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}</select></label><label className="rounded-2xl border border-dashed border-lime-300/20 bg-lime-300/[0.035] p-5 text-xs text-slate-400 sm:col-span-2"><Upload className="mb-3 size-5 text-lime-200" />File · massimo 20 MB<Input accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic,.heif" className="mt-3 border-white/10 bg-black/30 file:text-lime-200" name="file" type="file" required /><span className="mt-2 block text-[10px] text-slate-600">DOCX incluso. Il documento viene verificato prima dell’archiviazione.</span></label></>}
       <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={busy} type="submit" className="bg-lime-300 text-[#050705] hover:bg-lime-200">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}{modal === "document" ? "Archivia documento" : "Conferma"}</Button></DialogFooter>
