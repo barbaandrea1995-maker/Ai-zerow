@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { PlanningResourceFields } from "@/components/planning-resource-fields";
 
 type JourneyRecord = { id: string; domain: string; recordType: string; title: string; status: string; version: number; payload: Record<string, unknown>; updatedAt: string };
 type JourneySection = { access: "granted" | "restricted"; count: number; records: JourneyRecord[] };
@@ -35,7 +34,7 @@ type JourneyPayload = {
   readback?: { status: string; checkedAt?: string };
   mutation?: { action: string; eventId?: string; record?: JourneyRecord; idempotent?: boolean };
 };
-type ModalKind = "planning" | "field" | "fieldClose" | "material" | "document" | null;
+type ModalKind = "field" | "fieldClose" | "material" | "document" | null;
 type JourneyCreateKind = "planning" | "field" | "material" | "mission";
 
 const MODULES = [
@@ -198,9 +197,9 @@ function DocumentSecurityActions({ document, allowed, busy, onAction }: { docume
   return null;
 }
 
-function RecordActions({ record, can, mutate, closeField }: { record: JourneyRecord; can: Record<string, boolean>; mutate: (action: string, body: Record<string, unknown>) => Promise<boolean>; closeField: (record: JourneyRecord) => void }) {
+function RecordActions({ jobId, record, can, closeField }: { jobId: string; record: JourneyRecord; can: Record<string, boolean>; closeField: (record: JourneyRecord) => void }) {
   const router = useRouter();
-  if (record.domain === "planning" && record.status === "DRAFT" && can.planning_publish) return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 transition hover:bg-lime-300/10" onClick={() => void mutate("planning_publish", { recordId: record.id, expectedVersion: record.version })} type="button"><Send className="mr-1.5 inline size-3" />Pubblica</button>;
+  if (record.domain === "planning") return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 transition hover:bg-lime-300/10" onClick={() => router.push(`/planning?jobId=${encodeURIComponent(jobId)}`)} type="button"><CalendarClock className="mr-1.5 inline size-3" />Apri in Pianificazione</button>;
   if (record.domain === "field" && record.status === "OPEN" && can.field_close) return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 transition hover:bg-lime-300/10" onClick={() => closeField(record)} type="button"><Check className="mr-1.5 inline size-3" />Chiudi con consuntivo</button>;
   if (record.domain === "warehouse" && record.status === "REQUESTED" && can.material_review) return <button className="rounded-lg border border-lime-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-lime-100 hover:bg-lime-300/10" onClick={() => router.push(`/warehouse?request=${encodeURIComponent(record.id)}`)} type="button"><PackageCheck className="mr-1.5 inline size-3" />Apri Magazzino</button>;
   if (record.domain === "mission") return <button className="rounded-lg border border-cyan-300/20 px-2.5 py-1.5 text-[9px] font-semibold text-cyan-100 hover:bg-cyan-300/10" onClick={() => router.push(`/mission?missionId=${encodeURIComponent(record.id)}`)} type="button"><Truck className="mr-1.5 inline size-3" />Apri Missione</button>;
@@ -218,9 +217,6 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   const idempotencyKeys = useRef(new Map<string, string>());
   const [securityBusy, setSecurityBusy] = useState("");
   const [notice, setNotice] = useState("");
-  const [planningStartsAt, setPlanningStartsAt] = useState("");
-  const [planningEndsAt, setPlanningEndsAt] = useState("");
-  const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
 
   const notify = useCallback((message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 3400); }, []);
   const requestKey = useCallback((scope: string, value: unknown) => {
@@ -315,44 +311,6 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    if (modal === "planning") {
-      if (!planningResourceIds.length) {
-        notify("Seleziona almeno una risorsa reale per il piano.");
-        return;
-      }
-      if (busyRef.current) return;
-      busyRef.current = true;
-      setBusy(true);
-      const planningBody = { action: "draft", title: field(form, "title"), startsAt: field(form, "startsAt"), endsAt: field(form, "endsAt"), resourceIds: planningResourceIds, notes: field(form, "notes") };
-      const { identity, key } = requestKey("planning-draft", planningBody);
-      try {
-        const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/planning`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...planningBody, idempotencyKey: key }),
-        });
-        const result = await response.json() as { plan?: JourneyRecord; eventId?: string; idempotent?: boolean; readback?: { status?: string; version?: number } };
-        if (!response.ok) {
-          notify("Piano non creato. Controlla i dati e riprova.");
-          if (response.status < 500 && response.status !== 409) idempotencyKeys.current.delete(identity);
-          return;
-        }
-        if (!result.plan || result.readback?.status !== "verified" || (!result.idempotent && !result.eventId)) {
-          notify("Il server non ha confermato l’evento e il readback del piano.");
-          return;
-        }
-        idempotencyKeys.current.delete(identity);
-        await refresh();
-        setModal(null);
-        notify(`Piano registrato · ${result.eventId?.slice(0, 8) ?? "riletto"} · v${result.readback.version}`);
-      } catch {
-        notify("Connessione non disponibile: nessun piano confermato.");
-      } finally {
-        busyRef.current = false;
-        setBusy(false);
-      }
-      return;
-    }
     if (modal === "field") await mutate("field_open", { title: field(form, "title"), teamId: field(form, "teamId"), supervisorMembershipId: field(form, "supervisorMembershipId"), notes: field(form, "notes") });
     if (modal === "fieldClose" && selected) await mutate("field_close", { recordId: selected.id, expectedVersion: selected.version, summary: field(form, "summary") });
     if (modal === "material") {
@@ -427,12 +385,12 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
                         <span className={`shrink-0 rounded-full border px-2 py-1 text-[7px] font-semibold ${statusTone(record.status)}`}>{displayJourneyStatus(record.status)}</span>
                       </div>
                       {recordSummary(record).length > 0 && <div className="mt-2 space-y-1 border-t border-white/[0.05] pt-2">{recordSummary(record).map((line, lineIndex) => <p className="line-clamp-2 text-[9px] leading-4 text-slate-500" key={`${record.id}:${lineIndex}`}>{line}</p>)}</div>}
-                      <div className="mt-2"><RecordActions record={record} can={payload.can} mutate={mutate} closeField={(next) => { setSelected(next); setModal("fieldClose"); }} /></div>
+                      <div className="mt-2"><RecordActions jobId={jobId} record={record} can={payload.can} closeField={(next) => { setSelected(next); setModal("fieldClose"); }} /></div>
                     </div>
                   ))}
                   {section.records.length === 0 && <p className="rounded-xl border border-dashed border-lime-300/[0.09] px-3 py-4 text-[10px] leading-5 text-slate-600 xl:col-span-2">Nessun record registrato in questa fase. Quando previsto, avvia il passaggio da qui: il server verifica ruolo, dati e perimetro della commessa prima di salvarlo.</p>}
                 </div>
-                {payload.can[module.capability] && canCreateTransport && <Button variant="outline" className="mt-3 h-10 border-lime-300/18 bg-lime-300/[0.04] px-4 text-[10px] text-lime-100 hover:bg-lime-300/[0.09]" onClick={() => { if (module.create === "mission") { router.push(`/mission?jobId=${encodeURIComponent(jobId)}&create=1`); return; } if (module.create === "planning") { setPlanningStartsAt(""); setPlanningEndsAt(""); setPlanningResourceIds([]); } setModal(module.create); }}><span className="text-base leading-none">+</span>{module.create === "planning" ? "Crea piano operativo" : module.create === "field" ? "Apri attività di cantiere" : module.create === "material" ? "Richiedi materiali" : "Pianifica nel modulo Missioni"}</Button>}
+                {payload.can[module.capability] && canCreateTransport && <Button variant="outline" className="mt-3 h-10 border-lime-300/18 bg-lime-300/[0.04] px-4 text-[10px] text-lime-100 hover:bg-lime-300/[0.09]" onClick={() => { if (module.create === "mission") { router.push(`/mission?jobId=${encodeURIComponent(jobId)}&create=1`); return; } if (module.create === "planning") { router.push(`/planning?jobId=${encodeURIComponent(jobId)}&create=1`); return; } setModal(module.create); }}><span className="text-base leading-none">+</span>{module.create === "planning" ? "Apri Pianificazione" : module.create === "field" ? "Apri attività di cantiere" : module.create === "material" ? "Richiedi materiali" : "Pianifica nel modulo Missioni"}</Button>}
                 {module.create === "mission" && !canCreateTransport && <p className="mt-3 rounded-xl border border-amber-300/15 bg-amber-300/[.03] px-3 py-2 text-[9px] text-amber-200/80">Nessuna modalità di trasporto disponibile per questa azienda.</p>}
               </>
             )}
@@ -460,8 +418,7 @@ export default function JobCommercialJourney({ jobId }: { jobId: string }) {
       </article>
     </div>
 
-    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) { setModal(null); setSelected(null); } }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[600px]"><DialogHeader><DialogTitle>{modal === "planning" ? "Nuovo piano operativo" : modal === "field" ? "Apri sessione di cantiere" : modal === "fieldClose" ? "Chiudi sessione di cantiere" : modal === "material" ? "Richiesta materiali" : "Carica documento"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "fieldClose" ? "Descrivi l’esito reale della sessione. L’orario di chiusura viene assegnato dal server." : "Le informazioni vengono validate prima di essere confermate nella commessa."}</DialogDescription></DialogHeader><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
-      {modal === "planning" && <><label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Attività operativa" required /></label><label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" name="startsAt" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label><label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" name="endsAt" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label><PlanningResourceFields jobId={jobId} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} /><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
+    <Dialog open={modal !== null} onOpenChange={(open) => { if (!open) { setModal(null); setSelected(null); } }}><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[600px]"><DialogHeader><DialogTitle>{modal === "field" ? "Apri sessione di cantiere" : modal === "fieldClose" ? "Chiudi sessione di cantiere" : modal === "material" ? "Richiesta materiali" : "Carica documento"}</DialogTitle><DialogDescription className="text-slate-500">{modal === "fieldClose" ? "Descrivi l’esito reale della sessione. L’orario di chiusura viene assegnato dal server." : "Le informazioni vengono validate prima di essere confermate nella commessa."}</DialogDescription></DialogHeader><form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
       {modal === "field" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Sessione di cantiere" required /></label><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3 sm:col-span-2"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">TIMESTAMP UFFICIALE</p><p className="mt-1 text-[10px] leading-5 text-slate-500">L’apertura viene datata dal server al momento della conferma.</p></div><label className="text-xs text-slate-400">Squadra<select aria-label="Squadra di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="teamId" defaultValue=""><option value="">Non assegnata</option>{(payload.options?.workforce?.teams ?? []).map((team) => <option key={team.id} value={team.id}>{team.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Supervisore<select aria-label="Supervisore di cantiere" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="supervisorMembershipId" defaultValue=""><option value="">Non assegnato</option>{(payload.options?.workforce?.supervisors ?? []).map((person) => <option key={person.id} value={person.id}>{person.label}</option>)}</select></label><label className="text-xs text-slate-400 sm:col-span-2">Note<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}
       {modal === "fieldClose" && <><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3 sm:col-span-2"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">SESSIONE APERTA</p><p className="mt-1 text-sm font-semibold text-slate-100">{selected?.title}</p><p className="mt-1 text-[10px] text-slate-500">Il server conserva la versione {selected?.version ?? "—"} e registra il timestamp ufficiale alla conferma.</p></div><label className="text-xs text-slate-400 sm:col-span-2">Consuntivo della sessione<Textarea autoFocus className="mt-2 min-h-32 border-white/10 bg-black/30" minLength={4} name="summary" placeholder="Lavorazioni eseguite, esito, criticità o attività residue…" required /></label></>}
       {modal === "material" && <><label className="text-xs text-slate-400 sm:col-span-2">Titolo<Input className="mt-2 border-white/10 bg-black/30" name="title" defaultValue="Richiesta materiali" required /></label><label className="text-xs text-slate-400 sm:col-span-2">Materiale richiesto<Input className="mt-2 border-white/10 bg-black/30" name="description" placeholder="Es. tubo corrugato Ø 40, cemento…" required /><span className="mt-1 block text-[9px] leading-4 text-slate-600">La descrizione viene registrata subito. Il responsabile del magazzino la associa all’articolo del deposito prima di approvare e prenotare le scorte.</span></label><label className="text-xs text-slate-400">Quantità<Input className="mt-2 border-white/10 bg-black/30" min="0.001" name="quantity" step="0.001" type="number" required /></label><label className="text-xs text-slate-400">Unità<select aria-label="Unità materiale" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" name="unit" required defaultValue="PZ">{(payload.options?.inventoryUnits ?? []).map((unit) => <option key={unit.code} value={unit.code}>{unit.label} ({unit.symbol})</option>)}</select></label><label className="text-xs text-slate-400">Necessario entro<Input className="mt-2 border-white/10 bg-black/30" name="neededAt" type="datetime-local" /></label>{payload.job.location ? <div className="sm:col-span-2"><span className="block text-xs text-slate-400">Punto di consegna · cantiere ufficiale</span><div className="mt-2 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3 py-3 text-[11px] leading-5 text-slate-200">{payload.job.location}</div><p className="mt-1 text-[9px] text-slate-600">Il server collega la richiesta all’indirizzo registrato nella scheda commessa.</p></div> : <p className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] leading-5 text-amber-100 sm:col-span-2">Registra prima l’indirizzo ufficiale del cantiere nella scheda commessa: la richiesta userà quel punto di consegna.</p>}<label className="text-xs text-slate-400 sm:col-span-2">Indicazioni per il deposito<Textarea className="mt-2 border-white/10 bg-black/30" name="deliveryInstructions" placeholder="Ingresso da Via…, scarico nell’area…" /></label><label className="text-xs text-slate-400 sm:col-span-2">Note interne<Textarea className="mt-2 border-white/10 bg-black/30" name="notes" /></label></>}

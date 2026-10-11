@@ -2,15 +2,14 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantMemberships } from "@/db/schema";
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
-import { assetAssignmentCustodyEnd, assetAssignmentStatus } from "@/lib/asset-contract";
+import { assetAssignmentCustodyEnd, assetAssignmentStatus, vehicleCanTransport } from "@/lib/asset-contract";
+import type { PlanningResourceProfile } from "@/lib/planning-catalog";
 import type { PlanningResource, PlanningResourceKind } from "@/lib/planning-contract";
 
 export type PlanningAvailabilityWindow = {
   startsAt: string;
   endsAt: string;
 };
-
-export type PlanningJobModule = "operations" | "mission";
 
 export type PlanningResourceConflict = PlanningAvailabilityWindow & {
   recordId: string;
@@ -48,6 +47,7 @@ export type PlanningResourceOption = {
   kind: PlanningResourceKind;
   status: string;
   assignable: boolean;
+  profileEligible: boolean;
   capacity: number;
   qualifications: string[];
   updatedAt: string;
@@ -134,9 +134,9 @@ function custodyAppliesToWindow(custody: PlanningAssetCustody, window?: Planning
   return Number.isFinite(windowStart) && Number.isFinite(windowEnd) && windowStart < endsAt && startsAt < windowEnd;
 }
 
-function planningRoleEligible(roles: string[], module: PlanningJobModule) {
-  const eligibleRoles = module === "mission"
-    ? new Set(["driver", "delivery_driver"])
+function planningRoleEligible(roles: string[], profile: PlanningResourceProfile) {
+  const eligibleRoles = profile === "mission"
+    ? new Set(["delivery_driver"])
     : new Set(["technical", "field_supervisor", "worker", "driver", "maintenance"]);
   return roles.some((role) => eligibleRoles.has(role));
 }
@@ -153,6 +153,7 @@ function optionForMembership(
     kind: "person",
     status: "ACTIVE",
     assignable: true,
+    profileEligible: true,
     capacity: 1,
     qualifications: [],
     updatedAt: membership.updatedAt,
@@ -170,6 +171,7 @@ function optionForRow(
   planningActorIds?: Set<string>,
   attachedAssets: PlanningAttachedAsset[] = [],
   assignmentCustody?: PlanningAssetCustody,
+  profile: PlanningResourceProfile = "operations",
 ): PlanningResourceOption | null {
   const kind = resourceKind(row, parsePayload(row.payloadJson));
   if (!kind) return null;
@@ -187,7 +189,8 @@ function optionForRow(
         && stringList(payload.memberMembershipIds).every((id) => activeMembershipIds?.has(id) && planningMembershipIds?.has(id))
       : ["AVAILABLE", "ACTIVE", "OPERATIVO", "ONLINE", "IN PRESIDIO"].includes(status);
   const blockedByCustody = Boolean(assignmentCustody);
-  const effectiveAssignable = assignable && !blockedByCustody;
+  const profileEligible = profile !== "mission" || kind !== "vehicle" || vehicleCanTransport(payload);
+  const effectiveAssignable = assignable && profileEligible && !blockedByCustody;
   const qualifications = Array.isArray(payload.qualifications)
     ? payload.qualifications.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 32)
     : [];
@@ -198,6 +201,7 @@ function optionForRow(
     kind,
     status,
     assignable: effectiveAssignable,
+    profileEligible,
     capacity: finiteCapacity(payload.capacity),
     qualifications,
     updatedAt: row.updatedAt,
@@ -245,7 +249,7 @@ async function activePlanningAssignments(tenantId: string, excludedId?: string) 
   const rows = await getDb().select().from(jobJourneyRecords).where(and(
     eq(jobJourneyRecords.tenantId, tenantId),
     eq(jobJourneyRecords.domain, "planning"),
-    inArray(jobJourneyRecords.status, ["DRAFT", "PUBLISHED"]),
+    eq(jobJourneyRecords.status, "PUBLISHED"),
   )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
 
   return rows
@@ -300,7 +304,7 @@ async function activeAssetCustody(tenantId: string) {
 export async function getPlanningResourceOptions(
   tenantId: string,
   window: PlanningAvailabilityWindow | undefined,
-  module: PlanningJobModule,
+  profile: PlanningResourceProfile,
   excludedPlanId?: string,
 ) {
   const [rows, assignments, activeMembershipRows, custodyRows] = await Promise.all([
@@ -325,11 +329,11 @@ export async function getPlanningResourceOptions(
   const activeMembershipIds = new Set(activeMembershipRows.map((membership) => membership.id));
   const planningMembershipIds = new Set(activeMembershipRows.filter((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
-    return planningRoleEligible(roles, module);
+    return planningRoleEligible(roles, profile);
   }).map((membership) => membership.id));
   const planningActorIds = new Set(activeMembershipRows.filter((membership) => {
     const roles = normalizeAuthorityRoles(membership.rolesJson, membership.role);
-    return planningRoleEligible(roles, module);
+    return planningRoleEligible(roles, profile);
   }).map((membership) => membership.actorId));
   const conflictsByResource = new Map<string, PlanningResourceConflict>();
   if (window) {
@@ -407,6 +411,14 @@ export async function getPlanningResourceOptions(
     return [...new Map(identities.flatMap((identity) => (attachedByPerson.get(identity) ?? []).map((asset) => [asset.id, asset] as const))).values()];
   }
 
+  function attachedAssetsForProfile(identities: string[]) {
+    return attachedAssetsFor(identities).filter((asset) => {
+      if (profile !== "mission" || asset.kind !== "vehicle") return true;
+      const row = assetRows.get(asset.id);
+      return row ? vehicleCanTransport(parsePayload(row.payloadJson)) : false;
+    });
+  }
+
   function conflictIncludingAttached(resourceId: string, attachedAssets: PlanningAttachedAsset[]) {
     const ownConflict = conflictsByResource.get(resourceId);
     if (ownConflict) return ownConflict;
@@ -428,8 +440,8 @@ export async function getPlanningResourceOptions(
       : kind === "team"
         ? stringList(payload.memberMembershipIds)
         : [];
-    const attachedAssets = attachedAssetsFor(attachedIdentities);
-    return optionForRow(row, conflictIncludingAttached(row.id, attachedAssets), activeMembershipIds, planningMembershipIds, planningActorIds, attachedAssets, custodyByAsset.get(row.id));
+    const attachedAssets = attachedAssetsForProfile(attachedIdentities);
+    return optionForRow(row, conflictIncludingAttached(row.id, attachedAssets), activeMembershipIds, planningMembershipIds, planningActorIds, attachedAssets, custodyByAsset.get(row.id), profile);
   })
     .filter((item): item is PlanningResourceOption => Boolean(item));
 
@@ -446,7 +458,7 @@ export async function getPlanningResourceOptions(
   const membershipOptions = activeMembershipRows
     .filter((membership) => planningMembershipIds.has(membership.id) && !representedMembershipIds.has(membership.id))
     .map((membership) => {
-      const attachedAssets = attachedAssetsFor([membership.id, membership.actorId]);
+      const attachedAssets = attachedAssetsForProfile([membership.id, membership.actorId]);
       const id = personResourceId(membership.actorId);
       return optionForMembership(membership, conflictIncludingAttached(id, attachedAssets), attachedAssets);
     });
@@ -473,7 +485,7 @@ export async function resolvePlanningResources(
   tenantId: string,
   value: unknown,
   window: PlanningAvailabilityWindow | undefined,
-  module: PlanningJobModule,
+  profile: PlanningResourceProfile,
   excludedPlanId?: string,
 ) {
   const resourceIds = Array.isArray(value)
@@ -481,7 +493,7 @@ export async function resolvePlanningResources(
     : [];
   if (!resourceIds.length) throw new PlanningResourceError("planning_resource_ids_required");
 
-  const options = await getPlanningResourceOptions(tenantId, window, module, excludedPlanId);
+  const options = await getPlanningResourceOptions(tenantId, window, profile, excludedPlanId);
   const byId = new Map(options.map((option) => [option.id, option]));
   const implicitlyAttachedIds = new Set(resourceIds.flatMap((resourceId) =>
     byId.get(resourceId)?.attachedAssets.map((asset) => asset.id) ?? [],
@@ -500,7 +512,9 @@ export async function resolvePlanningResources(
     for (const attachedAsset of option.attachedAssets) {
       if (resolvedIds.has(attachedAsset.id)) continue;
       const attachedOption = byId.get(attachedAsset.id);
-      if (!attachedOption || attachedOption.availabilityConflict || !["AVAILABLE", "ACTIVE", "OPERATIVO", "ONLINE", "IN PRESIDIO"].includes(attachedOption.status)) {
+      if (!attachedOption) throw new PlanningResourceError("planning_resource_unavailable", attachedAsset.label);
+      if (!attachedOption.profileEligible) continue;
+      if (attachedOption.availabilityConflict || !["AVAILABLE", "ACTIVE", "OPERATIVO", "ONLINE", "IN PRESIDIO"].includes(attachedOption.status)) {
         throw new PlanningResourceError("planning_resource_unavailable", attachedAsset.label);
       }
       resolved.push(planningResourceForOption(attachedOption));

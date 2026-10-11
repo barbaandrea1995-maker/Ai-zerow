@@ -4,6 +4,7 @@ import { jobJourneyRecords, routePlans, routeStops, s04Records } from "@/db/sche
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { storedMissionException } from "@/lib/mission-exception-contract";
 import { parseJobPayload } from "@/lib/operations-contract";
+import { planningCatalog } from "@/lib/planning-catalog";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
@@ -167,9 +168,10 @@ function currentDayOverlap(startsAt: string | null, endsAt: string | null) {
 
 const NON_PLANNABLE_JOB_STATUSES = new Set(["COMPLETED", "CLOSED", "CANCELLED"]);
 
-function planningEligibility(status: string) {
+function planningEligibility(status: string, location: string | null) {
   const normalized = status.trim().toUpperCase();
-  if (!NON_PLANNABLE_JOB_STATUSES.has(normalized)) return { planningEligible: true, planningBlockedReason: null };
+  if (!NON_PLANNABLE_JOB_STATUSES.has(normalized) && location) return { planningEligible: true, planningBlockedReason: null };
+  if (!location) return { planningEligible: false, planningBlockedReason: "Registra prima il luogo operativo canonico del perimetro." };
   if (normalized === "COMPLETED") return { planningEligible: false, planningBlockedReason: "Commessa completata: riaprila prima di aggiungere attività." };
   if (normalized === "CANCELLED") return { planningEligible: false, planningBlockedReason: "Perimetro annullato: disponibile solo per consultazione." };
   return { planningEligible: false, planningBlockedReason: "Perimetro chiuso: disponibile solo per consultazione." };
@@ -189,6 +191,7 @@ export async function GET() {
       context: publicAuthorityContext(context),
       jobs: [],
       plans: [],
+      catalogs: { ...planningCatalog(), qualifications: [] },
       summary: { jobs: 0, plans: 0, published: 0, conflicted: 0 },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
@@ -271,14 +274,15 @@ export async function GET() {
     const jobViews = visibleJobs.map((job) => {
       const payload = parseJobPayload(job.payloadJson);
       const status = payload.statusCode || job.status;
+      const location = payload.worksite || payload.location || job.detail || null;
       return {
         id: job.id,
         code: job.canonicalCode,
         title: payload.title || job.title,
         module: job.module,
         status,
-        ...planningEligibility(status),
-        location: payload.worksite || payload.location || job.detail,
+        ...planningEligibility(status, location),
+        location,
         scopeSubgroupId: payload.scopeSubgroupId || null,
         scopeSubgroupTitle: typeof payload.scope === "object" && payload.scope && "subgroupTitle" in payload.scope
           ? String(payload.scope.subgroupTitle ?? "")
@@ -317,6 +321,12 @@ export async function GET() {
         scopeSubgroupTitle: typeof payload.scopeSubgroupTitle === "string" ? payload.scopeSubgroupTitle : null,
         priority: typeof payload.priority === "string" ? payload.priority : "STANDARD",
         requiredQualifications,
+        resourceIds: Array.isArray(payload.selectedResourceIds)
+          ? payload.selectedResourceIds.filter((value: unknown): value is string => typeof value === "string").slice(0, 64)
+          : firstSlot && Array.isArray(firstSlot.resourceIds)
+            ? firstSlot.resourceIds.filter((value: unknown): value is string => typeof value === "string").slice(0, 64)
+            : [],
+        notes: typeof payload.notes === "string" ? payload.notes : "",
         resourceCount: resources.length,
         resourceLabels: resources.map((resource) => typeof resource.label === "string" ? resource.label : "Risorsa").slice(0, 16),
         conflictCount: evaluation && Array.isArray(evaluation.conflicts) ? evaluation.conflicts.length : 0,
@@ -333,11 +343,18 @@ export async function GET() {
         updatedAt: plan.updatedAt,
       };
     });
-    const todayPlans = planViews.filter((plan) => currentDayOverlap(plan.startsAt, plan.endsAt));
+    const todayPlans = planViews.filter((plan) => plan.status !== "CANCELLED" && currentDayOverlap(plan.startsAt, plan.endsAt));
+    const qualifications = [...new Set(workforceRows.flatMap((row) => {
+      const payload = parseJson(row.payloadJson);
+      return Array.isArray(payload.qualifications)
+        ? payload.qualifications.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+        : [];
+    }))].sort((left, right) => left.localeCompare(right, "it"));
     return Response.json({
       context: publicAuthorityContext(context),
       jobs: jobViews,
       plans: planViews,
+      catalogs: { ...planningCatalog(), qualifications },
       summary: {
         jobs: jobViews.length,
         plans: planViews.length,

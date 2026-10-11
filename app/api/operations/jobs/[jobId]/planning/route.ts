@@ -3,6 +3,12 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import {
+  planningActivityType,
+  planningPriority,
+  planningResourceProfile,
+  type PlanningActivityType,
+} from "@/lib/planning-catalog";
+import {
   evaluatePlanning,
   normalizePlanningResource,
   normalizePlanningSlot,
@@ -107,7 +113,7 @@ async function activeTenantPlans(tenantId: string, excludedId?: string) {
   const rows = await getDb().select().from(jobJourneyRecords).where(and(
     eq(jobJourneyRecords.tenantId, tenantId),
     eq(jobJourneyRecords.domain, "planning"),
-    inArray(jobJourneyRecords.status, ["DRAFT", "PUBLISHED"]),
+    eq(jobJourneyRecords.status, "PUBLISHED"),
   )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
   return rows.filter((row) => row.id !== excludedId);
 }
@@ -136,7 +142,16 @@ function evaluateAgainstTenant(
   return evaluatePlanning(slots, resources);
 }
 
-function planPayload(input: JsonObject, now: string): JsonObject | null {
+function planPayload(
+  input: JsonObject,
+  now: string,
+  canonical: {
+    activityType: PlanningActivityType;
+    location: string;
+    scopeSubgroupId: string;
+    scopeSubgroupTitle: string;
+  },
+): JsonObject | null {
   const rawResources = Array.isArray(input.resources) ? input.resources : [];
   const resources = rawResources.map(normalizePlanningResource).filter((item): item is PlanningResource => Boolean(item)).slice(0, 64);
   const rawSlots = Array.isArray(input.slots) ? input.slots : [];
@@ -153,23 +168,35 @@ function planPayload(input: JsonObject, now: string): JsonObject | null {
     if (fallback) slots.push(fallback);
   }
   if (!resources.length || !slots.length) return null;
-  const activityType = bounded(input.activityType, 24, "WORK").toUpperCase();
-  if (activityType !== "WORK" && activityType !== "TRANSPORT") return null;
+  const priority = planningPriority(input.priority);
+  if (!priority) return null;
   return {
-    activityType,
-    scopeSubgroupId: bounded(input.scopeSubgroupId, 160),
-    scopeSubgroupTitle: bounded(input.scopeSubgroupTitle, 240),
-    location: bounded(input.location, 240),
-    priority: bounded(input.priority, 24, "STANDARD").toUpperCase(),
+    activityType: canonical.activityType,
+    scopeSubgroupId: canonical.scopeSubgroupId,
+    scopeSubgroupTitle: canonical.scopeSubgroupTitle,
+    location: canonical.location,
+    priority,
     startsAt: bounded(input.startsAt, 40, slots[0].startsAt),
     endsAt: bounded(input.endsAt, 40, slots[0].endsAt),
     selectedResourceIds: [...new Set(slots.flatMap((slot) => slot.resourceIds))].slice(0, 64),
     resources,
     slots,
     notes: bounded(input.notes, 2_000),
-    mode: bounded(input.mode, 24, "EXECUTABLE"),
+    mode: "EXECUTABLE",
     createdAt: now,
   };
+}
+
+function planningCompositionError(resources: PlanningResource[], activityType: PlanningActivityType) {
+  const people = resources.filter((resource) => resource.kind === "person");
+  const teams = resources.filter((resource) => resource.kind === "team");
+  const vehicles = resources.filter((resource) => resource.kind === "vehicle");
+  if (activityType === "TRANSPORT") {
+    if (!people.length) return "Seleziona almeno un autista di consegna dal registro Persone.";
+    if (!vehicles.length) return "Seleziona un mezzo di trasporto disponibile o un autista con mezzo affidato.";
+    return null;
+  }
+  return people.length || teams.length ? null : "Seleziona almeno una persona o una squadra operativa.";
 }
 
 async function appendPlanMutation({
@@ -311,8 +338,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (job.recordType === "adapter-contract") return Response.json({ error: "operational_job_required" }, { status: 409 });
     const jobPayload = parseJson(job.payloadJson);
     const jobStatus = bounded(jobPayload.statusCode, 32, job.status).toUpperCase();
+    const jobModule = job.module === "mission" ? "mission" : "operations";
+    const jobScope = isRecord(jobPayload.scope) ? jobPayload.scope : {};
+    const canonicalLocation = bounded(jobPayload.worksite ?? jobPayload.location ?? job.detail, 240);
+    const canonicalScope = {
+      scopeSubgroupId: bounded(jobPayload.scopeSubgroupId ?? jobScope.subgroupId, 160),
+      scopeSubgroupTitle: bounded(jobScope.subgroupTitle, 240),
+    };
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
       eq(s06Events.idempotencyKey, idempotencyKey),
@@ -329,12 +364,16 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (!record) return Response.json({ error: "planning_idempotency_readback_unavailable" }, { status: 503 });
       return Response.json({ plan: recordForResponse(record), idempotent: true, eventId: existingEvent.eventId, readback: { status: "verified", scope: "tenant", version: record.version } }, { headers: { "cache-control": "private, no-store" } });
     }
-    if (NON_PLANNABLE_JOB_STATUSES.has(jobStatus)) {
+    if (NON_PLANNABLE_JOB_STATUSES.has(jobStatus) && action !== "cancel") {
       return Response.json({ error: "planning_job_not_active", status: jobStatus }, { status: 409 });
     }
+    if (!canonicalLocation && action !== "cancel") return Response.json({ error: "planning_job_location_required" }, { status: 409 });
 
     const now = new Date().toISOString();
     if (action === "what_if" || action === "draft" || action === "revise") {
+      const activityType = planningActivityType(input.activityType, jobModule);
+      if (!activityType) return Response.json({ error: "invalid_planning_activity_type" }, { status: 400 });
+      if (!planningPriority(input.priority)) return Response.json({ error: "invalid_planning_priority" }, { status: 400 });
       const resourceWindow = (() => {
         const startsAt = bounded(input.startsAt, 40);
         const endsAt = bounded(input.endsAt, 40);
@@ -348,7 +387,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           context.tenantId,
           input.resourceIds,
           resourceWindow,
-          job.module === "mission" ? "mission" : "operations",
+          planningResourceProfile(activityType),
           action === "revise" ? bounded(input.recordId, 120) : undefined,
         );
       } catch (error) {
@@ -366,20 +405,19 @@ export async function POST(request: Request, routeContext: RouteContext) {
         && !hasCapability(context, "asset.read")) {
         return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
       }
-      const jobScope = isRecord(jobPayload.scope) ? jobPayload.scope : {};
+      const compositionError = planningCompositionError(canonicalResources, activityType);
+      if (compositionError) return Response.json({ error: "planning_resource_composition_invalid", detail: compositionError }, { status: 400 });
       const payload = planPayload({
         ...input,
-        activityType: job.module === "mission" ? "TRANSPORT" : input.activityType,
         resources: canonicalResources,
-        scopeSubgroupId: input.scopeSubgroupId ?? jobPayload.scopeSubgroupId ?? jobScope.subgroupId,
-        scopeSubgroupTitle: input.scopeSubgroupTitle ?? jobScope.subgroupTitle,
-        location: input.location ?? jobPayload.worksite ?? jobPayload.location,
-      }, now);
+      }, now, {
+        activityType,
+        location: canonicalLocation,
+        ...canonicalScope,
+      });
       if (!payload) return Response.json({ error: "valid_resources_and_slots_required" }, { status: 400 });
-      const candidateEvaluation = evaluatePlanning(payload.slots as PlanningSlot[], payload.resources as PlanningResource[]);
       const existing = await activeTenantPlans(context.tenantId, action === "revise" ? bounded(input.recordId, 120) : undefined);
-      const tenantEvaluation = evaluateAgainstTenant(payload.slots as PlanningSlot[], payload.resources as PlanningResource[], existing);
-      const evaluation = { ...tenantEvaluation, conflicts: [...candidateEvaluation.conflicts, ...tenantEvaluation.conflicts] };
+      const evaluation = evaluateAgainstTenant(payload.slots as PlanningSlot[], payload.resources as PlanningResource[], existing);
       if (action === "what_if") {
         return Response.json({
           persisted: false,
@@ -389,7 +427,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           readback: { status: "simulation_only", scope: "tenant", checkedAt: now },
         }, { headers: { "cache-control": "private, no-store" } });
       }
-      if (!evaluation.feasible && input.allowConflicts !== true) {
+      if (!evaluation.feasible) {
         return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
       }
       if (action === "revise") {
@@ -404,8 +442,54 @@ export async function POST(request: Request, routeContext: RouteContext) {
         )).limit(1);
         if (!source) return Response.json({ error: "planning_record_not_found" }, { status: 404 });
         if (source.version !== expectedVersion) return Response.json({ error: "version_conflict", expectedVersion, currentVersion: source.version }, { status: 409 });
+        if (source.status !== "DRAFT") return Response.json({ error: "planning_revision_requires_draft", status: source.status }, { status: 409 });
+        const nextVersion = source.version + 1;
+        const eventId = crypto.randomUUID();
         payload.revisionOf = source.id;
         payload.revisionNumber = source.version + 1;
+        payload.evaluation = evaluation;
+        payload.status = "DRAFT";
+        payload.revisedAt = now;
+        payload.revisedBy = context.actorId;
+        const results = await db.batch([
+          db.update(jobJourneyRecords).set({
+            title: bounded(input.title, 160, source.title),
+            status: "DRAFT",
+            version: nextVersion,
+            payloadJson: JSON.stringify(payload),
+            updatedBy: context.actorId,
+            updatedAt: now,
+          }).where(and(
+            eq(jobJourneyRecords.tenantId, context.tenantId),
+            eq(jobJourneyRecords.id, source.id),
+            eq(jobJourneyRecords.version, expectedVersion),
+          )).returning(),
+          db.insert(s06Events).values({
+            eventId,
+            tenantId: context.tenantId,
+            eventType: "planning.plan.revised",
+            schemaVersion: "1",
+            actorType: "human",
+            actorId: context.actorId,
+            source: "sites-planning",
+            occurredAt: now,
+            observedAt: now,
+            aggregateType: "job.journey.planning",
+            aggregateId: source.id,
+            aggregateVersion: nextVersion,
+            payloadJson: JSON.stringify({ jobId: job.id, status: "DRAFT", source: "sites-planning" }),
+            correlationId: crypto.randomUUID(),
+            causationId: null,
+            idempotencyKey,
+            status: "COMMITTED_SITES_READBACK",
+            createdAt: now,
+          }),
+          db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: "zerow.planning.plan.revised", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
+          db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.planning", aggregateId: source.id, expectedVersion: nextVersion, observedVersion: nextVersion, status: "SITES_READBACK_VERIFIED", detail: "Bozza aggiornata con cataloghi canonici e nuova verifica di disponibilità.", createdAt: now, updatedAt: now }),
+        ]);
+        const updated = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
+        if (!updated) return Response.json({ error: "version_conflict", currentVersion: source.version }, { status: 409 });
+        return Response.json({ plan: recordForResponse(updated), evaluation, eventId, idempotent: false, readback: { status: "verified", scope: "tenant", version: updated.version } }, { headers: { "cache-control": "private, no-store" } });
       }
       payload.evaluation = evaluation;
       payload.status = "DRAFT";
@@ -417,14 +501,14 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status: "DRAFT",
         payload,
         idempotencyKey,
-        eventType: action === "revise" ? "planning.plan.revised" : "planning.plan.created",
+        eventType: "planning.plan.created",
         now,
       });
       if (!result.row) return Response.json({ error: "planning_readback_unavailable" }, { status: 503 });
       return Response.json({ plan: recordForResponse(result.row), evaluation, eventId: result.eventId, idempotent: false, readback: { status: "verified", scope: "tenant", version: result.row.version } }, { status: 201, headers: { "cache-control": "private, no-store" } });
     }
 
-    if (action !== "publish") return Response.json({ error: "unsupported_planning_action", allowed: ["draft", "publish", "revise", "what_if"] }, { status: 400 });
+    if (action !== "publish" && action !== "cancel") return Response.json({ error: "unsupported_planning_action", allowed: ["draft", "publish", "revise", "what_if", "cancel"] }, { status: 400 });
     const recordId = bounded(input.recordId, 120);
     const expectedVersion = typeof input.expectedVersion === "number" ? Math.floor(input.expectedVersion) : null;
     if (!recordId || expectedVersion === null || expectedVersion < 1) return Response.json({ error: "record_id_and_expected_version_required" }, { status: 400 });
@@ -436,8 +520,72 @@ export async function POST(request: Request, routeContext: RouteContext) {
     )).limit(1);
     if (!record) return Response.json({ error: "planning_record_not_found" }, { status: 404 });
     if (record.version !== expectedVersion) return Response.json({ error: "version_conflict", expectedVersion, currentVersion: record.version }, { status: 409 });
+    if (action === "cancel") {
+      if (record.status !== "DRAFT" && record.status !== "PUBLISHED") return Response.json({ error: "invalid_planning_transition", status: record.status }, { status: 409 });
+      const linkedMissionRows = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.jobId, job.id),
+        eq(jobJourneyRecords.domain, "mission"),
+      )).limit(200);
+      const linkedMission = linkedMissionRows.find((mission) => parseJson(mission.payloadJson).planningPlanId === record.id);
+      if (linkedMission) {
+        return Response.json({
+          error: "planning_linked_mission_requires_resolution",
+          detail: `Il piano è collegato alla missione ${linkedMission.title}. Gestisci la missione prima di annullare la pianificazione.`,
+          missionId: linkedMission.id,
+        }, { status: 409 });
+      }
+      const nextVersion = record.version + 1;
+      const eventId = crypto.randomUUID();
+      const cancelledPayload = {
+        ...parseJson(record.payloadJson),
+        status: "CANCELLED",
+        cancelledAt: now,
+        cancelledBy: context.actorId,
+      };
+      const results = await db.batch([
+        db.update(jobJourneyRecords).set({
+          status: "CANCELLED",
+          version: nextVersion,
+          payloadJson: JSON.stringify(cancelledPayload),
+          updatedBy: context.actorId,
+          updatedAt: now,
+        }).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.id, record.id),
+          eq(jobJourneyRecords.version, expectedVersion),
+        )).returning(),
+        db.insert(s06Events).values({
+          eventId,
+          tenantId: context.tenantId,
+          eventType: "planning.plan.cancelled",
+          schemaVersion: "1",
+          actorType: "human",
+          actorId: context.actorId,
+          source: "sites-planning",
+          occurredAt: now,
+          observedAt: now,
+          aggregateType: "job.journey.planning",
+          aggregateId: record.id,
+          aggregateVersion: nextVersion,
+          payloadJson: JSON.stringify({ jobId: job.id, previousStatus: record.status, status: "CANCELLED" }),
+          correlationId: crypto.randomUUID(),
+          causationId: null,
+          idempotencyKey,
+          status: "COMMITTED_SITES_READBACK",
+          createdAt: now,
+        }),
+        db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: "zerow.planning.plan.cancelled", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
+        db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "job.journey.planning", aggregateId: record.id, expectedVersion: nextVersion, observedVersion: nextVersion, status: "SITES_READBACK_VERIFIED", detail: "Piano annullato e risorse rilasciate con transizione versionata.", createdAt: now, updatedAt: now }),
+      ]);
+      const cancelled = (results[0] as (typeof jobJourneyRecords.$inferSelect)[])[0];
+      if (!cancelled) return Response.json({ error: "version_conflict", currentVersion: record.version }, { status: 409 });
+      return Response.json({ plan: recordForResponse(cancelled), eventId, idempotent: false, readback: { status: "verified", scope: "tenant", version: cancelled.version } }, { headers: { "cache-control": "private, no-store" } });
+    }
     if (record.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition", status: record.status }, { status: 409 });
     const data = planningData(record);
+    const storedActivityType = planningActivityType(data.payload.activityType, jobModule);
+    if (!storedActivityType) return Response.json({ error: "invalid_planning_activity_type" }, { status: 409 });
     const selectedResourceIds = Array.isArray(data.payload.selectedResourceIds)
       ? data.payload.selectedResourceIds.filter((value): value is string => typeof value === "string").slice(0, 64)
       : [...new Set(data.slots.flatMap((slot) => slot.resourceIds))].slice(0, 64);
@@ -455,7 +603,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         context.tenantId,
         selectedResourceIds,
         { startsAt, endsAt },
-        job.module === "mission" ? "mission" : "operations",
+        planningResourceProfile(storedActivityType),
         record.id,
       );
     } catch (error) {
@@ -473,9 +621,23 @@ export async function POST(request: Request, routeContext: RouteContext) {
       && !hasCapability(context, "asset.read"))) {
       return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
     }
+    const compositionError = planningCompositionError(canonicalResources, storedActivityType);
+    if (compositionError) return Response.json({ error: "planning_resource_composition_invalid", detail: compositionError }, { status: 409 });
     const evaluation = evaluateAgainstTenant(data.slots, canonicalResources, await activeTenantPlans(context.tenantId, record.id));
-    if (!evaluation.feasible && input.allowConflicts !== true) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
-    const nextPayload = { ...data.payload, selectedResourceIds, resources: canonicalResources, evaluation, publishedAt: now, publishedBy: context.actorId, status: "PUBLISHED" };
+    if (!evaluation.feasible) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
+    const nextPayload = {
+      ...data.payload,
+      activityType: storedActivityType,
+      priority: planningPriority(data.payload.priority) ?? "STANDARD",
+      location: canonicalLocation,
+      ...canonicalScope,
+      selectedResourceIds,
+      resources: canonicalResources,
+      evaluation,
+      publishedAt: now,
+      publishedBy: context.actorId,
+      status: "PUBLISHED",
+    };
     const eventId = crypto.randomUUID();
     const publishUpdate = db.update(jobJourneyRecords).set({
       status: "PUBLISHED",

@@ -139,6 +139,7 @@ export function evaluatePlanning(
       });
       continue;
     }
+    const slotResources: PlanningResource[] = [];
     for (const resourceId of slot.resourceIds) {
       const resource = resourcesById.get(resourceId);
       if (!resource) {
@@ -150,21 +151,13 @@ export function evaluatePlanning(
         });
         continue;
       }
+      slotResources.push(resource);
       if (resource.unavailable.some((interval) => validInterval(interval) && overlaps(slot, interval))) {
         addConflict(conflicts, {
           code: "RESOURCE_UNAVAILABLE",
           slotIds: [slot.id],
           resourceId,
           detail: `${resource.label} non è disponibile nella finestra richiesta.`,
-        });
-      }
-      const missing = slot.requiredQualifications.filter((qualification) => !resource.qualifications.includes(qualification));
-      if (missing.length) {
-        addConflict(conflicts, {
-          code: "QUALIFICATION_MISSING",
-          slotIds: [slot.id],
-          resourceId,
-          detail: `${resource.label} non possiede: ${missing.join(", ")}.`,
         });
       }
       const overlapping = slots.filter((other) => other.id !== slot.id
@@ -180,6 +173,17 @@ export function evaluatePlanning(
           detail: `${resource.label} supera la capacità ${resource.capacity} nella finestra richiesta.`,
         });
       }
+    }
+    const workforceQualifications = new Set(slotResources
+      .filter((resource) => resource.kind === "person" || resource.kind === "team")
+      .flatMap((resource) => resource.qualifications));
+    const missingQualifications = slot.requiredQualifications.filter((qualification) => !workforceQualifications.has(qualification));
+    if (missingQualifications.length) {
+      addConflict(conflicts, {
+        code: "QUALIFICATION_MISSING",
+        slotIds: [slot.id],
+        detail: `Nessuna persona o squadra selezionata copre: ${missingQualifications.join(", ")}.`,
+      });
     }
   }
 

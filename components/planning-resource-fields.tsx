@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Users, Wrench } from "lucide-react";
+import type { PlanningActivityType } from "@/lib/planning-catalog";
 
 type ResourceOption = {
   id: string;
@@ -45,6 +46,7 @@ type ResourceResponse = {
 
 type PlanningResourceFieldsProps = {
   jobId: string;
+  activityType?: PlanningActivityType;
   startsAt: string;
   endsAt: string;
   selectedIds: string[];
@@ -70,7 +72,7 @@ function resourceStatusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
-export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, onChange }: PlanningResourceFieldsProps) {
+export function PlanningResourceFields({ jobId, activityType = "WORK", startsAt, endsAt, selectedIds, onChange }: PlanningResourceFieldsProps) {
   const [resources, setResources] = useState<ResourceOption[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [availabilityWindow, setAvailabilityWindow] = useState<ResourceResponse["availability"]>(undefined);
@@ -85,6 +87,7 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
     let active = true;
     const timer = window.setTimeout(() => setState("loading"), 0);
     const params = new URLSearchParams();
+    params.set("activityType", activityType);
     if (startsAt && endsAt && Number.isFinite(Date.parse(startsAt)) && Number.isFinite(Date.parse(endsAt)) && Date.parse(endsAt) > Date.parse(startsAt)) {
       params.set("startsAt", new Date(startsAt).toISOString());
       params.set("endsAt", new Date(endsAt).toISOString());
@@ -112,12 +115,12 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
         setState("error");
       });
     return () => { active = false; window.clearTimeout(timer); };
-  }, [jobId, startsAt, endsAt]);
+  }, [activityType, endsAt, jobId, startsAt]);
 
   const groups = useMemo(() => [
-    { label: "Persone e squadre", icon: Users, items: resources.filter((resource) => resource.kind === "person" || resource.kind === "team") },
-    { label: "Asset e mezzi", icon: Wrench, items: resources.filter((resource) => resource.kind === "asset" || resource.kind === "vehicle") },
-  ], [resources]);
+    { label: activityType === "TRANSPORT" ? "Autisti di consegna" : "Persone e squadre", icon: Users, items: resources.filter((resource) => activityType === "TRANSPORT" ? resource.kind === "person" : resource.kind === "person" || resource.kind === "team") },
+    { label: activityType === "TRANSPORT" ? "Mezzi e carico" : "Asset e mezzi", icon: Wrench, items: resources.filter((resource) => resource.kind === "asset" || resource.kind === "vehicle") },
+  ], [activityType, resources]);
   const attachedAssetCount = useMemo(() => new Set(resources.filter((resource) => selectedIds.includes(resource.id)).flatMap((resource) => resource.attachedAssets?.map((asset) => asset.id) ?? [])).size, [resources, selectedIds]);
 
   function toggle(id: string) {
@@ -129,7 +132,7 @@ export function PlanningResourceFields({ jobId, startsAt, endsAt, selectedIds, o
       <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[0.08] text-lime-200"><Users className="size-4" /></span>
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-lime-300/70">RISORSE REALI · PIANO GIORNALIERO</p>
-        <p className="mt-1 text-[10px] leading-4 text-slate-500">Seleziona persone e squadre registrate. Mezzi e asset affidati a lungo termine vengono inclusi automaticamente nella scheda della persona, con nome e identificativo leggibili.</p>
+        <p className="mt-1 text-[10px] leading-4 text-slate-500">{activityType === "TRANSPORT" ? "Il catalogo mostra solo autisti di consegna e mezzi autorizzati. Un mezzo affidato a lungo termine segue automaticamente il suo autista." : "Il catalogo mostra solo personale operativo. Mezzi e asset affidati a lungo termine seguono automaticamente la persona assegnataria."}</p>
       </div>
       <span className="shrink-0 text-right font-mono text-[9px] text-slate-600">{state === "loading" ? <LoaderCircle className="size-3.5 animate-spin text-lime-200" /> : state === "error" ? "NON DISPONIBILE" : <>{selectedIds.length} SELEZIONATE{attachedAssetCount ? <span className="block text-cyan-200/70">+ {attachedAssetCount} ASSET COLLEGATI</span> : null}</>}</span>
     </div>

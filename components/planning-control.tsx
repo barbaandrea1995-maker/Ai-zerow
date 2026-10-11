@@ -1,12 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowUpRight,
   Bell,
+  Ban,
   BriefcaseBusiness,
   CalendarClock,
   CheckCircle2,
@@ -17,6 +18,7 @@ import {
   LoaderCircle,
   MapPin,
   Menu,
+  PencilLine,
   RefreshCw,
   Route,
   Search,
@@ -47,6 +49,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 import { missionExceptionLabel } from "@/lib/mission-exception-contract";
+import type { PlanningActivityType, PlanningJobModule, PlanningPriority } from "@/lib/planning-catalog";
 
 type Tone = "lime" | "cyan" | "amber" | "red";
 type PlanningView = "today" | "plans" | "perimeters";
@@ -64,7 +67,7 @@ type PlanningJob = {
   id: string;
   code: string | null;
   title: string;
-  module: "operations" | "mission";
+  module: PlanningJobModule;
   status: string;
   location: string | null;
   scopeSubgroupId: string | null;
@@ -117,6 +120,8 @@ type PlanningPlan = {
   scopeSubgroupTitle: string | null;
   priority: string;
   requiredQualifications: string[];
+  resourceIds: string[];
+  notes: string;
   resourceCount: number;
   resourceLabels: string[];
   conflictCount: number;
@@ -164,6 +169,17 @@ type PlanningPayload = {
   jobs?: PlanningJob[];
   plans?: PlanningPlan[];
   summary?: PlanningSummary;
+  catalogs?: {
+    activityTypes: Array<{
+      value: PlanningActivityType;
+      label: string;
+      description: string;
+      resourceProfile: "operations" | "mission";
+      allowedJobModules: PlanningJobModule[];
+    }>;
+    priorities: Array<{ value: PlanningPriority; label: string }>;
+    qualifications: string[];
+  };
   readback?: { status?: string; checkedAt?: string };
   error?: string;
 };
@@ -237,6 +253,14 @@ function localDateTime(offsetHours: number) {
   return local.toISOString().slice(0, 16);
 }
 
+function inputDateTime(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 function moduleLabel(module: PlanningJob["module"] | PlanningPlan["jobModule"]) {
   if (!module) return "Perimetro";
   return module === "mission" ? "Missione" : "Commessa";
@@ -265,6 +289,7 @@ function statusLabel(status: string) {
     POD_VERIFIED: "POD verificato",
     RECONCILED: "Riconciliata",
     CLOSED: "Chiusa",
+    CANCELLED: "Annullato",
     EXCEPTION: "Eccezione",
     NOT_SCHEDULED: "Finestra da definire",
     SCHEDULED: "Programmata",
@@ -280,7 +305,7 @@ function statusLabel(status: string) {
 }
 
 function statusTone(status: string, feasible = true): Tone {
-  if (!feasible || status === "CONFLICTED" || status === "EXCEPTION") return "red";
+  if (!feasible || status === "CONFLICTED" || status === "EXCEPTION" || status === "CANCELLED") return "red";
   if (status === "PUBLISHED" || status === "FEASIBLE" || status === "COMPLETED") return "lime";
   if (status === "DRAFT" || status === "STARTED_LATE" || status === "OVERDUE") return "amber";
   return "cyan";
@@ -298,6 +323,13 @@ function planningErrorMessage(code?: string, detail?: string) {
   if (code === "planning_resource_unavailable") return detail ? `${detail} non è disponibile nella finestra scelta.` : "Una risorsa non è disponibile nella finestra scelta.";
   if (code === "planning_conflicts") return "La proposta contiene sovrapposizioni o requisiti non soddisfatti.";
   if (code === "planning_job_not_active") return "Il perimetro è completato, chiuso o annullato e resta disponibile solo per consultazione.";
+  if (code === "planning_job_location_required") return "Registra prima il luogo operativo canonico della commessa o della missione.";
+  if (code === "planning_resource_composition_invalid") return detail || "La composizione delle risorse non è valida per questo tipo di attività.";
+  if (code === "invalid_planning_activity_type") return "Il tipo di attività non appartiene al catalogo disponibile per questo perimetro.";
+  if (code === "invalid_planning_priority") return "La priorità selezionata non appartiene al catalogo aziendale.";
+  if (code === "planning_revision_requires_draft") return "Puoi modificare soltanto una bozza non ancora pubblicata.";
+  if (code === "planning_linked_mission_requires_resolution") return detail || "Gestisci la missione collegata prima di annullare il piano.";
+  if (code === "invalid_planning_transition") return "Lo stato del piano è cambiato. Aggiorna i dati e riprova.";
   if (code === "workforce_registry_access_required") return "Il tuo ruolo non può assegnare persone dal registro aziendale.";
   if (code === "asset_registry_access_required") return "Il tuo ruolo non può assegnare mezzi o attrezzature.";
   if (code === "valid_resources_and_slots_required") return "Controlla orari e risorse prima di salvare.";
@@ -365,18 +397,27 @@ function PlanCard({
   plan,
   busy,
   canPublish,
+  canReadMission,
+  canPrepareMission,
+  onCancel,
+  onEdit,
   onPublish,
   onOpenMission,
 }: {
   plan: PlanningPlan;
   busy: boolean;
   canPublish: boolean;
+  canReadMission: boolean;
+  canPrepareMission: boolean;
+  onCancel: () => void;
+  onEdit: () => void;
   onPublish: () => void;
   onOpenMission: () => void;
 }) {
   const mission = plan.linkedMission;
-  const canOpenMission = Boolean(mission)
-    || (plan.activityType === "TRANSPORT" && plan.status === "PUBLISHED" && plan.feasible);
+  const canOpenMission = mission
+    ? canReadMission
+    : canPrepareMission && plan.activityType === "TRANSPORT" && plan.status === "PUBLISHED" && plan.feasible;
   const missionAttention = mission?.exception?.recoveryStatus === "OPEN";
 
   return <article className="rounded-2xl border border-white/[.08] bg-black/20 p-4 transition hover:border-lime-300/20 sm:p-5">
@@ -403,7 +444,9 @@ function PlanCard({
     {mission && <div className={`mt-4 rounded-xl border p-3 ${missionAttention ? "border-rose-300/20 bg-rose-300/[.035]" : "border-cyan-300/15 bg-cyan-300/[.03]"}`}><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100">Missione collegata</p><span className="flex items-center gap-2 text-[9px] text-slate-500">Esecuzione <StatusPill status={mission.executionStatus} tone={statusTone(mission.executionStatus)} /></span></div><div className="mt-3 grid gap-2 text-[10px] text-slate-400 sm:grid-cols-2"><p><Clock3 className="mr-1.5 inline size-3.5 text-cyan-200" />{statusLabel(mission.schedule.status)}{scheduleDeltaLabel(mission.schedule)}</p><p><Route className="mr-1.5 inline size-3.5 text-lime-200" />{mission.routeProgress ? `${mission.routeProgress.completedStops}/${mission.routeProgress.totalStops} tappe completate` : "Percorso da preparare"}</p></div>{mission.routeProgress?.currentStopLabel && <p className="mt-2 text-[10px] text-slate-500">Prossima tappa: {mission.routeProgress.currentStopLabel}</p>}{mission.exception && <p className={`mt-2 text-[10px] ${missionAttention ? "text-rose-100" : "text-slate-500"}`}>Eccezione: {missionExceptionLabel(mission.exception.type)} · {mission.exception.recoveryStatus === "OPEN" ? "da gestire" : "risolta"}</p>}</div>}
 
     <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/[.06] pt-4">
+      {plan.status === "DRAFT" && canPublish && <Button className="h-9 border-white/10 bg-black/20 text-[10px] font-semibold text-slate-300 hover:border-lime-300/25 hover:bg-lime-300/[.06] hover:text-lime-100" disabled={busy} onClick={onEdit} variant="outline"><PencilLine className="size-3.5" />Modifica bozza</Button>}
       {plan.status === "DRAFT" && <Button className="h-9 bg-lime-300 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy || !canPublish || !plan.feasible} onClick={onPublish}><Send className="size-3.5" />Pubblica</Button>}
+      {(plan.status === "DRAFT" || plan.status === "PUBLISHED") && canPublish && <Button className="h-9 border-rose-300/15 bg-rose-300/[.03] text-[10px] font-semibold text-rose-100 hover:bg-rose-300/[.08]" disabled={busy} onClick={onCancel} variant="outline"><Ban className="size-3.5" />Annulla piano</Button>}
       {canOpenMission && <Button className="h-9 border-cyan-300/20 bg-cyan-300/[.05] text-[10px] font-semibold text-cyan-100 hover:bg-cyan-300/[.1]" onClick={onOpenMission} variant="outline"><Route className="size-3.5" />{mission ? "Apri missione" : "Prepara missione"}</Button>}
       <span className="ml-auto text-[9px] text-slate-700">Aggiornato {formatDate(plan.updatedAt)}</span>
     </div>
@@ -424,6 +467,8 @@ function JobSelector({
 
 export default function PlanningControl() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const handoffRef = useRef("");
   const [payload, setPayload] = useState<PlanningPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -432,13 +477,13 @@ export default function PlanningControl() {
   const [view, setView] = useState<PlanningView>("today");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [modal, setModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<PlanningPlan | null>(null);
   const [title, setTitle] = useState("");
-  const [activityType, setActivityType] = useState<"WORK" | "TRANSPORT">("WORK");
-  const [priority, setPriority] = useState("STANDARD");
+  const [activityType, setActivityType] = useState<PlanningActivityType>("WORK");
+  const [priority, setPriority] = useState<PlanningPriority>("STANDARD");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
-  const [location, setLocation] = useState("");
-  const [qualifications, setQualifications] = useState("");
+  const [qualifications, setQualifications] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [resourceIds, setResourceIds] = useState<string[]>([]);
   const [simulation, setSimulation] = useState<SimulationState>({ status: "idle", evaluation: null });
@@ -474,12 +519,20 @@ export default function PlanningControl() {
   const allowedNavigation = useMemo(() => getAllowedCommandNavigation(capabilities).map((item) => item.id), [capabilities]);
   const jobs = useMemo(() => payload?.jobs ?? [], [payload?.jobs]);
   const plans = useMemo(() => payload?.plans ?? [], [payload?.plans]);
+  const activityCatalog = useMemo(() => payload?.catalogs?.activityTypes ?? [], [payload?.catalogs?.activityTypes]);
+  const priorityCatalog = useMemo(() => payload?.catalogs?.priorities ?? [], [payload?.catalogs?.priorities]);
+  const qualificationCatalog = useMemo(() => payload?.catalogs?.qualifications ?? [], [payload?.catalogs?.qualifications]);
+  const editorQualificationCatalog = useMemo(
+    () => [...new Set([...qualificationCatalog, ...(editingPlan?.requiredQualifications ?? [])])],
+    [editingPlan?.requiredQualifications, qualificationCatalog],
+  );
   const summary = payload?.summary ?? {};
   const selectedJob = jobs.find((job) => job.id === selectedJobId) ?? jobs[0] ?? null;
   const selectedPlans = useMemo(() => plans.filter((plan) => plan.jobId === selectedJob?.id), [plans, selectedJob?.id]);
   const canWritePlanning = capabilities.includes("planning.write");
   const canReadCommunication = capabilities.includes("communication.read");
   const canReadMission = capabilities.includes("mission.read");
+  const canPrepareMission = capabilities.includes("mission.write") || capabilities.includes("mission.manage");
   const actor = { email: context?.actorEmail ?? "operator@zerow.local", name: context?.actorName ?? "Operatore" };
   const validWindow = Boolean(startsAt && endsAt && Number.isFinite(Date.parse(startsAt)) && Number.isFinite(Date.parse(endsAt)) && Date.parse(endsAt) > Date.parse(startsAt));
 
@@ -496,7 +549,7 @@ export default function PlanningControl() {
     }).sort((left, right) => Date.parse(left.startsAt ?? "") - Date.parse(right.startsAt ?? ""));
   }, [plans, query, statusFilter]);
 
-  const todayPlans = useMemo(() => filteredPlans.filter((plan) => currentDayOverlap(plan.startsAt, plan.endsAt)), [filteredPlans]);
+  const todayPlans = useMemo(() => filteredPlans.filter((plan) => plan.status !== "CANCELLED" && currentDayOverlap(plan.startsAt, plan.endsAt)), [filteredPlans]);
   const attentionPlans = useMemo(() => plans.filter((plan) => !plan.feasible || plan.linkedMission?.exception?.recoveryStatus === "OPEN"), [plans]);
   const selectedFilteredPlans = useMemo(() => filteredPlans.filter((plan) => plan.jobId === selectedJob?.id), [filteredPlans, selectedJob?.id]);
   const filteredJobs = useMemo(() => {
@@ -509,11 +562,16 @@ export default function PlanningControl() {
     router.push(path);
   }
 
-  function resetSimulation() {
+  const resetSimulation = useCallback(() => {
     setSimulation({ status: "idle", evaluation: null });
-  }
+  }, []);
 
-  function openCreate(job = selectedJob) {
+  const openCreate = useCallback((requestedJob?: PlanningJob | null) => {
+    const job = requestedJob ?? selectedJob;
+    if (!canWritePlanning) {
+      setNotice("Il tuo ruolo può consultare la pianificazione ma non creare attività.");
+      return;
+    }
     if (!job) {
       setNotice("Prima seleziona una commessa o una missione.");
       return;
@@ -522,21 +580,50 @@ export default function PlanningControl() {
       setNotice(job.planningBlockedReason ?? "Questo perimetro è disponibile solo per consultazione.");
       return;
     }
+    const availableActivities = activityCatalog.filter((entry) => entry.allowedJobModules.includes(job.module));
+    const defaultActivity = availableActivities.find((entry) => entry.value === (job.module === "mission" ? "TRANSPORT" : "WORK"))?.value
+      ?? availableActivities[0]?.value
+      ?? (job.module === "mission" ? "TRANSPORT" : "WORK");
+    const defaultPriority = priorityCatalog.find((entry) => entry.value === "STANDARD")?.value ?? priorityCatalog[0]?.value ?? "STANDARD";
     setSelectedJobId(job.id);
+    setEditingPlan(null);
     setTitle(job.module === "mission" ? `Piano missione · ${job.title}` : `Attività · ${job.title}`);
-    setActivityType(job.module === "mission" ? "TRANSPORT" : "WORK");
-    setPriority("STANDARD");
+    setActivityType(defaultActivity);
+    setPriority(defaultPriority);
     setStartsAt(localDateTime(1));
     setEndsAt(localDateTime(5));
-    setLocation(job.location ?? "");
-    setQualifications("");
+    setQualifications([]);
     setNotes("");
     setResourceIds([]);
     resetSimulation();
     setModal(true);
-  }
+  }, [activityCatalog, canWritePlanning, priorityCatalog, resetSimulation, selectedJob]);
 
-  function requestBody(action: "draft" | "what_if") {
+  const openEdit = useCallback((plan: PlanningPlan) => {
+    if (!canWritePlanning) {
+      setNotice("Il tuo ruolo non può modificare questa bozza.");
+      return;
+    }
+    const job = jobs.find((candidate) => candidate.id === plan.jobId);
+    if (!job || !job.planningEligible || plan.status !== "DRAFT") {
+      setNotice("La bozza non è più modificabile nel perimetro corrente.");
+      return;
+    }
+    setSelectedJobId(job.id);
+    setEditingPlan(plan);
+    setTitle(plan.title);
+    setActivityType(plan.activityType === "TRANSPORT" ? "TRANSPORT" : "WORK");
+    setPriority(priorityCatalog.some((entry) => entry.value === plan.priority) ? plan.priority as PlanningPriority : "STANDARD");
+    setStartsAt(inputDateTime(plan.startsAt));
+    setEndsAt(inputDateTime(plan.endsAt));
+    setQualifications(plan.requiredQualifications);
+    setNotes(plan.notes);
+    setResourceIds(plan.resourceIds);
+    resetSimulation();
+    setModal(true);
+  }, [canWritePlanning, jobs, priorityCatalog, resetSimulation]);
+
+  function requestBody(action: "draft" | "revise" | "what_if") {
     return {
       action,
       title: title.trim() || "Piano operativo",
@@ -544,15 +631,34 @@ export default function PlanningControl() {
       priority,
       startsAt,
       endsAt,
-      location: location.trim(),
-      scopeSubgroupId: selectedJob?.scopeSubgroupId,
-      scopeSubgroupTitle: selectedJob?.scopeSubgroupTitle,
-      requiredQualifications: qualifications.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 12),
+      requiredQualifications: qualifications,
       notes: notes.trim(),
       resourceIds,
+      ...(editingPlan ? { recordId: editingPlan.id, expectedVersion: editingPlan.version } : {}),
       idempotencyKey: `planning-${action}-${crypto.randomUUID()}`,
     };
   }
+
+  useEffect(() => {
+    if (state !== "ready") return;
+    const requestedJobId = searchParams.get("jobId")?.trim() ?? "";
+    const createRequested = searchParams.get("create") === "1";
+    if (!requestedJobId) return;
+    const handoffKey = `${requestedJobId}:${createRequested ? "create" : "open"}`;
+    if (handoffRef.current === handoffKey) return;
+    handoffRef.current = handoffKey;
+    const timer = window.setTimeout(() => {
+      const job = jobs.find((candidate) => candidate.id === requestedJobId || candidate.code === requestedJobId);
+      if (!job) setNotice("Il perimetro richiesto non è disponibile nella tua pianificazione.");
+      else {
+        setSelectedJobId(job.id);
+        setView("perimeters");
+        if (createRequested) openCreate(job);
+      }
+      router.replace("/planning", { scroll: false });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [jobs, openCreate, router, searchParams, state]);
 
   async function simulatePlan() {
     if (!selectedJob || !validWindow || !resourceIds.length) return;
@@ -581,15 +687,17 @@ export default function PlanningControl() {
     setBusy(true);
     setNotice("");
     try {
+      const action = editingPlan ? "revise" : "draft";
       const response = await fetch(`/api/operations/jobs/${encodeURIComponent(selectedJob.id)}/planning`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...requestBody("draft"), action: "draft" }),
+        body: JSON.stringify({ ...requestBody(action), action }),
       });
       const result = await response.json() as { error?: string; detail?: string; evaluation?: Evaluation };
       if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail ?? result.evaluation?.conflicts?.[0]?.detail));
       setModal(false);
-      setNotice("Bozza salvata. Pubblicala quando finestra e risorse sono confermate.");
+      setEditingPlan(null);
+      setNotice(editingPlan ? "Bozza aggiornata e ricontrollata dal server." : "Bozza salvata. Pubblicala quando finestra e risorse sono confermate.");
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : planningErrorMessage());
@@ -618,6 +726,27 @@ export default function PlanningControl() {
     }
   }
 
+  async function cancelPlan(plan: PlanningPlan) {
+    if (!window.confirm(`Annullare “${plan.title}”? Le risorse torneranno disponibili per altre attività.`)) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(plan.jobId)}/planning`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "cancel", recordId: plan.id, expectedVersion: plan.version, idempotencyKey: `planning-cancel-${crypto.randomUUID()}` }),
+      });
+      const result = await response.json() as { error?: string; detail?: string };
+      if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail));
+      setNotice("Piano annullato. Le risorse pubblicate sono state rilasciate.");
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : planningErrorMessage());
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openMissionFromPlan(plan: PlanningPlan) {
     const missionQuery = plan.linkedMission
       ? `missionId=${encodeURIComponent(plan.linkedMission.id)}`
@@ -634,7 +763,7 @@ export default function PlanningControl() {
   }
 
   const viewOptions: Array<{ id: PlanningView; label: string; icon: LucideIcon; count: number }> = [
-    { id: "today", label: "Oggi", icon: Clock3, count: plans.filter((plan) => currentDayOverlap(plan.startsAt, plan.endsAt)).length },
+    { id: "today", label: "Oggi", icon: Clock3, count: plans.filter((plan) => plan.status !== "CANCELLED" && currentDayOverlap(plan.startsAt, plan.endsAt)).length },
     { id: "plans", label: "Piani", icon: CalendarClock, count: plans.length },
     { id: "perimeters", label: "Perimetri", icon: BriefcaseBusiness, count: jobs.length },
   ];
@@ -660,16 +789,16 @@ export default function PlanningControl() {
         </section>
 
         {view === "today" && <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,.72fr)]">
-          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">AGENDA DI OGGI</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{formatDay(new Date().toISOString())}</h2><p className="mt-1 text-xs text-slate-500">Finestre attive nel tuo perimetro autorizzato.</p></div><StatusPill status={todayPlans.length ? "ACTIVE" : "NOT_SCHEDULED"} tone={todayPlans.length ? "lime" : "amber"} /></div><div className="mt-4 space-y-3">{todayPlans.map((plan) => <PlanCard busy={busy} canPublish={canWritePlanning} key={plan.id} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{todayPlans.length === 0 && <EmptyState canCreate={canWritePlanning && Boolean(selectedJob?.planningEligible)} detail={query || statusFilter !== "ALL" ? "Nessun piano di oggi corrisponde ai filtri selezionati." : "Crea una finestra operativa collegata a una commessa o a una missione."} onCreate={() => openCreate()} title="Nessuna attività visibile oggi" />}</div></section>
+          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">AGENDA DI OGGI</p><h2 className="mt-1 text-lg font-semibold text-slate-100">{formatDay(new Date().toISOString())}</h2><p className="mt-1 text-xs text-slate-500">Finestre attive nel tuo perimetro autorizzato.</p></div><StatusPill status={todayPlans.length ? "ACTIVE" : "NOT_SCHEDULED"} tone={todayPlans.length ? "lime" : "amber"} /></div><div className="mt-4 space-y-3">{todayPlans.map((plan) => <PlanCard busy={busy} canPrepareMission={canPrepareMission} canPublish={canWritePlanning} canReadMission={canReadMission} key={plan.id} onCancel={() => void cancelPlan(plan)} onEdit={() => openEdit(plan)} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{todayPlans.length === 0 && <EmptyState canCreate={canWritePlanning && Boolean(selectedJob?.planningEligible)} detail={query || statusFilter !== "ALL" ? "Nessun piano di oggi corrisponde ai filtri selezionati." : "Crea una finestra operativa collegata a una commessa o a una missione."} onCreate={() => openCreate()} title="Nessuna attività visibile oggi" />}</div></section>
 
           <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center gap-3"><span className={`grid size-10 place-items-center rounded-xl border ${toneStyles.cyan.border}`}><BriefcaseBusiness className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">PERIMETRO SELEZIONATO</p><h2 className="mt-1 text-base font-semibold text-slate-100">Dove pianificare</h2></div></div>{jobs.length > 0 ? <><div className="mt-4"><JobSelector jobs={jobs} onChange={setSelectedJobId} selectedJobId={selectedJob?.id ?? ""} /></div>{selectedJob && <div className="mt-3 rounded-xl border border-white/[.07] bg-black/20 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><StatusPill status={selectedJob.status} tone={selectedJob.planningEligible ? "lime" : "amber"} /><span className={`rounded-full border px-2 py-1 text-[9px] uppercase tracking-[.08em] ${selectedJob.module === "mission" ? toneStyles.cyan.badge : toneStyles.lime.badge}`}>{moduleLabel(selectedJob.module)}</span></div><h3 className="mt-3 text-sm font-semibold text-slate-100">{selectedJob.title}</h3><p className="mt-2 text-[11px] leading-5 text-slate-500"><MapPin className="mr-1.5 inline size-3.5 text-cyan-200" />{selectedJob.location || "Luogo da definire"}</p><p className="mt-2 text-[10px] text-slate-600">{selectedJob.scopeSubgroupTitle ? `Ambito: ${selectedJob.scopeSubgroupTitle}` : "Ambito operativo generale"}</p>{selectedJob.planningBlockedReason && <p className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[.04] p-2.5 text-[10px] leading-4 text-amber-100">{selectedJob.planningBlockedReason}</p>}<p className="mt-3 border-t border-white/[.06] pt-3 text-[10px] text-slate-500">{selectedPlans.length} {selectedPlans.length === 1 ? "piano collegato" : "piani collegati"}</p></div>}<Button className="mt-3 h-10 w-full bg-lime-300 text-xs font-semibold text-[#050705] hover:bg-lime-200" disabled={!canWritePlanning || !selectedJob?.planningEligible} onClick={() => openCreate()}><Target className="size-4" />Aggiungi attività</Button></> : <p className="mt-4 rounded-xl border border-dashed border-white/10 p-5 text-center text-xs leading-5 text-slate-600">Non ci sono commesse o missioni pianificabili nel tuo perimetro.</p>}</section>
 
-            <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-center gap-3"><span className={`grid size-10 place-items-center rounded-xl border ${toneStyles.lime.border}`}><ShieldCheck className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-lime-200/75">CONTROLLO SERVER</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Disponibilità verificata</h2></div></div><p className="mt-3 text-[11px] leading-5 text-slate-500">Persone, squadre e asset vengono ricontrollati sulla finestra scelta. Gli asset affidati a lungo termine seguono automaticamente la persona assegnataria.</p></section>
+            <section className="carbon-card-neon rounded-2xl p-4 sm:p-5"><div className="flex items-center gap-3"><span className={`grid size-10 place-items-center rounded-xl border ${toneStyles.lime.border}`}><ShieldCheck className="size-[18px]" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-lime-200/75">CONTROLLO SERVER</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Disponibilità verificata</h2></div></div><p className="mt-3 text-[11px] leading-5 text-slate-500">Persone, squadre e asset vengono ricontrollati sulla finestra scelta. Gli asset affidati seguono la persona; la bozza non prenota risorse e la pubblicazione esegue il controllo definitivo.</p></section>
           </aside>
         </section>}
 
         {view === "plans" && <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,.72fr)]">
-          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">REGISTRO PIANI</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Tutte le attività</h2><p className="mt-1 text-xs text-slate-500">Bozze e pubblicazioni ordinate per data di inizio.</p></div><span className="rounded-full border border-white/10 px-2.5 py-1 font-mono text-[9px] text-slate-500">{filteredPlans.length} PIANI</span></div><div className="mt-4 space-y-3">{filteredPlans.map((plan) => <PlanCard busy={busy} canPublish={canWritePlanning} key={plan.id} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{filteredPlans.length === 0 && <EmptyState canCreate={canWritePlanning && Boolean(selectedJob?.planningEligible)} detail="Modifica la ricerca oppure crea la prima attività del perimetro selezionato." onCreate={() => openCreate()} title="Nessun piano corrispondente" />}</div></section>
+          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/75">REGISTRO PIANI</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Tutte le attività</h2><p className="mt-1 text-xs text-slate-500">Bozze e pubblicazioni ordinate per data di inizio.</p></div><span className="rounded-full border border-white/10 px-2.5 py-1 font-mono text-[9px] text-slate-500">{filteredPlans.length} PIANI</span></div><div className="mt-4 space-y-3">{filteredPlans.map((plan) => <PlanCard busy={busy} canPrepareMission={canPrepareMission} canPublish={canWritePlanning} canReadMission={canReadMission} key={plan.id} onCancel={() => void cancelPlan(plan)} onEdit={() => openEdit(plan)} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{filteredPlans.length === 0 && <EmptyState canCreate={canWritePlanning && Boolean(selectedJob?.planningEligible)} detail="Modifica la ricerca oppure crea la prima attività del perimetro selezionato." onCreate={() => openCreate()} title="Nessun piano corrispondente" />}</div></section>
 
           <aside className="space-y-4"><section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-rose-200/75">ATTENZIONI OPERATIVE</p><h2 className="mt-1 text-base font-semibold text-slate-100">Da risolvere prima dell’esecuzione</h2></div><span className="font-mono text-lg text-rose-100">{attentionPlans.length}</span></div><div className="mt-4 space-y-2">{attentionPlans.slice(0, 5).map((plan) => <button className="w-full rounded-xl border border-white/[.07] bg-black/20 p-3 text-left transition hover:border-rose-300/20" key={plan.id} onClick={() => { setQuery(plan.title); setStatusFilter("ATTENTION"); }} type="button"><div className="flex items-start gap-2"><CircleAlert className="mt-0.5 size-3.5 shrink-0 text-rose-200" /><span className="min-w-0"><span className="block truncate text-xs font-medium text-slate-200">{plan.title}</span><span className="mt-1 block truncate text-[10px] text-slate-600">{!plan.feasible ? `${plan.conflictCount} conflitti` : "Eccezione missione aperta"} · {plan.jobTitle}</span></span></div></button>)}{attentionPlans.length === 0 && <div className="rounded-xl border border-lime-300/15 bg-lime-300/[.03] p-4 text-[11px] leading-5 text-lime-100"><CheckCircle2 className="mr-1.5 inline size-4" />Nessun conflitto o eccezione aperta.</div>}</div></section>
 
@@ -680,7 +809,7 @@ export default function PlanningControl() {
         {view === "perimeters" && <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(300px,.72fr)_minmax(0,1.45fr)]">
           <aside className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/75">PERIMETRI OPERATIVI</p><h2 className="mt-1 text-base font-semibold text-slate-100">Commesse e missioni</h2><p className="mt-1 text-xs leading-5 text-slate-500">Scegli dove creare o consultare il piano.</p></div><span className="font-mono text-[9px] text-slate-600">{filteredJobs.length}</span></div><div className="mt-4 space-y-2">{filteredJobs.map((job) => <button aria-pressed={job.id === selectedJob?.id} className={`w-full rounded-xl border p-3.5 text-left transition ${job.id === selectedJob?.id ? "border-lime-300/35 bg-lime-300/[.07]" : "border-white/[.07] bg-black/20 hover:border-lime-300/20"} ${job.planningEligible ? "" : "opacity-70"}`} key={job.id} onClick={() => setSelectedJobId(job.id)} type="button"><div className="flex items-start justify-between gap-2"><span className="min-w-0"><span className="block truncate text-xs font-semibold text-slate-100">{job.code ? `${job.code} · ` : ""}{job.title}</span><span className="mt-1.5 block truncate text-[10px] text-slate-600">{job.location || "Luogo da definire"}</span></span><span className={`shrink-0 rounded-full border px-2 py-1 text-[8px] font-semibold uppercase tracking-[.08em] ${job.module === "mission" ? toneStyles.cyan.badge : toneStyles.lime.badge}`}>{moduleLabel(job.module)}</span></div><span className={`mt-2 block text-[9px] ${job.planningEligible ? "text-slate-600" : "text-amber-200"}`}>{statusLabel(job.status)}{job.planningEligible ? job.scopeSubgroupTitle ? ` · ${job.scopeSubgroupTitle}` : "" : " · solo storico"}</span></button>)}{filteredJobs.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-5 text-center text-xs leading-5 text-slate-600">Nessun perimetro corrisponde alla ricerca.</p>}</div></aside>
 
-          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5">{selectedJob ? <><div className="flex flex-col gap-3 border-b border-white/[.07] pb-4 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[.08em] ${selectedJob.module === "mission" ? toneStyles.cyan.badge : toneStyles.lime.badge}`}>{moduleLabel(selectedJob.module)}</span><StatusPill status={selectedJob.status} tone={selectedJob.planningEligible ? "lime" : "amber"} /></div><h2 className="mt-3 text-lg font-semibold text-slate-100">{selectedJob.title}</h2><p className="mt-1 text-xs text-slate-500"><MapPin className="mr-1.5 inline size-3.5 text-cyan-200" />{selectedJob.location || "Luogo da definire"}</p><p className="mt-2 text-[10px] text-slate-600">{selectedJob.scopeSubgroupTitle ? `Ambito: ${selectedJob.scopeSubgroupTitle}` : "Ambito operativo generale"}</p>{selectedJob.planningBlockedReason && <p className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[.04] p-2.5 text-[10px] leading-4 text-amber-100">{selectedJob.planningBlockedReason}</p>}</div>{canWritePlanning && <Button className="h-10 shrink-0 bg-lime-300 text-xs font-semibold text-[#050705] hover:bg-lime-200" disabled={!selectedJob.planningEligible} onClick={() => openCreate(selectedJob)}><Target className="size-4" />Nuova attività</Button>}</div><div className="mt-4 space-y-3">{selectedFilteredPlans.map((plan) => <PlanCard busy={busy} canPublish={canWritePlanning} key={plan.id} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{selectedFilteredPlans.length === 0 && <EmptyState canCreate={canWritePlanning && selectedJob.planningEligible} detail={query || statusFilter !== "ALL" ? "Nessun piano collegato corrisponde ai filtri selezionati." : selectedJob.planningEligible ? "Crea la prima finestra operativa per questo perimetro." : "Lo storico resta consultabile, ma non è possibile aggiungere nuove attività."} onCreate={() => openCreate(selectedJob)} title="Nessun piano visibile" />}</div></> : <EmptyState canCreate={false} detail="Scegli una commessa o una missione dall’elenco per consultarne le attività." onCreate={() => undefined} title="Seleziona un perimetro" />}</section>
+          <section className="carbon-card min-w-0 rounded-2xl p-4 sm:p-5">{selectedJob ? <><div className="flex flex-col gap-3 border-b border-white/[.07] pb-4 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[.08em] ${selectedJob.module === "mission" ? toneStyles.cyan.badge : toneStyles.lime.badge}`}>{moduleLabel(selectedJob.module)}</span><StatusPill status={selectedJob.status} tone={selectedJob.planningEligible ? "lime" : "amber"} /></div><h2 className="mt-3 text-lg font-semibold text-slate-100">{selectedJob.title}</h2><p className="mt-1 text-xs text-slate-500"><MapPin className="mr-1.5 inline size-3.5 text-cyan-200" />{selectedJob.location || "Luogo da definire"}</p><p className="mt-2 text-[10px] text-slate-600">{selectedJob.scopeSubgroupTitle ? `Ambito: ${selectedJob.scopeSubgroupTitle}` : "Ambito operativo generale"}</p>{selectedJob.planningBlockedReason && <p className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[.04] p-2.5 text-[10px] leading-4 text-amber-100">{selectedJob.planningBlockedReason}</p>}</div>{canWritePlanning && <Button className="h-10 shrink-0 bg-lime-300 text-xs font-semibold text-[#050705] hover:bg-lime-200" disabled={!selectedJob.planningEligible} onClick={() => openCreate(selectedJob)}><Target className="size-4" />Nuova attività</Button>}</div><div className="mt-4 space-y-3">{selectedFilteredPlans.map((plan) => <PlanCard busy={busy} canPrepareMission={canPrepareMission} canPublish={canWritePlanning} canReadMission={canReadMission} key={plan.id} onCancel={() => void cancelPlan(plan)} onEdit={() => openEdit(plan)} onOpenMission={() => openMissionFromPlan(plan)} onPublish={() => void publishPlan(plan)} plan={plan} />)}{selectedFilteredPlans.length === 0 && <EmptyState canCreate={canWritePlanning && selectedJob.planningEligible} detail={query || statusFilter !== "ALL" ? "Nessun piano collegato corrisponde ai filtri selezionati." : selectedJob.planningEligible ? "Crea la prima finestra operativa per questo perimetro." : "Lo storico resta consultabile, ma non è possibile aggiungere nuove attività."} onCreate={() => openCreate(selectedJob)} title="Nessun piano visibile" />}</div></> : <EmptyState canCreate={false} detail="Scegli una commessa o una missione dall’elenco per consultarne le attività." onCreate={() => undefined} title="Seleziona un perimetro" />}</section>
         </section>}
 
         <footer className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/[.07] py-5 text-[10px] text-slate-600"><span>AI-ZEROW · PIANIFICAZIONE</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300" />Risorse canoniche · verifica server · perimetro autorizzato</span></footer>
@@ -691,32 +820,32 @@ export default function PlanningControl() {
 
     {notice && <div className="fixed bottom-24 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-amber-300/25 bg-[#080d09]/96 px-4 py-3 text-left text-xs text-amber-100 shadow-[0_0_28px_rgba(190,255,60,.14)] backdrop-blur-xl sm:bottom-5"><CircleAlert className="size-4 shrink-0 text-amber-200" /><span>{notice}</span><button aria-label="Chiudi avviso" className="ml-2 text-slate-400 hover:text-slate-100" onClick={() => setNotice("")} type="button">×</button></div>}
 
-    <Dialog open={modal} onOpenChange={setModal}>
+    <Dialog open={modal} onOpenChange={(open) => { setModal(open); if (!open) setEditingPlan(null); }}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[780px]">
-        <DialogHeader><DialogTitle>Nuova attività pianificata</DialogTitle><DialogDescription className="text-slate-500">Definisci finestra e risorse. Il server controlla disponibilità, sovrapposizioni e qualifiche prima del salvataggio.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{editingPlan ? "Modifica bozza pianificata" : "Nuova attività pianificata"}</DialogTitle><DialogDescription className="text-slate-500">Definisci finestra e risorse. Il server ricontrolla cataloghi, disponibilità, sovrapposizioni e qualifiche prima del salvataggio.</DialogDescription></DialogHeader>
         <form className="grid gap-4 sm:grid-cols-2" onSubmit={createPlan}>
           <div className="sm:col-span-2 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.16em] text-lime-300/80"><Target className="size-3.5" />Perimetro operativo</p>{selectedJob && <span className={`rounded-full border px-2 py-1 text-[8px] font-semibold uppercase tracking-[.08em] ${selectedJob.module === "mission" ? toneStyles.cyan.badge : toneStyles.lime.badge}`}>{moduleLabel(selectedJob.module)}</span>}</div><p className="mt-2 text-sm text-slate-200">{selectedJob?.code ? `${selectedJob.code} · ` : ""}{selectedJob?.title ?? "—"}</p><p className="mt-1 text-[10px] text-slate-500">{selectedJob?.scopeSubgroupTitle ? `Ambito: ${selectedJob.scopeSubgroupTitle}` : "Ambito operativo generale"}</p></div>
 
           <label className="text-xs text-slate-400 sm:col-span-2">Titolo attività<Input className="mt-2 border-white/10 bg-black/30" maxLength={160} onChange={(event) => setTitle(event.target.value)} value={title} required /></label>
 
-          <label className="text-xs text-slate-400">Tipo attività<select aria-label="Tipo attività" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 disabled:cursor-not-allowed disabled:opacity-60" disabled={selectedJob?.module === "mission"} onChange={(event) => { setActivityType(event.target.value as "WORK" | "TRANSPORT"); resetSimulation(); }} value={selectedJob?.module === "mission" ? "TRANSPORT" : activityType}><option className="bg-[#080c09]" value="WORK">Lavorazione commessa</option><option className="bg-[#080c09]" value="TRANSPORT">Trasporto / missione</option></select>{selectedJob?.module === "mission" && <span className="mt-1.5 block text-[9px] leading-4 text-cyan-200/75">Le missioni usano sempre il flusso trasporto.</span>}</label>
+          <label className="text-xs text-slate-400">Tipo attività<select aria-label="Tipo attività" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40 disabled:cursor-not-allowed disabled:opacity-60" disabled={selectedJob?.module === "mission"} onChange={(event) => { setActivityType(event.target.value as PlanningActivityType); setResourceIds([]); resetSimulation(); }} value={selectedJob?.module === "mission" ? "TRANSPORT" : activityType}>{activityCatalog.filter((entry) => selectedJob && entry.allowedJobModules.includes(selectedJob.module)).map((entry) => <option className="bg-[#080c09]" key={entry.value} value={entry.value}>{entry.label}</option>)}</select><span className="mt-1.5 block text-[9px] leading-4 text-cyan-200/75">{activityCatalog.find((entry) => entry.value === activityType)?.description ?? "Catalogo attività verificato dal server."}</span></label>
 
-          <label className="text-xs text-slate-400">Priorità<select aria-label="Priorità" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" onChange={(event) => setPriority(event.target.value)} value={priority}><option className="bg-[#080c09]" value="STANDARD">Standard</option><option className="bg-[#080c09]" value="HIGH">Alta</option><option className="bg-[#080c09]" value="CRITICAL">Critica</option></select></label>
+          <label className="text-xs text-slate-400">Priorità<select aria-label="Priorità" className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/40" onChange={(event) => setPriority(event.target.value as PlanningPriority)} value={priority}>{priorityCatalog.map((entry) => <option className="bg-[#080c09]" key={entry.value} value={entry.value}>{entry.label}</option>)}</select></label>
 
           <label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => { setStartsAt(event.target.value); resetSimulation(); }} type="datetime-local" value={startsAt} required /></label>
           <label className="text-xs text-slate-400">Fine<Input aria-invalid={Boolean(startsAt && endsAt && !validWindow)} className="mt-2 border-white/10 bg-black/30" onChange={(event) => { setEndsAt(event.target.value); resetSimulation(); }} type="datetime-local" value={endsAt} required /></label>
           {startsAt && endsAt && !validWindow && <p className="sm:col-span-2 -mt-2 text-[10px] text-rose-200">La fine deve essere successiva all’inizio.</p>}
 
-          <label className="text-xs text-slate-400 sm:col-span-2">Luogo operativo<Input className="mt-2 border-white/10 bg-black/30" maxLength={240} onChange={(event) => setLocation(event.target.value)} placeholder="Cantiere, sede o tratta" value={location} /></label>
+          <div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.03] p-3 sm:col-span-2"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-cyan-200/75">Luogo canonico · sola lettura</p><p className="mt-2 flex items-start gap-2 text-xs leading-5 text-slate-300"><MapPin className="mt-0.5 size-3.5 shrink-0 text-cyan-200" />{selectedJob?.location || "Luogo operativo non configurato"}</p><p className="mt-1 text-[9px] leading-4 text-slate-600">Il server usa il luogo registrato nella commessa o nella missione; il piano non può sostituirlo.</p></div>
 
-          <div className="sm:col-span-2"><PlanningResourceFields jobId={selectedJob?.id ?? ""} startsAt={startsAt} endsAt={endsAt} selectedIds={resourceIds} onChange={(ids) => { setResourceIds(ids); resetSimulation(); }} /></div>
+          <div className="sm:col-span-2"><PlanningResourceFields activityType={selectedJob?.module === "mission" ? "TRANSPORT" : activityType} endsAt={endsAt} jobId={selectedJob?.id ?? ""} onChange={(ids) => { setResourceIds(ids); resetSimulation(); }} selectedIds={resourceIds} startsAt={startsAt} /></div>
 
-          <label className="text-xs text-slate-400 sm:col-span-2">Qualifiche richieste <span className="text-slate-600">(separate da virgola)</span><Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => { setQualifications(event.target.value); resetSimulation(); }} placeholder="Patentino, PES-PAV, ADR…" value={qualifications} /></label>
+          <fieldset className="rounded-xl border border-white/[.08] bg-black/20 p-3 sm:col-span-2"><legend className="px-1 text-xs text-slate-400">Qualifiche richieste · catalogo Persone</legend>{editorQualificationCatalog.length ? <div className="mt-2 flex flex-wrap gap-2">{editorQualificationCatalog.map((qualification) => { const active = qualifications.includes(qualification); return <button aria-pressed={active} className={`rounded-full border px-3 py-1.5 text-[10px] transition ${active ? "border-cyan-300/35 bg-cyan-300/[.1] text-cyan-100" : "border-white/10 bg-black/20 text-slate-500 hover:border-cyan-300/20 hover:text-slate-300"}`} key={qualification} onClick={() => { setQualifications((current) => current.includes(qualification) ? current.filter((item) => item !== qualification) : [...current, qualification]); resetSimulation(); }} type="button">{qualification}{!qualificationCatalog.includes(qualification) ? " · storico" : ""}</button>; })}</div> : <p className="mt-2 text-[10px] leading-5 text-slate-600">Nessuna qualifica è ancora censita nel registro Persone. Aggiungila al profilo operativo prima di renderla obbligatoria.</p>}</fieldset>
           <label className="text-xs text-slate-400 sm:col-span-2">Note operative<Textarea className="mt-2 min-h-20 border-white/10 bg-black/30" maxLength={2000} onChange={(event) => setNotes(event.target.value)} placeholder="Istruzioni utili alla squadra o all’autista" value={notes} /></label>
 
           <div className="sm:col-span-2 rounded-xl border border-cyan-300/15 bg-cyan-300/[.03] p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/80">CONTROLLO PREVENTIVO</p><p className="mt-1 text-[10px] leading-4 text-slate-500">Simula capacità, qualifiche e sovrapposizioni senza salvare.</p></div><Button className="h-9 border-cyan-300/25 bg-cyan-300/[.08] text-[10px] text-cyan-100 hover:bg-cyan-300/[.14]" disabled={simulation.status === "checking" || !resourceIds.length || !validWindow} onClick={() => void simulatePlan()} type="button" variant="outline">{simulation.status === "checking" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}Verifica capacità</Button></div>{simulation.status === "ready" && <div className={`mt-3 rounded-lg border px-3 py-2 text-[10px] ${simulation.evaluation?.feasible ? toneStyles.lime.border : toneStyles.red.border}`}><span className="font-semibold">{simulation.evaluation?.feasible ? "Verifica superata" : "Conflitti rilevati"}</span>{simulation.evaluation?.conflicts?.slice(0, 3).map((conflict, index) => <p className="mt-1 text-slate-400" key={`${conflict.code ?? "conflict"}-${index}`}>{conflict.detail ?? conflict.code}</p>)}</div>}{simulation.status === "error" && <p className="mt-3 text-[10px] text-amber-200">{simulation.message}</p>}</div>
 
-          <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline"><X className="size-3.5" />Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !resourceIds.length || !canWritePlanning || !validWindow} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}Salva bozza</Button></DialogFooter>
+          <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline"><X className="size-3.5" />Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || !resourceIds.length || !canWritePlanning || !validWindow} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : editingPlan ? <PencilLine className="size-3.5" /> : <Send className="size-3.5" />}{editingPlan ? "Aggiorna bozza" : "Salva bozza"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

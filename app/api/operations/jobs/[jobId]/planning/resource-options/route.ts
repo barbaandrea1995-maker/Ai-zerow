@@ -2,6 +2,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { parseJobPayload } from "@/lib/operations-contract";
+import { planningActivityType, planningCatalog, planningResourceProfile } from "@/lib/planning-catalog";
 import { getPlanningResourceOptions, type PlanningAvailabilityWindow } from "@/lib/planning-resources";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
@@ -45,17 +47,23 @@ export async function GET(request: Request, routeContext: RouteContext) {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (!(await canAccessJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (job.recordType === "adapter-contract") return Response.json({ error: "operational_job_required" }, { status: 409 });
     const url = new URL(request.url);
     const startsAt = url.searchParams.get("startsAt")?.trim() ?? "";
     const endsAt = url.searchParams.get("endsAt")?.trim() ?? "";
-    const excludedPlanId = url.searchParams.get("excludePlanId")?.trim() || undefined;
     const hasWindow = Boolean(startsAt || endsAt);
     if (hasWindow && (!startsAt || !endsAt || !Number.isFinite(Date.parse(startsAt)) || !Number.isFinite(Date.parse(endsAt)) || Date.parse(endsAt) <= Date.parse(startsAt))) {
       return Response.json({ error: "invalid_planning_window" }, { status: 400 });
     }
     const window: PlanningAvailabilityWindow | undefined = hasWindow ? { startsAt, endsAt } : undefined;
     const jobModule = job.module === "mission" ? "mission" : "operations";
-    const planningOptions = await getPlanningResourceOptions(context.tenantId, window, jobModule, excludedPlanId);
+    const activityType = planningActivityType(url.searchParams.get("activityType"), jobModule);
+    if (!activityType) return Response.json({ error: "invalid_planning_activity_type" }, { status: 400 });
+    const jobPayload = parseJobPayload(job.payloadJson);
+    const canonicalLocation = jobPayload.worksite || jobPayload.location || job.detail;
+    if (!canonicalLocation) return Response.json({ error: "planning_job_location_required" }, { status: 409 });
+    const resourceProfile = planningResourceProfile(activityType);
+    const planningOptions = await getPlanningResourceOptions(context.tenantId, window, resourceProfile);
     const canReadWorkforceRegistry = hasCapability(context, "workforce.registry.read")
       || hasCapability(context, "workforce.read.all")
       || hasCapability(context, "workforce.manage");
@@ -71,7 +79,9 @@ export async function GET(request: Request, routeContext: RouteContext) {
       : [];
     return Response.json({
       context: publicAuthorityContext(context),
-      job: { id: job.id, code: job.canonicalCode, title: job.title },
+      job: { id: job.id, code: job.canonicalCode, title: job.title, module: jobModule, location: canonicalLocation },
+      activityType,
+      catalogs: planningCatalog(),
       options: {
         workforce,
         assets: assets.filter((item) => item.assignable),
@@ -82,12 +92,12 @@ export async function GET(request: Request, routeContext: RouteContext) {
       contract: {
         source: "sites-d1-planning-resource-readback",
         writes: "/api/operations/jobs/:jobId/planning",
-        assignmentGuard: "server-window-lifecycle-and-tenant-active-plans",
+        assignmentGuard: "server-window-lifecycle-role-profile-and-published-plans",
       },
       availability: {
         status: "verified",
         window: window ?? null,
-        rule: "DRAFT/PUBLISHED tenant plans are checked for interval overlap before options are returned.",
+        rule: "Published tenant plans are checked for interval overlap. Drafts do not reserve resources.",
         checkedAt: new Date().toISOString(),
       },
       readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },

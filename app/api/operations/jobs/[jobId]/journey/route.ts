@@ -913,6 +913,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
     if (!(await canAccessJourneyJob(context, job))) return Response.json({ error: "job_not_found" }, { status: 404 });
+    if (action === "planning_create" || action === "planning_publish") {
+      return Response.json({
+        error: "planning_module_required",
+        href: `/planning?jobId=${encodeURIComponent(job.id)}${action === "planning_create" ? "&create=1" : ""}`,
+      }, { status: 409 });
+    }
     if (action === "mission_create" && job.recordType === "adapter-contract") {
       return Response.json({ error: "operational_job_required" }, { status: 409 });
     }

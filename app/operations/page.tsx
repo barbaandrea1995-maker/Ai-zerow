@@ -39,15 +39,6 @@ import { Button } from "@/components/ui/button";
 import { AccountMenu } from "@/components/account-menu";
 import { useAuthorityAccess } from "@/components/authority-access-provider";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
@@ -59,7 +50,6 @@ import type {
 import { invalidateReadback, readback } from "@/lib/client-readback";
 import { ROLE_METADATA } from "@/lib/authority-catalog";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
-import { PlanningResourceFields } from "@/components/planning-resource-fields";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 
 const OperationsCommessaIntake = dynamic(
@@ -461,7 +451,6 @@ export default function OperationsPage() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [newJobOpen, setNewJobOpen] = useState(false);
-  const [planningOpen, setPlanningOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [adapterJobs, setAdapterJobs] = useState<OperationsJob[] | null>(null);
   const [adapterStatus, setAdapterStatus] = useState<
@@ -521,13 +510,7 @@ export default function OperationsPage() {
   const [planningOptions, setPlanningOptions] =
     useState<PlanningOptionsResponse | null>(null);
   const [planningOptionsJobId, setPlanningOptionsJobId] = useState("");
-  const [planningTitle, setPlanningTitle] = useState("Attività operativa");
-  const [planningStartsAt, setPlanningStartsAt] = useState("");
-  const [planningEndsAt, setPlanningEndsAt] = useState("");
-  const [planningResourceIds, setPlanningResourceIds] = useState<string[]>([]);
-  const [planningSaving, setPlanningSaving] = useState(false);
-  const [planningNotice, setPlanningNotice] = useState("");
-  const planningReadbackKey = `planning-options:${selectedJob.id}:${planningStartsAt}:${planningEndsAt}`;
+  const planningReadbackKey = `planning-options:${selectedJob.id}`;
   const resourceOptions = useMemo(() => {
     if (planningOptionsJobId !== selectedJob.id || !planningOptions?.options) return [];
     return [
@@ -537,18 +520,12 @@ export default function OperationsPage() {
   }, [planningOptions, planningOptionsJobId, selectedJob.id]);
 
   useEffect(() => {
-    if (!planningOpen || selectedJob.id === "EMPTY") return;
+    if (selectedJob.id === "EMPTY") return;
     let active = true;
     const reference = encodeURIComponent(selectedJob.sourceId ?? selectedJob.id);
-    const params = new URLSearchParams();
-    if (planningStartsAt && planningEndsAt && Number.isFinite(Date.parse(planningStartsAt)) && Number.isFinite(Date.parse(planningEndsAt)) && Date.parse(planningEndsAt) > Date.parse(planningStartsAt)) {
-      params.set("startsAt", new Date(planningStartsAt).toISOString());
-      params.set("endsAt", new Date(planningEndsAt).toISOString());
-    }
-    const query = params.toString();
     readback<PlanningOptionsResponse>(
       planningReadbackKey,
-      `/api/operations/jobs/${reference}/planning/resource-options${query ? `?${query}` : ""}`,
+      `/api/operations/jobs/${reference}/planning/resource-options`,
       { force: true },
     )
       .then((payload) => {
@@ -564,48 +541,7 @@ export default function OperationsPage() {
     return () => {
       active = false;
     };
-  }, [planningOpen, planningReadbackKey, planningStartsAt, planningEndsAt, selectedJob.id, selectedJob.sourceId]);
-  const planningOptionsStatus = !planningOpen
-    ? "idle"
-    : planningOptionsJobId !== selectedJob.id
-      ? "loading"
-      : planningOptions
-        ? "online"
-        : "error";
-
-  async function savePlanningDraft() {
-    if (selectedJob.id === "EMPTY") return;
-    if (!planningStartsAt || !planningEndsAt || !planningResourceIds.length) {
-      setPlanningNotice("Inserisci una finestra valida e seleziona almeno una risorsa reale.");
-      return;
-    }
-    setPlanningSaving(true);
-    setPlanningNotice("");
-    try {
-      const reference = encodeURIComponent(selectedJob.sourceId ?? selectedJob.id);
-      const response = await fetch(`/api/operations/jobs/${reference}/planning`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "draft",
-          title: planningTitle.trim() || "Attività operativa",
-          startsAt: planningStartsAt,
-          endsAt: planningEndsAt,
-          resourceIds: planningResourceIds,
-          idempotencyKey: `planning-draft-${crypto.randomUUID()}`,
-        }),
-      });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "planning_write_failed");
-      invalidateReadback(planningReadbackKey);
-      setPlanningOpen(false);
-      notify("Piano creato in bozza · risorse disponibili verificate");
-    } catch (error) {
-      setPlanningNotice(error instanceof Error ? error.message : "Piano non salvato");
-    } finally {
-      setPlanningSaving(false);
-    }
-  }
+  }, [planningReadbackKey, selectedJob.id, selectedJob.sourceId]);
   const activeCount = activeJobs.filter(
     (job) => job.status === "In corso",
   ).length;
@@ -1142,18 +1078,9 @@ export default function OperationsPage() {
                     <Button
                       variant="outline"
                       className="h-9 border-white/10 bg-black/20 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/10 hover:text-lime-100"
-                      onClick={() => {
-                        setPlanningOptions(null);
-                        setPlanningOptionsJobId("");
-                        setPlanningTitle("Attività operativa");
-                        const starts = new Date(Date.now() + 60 * 60 * 1000);
-                        const ends = new Date(starts.getTime() + 4 * 60 * 60 * 1000);
-                        setPlanningStartsAt(starts.toISOString().slice(0, 16));
-                        setPlanningEndsAt(ends.toISOString().slice(0, 16));
-                        setPlanningResourceIds([]);
-                        setPlanningNotice("");
-                        setPlanningOpen(true);
-                      }}
+                      onClick={() => selectedJob.id === "EMPTY"
+                        ? notify("Seleziona una commessa riletta prima di pianificare")
+                        : router.push(`/planning?jobId=${encodeURIComponent(selectedJob.sourceId ?? selectedJob.id)}&create=1`)}
                     >
                       <CalendarClock className="size-3.5" />
                       Pianifica
@@ -1365,29 +1292,6 @@ export default function OperationsPage() {
           onOpenChange={setNewJobOpen}
           onCreated={handleIntakeCreated}
         />
-      )}
-      {canWriteOperations && (
-        <Dialog open={planningOpen} onOpenChange={setPlanningOpen}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-cyan-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[620px]">
-          <DialogHeader>
-            <DialogTitle className="text-slate-100">
-              Nuova attività giornaliera
-            </DialogTitle>
-            <DialogDescription className="text-slate-500">
-              {selectedJob.title} · la bozza verifica disponibilità, qualifica e possibili sovrapposizioni.
-            </DialogDescription>
-          </DialogHeader>
-          <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void savePlanningDraft(); }}>
-            <label className="text-xs text-slate-400 sm:col-span-2">Attività della giornata<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningTitle(event.target.value)} value={planningTitle} required /></label>
-            <label className="text-xs text-slate-400">Inizio<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningStartsAt(event.target.value)} type="datetime-local" value={planningStartsAt} required /></label>
-            <label className="text-xs text-slate-400">Fine<Input className="mt-2 border-white/10 bg-black/30" onChange={(event) => setPlanningEndsAt(event.target.value)} type="datetime-local" value={planningEndsAt} required /></label>
-            <PlanningResourceFields jobId={selectedJob.sourceId ?? selectedJob.id} startsAt={planningStartsAt} endsAt={planningEndsAt} selectedIds={planningResourceIds} onChange={setPlanningResourceIds} />
-            <div className="flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[10px] leading-5 text-lime-100/80 sm:col-span-2"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />{planningOptionsStatus === "online" ? `${planningOptions?.existingPlans?.length ?? 0} piani già presenti. Le sovrapposizioni e le risorse non disponibili vengono bloccate automaticamente.` : "Le risorse vengono verificate per l’azienda e non assegnate automaticamente."}</div>
-            {planningNotice && <p className="rounded-xl border border-amber-300/20 bg-amber-300/[.04] px-3 py-2 text-[10px] text-amber-100 sm:col-span-2">{planningNotice}</p>}
-            <DialogFooter className="sm:col-span-2"><DialogClose asChild><Button type="button" variant="outline" className="border-white/10 bg-transparent text-slate-400">Annulla</Button></DialogClose><Button disabled={planningSaving} type="submit" className="bg-lime-300 text-[#060806] hover:bg-lime-200">{planningSaving ? "Salvataggio…" : "Crea bozza"}</Button></DialogFooter>
-          </form>
-        </DialogContent>
-        </Dialog>
       )}
       {toast && (
         <div className="fixed bottom-5 left-1/2 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#0b1008]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_30px_rgba(190,255,60,0.14)] backdrop-blur-xl">
