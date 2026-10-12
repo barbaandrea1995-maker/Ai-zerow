@@ -1138,6 +1138,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         ? requestedTransportMode
         : cargoAssetIds.length ? "ASSET_TRANSFER" : "WAREHOUSE_TO_JOB";
       if (materialRequestId) {
+        if (transportMode !== "WAREHOUSE_TO_JOB") {
+          return Response.json({ error: "material_request_requires_warehouse_to_job" }, { status: 409 });
+        }
         const [requestRow] = await db.select().from(jobJourneyRecords).where(and(
           eq(jobJourneyRecords.tenantId, context.tenantId),
           eq(jobJourneyRecords.jobId, job.id),
@@ -1154,6 +1157,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (!warehouseLocation) return Response.json({ error: "fulfillment_warehouse_location_required" }, { status: 422 });
         pickup = warehouseLocation;
         materialRequest = requestRow;
+        // The approved request owns origin, destination and material lines. The client may
+        // display them, but the route projection is rebuilt from canonical server records.
+        routeInputStops = undefined;
       }
       if (transportMode === "WAREHOUSE_TO_JOB" && !materialRequestId) {
         return Response.json({ error: "approved_material_request_required" }, { status: 409 });
@@ -2354,6 +2360,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       }).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.id, materialRequest.id),
+        eq(jobJourneyRecords.status, "APPROVED"),
         eq(jobJourneyRecords.version, materialRequest.version),
       )) as never);
     }

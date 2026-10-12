@@ -189,6 +189,17 @@ type MissionPayload = {
   };
 };
 
+type MissionCreateResponse = {
+  error?: string;
+  message?: string;
+  readback?: { status?: string };
+  mutation?: {
+    action?: string;
+    record?: { id?: string; status?: string; payload?: Record<string, unknown> };
+    eventId?: string;
+  };
+};
+
 type PlanningHandoff = {
   id: string;
   jobId: string;
@@ -1010,6 +1021,24 @@ function RouteStopsEditor({
     onChange(stops.map((stop, stopIndex) => stopIndex === index ? { ...stop, locationId: "", temporaryAddress: candidate.formattedAddress, temporaryLocation: candidate } : stop));
     clearTemporaryCandidates(index);
   };
+  if (materialLines.length) {
+    const canonicalLabel = (stop: RouteStopDraft | undefined, fallback: string) => {
+      if (!stop) return fallback;
+      if (stop.temporaryLocation?.formattedAddress) return stop.temporaryLocation.formattedAddress;
+      return locations.find((location) => location.id === stop.locationId)?.formattedAddress ?? fallback;
+    };
+    return <section className="rounded-2xl border border-lime-300/20 bg-lime-300/[.035] p-4 sm:col-span-2">
+      <div className="flex items-start gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><ShieldCheck className="size-5" /></span>
+        <div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-200/75">TRATTA VINCOLATA DAL SERVER</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Deposito → commessa</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">Origine, destinazione e righe derivano dalla richiesta approvata. Non possono essere sostituite nel dispositivo.</p></div>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-cyan-300/15 bg-black/25 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-cyan-200/70">1 · CARICO</p><p className="mt-2 text-[11px] leading-5 text-slate-200"><MapPin className="mr-1.5 inline size-3.5 text-cyan-200" />{canonicalLabel(stops[0], "Deposito approvato")}</p></div>
+        <div className="rounded-xl border border-lime-300/15 bg-black/25 p-3"><p className="text-[9px] uppercase tracking-[.14em] text-lime-200/70">2 · CONSEGNA</p><p className="mt-2 text-[11px] leading-5 text-slate-200"><MapPin className="mr-1.5 inline size-3.5 text-lime-200" />{canonicalLabel(stops.at(-1), "Cantiere della commessa")}</p></div>
+      </div>
+      <div className="mt-3 rounded-xl border border-amber-300/15 bg-black/20 p-3"><p className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.14em] text-amber-200/75"><Package className="size-3.5" />CARICO PRENOTATO</p><div className="mt-2 grid gap-1.5 sm:grid-cols-2">{materialLines.map((line) => <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[.06] px-2.5 py-2" key={line.itemId}><span className="min-w-0 truncate text-[10px] text-slate-300">{line.description}</span><span className="shrink-0 font-mono text-[9px] text-amber-100">{line.quantity} {line.unit}</span></div>)}</div></div>
+    </section>;
+  }
   return <section className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.03] p-4 sm:col-span-2">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -1063,8 +1092,10 @@ export default function MissionCommandDeck() {
   const handoffPlanId = searchParams.get("planId") ?? "";
   const handoffJobId = searchParams.get("jobId") ?? "";
   const openMissionId = searchParams.get("missionId") ?? "";
+  const requestedMaterialRequestId = searchParams.get("requestId") ?? "";
   const createRequested = searchParams.get("create") === "1";
   const createFromJobHandled = useRef("");
+  const createFromRequestHandled = useRef("");
   const [payload, setPayload] = useState<MissionPayload | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "forbidden" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -1250,6 +1281,10 @@ export default function MissionCommandDeck() {
   }
 
   function handleJobSelection(jobId: string) {
+    if (selectedRequestId) {
+      notify("La commessa è vincolata alla richiesta materiali approvata dal server.");
+      return;
+    }
     setCreateJobId(jobId);
     setSelectedRequestId("");
     if (!jobId || jobId === "__standalone__") {
@@ -1262,6 +1297,10 @@ export default function MissionCommandDeck() {
   }
 
   function openCreate(request: MaterialRequest | null = null, handoff: PlanningHandoff | null = null, jobOverride = "") {
+    if (request && !enabledTransportModes.includes("WAREHOUSE_TO_JOB")) {
+      notify("La consegna magazzino → commessa non è abilitata nel profilo operativo aziendale.");
+      return;
+    }
     const planResources = Array.isArray(handoff?.payload.resources)
       ? handoff.payload.resources.flatMap((resource) => resource && typeof resource === "object" && !Array.isArray(resource) ? [resource as Record<string, unknown>] : [])
       : [];
@@ -1322,6 +1361,37 @@ export default function MissionCommandDeck() {
   // L’apertura guidata dipende dal contratto URL; openCreate idrata il form con i cataloghi già riletti.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createRequested, handoffJobId, handoffPlanId, jobs, notify, state]);
+
+  useEffect(() => {
+    if (!requestedMaterialRequestId || state !== "ready") return;
+    if (createFromRequestHandled.current === requestedMaterialRequestId) return;
+    createFromRequestHandled.current = requestedMaterialRequestId;
+    const request = materialRequests.find((candidate) => candidate.id === requestedMaterialRequestId);
+    if (!request) {
+      notify("La richiesta approvata non è disponibile nel perimetro Missioni corrente.");
+      router.replace("/mission", { scroll: false });
+      return;
+    }
+    if (request.scheduledMissionId) {
+      setQuery("");
+      setStatusFilter("ALL");
+      setAttentionFilter("ALL");
+      setSelectedId(request.scheduledMissionId);
+      notify("La richiesta è già collegata a una missione: ho aperto il record esistente.");
+      router.replace(`/mission?missionId=${encodeURIComponent(request.scheduledMissionId)}`, { scroll: false });
+      return;
+    }
+    if (request.status !== "APPROVED") {
+      notify("La richiesta deve essere approvata e prenotata dal magazzino prima della programmazione.");
+      router.replace("/mission", { scroll: false });
+      return;
+    }
+    openCreate(request);
+    notify("Richiesta riletta dal server: deposito, commessa e materiali sono già collegati.");
+    router.replace("/mission", { scroll: false });
+  // L’apertura da magazzino dipende dal contratto URL e dai record riletti dal server.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialRequests, notify, requestedMaterialRequestId, router, state]);
 
   function openMissionReport() {
     const readback = selected ? missionReport(selected.payload) : null;
@@ -1392,7 +1462,7 @@ export default function MissionCommandDeck() {
           ...body,
         }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as MissionCreateResponse;
       if (!response.ok) {
         if (response.status === 409) await refresh();
         const errorLabels: Record<string, string> = {
@@ -1400,19 +1470,37 @@ export default function MissionCommandDeck() {
           mission_plan_resource_mismatch: "autista, mezzo o asset non corrispondono al piano pubblicato",
           mission_window_outside_planning_plan: "la finestra missione esce da quella pubblicata",
           published_transport_plan_required: "serve un piano trasporto pubblicato",
+          material_request_already_scheduled: "la richiesta è già collegata a una missione",
+          approved_material_request_required: "la richiesta materiali non risulta approvata",
+          material_request_requires_warehouse_to_job: "una richiesta materiali approvata deve viaggiare dal deposito alla commessa collegata",
+          mission_resource_conflict: "una delle risorse è già occupata nella finestra scelta",
+          mission_driver_and_vehicle_required: "seleziona un autista e un mezzo disponibili",
+          material_request_link_unavailable: "il collegamento tra richiesta e missione non è stato confermato dal registro",
         };
-        notify("Missione non creata: " + (errorLabels[result.error ?? ""] ?? result.error ?? "errore"));
+        notify("Missione non creata: " + (result.message ?? errorLabels[result.error ?? ""] ?? result.error ?? "errore"));
         return;
       }
+      const createdMissionId = result.mutation?.record?.id ?? "";
+      if (!createdMissionId || result.readback?.status !== "verified") {
+        notify("La missione è stata ricevuta, ma il readback server non è completo. Aggiorna il registro prima di procedere.");
+        await refresh();
+        return;
+      }
+      setQuery("");
+      setStatusFilter("ALL");
+      setAttentionFilter("ALL");
+      setSelectedId(createdMissionId);
       await refresh();
+      setSelectedId(createdMissionId);
       setModal(null);
-      notify("Missione creata e readback verificato.");
+      router.replace(`/mission?missionId=${encodeURIComponent(createdMissionId)}`, { scroll: false });
+      notify("Missione creata, richiesta collegata e readback verificato. È pronta per il prelievo in magazzino.");
     } catch {
       notify("Connessione non disponibile: nessuna missione modificata.");
     } finally {
       setBusy(false);
     }
-  }, [notify, refresh]);
+  }, [notify, refresh, router]);
 
   async function submitException(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1431,7 +1519,7 @@ export default function MissionCommandDeck() {
     const form = new FormData(event.currentTarget);
     if (modal === "create") {
       const jobId = selectedRequest?.jobId || createJobId || field(form, "jobId") || "";
-      const mode = field(form, "transportMode") as TransportMode;
+      const mode = selectedRequest ? "WAREHOUSE_TO_JOB" : field(form, "transportMode") as TransportMode;
       const selectedCargoAssetIds = [...new Set([
         ...cargoAssetIds,
         ...cargoAssetId.split(",").map((value) => value.trim()).filter(Boolean),

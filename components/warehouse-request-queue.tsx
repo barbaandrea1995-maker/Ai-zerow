@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { CheckCircle2, ClipboardCheck, LoaderCircle, PackageCheck, RefreshCw, ShieldCheck, Truck } from "lucide-react";
+import { ArrowRight, CheckCircle2, ClipboardCheck, LoaderCircle, PackageCheck, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -334,7 +335,7 @@ export function WarehouseRequestQueue({
               return <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[.06] bg-black/25 px-3 py-2" key={`${line.id}-pick`}><p className="text-[10px] text-slate-300">{line.description} · prelevato {formatQuantity(picked, line.unit)} / {formatQuantity(grouped?.quantity ?? line.quantity, line.unit)}</p><Button className="h-8 border-lime-300/20 bg-lime-300/[.05] px-2.5 text-[9px] text-lime-100 hover:bg-lime-300/10" disabled={!canFulfill || !item || !remaining || request.mission?.status !== "PLANNED" || pickBusyId === line.itemId} onClick={() => void pickForMission(request, line.itemId)} variant="outline">{pickBusyId === line.itemId ? <LoaderCircle className="size-3 animate-spin" /> : <PackageCheck className="size-3" />}{remaining ? `Preleva ${formatQuantity(remaining, line.unit)}` : "Prelievo completo"}</Button></div>;
             })}</div><p className="mt-2 text-[9px] leading-4 text-slate-600">Il prelievo scala saldo e prenotazione in questo deposito. L’autista conferma il carico alla tappa missione con timestamp e geofence.</p></div>}
             {request.status === "REQUESTED" && canReview && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[.06] pt-3"><p className="flex items-center gap-2 text-[10px] text-slate-500"><ShieldCheck className="size-3.5 text-amber-200" />Verifica articolo, disponibilità e deposito prima di approvare.</p><Button className="h-9 bg-lime-300 px-3 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" onClick={() => openRequest(request)}><ClipboardCheck className="size-3.5" />Revisiona e assegna</Button></div>}
-            {request.status === "APPROVED" && !request.mission && <p className="mt-3 text-[10px] text-amber-100/75">Richiesta approvata · in attesa di programmazione nel modulo Missioni.</p>}
+            {request.status === "APPROVED" && !request.mission && <div className="mt-3 flex flex-col gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-semibold text-amber-100">Scorte prenotate · missione da programmare</p><p className="mt-1 text-[9px] leading-4 text-slate-500">Deposito, commessa e righe approvate verranno riletti dal server. In Missioni scegli soltanto finestra, autista e mezzo disponibili.</p></div><Link className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-2 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" href={`/mission?requestId=${encodeURIComponent(request.id)}&create=1`}><Truck className="size-3.5" />Programma missione<ArrowRight className="size-3.5" /></Link></div>}
           </article>;
         })}
         {!loading && requests.length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-xs text-slate-500">Nessuna richiesta o missione materiali nel tuo perimetro.</div>}
