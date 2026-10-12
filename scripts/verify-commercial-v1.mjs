@@ -40,6 +40,7 @@ assert.equal(packageJson.scripts["audit:release"], "node scripts/audit-release-s
 assert.equal(packageJson.scripts["audit:e2e"], "node scripts/audit-e2e-contract.mjs", "E2E contract audit must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["audit:ui"], "node scripts/audit-ui-alignment.mjs", "UI alignment audit must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["verify:company-ai-assets"], "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs", "Company AI personal asset context must have a runnable regression test");
+assert.equal(packageJson.scripts["package:sites"], "node scripts/package-sites-deployment.mjs", "Sites deployment packaging must be reproducible from the complete build output");
 const runtimeSmoke = await readFile(join(root, "scripts", "verify-runtime-smoke.mjs"), "utf8");
 assert(runtimeSmoke.includes("protected_api_fail_closed") && runtimeSmoke.includes("service_worker_build_binding"), "Runtime smoke must cover auth boundaries and PWA build binding");
 const surfaceAudit = await readFile(join(root, "scripts", "audit-release-surface.mjs"), "utf8");

@@ -16,6 +16,7 @@
     "audit:e2e": "node scripts/audit-e2e-contract.mjs",
     "verify:commercial": "node --experimental-strip-types scripts/verify-commercial-v1.mjs",
     "verify:company-ai-assets": "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs",
+    "package:sites": "node scripts/package-sites-deployment.mjs",
     "verify:runtime": "node scripts/verify-runtime-smoke.mjs",
     "db:generate": "drizzle-kit generate"
   },
