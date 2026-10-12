@@ -23,8 +23,8 @@ export const COMMAND_WIDGET_CATALOG = [
   },
   {
     id: "kpi-workforce",
-    label: "Team e workforce",
-    description: "Readback delle risorse autorizzate.",
+    label: "Risorse nel perimetro",
+    description: "Record workforce visibili nel perimetro autorizzato.",
     requiredCapabilities: ["workforce.read"],
     allowedSizes: ["compact", "standard"],
     defaultSize: "compact",
@@ -56,8 +56,9 @@ export const COMMAND_WIDGET_CATALOG = [
   {
     id: "weather",
     label: "Meteo operativo",
-    description: "Condizioni meteo per squadre, mezzi e cantieri.",
+    description: "Condizioni meteo per sedi server-side autorizzate.",
     requiredCapabilities: ["command.read"],
+    anyCapabilities: ["location.read.current", "location.read.history", "location.view.fleet", "location.manage.geofences"],
     allowedSizes: ["standard", "wide"],
     defaultSize: "standard",
   },
@@ -65,7 +66,7 @@ export const COMMAND_WIDGET_CATALOG = [
     id: "reminders",
     label: "Promemoria",
     description: "Scadenze e promemoria dal registro notifiche.",
-    requiredCapabilities: ["command.read"],
+    requiredCapabilities: ["command.read", "communication.read"],
     allowedSizes: ["standard", "wide"],
     defaultSize: "standard",
   },
@@ -73,7 +74,8 @@ export const COMMAND_WIDGET_CATALOG = [
     id: "operational-map",
     label: "Mappa operativa",
     description: "Vista territoriale di lavori, team e asset autorizzati.",
-    requiredCapabilities: ["operations.read", "location.read.current"],
+    requiredCapabilities: ["command.read", "operations.read"],
+    anyCapabilities: ["location.read.current", "location.read.history", "location.view.fleet", "location.manage.geofences"],
     allowedSizes: ["wide", "full"],
     defaultSize: "wide",
   },
@@ -190,9 +192,12 @@ function hasAllCapabilities(capabilities: readonly string[], required: readonly 
 }
 
 export function getAllowedCommandWidgets(capabilities: readonly string[]) {
-  return COMMAND_WIDGET_CATALOG.filter((widget) =>
-    hasAllCapabilities(capabilities, widget.requiredCapabilities),
-  );
+  return COMMAND_WIDGET_CATALOG.filter((widget) => {
+    const meetsRequired = hasAllCapabilities(capabilities, widget.requiredCapabilities);
+    const anyCapabilities = "anyCapabilities" in widget ? widget.anyCapabilities : undefined;
+    const meetsAny = !anyCapabilities || anyCapabilities.some((capability) => capabilities.includes(capability));
+    return meetsRequired && meetsAny;
+  });
 }
 
 export function getAllowedCommandNavigation(capabilities: readonly string[]) {

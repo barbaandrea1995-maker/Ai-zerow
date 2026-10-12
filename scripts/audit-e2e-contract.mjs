@@ -49,6 +49,10 @@ const communicationsSurface = await read("components/communications-control.tsx"
 const settingsSurface = await read("app/settings/settings-client.tsx");
 const commandMapRoute = await read("app/api/command/map/route.ts");
 const operationalMapSurface = await read("components/operational-map-board.tsx");
+const commandAnalyticsRoute = await read("app/api/command/analytics/route.ts");
+const commandReadinessRoute = await read("app/api/command/readiness/route.ts");
+const commandSurface = await read("components/command-surface.tsx");
+const commandDashboard = await read("lib/command-dashboard.ts");
 
 requireContract(teamRoute, /hasCapability\(context, "authority\.read"\)/, "team read capability gate");
 requireContract(teamRoute, /hasCapability\(context, "authority\.manage"\)/, "team write capability gate");
@@ -107,6 +111,22 @@ requireContract(operationalMapSurface, /setInterval\(refreshWhenVisible, 15_000\
 requireContract(operationalMapSurface, /value="MISSIONI">Missioni/, "control map offers a dedicated mission filter");
 requireContract(operationalMapSurface, /TAPPA TEMPORANEA/, "control map distinguishes temporary stop details");
 requireContract(operationalMapSurface, /MEZZO IN TRACKING/, "control map exposes selected driver vehicle tracking details");
+
+requireContract(commandAnalyticsRoute, /hasCapability\(context, "analytics\.read"\)/, "Command analytics capability gate");
+requireContract(commandAnalyticsRoute, /hasCapability\(context, "command\.read"\)/, "Command analytics page capability gate");
+requireContract(commandAnalyticsRoute, /eq\(s06Events\.tenantId, context\.tenantId\)/, "Command analytics tenant boundary");
+requireContract(commandAnalyticsRoute, /groupBy\(dayBucket\)/, "Command analytics server-side daily aggregation");
+requireContract(commandAnalyticsRoute, /rawPayloadIncluded: false/, "Command analytics excludes raw event payloads");
+assert(!/s06Events\.(payloadJson|actorId)/.test(commandAnalyticsRoute), "Command analytics must not read raw payload or actor identity");
+requireContract(commandSurface, /\/api\/command\/analytics\?days=\$\{period\}/, "Command analytics reads its server aggregate endpoint");
+requireContract(commandSurface, /payload\.liveRequest === "VERIFIED"/, "Company AI separates provider verification from configuration");
+requireContract(commandSurface, /assistantRequestRef\.current\?\.prompt === prompt/, "Company AI reuses the idempotency key for uncertain retries");
+requireContract(commandSurface, /readback\?\.status !== "ok"/, "Company AI confirms the server ledger before showing success");
+assert(!commandSurface.includes("OPENAI LIVE") && !commandSurface.includes("NewJobDialog"), "Command must not overstate AI liveness or expose a local-only job creation action");
+requireContract(commandReadinessRoute, /const checks = \[/, "Command readiness reports named checks");
+assert(!/localGateTotal\s*=\s*6/.test(commandReadinessRoute), "Command readiness must not publish a hardcoded readiness score");
+requireContract(commandDashboard, /anyCapabilities\.some\(/, "Command widgets support server-compatible alternative capability gates");
+requireContract(commandDashboard, /requiredCapabilities: \["command\.read", "communication\.read"\]/, "Reminder widget requires communication access");
 
 requireContract(authorityContext, /context\.tenantId/, "authority tenant context");
 requireContract(authorityContext, /assertTenantScope/, "authority tenant assertion");
@@ -215,6 +235,9 @@ console.log(JSON.stringify({
     planningAvailability: "PASS",
     controlMapDriverTracking: "PASS",
     temporaryMissionPlaces: "PASS",
+    commandAnalytics: "PASS",
+    companyAiRuntimeTruth: "PASS",
+    commandSurfaceActions: "PASS",
     tenantAndRoleGuards: "PASS",
     readbackLedger: "PASS",
   },

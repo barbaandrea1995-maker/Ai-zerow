@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   AlarmClock,
@@ -13,7 +14,6 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
-  CircleAlert,
   CircleGauge,
   CloudSun,
   Clock3,
@@ -40,11 +40,9 @@ import {
 } from "lucide-react";
 import {
   ActivityPanel,
-  AnalyticsPanel,
   AssetPanel,
   JobPanel,
   KpiCard,
-  NewJobDialog,
   defaultAssistantResponse,
   readbackLabel,
   toActivities,
@@ -84,9 +82,9 @@ import type {
 type Tone = "lime" | "amber" | "cyan" | "red";
 type ReadbackStatus = "loading" | "online" | "partial" | "empty" | "error";
 type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "MISSIONI" | "GEOFENCE";
-type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
+type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI" | "ANNULLATI";
 type AssetTab = "OPERATIVI" | "MANUTENZIONE" | "TUTTI";
-type AiRuntimeStatus = "checking" | "ready" | "not_configured" | "unavailable";
+type AiRuntimeStatus = "checking" | "configured" | "verified" | "not_configured" | "unavailable";
 
 type CommandRecord = {
   id: string;
@@ -110,9 +108,25 @@ type CommandDashboardResponse = {
 };
 
 type CommandReadinessResponse = {
-  summary?: { localGateReady?: number; localGateTotal?: number; ledgerCount?: number; ledgerStatus?: "READY" | "BLOCKED"; openAiLive?: "NOT_RUN" | "VERIFIED" | "FAILED" };
+  contract?: { commercialStatus?: string };
+  summary?: { ledgerCount?: number; ledgerStatus?: "READY" | "BLOCKED"; openAiLive?: "NOT_RUN" | "VERIFIED" | "FAILED"; openAiCheckedAt?: string | null };
   runtime?: { configured?: boolean; model?: string; liveRequest?: "NOT_RUN" | "VERIFIED" | "FAILED"; directWrite?: boolean };
   governanceRead?: boolean;
+  readback?: { status?: string; checkedAt?: string };
+};
+
+type CommandAnalyticsResponse = {
+  periodDays?: number;
+  summary?: { total?: number; activeDays?: number; peakDailyCount?: number };
+  daily?: Array<{ date: string; count: number }>;
+  contract?: { source?: string; scope?: string; rawPayloadIncluded?: boolean; actorDataIncluded?: boolean };
+  readback?: { status?: string; checkedAt?: string };
+};
+
+type CompanyAiStatusResponse = {
+  configured?: boolean;
+  liveRequest?: "NOT_RUN" | "VERIFIED" | "FAILED";
+  checkedAt?: string | null;
 };
 
 type W10Summary = {
@@ -183,8 +197,6 @@ type CommunicationsResponse = {
   records?: ReminderRecord[];
 };
 
-const commandModules = ["operations", "assets", "workforce"] as const;
-
 const navigationLabels: Record<CommandNavigationId, string> = {
   command: "CONTROL",
   operations: "OPERATIONS",
@@ -243,13 +255,181 @@ function W10CommandPanel({ summary }: { summary: W10Summary | null }) {
   return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W10 / CONTROL BRIDGE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Finance & Procurement</h2><p className="mt-1 text-[11px] text-slate-500">Workflow, approval e confine provider nel Command.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${unavailable ? "border-amber-300/20 bg-amber-300/[0.06] text-amber-100" : "border-lime-300/20 bg-lime-300/[0.06] text-lime-100"}`}>{unavailable ? "READBACK PENDING" : "D1 VERIFIED"}</span></div>{unavailable ? <div className="carbon-inset mt-5 flex flex-1 items-center gap-3 rounded-xl p-4"><CircleGauge className="size-5 text-amber-200" /><p className="text-xs leading-5 text-slate-500">Il workflow W10 non è ancora disponibile nel readback corrente. Nessun valore viene simulato.</p></div> : <><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Workflow</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.workflowCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">In review</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary.reviewCount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Valore aperto</p><p className="mt-2 font-mono text-sm text-lime-100">{amount}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Riconciliati</p><p className="mt-2 font-mono text-xl text-lime-100">{summary.reconciledCount}</p></div></div><div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[0.045] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-100"><ShieldCheck className="size-3.5" />Provider boundary</div><p className="mt-2 text-[11px] leading-5 text-slate-500">Approval e stato Sites sono verificabili. Emissione PO, ricezione e contabilizzazione restano esterni.</p></div></>}<div className="mt-5 flex flex-wrap gap-2"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push("/procurement")}><ShoppingCart className="size-3.5" />Apri Procurement</Button><Button className="h-9 flex-1 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/finance")}><Gauge className="size-3.5" />Apri Finance</Button></div></section>;
 }
 
-function CommandReadinessPanel({ readiness }: { readiness: CommandReadinessResponse | null }) {
+function CommandReadinessPanel({
+  readiness,
+  canReadGovernance,
+  canReadExternals,
+  onOpenLedger,
+}: {
+  readiness: CommandReadinessResponse | null;
+  canReadGovernance: boolean;
+  canReadExternals: boolean;
+  onOpenLedger: () => void;
+}) {
   const router = useRouter();
-  const ready = readiness?.summary?.localGateReady ?? 0;
-  const total = readiness?.summary?.localGateTotal ?? 0;
   const ledgerStatus = readiness?.summary?.ledgerStatus ?? "BLOCKED";
   const configured = Boolean(readiness?.runtime?.configured);
-  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W12 / READINESS</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Company AI control</h2><p className="mt-1 text-[11px] text-slate-500">Guard locali, ledger e confine provider.</p></div><span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${readiness ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-100" : "border-amber-300/20 bg-amber-300/[0.06] text-amber-100"}`}>{readiness ? "D1 READBACK" : "CHECKING"}</span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Local gates</p><p className="mt-2 font-mono text-xl text-lime-100">{readiness ? `${ready}/${total}` : "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Ledger</p><p className="mt-2 font-mono text-xl text-cyan-100">{readiness ? readiness.summary?.ledgerCount ?? 0 : "—"}</p></div></div><div className="mt-4 space-y-2"><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><CircleAlert className="size-3.5 text-amber-200" />OpenAI live</span><span className="text-amber-200">NOT RUN</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><ShieldCheck className="size-3.5 text-lime-200" />No direct write</span><span className="text-lime-200">BLOCKED</span></div><div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]"><span className="flex items-center gap-2 text-slate-500"><Sparkles className="size-3.5 text-lime-200" />Runtime binding</span><span className={configured ? "text-lime-200" : "text-amber-200"}>{configured ? "SERVER-SIDE" : "NOT OBSERVED"}</span></div></div><div className="mt-auto flex flex-wrap gap-2 pt-5"><Button className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200" onClick={() => router.push(readiness?.governanceRead ? "/governance" : "/externals")}><ShieldCheck className="size-3.5" />{readiness?.governanceRead ? "Apri control plane" : "Apri adapter"}</Button><span className="flex h-9 items-center rounded-lg border border-amber-300/15 px-2.5 text-[9px] text-amber-100/70">{ledgerStatus}</span></div></section>;
+  const liveStatus = readiness?.summary?.openAiLive ?? "NOT_RUN";
+  const apiLabel = !readiness
+    ? "IN LETTURA"
+    : liveStatus === "VERIFIED"
+    ? "TEST API OK"
+    : liveStatus === "FAILED"
+      ? "TEST FALLITO"
+      : configured ? "CONFIGURATO · NON TESTATO" : "NON CONFIGURATO";
+  const apiTone = !readiness ? "text-cyan-200" : liveStatus === "VERIFIED" ? "text-lime-200" : liveStatus === "FAILED" || !configured ? "text-amber-200" : "text-cyan-200";
+  const writeBoundary = readiness?.runtime?.directWrite === false
+    ? "DISABILITATA"
+    : readiness?.runtime?.directWrite === true ? "ATTIVA · DA BLOCCARE" : "NON VERIFICATA";
+  const writeTone = readiness?.runtime?.directWrite === false ? "text-lime-200" : "text-amber-200";
+  const destination = canReadGovernance ? "/governance" : canReadExternals ? "/externals" : null;
+  const releaseStatus = readiness ? readiness.contract?.commercialStatus ?? "NO_GO" : "—";
+
+  return (
+    <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-lime-300/70">W12 / READINESS</p>
+          <h2 className="mt-1 text-sm font-semibold text-slate-100">Company AI control</h2>
+          <p className="mt-1 text-[11px] text-slate-500">Stato osservato di ledger, provider e confini di scrittura.</p>
+        </div>
+        <span className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${readiness?.readback?.status === "ok" ? "border-lime-300/20 bg-lime-300/[0.06] text-lime-100" : "border-amber-300/20 bg-amber-300/[0.06] text-amber-100"}`}>
+          {readiness?.readback?.status === "ok" ? "D1 CHECKED" : "READBACK PENDING"}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="carbon-inset rounded-xl p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Voci ledger</p>
+          <p className="mt-2 font-mono text-xl text-cyan-100">{readiness ? readiness.summary?.ledgerCount ?? 0 : "—"}</p>
+          <p className="mt-1 text-[9px] text-slate-600">{readiness ? ledgerStatus : "in lettura"}</p>
+        </div>
+        <div className="carbon-inset rounded-xl p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Rilascio</p>
+          <p className="mt-2 font-mono text-xl text-amber-100">{releaseStatus.replaceAll("_", "-")}</p>
+          <p className="mt-1 text-[9px] text-slate-600">Gate commerciale</p>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]">
+          <span className="flex items-center gap-2 text-slate-500"><CircleGauge className="size-3.5 text-cyan-200" />Probe OpenAI</span>
+          <span className={`text-right ${apiTone}`}>{apiLabel}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2.5 text-[10px]">
+          <span className="flex items-center gap-2 text-slate-500"><ShieldCheck className="size-3.5 text-lime-200" />Scrittura di dominio</span>
+          <span className={`text-right ${writeTone}`}>{writeBoundary}</span>
+        </div>
+        <p className="px-1 text-[9px] leading-4 text-slate-600">
+          {readiness?.summary?.openAiCheckedAt ? `Ultimo test provider: ${new Date(readiness.summary.openAiCheckedAt).toLocaleString("it-IT", { timeZone: "Europe/Rome" })}. ` : "Nessun test API verificato. "}
+          Il controllo configurazione non equivale a una chiamata riuscita.
+        </p>
+      </div>
+
+      <div className="mt-auto flex flex-wrap gap-2 pt-5">
+        <Button
+          className="h-9 flex-1 bg-lime-300 text-[11px] font-semibold text-[#060806] hover:bg-lime-200"
+          onClick={() => destination ? router.push(destination) : onOpenLedger()}
+        >
+          <ShieldCheck className="size-3.5" />
+          {destination === "/governance" ? "Apri governance" : destination === "/externals" ? "Apri adapter" : "Apri ledger"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function CommandAnalyticsPanel() {
+  const [period, setPeriod] = useState<7 | 30>(30);
+  const [snapshot, setSnapshot] = useState<CommandAnalyticsResponse | null>(null);
+  const [error, setError] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [loadedRequest, setLoadedRequest] = useState<{ period: 7 | 30; refreshToken: number } | null>(null);
+  const loading = !loadedRequest || loadedRequest.period !== period || loadedRequest.refreshToken !== refreshToken;
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/command/analytics?days=${period}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as CommandAnalyticsResponse & { error?: string };
+        if (!response.ok || payload.readback?.status !== "ok") throw new Error(payload.error ?? "analytics_readback_unavailable");
+        if (active) {
+          setSnapshot(payload);
+          setError(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSnapshot(null);
+          setError(true);
+        }
+      })
+      .finally(() => { if (active) setLoadedRequest({ period, refreshToken }); });
+    return () => { active = false; };
+  }, [period, refreshToken]);
+
+  const daily = snapshot?.daily ?? [];
+  const maximum = Math.max(1, ...daily.map((day) => day.count));
+  const summary = snapshot?.summary;
+
+  return (
+    <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">S06 / EVENT LEDGER</p>
+          <h2 className="mt-1 text-sm font-semibold text-slate-100">Analytics operative</h2>
+          <p className="mt-1 text-[11px] text-slate-500">Aggregati tenant-scoped, senza payload né dati personali.</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1" aria-label="Intervallo analytics">
+          {([7, 30] as const).map((days) => (
+            <button
+              aria-pressed={period === days}
+              className={`rounded-lg px-2.5 py-1.5 text-[10px] font-semibold ${period === days ? "bg-lime-300 text-[#071006]" : "text-slate-500 hover:text-slate-200"}`}
+              key={days}
+              onClick={() => setPeriod(days)}
+              type="button"
+            >{days}g</button>
+          ))}
+          <button aria-label="Aggiorna analytics" className="grid size-7 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-cyan-200" onClick={() => setRefreshToken((value) => value + 1)} type="button">
+            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="carbon-inset mt-5 grid min-h-36 flex-1 place-items-center rounded-xl text-xs text-slate-500" aria-live="polite">Lettura degli aggregati dal server…</div>
+      ) : error || !snapshot ? (
+        <div className="carbon-inset mt-5 grid min-h-36 flex-1 place-items-center rounded-xl border border-amber-300/15 p-5 text-center" role="status">
+          <div><p className="text-xs font-medium text-amber-100">Readback Analytics non disponibile</p><p className="mt-2 text-[10px] leading-4 text-slate-500">Verifica il perimetro `analytics.read` e riprova. Nessun indicatore viene simulato.</p></div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-3 gap-2">
+            <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Eventi</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.total ?? 0}</p></div>
+            <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Giorni attivi</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.activeDays ?? 0}<span className="text-xs text-slate-600">/{period}</span></p></div>
+            <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.12em] text-slate-600">Picco / giorno</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.peakDailyCount ?? 0}</p></div>
+          </div>
+          <div className="carbon-inset mt-3 flex min-h-36 flex-1 flex-col justify-end rounded-xl p-3" role="img" aria-label={`Eventi registrati per giorno negli ultimi ${period} giorni`}>
+            {daily.length > 0 ? (
+              <div className="flex h-28 items-end gap-[3px]" aria-hidden="true">
+                {daily.map((day, index) => {
+                  const showLabel = period === 7 || index === 0 || index === daily.length - 1 || index % 7 === 0;
+                  const height = day.count === 0 ? 3 : Math.max(8, (day.count / maximum) * 100);
+                  return (
+                    <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1" key={day.date} title={`${day.date}: ${day.count} eventi`}>
+                      <div className={`w-full max-w-5 rounded-t-sm ${day.count > 0 ? "bg-gradient-to-t from-lime-500/60 to-lime-200 shadow-[0_0_10px_rgba(200,255,34,.14)]" : "bg-white/[0.08]"}`} style={{ height: `${height}%` }} />
+                      <span className="h-3 text-[8px] leading-3 text-slate-600">{showLabel ? new Date(`${day.date}T12:00:00Z`).toLocaleDateString("it-IT", { day: "2-digit", month: "short", timeZone: "UTC" }) : ""}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="m-auto text-center text-[11px] text-slate-500">Nessun evento registrato nel periodo.</p>}
+            <div className="mt-2 flex items-center justify-between border-t border-white/[0.06] pt-2 text-[9px] text-slate-600"><span>Eventi S06 confermati</span><span>{period} giorni · UTC</span></div>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function PlanningCommandPanel() {
@@ -279,7 +459,7 @@ function weatherNumber(value: number | null | undefined, suffix = "") {
   return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value * 10) / 10}${suffix}` : "—";
 }
 
-function WeatherCommandPanel() {
+function WeatherCommandPanel({ canReadExternals }: { canReadExternals: boolean }) {
   const router = useRouter();
   const [locations, setLocations] = useState<WeatherLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState("");
@@ -362,9 +542,9 @@ function WeatherCommandPanel() {
           <p className="mt-2 border-t border-white/[.06] pt-2 text-[10px] leading-4 text-slate-500">Le informazioni meteo sono fornite a scopo informativo generale. Previsioni e condizioni sono probabilistiche e possono non essere accurate per il luogo o il momento specifico. Non usarle come unica base per decisioni su sicurezza personale, aviazione, navigazione marittima, pianificazione delle emergenze o altri usi critici per la sicurezza. Per decisioni dove la precisione è critica, consulta i servizi meteorologici ufficiali e le autorità competenti.</p>
         </> : <div className="flex flex-1 flex-col items-center justify-center text-center"><CloudSun className={`size-8 ${weatherLoading ? "animate-pulse text-cyan-200" : "text-slate-700"}`} /><p className="mt-3 text-xs text-slate-300">{locationsLoading ? "Cerco le sedi operative…" : noLocations ? "Nessuna sede geocodificata disponibile." : weatherLoading ? "Leggo le condizioni…" : "Seleziona una sede operativa."}</p><p className="mt-2 max-w-xs text-[10px] leading-4 text-slate-600">{error === "weather_provider_not_configured" ? "WeatherAPI non è ancora configurato sul server." : error ? "WeatherAPI non ha restituito il dato. Riprova tra poco." : "Il meteo viene letto solo per luoghi server-side autorizzati."}</p></div>}
       </div>
-      <button className="mt-4 flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" onClick={() => router.push("/externals")} type="button">
+      {canReadExternals ? <button className="mt-4 flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" onClick={() => router.push("/externals")} type="button">
         Vedi contratto provider <ArrowUpRight className="size-3.5" />
-      </button>
+      </button> : null}
     </section>
   );
 }
@@ -441,7 +621,7 @@ function AttendanceCommandPanel() {
       .catch(() => { if (active) setSummary(null); });
     return () => { active = false; };
   }, []);
-  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">P3 / WORKFORCE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Presenze operative</h2><p className="mt-1 text-[11px] text-slate-500">Solo servizio, timestamp e geofence osservato.</p></div><span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><Clock3 className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Presenze</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.total ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In servizio</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.checkedIn ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In pausa</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.paused ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">GPS</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.gpsObserved ?? "—"}</p></div></div><Button className="mt-auto h-9 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => router.push("/presenze")} variant="outline"><Clock3 className="size-3.5" />Apri presenze</Button></section>;
+  return <section className="carbon-card flex h-full flex-col rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-200/70">P3 / WORKFORCE</p><h2 className="mt-1 text-sm font-semibold text-slate-100">Presenze operative</h2><p className="mt-1 text-[11px] text-slate-500">Turni nel perimetro autorizzato; timestamp e geofence osservati.</p></div><span className="grid size-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-200"><Clock3 className="size-4" /></span></div><div className="mt-5 grid grid-cols-2 gap-2"><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Presenze visibili</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.total ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In servizio</p><p className="mt-2 font-mono text-xl text-lime-100">{summary?.checkedIn ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">In pausa</p><p className="mt-2 font-mono text-xl text-amber-100">{summary?.paused ?? "—"}</p></div><div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[.14em] text-slate-600">Posizione osservata</p><p className="mt-2 font-mono text-xl text-cyan-100">{summary?.gpsObserved ?? "—"}</p></div></div><Button className="mt-auto h-9 border-white/10 bg-transparent text-[11px] text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100" onClick={() => router.push("/presenze")} variant="outline"><Clock3 className="size-3.5" />Apri presenze</Button></section>;
 }
 
 function IconButton({
@@ -496,6 +676,8 @@ function CompanyAiPanel({
   query,
   response,
   runtimeStatus,
+  checkedAt,
+  pending,
   onQueryChange,
   onSubmit,
   onQuickPrompt,
@@ -504,14 +686,18 @@ function CompanyAiPanel({
   query: string;
   response: string;
   runtimeStatus: AiRuntimeStatus;
+  checkedAt: string | null;
+  pending: boolean;
   onQueryChange: (value: string) => void;
   onSubmit: () => void;
   onQuickPrompt: (prompt: string) => void;
   onOpenLedger: () => void;
 }) {
   const quickPrompts = ["Analizza andamento commesse", "Quali asset sono disponibili?", "Evidenzia rischi operativi", "Prepara un riepilogo per il cliente"];
-  const status = runtimeStatus === "ready"
-    ? { label: "OPENAI LIVE", tone: "text-lime-200 border-lime-300/30 bg-lime-300/10" }
+  const status = runtimeStatus === "verified"
+    ? { label: "TEST API OK", tone: "text-lime-200 border-lime-300/30 bg-lime-300/10" }
+    : runtimeStatus === "configured"
+      ? { label: "CONFIGURATO · NON TESTATO", tone: "text-cyan-200 border-cyan-300/25 bg-cyan-300/10" }
     : runtimeStatus === "checking"
       ? { label: "RUNTIME CHECK", tone: "text-cyan-200 border-cyan-300/25 bg-cyan-300/10" }
       : runtimeStatus === "not_configured"
@@ -521,30 +707,32 @@ function CompanyAiPanel({
   return (
     <section className="carbon-card carbon-card-neon flex h-full flex-col rounded-2xl p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3"><span className="neon-pulse grid size-10 place-items-center rounded-xl bg-lime-300 text-[#060806]"><Sparkles className="size-[18px]" /></span><div><p className="text-[15px] font-semibold text-slate-50">Company AI</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">OpenAI · governed command</p></div></div>
+        <div className="flex items-center gap-3"><span className="neon-pulse grid size-10 place-items-center rounded-xl bg-lime-300 text-[#060806]"><Sparkles className="size-[18px]" /></span><div><p className="text-[15px] font-semibold text-slate-50">Company AI</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-lime-200/60">OpenAI · governed command</p><p className="mt-1 text-[9px] text-slate-600">{checkedAt && Number.isFinite(Date.parse(checkedAt)) ? `Ultima verifica ${new Date(checkedAt).toLocaleString("it-IT", { timeZone: "Europe/Rome" })}` : "Configurazione e test provider sono stati distinti"}</p></div></div>
         <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold tracking-[0.08em] ${status.tone}`}>{status.label}</span>
       </div>
       <div className="carbon-inset mt-5 rounded-xl p-3">
-        <div className="flex items-center gap-2 text-[10px] text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />SERVER-SIDE AI<span className="ml-auto font-mono text-[9px] text-slate-600">NO DIRECT WRITE</span></div>
+        <div className="flex items-center gap-2 text-[10px] text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />SERVER-SIDE AI<span className="ml-auto font-mono text-[9px] text-slate-600">READ-ONLY SUI DOMINI</span></div>
         <p className="mt-3 text-sm leading-6 text-slate-300" aria-live="polite">{response}</p>
+        {pending ? <p className="mt-2 flex items-center gap-2 text-[10px] text-cyan-200" role="status"><RefreshCw className="size-3 animate-spin" />Invio al runtime e registrazione nel ledger…</p> : null}
       </div>
       <form className="mt-4 flex gap-2" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
-        <div className="relative min-w-0 flex-1"><MessageSquareText className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Chiedi a Company AI" className="h-10 border-white/10 bg-black/40 pl-9 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => onQueryChange(event.target.value)} placeholder="Chiedi a Company AI…" value={query} /></div>
-        <Button aria-label="Invia richiesta" className="h-10 w-10 bg-lime-300 p-0 text-[#060806] shadow-[0_0_18px_rgba(200,255,34,.18)] hover:bg-lime-200" size="icon" type="submit"><Send className="size-4" /></Button>
+        <div className="relative min-w-0 flex-1"><MessageSquareText className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><Input aria-label="Chiedi a Company AI" className="h-10 border-white/10 bg-black/40 pl-9 text-xs text-slate-100 placeholder:text-slate-600" maxLength={500} onChange={(event) => onQueryChange(event.target.value)} placeholder="Chiedi a Company AI…" value={query} /></div>
+        <Button aria-label={pending ? "Richiesta in corso" : "Invia richiesta"} className="h-10 w-10 bg-lime-300 p-0 text-[#060806] shadow-[0_0_18px_rgba(200,255,34,.18)] hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={pending || query.trim().length < 2} size="icon" type="submit">{pending ? <RefreshCw className="size-4 animate-spin" /> : <Send className="size-4" />}</Button>
       </form>
-      <div className="mt-4 space-y-2">{quickPrompts.map((prompt) => <button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200" key={prompt} onClick={() => onQuickPrompt(prompt)} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>{prompt}</button>)}</div>
+      <div className="mt-4 space-y-2">{quickPrompts.map((prompt) => <button className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-left text-[11px] text-slate-400 transition hover:border-lime-300/30 hover:bg-lime-300/5 hover:text-lime-200 disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} key={prompt} onClick={() => onQuickPrompt(prompt)} type="button"><span className="grid size-5 place-items-center rounded-md border border-white/10 text-slate-600"><ChevronRight className="size-3" /></span>{prompt}</button>)}</div>
       <div className="mt-auto flex items-center justify-between border-t border-white/10 pt-4"><button className="flex items-center gap-2 text-[10px] text-slate-500 hover:text-lime-200" onClick={onOpenLedger} type="button"><FileText className="size-3.5" />Apri command ledger</button><span className="font-mono text-[9px] text-slate-600">S07 / D1</span></div>
     </section>
   );
 }
 
 function CommandLedgerDialog({ open, onOpenChange, runtimeStatus }: { open: boolean; onOpenChange: (open: boolean) => void; runtimeStatus: AiRuntimeStatus }) {
+  const runtimeLabel = runtimeStatus === "verified" ? "API TEST OK" : runtimeStatus === "configured" ? "CONFIGURED · NOT TESTED" : runtimeStatus.replaceAll("_", " ").toUpperCase();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="carbon-card max-w-2xl border-lime-300/20 p-0 text-slate-100">
         <DialogHeader className="border-b border-white/10 px-5 py-5 text-left"><DialogTitle className="text-base text-slate-50">Command ledger</DialogTitle><DialogDescription className="mt-1 text-xs text-slate-500">Ogni richiesta conserva actor, tenant, runtime e readback. Nessuna risposta AI scrive direttamente nei domini.</DialogDescription></DialogHeader>
         <div className="space-y-3 p-5">
-          <div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">OpenAI Responses API</p><p className="mt-1 text-[10px] text-slate-500">Chiave solo server · output strutturato · timeout controllato</p></div><span className={`rounded-full border px-2 py-1 text-[9px] ${runtimeStatus === "ready" ? "border-lime-300/25 text-lime-200" : "border-amber-300/25 text-amber-200"}`}>{runtimeStatus === "ready" ? "CONFIGURED" : runtimeStatus.toUpperCase()}</span></div>
+          <div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">OpenAI Responses API</p><p className="mt-1 text-[10px] text-slate-500">Chiave solo server · output strutturato · timeout controllato</p></div><span className={`rounded-full border px-2 py-1 text-[9px] ${runtimeStatus === "verified" ? "border-lime-300/25 text-lime-200" : "border-amber-300/25 text-amber-200"}`}>{runtimeLabel}</span></div>
           <div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">Authority context</p><p className="mt-1 text-[10px] text-slate-500">Record filtrati per tenant e capability prima del prompt</p></div><span className="text-[9px] text-lime-200">ENFORCED</span></div>
           <div className="carbon-inset flex items-center justify-between rounded-xl p-3"><div><p className="text-xs font-medium text-slate-200">Write boundary</p><p className="mt-1 text-[10px] text-slate-500">Le azioni restano preview e richiedono approvazione</p></div><span className="text-[9px] text-lime-200">NO DIRECT WRITE</span></div>
         </div>
@@ -573,8 +761,10 @@ export default function CommandSurface({
   const [assistantQuery, setAssistantQuery] = useState("");
   const [assistantResponse, setAssistantResponse] = useState(defaultAssistantResponse);
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiRuntimeStatus>("checking");
+  const [aiCheckedAt, setAiCheckedAt] = useState<string | null>(null);
+  const [assistantPending, setAssistantPending] = useState(false);
+  const assistantRequestRef = useRef<{ prompt: string; idempotencyKey: string } | null>(null);
   const [ledgerOpen, setLedgerOpen] = useState(false);
-  const [newJobOpen, setNewJobOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [readbackStatus, setReadbackStatus] = useState<ReadbackStatus>("loading");
   const [records, setRecords] = useState<CommandRecord[]>([]);
@@ -609,14 +799,12 @@ export default function CommandSurface({
       .then((payload) => {
         if (!active) return;
         const nextRecords = Array.isArray(payload.records) ? payload.records : [];
-        const requestedModules = payload.requestedModules?.length ?? commandModules.length;
         const readableModules = payload.modules?.length ?? 0;
         setRecords(nextRecords);
         setW10Summary(payload.w10 ?? null);
         if (readableModules === 0) setReadbackStatus("error");
         else if (nextRecords.length === 0) setReadbackStatus("empty");
-        else if (readableModules === requestedModules) setReadbackStatus("online");
-        else setReadbackStatus("partial");
+        else setReadbackStatus("online");
       })
       .catch(() => {
         if (!active) return;
@@ -647,13 +835,16 @@ export default function CommandSurface({
 
     void fetch("/api/command/ai-status", { cache: "no-store" })
       .then(async (response) => {
-        const payload = await response.json() as { configured?: boolean };
+        const payload = await response.json() as CompanyAiStatusResponse;
         if (!active) return;
         if (!response.ok) {
           setAiRuntimeStatus("unavailable");
           return;
         }
-        setAiRuntimeStatus(payload.configured ? "ready" : "not_configured");
+        setAiCheckedAt(payload.checkedAt ?? null);
+        if (payload.liveRequest === "VERIFIED") setAiRuntimeStatus("verified");
+        else if (payload.liveRequest === "FAILED") setAiRuntimeStatus("unavailable");
+        else setAiRuntimeStatus(payload.configured ? "configured" : "not_configured");
       })
       .catch(() => {
         if (active) setAiRuntimeStatus("unavailable");
@@ -689,23 +880,25 @@ export default function CommandSurface({
 
   const commandKpis = useMemo(() => {
     const activeJobs = jobs.filter((job) => job.status === "In corso").length;
+    const blockedJobs = jobs.filter((job) => job.status === "Bloccato").length;
     const operationalAssets = assets.filter((asset) => asset.status === "Operativo").length;
-    const averageProgress = jobs.length
-      ? Math.round(jobs.reduce((total, job) => total + job.progress, 0) / jobs.length)
+    const openJobs = jobs.filter((job) => !["Completato", "Annullato"].includes(job.status));
+    const averageProgress = openJobs.length
+      ? Math.round(openJobs.reduce((total, job) => total + job.progress, 0) / openJobs.length)
       : null;
     const stateLabel = readbackLabel(readbackStatus);
     return {
-      "kpi-jobs": { label: "Lavori attivi", value: readbackStatus === "loading" ? "—" : String(activeJobs), delta: stateLabel, icon: BriefcaseBusiness, tone: "lime" as Tone, data: `${records.filter((record) => record.module === "operations").length} record operations` },
-      "kpi-assets": { label: "Asset operativi", value: readbackStatus === "loading" ? "—" : String(operationalAssets), delta: stateLabel, icon: Package, tone: "cyan" as Tone, data: `${records.filter((record) => record.module === "assets").length} record assets` },
-      "kpi-workforce": { label: "Team in readback", value: readbackStatus === "loading" ? "—" : String(records.filter((record) => record.module === "workforce").length), delta: stateLabel, icon: Users, tone: "amber" as Tone, data: "Presenze e assegnazioni server-side" },
-      "kpi-progress": { label: "Avanzamento medio", value: readbackStatus === "loading" || averageProgress === null ? "—" : `${averageProgress}%`, delta: stateLabel, icon: Activity, tone: "lime" as Tone, data: jobs.length ? "Media dei lavori nel readback" : "Nessun lavoro disponibile" },
+      "kpi-jobs": { label: "Commesse in corso", value: readbackStatus === "loading" ? "—" : String(activeJobs), delta: stateLabel, icon: BriefcaseBusiness, tone: "lime" as Tone, data: `${blockedJobs} bloccate · ${records.filter((record) => record.module === "operations").length} nel perimetro` },
+      "kpi-assets": { label: "Asset operativi", value: readbackStatus === "loading" ? "—" : String(operationalAssets), delta: stateLabel, icon: Package, tone: "cyan" as Tone, data: "Ciclo di vita; disponibilità nel modulo Pianificazione" },
+      "kpi-workforce": { label: "Risorse nel perimetro", value: readbackStatus === "loading" ? "—" : String(records.filter((record) => record.module === "workforce").length), delta: stateLabel, icon: Users, tone: "amber" as Tone, data: "Record workforce visibili al ruolo corrente" },
+      "kpi-progress": { label: "Avanzamento medio", value: readbackStatus === "loading" || averageProgress === null ? "—" : `${averageProgress}%`, delta: stateLabel, icon: Activity, tone: "lime" as Tone, data: openJobs.length ? "Media delle commesse non concluse" : "Nessuna commessa aperta nel perimetro" },
     };
   }, [assets, jobs, readbackStatus, records]);
 
   const readbackAssistantResponse = useMemo(() => {
     if (readbackStatus === "loading") return defaultAssistantResponse;
-    if (readbackStatus === "error") return "Il readback D1 non e disponibile. Nessuna metrica o scrittura viene simulata.";
-    if (readbackStatus === "empty") return "Il readback D1 e raggiungibile ma non contiene ancora record operativi.";
+    if (readbackStatus === "error") return "Il readback D1 non è disponibile. Nessuna metrica o scrittura viene simulata.";
+    if (readbackStatus === "empty") return "Il readback D1 è raggiungibile ma non contiene ancora record operativi nel tuo perimetro.";
     return "Readback D1 verificato. Posso preparare una preview governata; le scritture restano vincolate agli adapter.";
   }, [readbackStatus]);
   const assistantPanelResponse = assistantResponse === defaultAssistantResponse ? readbackAssistantResponse : assistantResponse;
@@ -717,27 +910,41 @@ export default function CommandSurface({
 
   const submitAssistant = async () => {
     const prompt = assistantQuery.trim();
-    if (!prompt) return;
-    setAssistantQuery("");
+    if (prompt.length < 2 || assistantPending) return;
+    const request = assistantRequestRef.current?.prompt === prompt
+      ? assistantRequestRef.current
+      : { prompt, idempotencyKey: `command-query-${crypto.randomUUID()}` };
+    assistantRequestRef.current = request;
+    setAssistantPending(true);
+    setAssistantResponse("Sto interrogando il runtime server-side e verificando la registrazione nel ledger…");
     try {
       const response = await fetch("/api/command/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt, actionType: "query", idempotencyKey: `command-query-${crypto.randomUUID()}` }),
+        body: JSON.stringify({ prompt, actionType: "query", idempotencyKey: request.idempotencyKey }),
       });
       const payload = await response.json() as {
-        result?: { message?: string; aiRuntime?: { status?: "used" | "not_configured" | "unavailable" } };
+        result?: { actionId?: string; message?: string; aiRuntime?: { status?: "used" | "not_configured" | "unavailable" } };
+        readback?: { status?: string };
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error || "command_adapter_unavailable");
-      setAssistantResponse(payload.result?.message || `Preview registrata per “${prompt}”.`);
-      if (payload.result?.aiRuntime?.status === "used") setAiRuntimeStatus("ready");
+      if (!payload.result?.actionId || payload.readback?.status !== "ok") throw new Error("command_ledger_readback_unconfirmed");
+      setAssistantResponse(payload.result.message || "Richiesta confermata nel command ledger.");
+      if (payload.result.aiRuntime?.status === "used") {
+        setAiRuntimeStatus("verified");
+        setAiCheckedAt(new Date().toISOString());
+      }
       else if (payload.result?.aiRuntime?.status === "not_configured") setAiRuntimeStatus("not_configured");
       else if (payload.result?.aiRuntime?.status === "unavailable") setAiRuntimeStatus("unavailable");
-      notify("Richiesta registrata nel command ledger");
+      if (assistantRequestRef.current?.idempotencyKey === request.idempotencyKey) assistantRequestRef.current = null;
+      setAssistantQuery((current) => current.trim() === prompt ? "" : current);
+      notify("Risposta e registrazione confermate dal server");
     } catch (error) {
-      setAssistantResponse(`Preview locale per “${prompt}”. ${error instanceof Error ? error.message : "Gateway non disponibile"}.`);
-      notify("Gateway AI esterno non disponibile");
+      setAssistantResponse(`Esito non confermato dal server${error instanceof Error ? ` (${error.message})` : ""}. Controlla il command ledger prima di riprovare; la chiave di idempotenza verrà riutilizzata.`);
+      notify("Esito non confermato · verifica il ledger");
+    } finally {
+      setAssistantPending(false);
     }
   };
 
@@ -790,24 +997,24 @@ export default function CommandSurface({
       return <div className="h-full" id="operational-map"><OperationalMapBoard live mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onOpenEntity={openMapEntity} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;
     }
     if (item.id === "company-ai") {
-      return <div className="h-full" id="company-ai"><CompanyAiPanel onOpenLedger={() => setLedgerOpen(true)} onQueryChange={setAssistantQuery} onQuickPrompt={(prompt) => { setAssistantQuery(prompt); setAssistantResponse(`Pronto a preparare: “${prompt}”. Conferma e policy restano necessarie prima di qualsiasi scrittura.`); }} onSubmit={submitAssistant} query={assistantQuery} response={assistantPanelResponse} runtimeStatus={aiRuntimeStatus} /></div>;
+      return <div className="h-full" id="company-ai"><CompanyAiPanel checkedAt={aiCheckedAt} onOpenLedger={() => setLedgerOpen(true)} onQueryChange={setAssistantQuery} onQuickPrompt={(prompt) => { setAssistantQuery(prompt); setAssistantResponse("Domanda pronta. Inviala per eseguire una nuova richiesta server-side."); }} onSubmit={submitAssistant} pending={assistantPending} query={assistantQuery} response={assistantPanelResponse} runtimeStatus={aiRuntimeStatus} /></div>;
     }
     if (item.id === "activity-stream") {
       return <ActivityPanel activities={activities} onToggle={() => setShowAllActivity((value) => !value)} query={search} showAll={showAllActivity} />;
     }
     if (item.id === "jobs") {
-      return <JobPanel jobs={jobs} onNewJob={() => setNewJobOpen(true)} onTabChange={setJobTab} tab={jobTab} />;
+      return <JobPanel actionLabel="Apri commesse" jobs={jobs} onNewJob={() => router.push("/operations")} onTabChange={setJobTab} showViewAll={false} tab={jobTab} />;
     }
     if (item.id === "assets") {
       return <AssetPanel assets={assets} onTabChange={setAssetTab} tab={assetTab} />;
     }
-    if (item.id === "analytics") return <AnalyticsPanel />;
+    if (item.id === "analytics") return <CommandAnalyticsPanel />;
     if (item.id === "planning-overview") return <PlanningCommandPanel />;
     if (item.id === "attendance-overview") return <AttendanceCommandPanel />;
-    if (item.id === "weather") return <WeatherCommandPanel />;
+    if (item.id === "weather") return <WeatherCommandPanel canReadExternals={access.allowedNavigation.includes("externals")} />;
     if (item.id === "reminders") return <RemindersCommandPanel canRead={access.allowedNavigation.includes("communications")} />;
     if (item.id === "finance-procurement") return <W10CommandPanel summary={w10Summary} />;
-    if (item.id === "command-readiness") return <CommandReadinessPanel readiness={commandReadiness} />;
+    if (item.id === "command-readiness") return <CommandReadinessPanel canReadExternals={access.allowedNavigation.includes("externals")} canReadGovernance={access.allowedNavigation.includes("governance")} onOpenLedger={() => setLedgerOpen(true)} readiness={commandReadiness} />;
 
     return (
       <section className="carbon-card flex h-full flex-wrap items-center justify-between gap-4 rounded-2xl p-4 sm:p-5">
@@ -841,7 +1048,7 @@ export default function CommandSurface({
 
           <div className="zw-command-tenant mt-7 flex items-center gap-3 rounded-2xl p-3">
             <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200"><HardHat className="size-4" /></span>
-            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">ZEROW workspace</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · azienda corrente</span></span>
+            <span className="zw-command-sidebar__tenant-copy min-w-0 flex-1"><span className="block truncate text-xs font-semibold text-slate-200">Azienda attiva</span><span className="mt-0.5 block truncate text-[10px] uppercase tracking-[0.1em] text-slate-600">{access.role} · perimetro corrente</span></span>
           </div>
 
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
@@ -869,7 +1076,7 @@ export default function CommandSurface({
           </nav>
 
           <div className="zw-command-sidebar__footer mt-4 border-t border-white/[0.07] pt-4">
-            <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[0.14em] text-slate-600"><span>System core</span><span className="flex items-center gap-1.5 text-lime-200"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]" />{readbackLabel(readbackStatus)}</span></div>
+            <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[0.14em] text-slate-600"><span>System core</span><span className={`flex items-center gap-1.5 ${readbackStatus === "error" ? "text-rose-200" : readbackStatus === "loading" ? "text-cyan-200" : readbackStatus === "empty" || readbackStatus === "partial" ? "text-amber-200" : "text-lime-200"}`}><span className={`size-1.5 rounded-full ${readbackStatus === "error" ? "bg-rose-300" : readbackStatus === "loading" ? "bg-cyan-300 animate-pulse" : readbackStatus === "empty" || readbackStatus === "partial" ? "bg-amber-300" : "bg-lime-300 shadow-[0_0_10px_rgba(200,255,34,.9)]"}`} />{readbackLabel(readbackStatus)}</span></div>
             <div className="zw-command-core-status mt-3 rounded-xl p-3"><p className="font-mono text-[9px] text-slate-500">D1 / {records.length} RECORD</p><p className="mt-2 font-mono text-[9px] text-lime-300/60">POLICY / {access.role.toUpperCase()}</p></div>
           </div>
         </aside>
@@ -881,10 +1088,10 @@ export default function CommandSurface({
             <IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton>
             <button aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => router.push("/command")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="zw-command-topbar__wordmark hidden sm:block"><span className="block text-[11px] font-bold tracking-[0.18em] text-slate-50">ZEROW</span><span className="block text-[9px] uppercase tracking-[0.2em] text-lime-300/75">command</span></span></button>
             <IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
-            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca in COMMAND" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca commesse, clienti, asset, documenti…" value={search} /></div></div>
+            <div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca negli aggiornamenti operativi" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-xs text-slate-100 placeholder:text-slate-600" onChange={(event) => setSearch(event.target.value)} placeholder="Cerca tra le attività recenti…" value={search} /></div></div>
             <div className="ml-auto flex items-center gap-2">
               <TenantSwitcher />
-              <span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />Live control</span>
+              <span className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] sm:flex ${readbackStatus === "error" ? "border-rose-300/20 bg-rose-300/5 text-rose-200" : readbackStatus === "loading" ? "border-cyan-300/20 bg-cyan-300/5 text-cyan-200" : readbackStatus === "empty" || readbackStatus === "partial" ? "border-amber-300/20 bg-amber-300/5 text-amber-200" : "border-lime-300/20 bg-lime-300/5 text-lime-200"}`}><span className={`size-1.5 rounded-full ${readbackStatus === "error" ? "bg-rose-300" : readbackStatus === "loading" ? "bg-cyan-300 animate-pulse" : readbackStatus === "empty" || readbackStatus === "partial" ? "bg-amber-300" : "bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]"}`} />{readbackLabel(readbackStatus)}</span>
               <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
               <IconButton className="zw-command-topbar__refresh" label="Aggiorna Command" onClick={() => window.location.reload()}><RefreshCw className="size-4" /></IconButton>
               {access.allowedNavigation.includes("communications") ? <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
@@ -893,6 +1100,26 @@ export default function CommandSurface({
           </header>
 
           <div className="mx-auto max-w-[1920px] px-4 py-5 sm:px-7 sm:py-7">
+            <section aria-labelledby="command-page-title" className="carbon-card relative overflow-hidden rounded-[24px] border border-lime-300/15 bg-[radial-gradient(ellipse_at_78%_18%,rgba(190,255,60,.13),transparent_38%),linear-gradient(135deg,rgba(15,24,16,.98),rgba(5,8,7,.96))] p-5 shadow-[0_24px_80px_rgba(0,0,0,.32)] sm:p-7">
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:linear-gradient(135deg,transparent_48%,rgba(190,255,60,.12)_49%,transparent_50%)] [background-size:18px_18px]" />
+              <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+                <div className="max-w-3xl">
+                  <p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.24em] text-lime-200/75"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_12px_rgba(200,255,34,.9)]" />AI-ZEROW · COMMAND CENTER</p>
+                  <h1 className="mt-3 text-3xl font-semibold tracking-[-0.045em] text-slate-50 sm:text-4xl" id="command-page-title">Centrale operativa</h1>
+                  <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">Commesse, risorse, presenze e segnali aziendali in un’unica vista. Ogni dato segue il tenant e il perimetro autorizzato del tuo ruolo.</p>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:flex-col lg:items-end">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${readbackStatus === "error" ? "border-rose-300/20 bg-rose-300/[.06] text-rose-100" : readbackStatus === "loading" ? "border-cyan-300/20 bg-cyan-300/[.06] text-cyan-100" : readbackStatus === "empty" || readbackStatus === "partial" ? "border-amber-300/20 bg-amber-300/[.06] text-amber-100" : "border-lime-300/20 bg-lime-300/[.06] text-lime-100"}`}><span className={`size-1.5 rounded-full ${readbackStatus === "error" ? "bg-rose-300" : readbackStatus === "loading" ? "bg-cyan-300 animate-pulse" : readbackStatus === "empty" || readbackStatus === "partial" ? "bg-amber-300" : "bg-lime-300"}`} />{readbackLabel(readbackStatus)}</span>
+                    <span className="rounded-full border border-white/[.08] bg-black/20 px-3 py-1.5 text-[9px] uppercase tracking-[.12em] text-slate-400">{readbackStatus === "loading" ? "—" : records.length} record nel perimetro</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {visibleWidgets.some((item) => item.id === "operational-map") ? <a className="inline-flex h-10 items-center gap-2 rounded-xl bg-lime-300 px-4 text-[11px] font-semibold text-[#071006] shadow-[0_0_24px_rgba(190,255,60,.16)] transition hover:bg-lime-200" href="#operational-map"><Network className="size-4" />Mappa operativa</a> : access.allowedNavigation.includes("operations") ? <Link className="inline-flex h-10 items-center gap-2 rounded-xl bg-lime-300 px-4 text-[11px] font-semibold text-[#071006] shadow-[0_0_24px_rgba(190,255,60,.16)] transition hover:bg-lime-200" href="/operations"><BriefcaseBusiness className="size-4" />Apri commesse</Link> : null}
+                    {visibleWidgets.some((item) => item.id === "company-ai") ? <a className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 text-[11px] font-semibold text-slate-200 transition hover:border-lime-300/30 hover:text-lime-100" href="#company-ai"><Sparkles className="size-4" />Company AI</a> : null}
+                  </div>
+                </div>
+              </div>
+            </section>
             <div className="mt-5">
               <CommandPersonalizationBar canCustomize={access.canCustomize && preferencesReady} editMode={editMode} onEdit={() => setEditMode((value) => !value)} onOpenCustomizer={() => setCustomizerOpen(true)} saved={!dirtyLayout && preferencesSynced} totalCount={widgetLayout.length} visibleCount={visibleWidgets.length} />
             </div>
@@ -926,7 +1153,7 @@ export default function CommandSurface({
               </section>
             )}
 
-            <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] py-5 text-[10px] text-slate-700"><span>AI-ZEROW COMMAND · commercial control deck</span><span className="flex items-center gap-2"><span>ultra carbon core</span><span className="size-1 rounded-full bg-lime-300" /><span>capability filtered</span></span></footer>
+            <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] py-5 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · vista operativa tenant-scoped</span><span className="flex items-center gap-2"><span>Dati autorizzati dal server</span><span className="size-1 rounded-full bg-lime-300" /><span>nessuna scrittura simulata</span></span></footer>
           </div>
         </section>
       </div>
@@ -934,7 +1161,6 @@ export default function CommandSurface({
       <CommandMobileNav active="home" allowedNavigation={access.allowedNavigation} role={access.role} roles={access.roles} />
       <CommandWidgetCustomizer catalog={widgetCatalog} dirty={dirtyLayout} layout={widgetLayout} onLayoutChange={setWidgetLayout} onOpenChange={setCustomizerOpen} onReset={resetLayout} onSave={saveLayout} open={customizerOpen} saving={savingLayout} />
       <CommandLedgerDialog onOpenChange={setLedgerOpen} open={ledgerOpen} runtimeStatus={aiRuntimeStatus} />
-      <NewJobDialog onCreated={(title) => { setNewJobOpen(false); notify(`Bozza locale creata: ${title}`); }} onOpenChange={setNewJobOpen} open={newJobOpen} />
       {toast ? <div className="fixed bottom-5 left-1/2 z-[100] flex max-w-[calc(100vw-24px)] -translate-x-1/2 items-center gap-2 rounded-xl border border-lime-300/25 bg-[#080d09]/96 px-4 py-3 text-xs text-lime-100 shadow-[0_0_34px_rgba(200,255,34,.16)] backdrop-blur-xl"><CheckCircle2 className="size-4 shrink-0 text-lime-300" />{toast}</div> : null}
     </main>
   );

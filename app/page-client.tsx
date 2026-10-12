@@ -44,7 +44,7 @@ import { readback } from "@/lib/client-readback";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
 
 type MapFilter = "TUTTI" | "ASSET" | "TEAM" | "LAVORI" | "MISSIONI" | "GEOFENCE";
-type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI";
+type JobTab = "ATTIVI" | "PIANIFICATI" | "COMPLETATI" | "ANNULLATI";
 type AssetTab = "OPERATIVI" | "MANUTENZIONE" | "TUTTI";
 type Tone = "lime" | "amber" | "cyan" | "red";
 
@@ -60,7 +60,7 @@ type Job = {
   id: string;
   title: string;
   location: string;
-  status: "In corso" | "Pianificato" | "Completato";
+  status: "In corso" | "Pianificato" | "Completato" | "Bloccato" | "Annullato";
   team: string;
   progress: number;
   icon: LucideIcon;
@@ -70,7 +70,7 @@ type Asset = {
   id: string;
   title: string;
   detail: string;
-  status: "Operativo" | "In manutenzione";
+  status: "Operativo" | "In manutenzione" | "Bloccato" | "Non disponibile";
   team: string;
   icon: LucideIcon;
 };
@@ -156,9 +156,11 @@ function recordName(record: CommandRecord) {
 }
 
 function recordStatus(record: CommandRecord): Job["status"] {
-  const status = record.status.toUpperCase();
-  if (status.includes("COMPLET")) return "Completato";
-  if (status.includes("CORSO") || status.includes("ACTIVE")) return "In corso";
+  const status = String(record.payload?.statusCode ?? record.status).trim().toUpperCase().replace(/[ -]+/g, "_");
+  if (["COMPLETED", "COMPLETATA", "CLOSED", "CHIUSA"].includes(status)) return "Completato";
+  if (["CANCELLED", "CANCELED", "ANNULLATA"].includes(status)) return "Annullato";
+  if (["BLOCKED", "BLOCCATA"].includes(status)) return "Bloccato";
+  if (["ACTIVE", "IN_CORSO"].includes(status)) return "In corso";
   return "Pianificato";
 }
 
@@ -178,14 +180,24 @@ export function toJobs(records: CommandRecord[]): Job[] {
 }
 
 export function toAssets(records: CommandRecord[]): Asset[] {
-  return records.filter((record) => record.module === "assets").map((record) => ({
-    id: record.canonicalCode ?? record.id,
-    title: recordName(record),
-    detail: record.detail || "Dettaglio non dichiarato",
-    status: record.status.toUpperCase().includes("MANUTEN") ? "In manutenzione" : "Operativo",
-    team: typeof record.payload?.team === "string" ? record.payload.team : "Team non assegnato",
-    icon: Package,
-  }));
+  return records.filter((record) => record.module === "assets").map((record) => {
+    const lifecycle = String(record.payload?.lifecycleStatus ?? record.status).trim().toUpperCase().replace(/[ -]+/g, "_");
+    const status: Asset["status"] = ["AVAILABLE", "ACTIVE", "OPERATIVO", "ONLINE", "IN_PRESIDIO"].includes(lifecycle)
+      ? "Operativo"
+      : ["MAINTENANCE", "IN_MANUTENZIONE", "MANUTENZIONE"].includes(lifecycle)
+        ? "In manutenzione"
+        : ["BLOCKED", "BLOCCATO"].includes(lifecycle)
+          ? "Bloccato"
+          : "Non disponibile";
+    return {
+      id: record.canonicalCode ?? record.id,
+      title: recordName(record),
+      detail: record.detail || "Dettaglio non dichiarato",
+      status,
+      team: typeof record.payload?.team === "string" ? record.payload.team : "Team non assegnato",
+      icon: Package,
+    };
+  });
 }
 
 export function toActivities(records: CommandRecord[]): ActivityItem[] {
@@ -233,17 +245,17 @@ export function ActivityPanel({ query, showAll, onToggle, activities }: { query:
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = activities.filter((item) => `${item.title} ${item.detail}`.toLowerCase().includes(normalizedQuery));
   const visible = showAll ? filtered : filtered.slice(0, 5);
-  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="EVENT STREAM" title="Attività recenti" action={showAll ? "Riduci" : "Vedi tutte"} onAction={onToggle} /><div className="mt-4 divide-y divide-white/[0.07]">{visible.map((item) => { const Icon = item.icon; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={`${item.title}-${item.time}`}><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{item.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{item.detail}</p></div><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></div>; })}{visible.length === 0 && <div className="rounded-lg border border-dashed border-white/10 px-3 py-5 text-center text-xs text-slate-500">Nessuna attività corrisponde alla ricerca.</div>}</div></section>;
+  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="AGGIORNAMENTI OPERATIVI" title="Attività recenti" action={showAll ? "Riduci" : "Vedi tutte"} onAction={onToggle} /><div className="mt-4 divide-y divide-white/[0.07]">{visible.map((item) => { const Icon = item.icon; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={`${item.title}-${item.time}`}><span className={`grid size-8 shrink-0 place-items-center rounded-xl border ${toneStyles[item.tone].badge}`}><Icon className="size-4" /></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-slate-200">{item.title}</p><p className="mt-1 truncate text-[11px] text-slate-500">{item.detail}</p></div><span className="shrink-0 text-[10px] text-slate-600">{item.time}</span></div>; })}{visible.length === 0 && <div className="rounded-lg border border-dashed border-white/10 px-3 py-5 text-center text-xs text-slate-500">Nessuna attività corrisponde alla ricerca.</div>}</div></section>;
 }
 
-export function JobPanel({ tab, onTabChange, onNewJob, jobs }: { tab: JobTab; onTabChange: (value: JobTab) => void; onNewJob: () => void; jobs: Job[] }) {
-  const visibleJobs = jobs.filter((job) => tab === "ATTIVI" ? job.status === "In corso" : tab === "PIANIFICATI" ? job.status === "Pianificato" : job.status === "Completato");
-  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="WORK ORDERS" title="Lavori" action="Vedi tutti" /><Button className="h-8 border border-lime-300/25 bg-lime-300/10 px-2.5 text-[11px] text-lime-200 hover:bg-lime-300/20" onClick={onNewJob}><Plus className="size-3.5" />Nuovo</Button></div><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as JobTab)}><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ATTIVI">Attivi</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="PIANIFICATI">Pianificati</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="COMPLETATI">Completati</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleJobs.map((job) => { const Icon = job.icon; const tone = job.status === "Pianificato" ? "cyan" : "lime"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={job.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${toneStyles[tone].badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{job.id}</span><span className="truncate text-[11px] text-slate-300">{job.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{job.location}</p></div><div className="hidden w-[82px] text-right sm:block"><StatusBadge tone={tone}>{job.status}</StatusBadge><div className="mt-2 ml-auto h-1 w-[72px] overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-lime-300" style={{ width: `${job.progress}%` }} /></div></div></div>; })}{visibleJobs.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun lavoro in questo stato.</div>}</div></section>;
+export function JobPanel({ tab, onTabChange, onNewJob, jobs, actionLabel = "Nuovo", showViewAll = true }: { tab: JobTab; onTabChange: (value: JobTab) => void; onNewJob: () => void; jobs: Job[]; actionLabel?: string; showViewAll?: boolean }) {
+  const visibleJobs = jobs.filter((job) => tab === "ATTIVI" ? job.status === "In corso" || job.status === "Bloccato" : tab === "PIANIFICATI" ? job.status === "Pianificato" : tab === "COMPLETATI" ? job.status === "Completato" : job.status === "Annullato");
+  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><SectionTitle eyebrow="COMMESSE" title="Commesse" action={showViewAll ? "Vedi tutte" : undefined} /><Button className="h-8 border border-lime-300/25 bg-lime-300/10 px-2.5 text-[11px] text-lime-200 hover:bg-lime-300/20" onClick={onNewJob}><Plus className="size-3.5" />{actionLabel}</Button></div><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as JobTab)}><TabsList className="grid h-8 w-full grid-cols-4 rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 px-1 text-[9px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ATTIVI">Attive</TabsTrigger><TabsTrigger className="h-6 px-1 text-[9px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="PIANIFICATI">Pianificate</TabsTrigger><TabsTrigger className="h-6 px-1 text-[9px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="COMPLETATI">Concluse</TabsTrigger><TabsTrigger className="h-6 px-1 text-[9px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="ANNULLATI">Annullate</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleJobs.map((job) => { const Icon = job.icon; const tone = job.status === "Pianificato" ? "cyan" : job.status === "Bloccato" || job.status === "Annullato" ? "red" : "lime"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={job.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${toneStyles[tone].badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{job.id}</span><span className="truncate text-[11px] text-slate-300">{job.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{job.location}</p></div><div className="hidden w-[82px] text-right sm:block"><StatusBadge tone={tone}>{job.status}</StatusBadge><div className="mt-2 ml-auto h-1 w-[72px] overflow-hidden rounded-full bg-white/10"><span className="block h-full rounded-full bg-lime-300" style={{ width: `${job.progress}%` }} /></div></div></div>; })}{visibleJobs.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessuna commessa {tab === "ANNULLATI" ? "annullata" : "in questo stato"}.</div>}</div></section>;
 }
 
 export function AssetPanel({ tab, onTabChange, assets }: { tab: AssetTab; onTabChange: (value: AssetTab) => void; assets: Asset[] }) {
   const visibleAssets = assets.filter((asset) => tab === "TUTTI" || tab === "OPERATIVI" ? (tab === "TUTTI" || asset.status === "Operativo") : asset.status === "In manutenzione");
-  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="FLEET STATUS" title="Asset" action="Vedi tutti" /><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as AssetTab)}><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="OPERATIVI">Operativi</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="MANUTENZIONE">Manutenzione</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleAssets.map((asset) => { const Icon = asset.icon; const operational = asset.status === "Operativo"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={asset.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${operational ? toneStyles.lime.badge : toneStyles.amber.badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{asset.id}</span><span className="truncate text-[11px] text-slate-300">{asset.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{asset.detail}</p></div><div className="hidden text-right sm:block"><div className="flex items-center justify-end gap-1.5 text-[10px] text-slate-300"><span className={`size-1.5 rounded-full ${operational ? "bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" : "bg-amber-300"}`} />{asset.status}</div><p className="mt-1 text-[10px] text-slate-600">{asset.team}</p></div></div>; })}{visibleAssets.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun asset in questo stato.</div>}</div></section>;
+  return <section className="carbon-card rounded-2xl p-4 sm:p-5"><SectionTitle eyebrow="FLEET STATUS" title="Asset" action="Vedi tutti" /><Tabs className="mt-4" value={tab} onValueChange={(value) => onTabChange(value as AssetTab)}><TabsList className="h-8 w-full justify-start rounded-lg border border-white/10 bg-black/25 p-1"><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="OPERATIVI">Operativi</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="MANUTENZIONE">Manutenzione</TabsTrigger><TabsTrigger className="h-6 flex-none px-3 text-[10px] text-slate-500 data-[state=active]:bg-lime-300 data-[state=active]:text-[#071006]" value="TUTTI">Tutti</TabsTrigger></TabsList></Tabs><div className="mt-3 divide-y divide-white/[0.07]">{visibleAssets.map((asset) => { const Icon = asset.icon; const tone = asset.status === "Operativo" ? "lime" : asset.status === "In manutenzione" ? "amber" : asset.status === "Bloccato" ? "red" : "cyan"; return <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={asset.id}><span className={`grid size-8 shrink-0 place-items-center rounded-lg border ${toneStyles[tone].badge}`}><Icon className="size-3.5" /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-slate-200">{asset.id}</span><span className="truncate text-[11px] text-slate-300">{asset.title}</span></div><p className="mt-1 truncate text-[10px] text-slate-500">{asset.detail}</p></div><div className="hidden text-right sm:block"><div className="flex items-center justify-end gap-1.5 text-[10px] text-slate-300"><span className={`size-1.5 rounded-full bg-current ${toneStyles[tone].icon}`} />{asset.status}</div><p className="mt-1 text-[10px] text-slate-600">{asset.team}</p></div></div>; })}{visibleAssets.length === 0 && <div className="py-6 text-center text-xs text-slate-500">Nessun asset in questo stato.</div>}</div></section>;
 }
 
 export function AnalyticsPanel() {

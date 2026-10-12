@@ -12,14 +12,16 @@ export async function GET() {
   }
 
   let liveRequest: "NOT_RUN" | "VERIFIED" | "FAILED" = "NOT_RUN";
+  let checkedAt: string | null = null;
   try {
     const snapshot = await getExternalSnapshot(context.tenantId);
     const health = snapshot.checks.find(
       (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
     );
     liveRequest = companyAiLiveRequestFromCheck(health?.result);
+    checkedAt = health?.checkedAt ?? null;
   } catch {
     liveRequest = "NOT_RUN";
   }
-  return Response.json(getCompanyAiRuntimeStatus(liveRequest), { headers: { "cache-control": "private, no-store" } });
+  return Response.json({ ...getCompanyAiRuntimeStatus(liveRequest), checkedAt }, { headers: { "cache-control": "private, no-store" } });
 }

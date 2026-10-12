@@ -13,12 +13,14 @@ export async function GET() {
   }
 
   let openAiLive: ReturnType<typeof companyAiLiveRequestFromCheck> = "NOT_RUN";
+  let openAiCheckedAt: string | null = null;
   try {
     const snapshot = await getExternalSnapshot(context.tenantId);
     const health = snapshot.checks.find(
       (check) => check.adapterKey === "openai-runtime" && check.checkType === "health" && check.source === "sites-openai-live-check",
     );
     openAiLive = companyAiLiveRequestFromCheck(health?.result);
+    openAiCheckedAt = health?.checkedAt ?? null;
   } catch {
     openAiLive = "NOT_RUN";
   }
@@ -32,8 +34,13 @@ export async function GET() {
     ledgerStatus = "BLOCKED";
   }
 
-  const localGateTotal = 6;
-  const localGateReady = ledgerStatus === "READY" ? localGateTotal : localGateTotal - 1;
+  const checks = [
+    { id: "tenant-context", label: "Contesto tenant", status: "VERIFIED", detail: "Identità e perimetro risolti dal server." },
+    { id: "command-ledger", label: "Command ledger", status: ledgerStatus, detail: "Readback tenant-scoped del registro Company AI." },
+    { id: "openai-probe", label: "Test API OpenAI", status: openAiLive, checkedAt: openAiCheckedAt },
+    { id: "domain-write-boundary", label: "Scritture di dominio", status: runtime.directWrite ? "UNSAFE" : "ENFORCED", detail: "Company AI non scrive direttamente nei moduli operativi." },
+    { id: "commercial-release", label: "Go-live commerciale", status: "NO_GO", detail: "Stato corrente del gate di rilascio commerciale." },
+  ];
   return Response.json({
     contract: {
       tranche: "W12",
@@ -41,12 +48,12 @@ export async function GET() {
       commercialStatus: "NO_GO",
     },
     summary: {
-      localGateReady,
-      localGateTotal,
       ledgerCount,
       ledgerStatus,
       openAiLive,
+      openAiCheckedAt,
     },
+    checks,
     runtime: {
       configured: runtime.configured,
       model: runtime.model,
