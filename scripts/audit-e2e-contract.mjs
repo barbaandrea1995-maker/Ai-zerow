@@ -41,6 +41,7 @@ const teamRoute = await read("app/api/authority/teams/route.ts");
 const onboarding = await read("app/onboarding/page.tsx");
 const resourceLibrary = await read("lib/planning-resources.ts");
 const missionResourceLibrary = await read("lib/mission-resources.ts");
+const missionResourceFields = await read("components/mission-resource-fields.tsx");
 const resourceRoute = await read("app/api/operations/jobs/[jobId]/planning/resource-options/route.ts");
 const planningOverviewRoute = await read("app/api/planning/route.ts");
 const resourceFields = await read("components/planning-resource-fields.tsx");
@@ -93,6 +94,7 @@ requireContract(missionResourceLibrary, /readAllById/, "mission catalogs read be
 requireContract(missionResourceLibrary, /gt\(jobJourneyRecords\.id, afterId\)/, "mission assignments use stable keyset pagination");
 requireContract(missionResourceLibrary, /gt\(s04Records\.id, afterId\)/, "mission resources use stable keyset pagination");
 requireContract(missionResourceLibrary, /row\.domain === "planning" && status !== "PUBLISHED"/, "draft plans do not reserve mission resources");
+requireContract(missionResourceFields, /const selectableVehicles = useMemo\(\(\) => [^\n]*\?\? \[\]/, "mission form safely renders before the server vehicle catalog loads");
 requireContract(resourceRoute, /searchParams\.get\("startsAt"\)/, "planning start window query");
 requireContract(resourceRoute, /searchParams\.get\("endsAt"\)/, "planning end window query");
 requireContract(resourceRoute, /unavailableForWindow/, "planning unavailable readback");

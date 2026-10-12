@@ -155,7 +155,7 @@ export function MissionResourceFields({
   const selectedDriver = useMemo(() => catalog?.drivers.find((resource) => resource.id === driverId) ?? null, [catalog, driverId]);
   const selectedVehicle = useMemo(() => catalog?.vehicles.find((resource) => resource.id === vehicleId) ?? null, [catalog, vehicleId]);
   const selectableDrivers = useMemo(() => catalog?.drivers.filter((resource) => resource.available) ?? [], [catalog]);
-  const selectableVehicles = useMemo(() => catalog?.vehicles.filter((resource) => simulationMode ? resource.simulationEligible : resource.available), [catalog, simulationMode]);
+  const selectableVehicles = useMemo(() => catalog?.vehicles.filter((resource) => simulationMode ? resource.simulationEligible : resource.available) ?? [], [catalog, simulationMode]);
   const selectedCargoIds = useMemo(() => cargoAssetIds ?? (cargoAssetId ? [cargoAssetId] : []), [cargoAssetIds, cargoAssetId]);
   const selectedCargoResources = useMemo(() => catalog?.cargoAssets.filter((resource) => selectedCargoIds.includes(resource.id)) ?? [], [catalog, selectedCargoIds]);
   const selectedCargoAssignees = selectedCargoResources.flatMap((resource) => resource.custody
