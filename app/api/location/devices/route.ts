@@ -227,10 +227,13 @@ export async function POST(request: Request) {
       if (sameDevice && sameDevice.vehicleId !== vehicleId) return Response.json({ error: "tracking_device_already_bound", vehicleId: sameDevice.vehicleId }, { status: 409 });
       if (sameVehicle && sameVehicle.deviceId === deviceId) return Response.json({ binding: sameVehicle, idempotent: true }, { headers: responseHeaders() });
       const bindingId = `VEHICLE-TRACKING-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
-      const writes = [];
-      if (sameVehicle) writes.push(db.update(vehicleDeviceBindings).set({ status: "REPLACED", effectiveTo: now, updatedAt: now }).where(and(eq(vehicleDeviceBindings.tenantId, context.tenantId), eq(vehicleDeviceBindings.id, sameVehicle.id), eq(vehicleDeviceBindings.status, "ACTIVE"))));
-      writes.push(db.insert(vehicleDeviceBindings).values({ id: bindingId, tenantId: context.tenantId, vehicleId, deviceId, effectiveFrom: now, effectiveTo: null, status: "ACTIVE", createdBy: context.actorId, createdAt: now, updatedAt: now }));
-      await db.batch(writes);
+      const insertBinding = db.insert(vehicleDeviceBindings).values({ id: bindingId, tenantId: context.tenantId, vehicleId, deviceId, effectiveFrom: now, effectiveTo: null, status: "ACTIVE", createdBy: context.actorId, createdAt: now, updatedAt: now });
+      if (sameVehicle) {
+        const retireBinding = db.update(vehicleDeviceBindings).set({ status: "REPLACED", effectiveTo: now, updatedAt: now }).where(and(eq(vehicleDeviceBindings.tenantId, context.tenantId), eq(vehicleDeviceBindings.id, sameVehicle.id), eq(vehicleDeviceBindings.status, "ACTIVE")));
+        await db.batch([retireBinding, insertBinding] as const);
+      } else {
+        await db.batch([insertBinding] as const);
+      }
       const [binding] = await db.select().from(vehicleDeviceBindings).where(eq(vehicleDeviceBindings.id, bindingId)).limit(1);
       return binding ? Response.json({ binding, readback: "verified" }, { status: 201, headers: responseHeaders() }) : Response.json({ error: "tracking_binding_readback_unavailable" }, { status: 503 });
     }

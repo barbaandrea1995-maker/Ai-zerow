@@ -25,8 +25,6 @@ import { assertMissionResourceSelection, MissionResourceError } from "@/lib/miss
 import { parseJobPayload } from "@/lib/operations-contract";
 import { buildMissionReportReadback } from "@/lib/mission-contract";
 import { buildMissionWarehouseReadback, missionMaterialLines, type MissionWarehouseReadback } from "@/lib/mission-inventory-contract";
-import { evaluatePlanning, normalizePlanningResource, normalizePlanningSlot, type PlanningResource, type PlanningSlot } from "@/lib/planning-contract";
-import { PlanningResourceError as PlanningRegistryError, resolvePlanningResources } from "@/lib/planning-resources";
 import { buildMissionRouteProjection, MissionRouteError, routeSummaryForPayload, type MissionStopInput } from "@/lib/location-intelligence/route-planner";
 import { normalizeMissionException, storedMissionException, type MissionExceptionType } from "@/lib/mission-exception-contract";
 import { missionPodEvidenceComplete, normalizeMissionPodEvidence, storedMissionPodEvidence } from "@/lib/mission-pod-contract";
@@ -271,45 +269,6 @@ function planningWindow(payload: JsonObject) {
     : null;
 }
 
-function planningData(row: typeof jobJourneyRecords.$inferSelect) {
-  const payload = parseJson(row.payloadJson);
-  const resources = Array.isArray(payload.resources)
-    ? payload.resources.map(normalizePlanningResource).filter((item): item is PlanningResource => Boolean(item))
-    : [];
-  const slots = Array.isArray(payload.slots)
-    ? payload.slots.map(normalizePlanningSlot).filter((item): item is PlanningSlot => Boolean(item))
-    : [];
-  return { resources, slots };
-}
-
-async function activePlanningRows(tenantId: string) {
-  return getDb().select().from(jobJourneyRecords).where(and(
-    eq(jobJourneyRecords.tenantId, tenantId),
-    eq(jobJourneyRecords.domain, "planning"),
-    inArray(jobJourneyRecords.status, ["DRAFT", "PUBLISHED"]),
-  )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
-}
-
-function evaluatePlanningAgainstTenant(candidateSlots: PlanningSlot[], candidateResources: PlanningResource[], existing: (typeof jobJourneyRecords.$inferSelect)[]) {
-  const slots = [...candidateSlots];
-  const resources = [...candidateResources];
-  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
-  for (const row of existing) {
-    const data = planningData(row);
-    for (const resource of data.resources) {
-      const current = resourcesById.get(resource.id);
-      if (!current) {
-        resources.push(resource);
-        resourcesById.set(resource.id, resource);
-      } else if (resource.capacity > current.capacity) {
-        current.capacity = resource.capacity;
-      }
-    }
-    slots.push(...data.slots.map((slot) => ({ ...slot, id: `${row.id}:${slot.id}` })));
-  }
-  return evaluatePlanning(slots, resources);
-}
-
 async function readBoundedJson(request: Request, maxBytes = 65_536) {
   const declared = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > maxBytes) return { error: "payload_too_large" as const };
@@ -433,7 +392,7 @@ function documentForResponse(row: typeof operationalDocuments.$inferSelect) {
 }
 
 function actionAccess(context: AuthorityContext) {
-  const access = {
+  const access: Record<string, boolean> = {
     ...Object.fromEntries(Object.entries(ACTION_CAPABILITY).map(([action, capability]) => [
       action,
       hasCapability(context, capability),
@@ -958,70 +917,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let missionActionStopId = "";
     let missionActionRoutePlanId = "";
     let missionActionEvent: JsonObject | null = null;
-    let missionInventoryStatements: never[] = [];
+    let missionInventoryStatements: unknown[] = [];
     const inventoryReservationUpdateIndexes: number[] = [];
     const inventoryReservationGuards: Array<{ itemId: string; version: number; reservedMilli: number; sideKey: string }> = [];
 
-    if (action === "planning_create") {
-      domain = "planning";
-      recordType = "PLAN";
-      title = boundedText(input.title, 160, "Piano operativo");
-      const startsAt = boundedText(input.startsAt, 40);
-      const endsAt = boundedText(input.endsAt, 40);
-      if (!validDateTime(startsAt) || !validDateTime(endsAt)) return Response.json({ error: "valid_planning_dates_required" }, { status: 400 });
-      if (Date.parse(endsAt) <= Date.parse(startsAt)) return Response.json({ error: "planning_end_must_follow_start" }, { status: 400 });
-      let canonicalResources: PlanningResource[];
-      try {
-        canonicalResources = await resolvePlanningResources(
-          context.tenantId,
-          input.resourceIds,
-          { startsAt, endsAt },
-          job.module === "mission" ? "mission" : "operations",
-        );
-      } catch (error) {
-        if (error instanceof PlanningRegistryError) return Response.json({ error: error.code, detail: error.message }, { status: error.code === "planning_resource_unavailable" ? 409 : 400 });
-        throw error;
-      }
-      if (canonicalResources.some((resource) => resource.kind === "person" || resource.kind === "team")
-        && !hasCapability(context, "workforce.registry.read")
-        && !hasCapability(context, "workforce.read.all")) {
-        return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
-      }
-      if (canonicalResources.some((resource) => resource.kind === "asset" || resource.kind === "vehicle")
-        && !hasCapability(context, "asset.read")) {
-        return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
-      }
-      const slot = normalizePlanningSlot({
-        id: "slot-1",
-        startsAt,
-        endsAt,
-        resourceIds: canonicalResources.map((resource) => resource.id),
-        requiredQualifications: input.requiredQualifications,
-        workload: input.workload,
-      });
-      if (!slot) return Response.json({ error: "valid_planning_resources_required" }, { status: 400 });
-      const candidateEvaluation = evaluatePlanning([slot], canonicalResources);
-      const tenantEvaluation = evaluatePlanningAgainstTenant([slot], canonicalResources, await activePlanningRows(context.tenantId));
-      const evaluation = { ...tenantEvaluation, conflicts: [...candidateEvaluation.conflicts, ...tenantEvaluation.conflicts] };
-      if (!evaluation.feasible && input.allowConflicts !== true) return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
-      status = "DRAFT";
-      payload = {
-        startsAt,
-        endsAt,
-        activityType: boundedText(input.activityType, 24, "WORK").toUpperCase(),
-        scopeSubgroupId: boundedText(input.scopeSubgroupId, 160),
-        scopeSubgroupTitle: boundedText(input.scopeSubgroupTitle, 240),
-        location: boundedText(input.location, 240),
-        priority: boundedText(input.priority, 24, "STANDARD").toUpperCase(),
-        resources: canonicalResources,
-        resourceIds: slot.resourceIds,
-        selectedResourceIds: stringIds(input.resourceIds).map((id) => id.slice(0, 160)).slice(0, 64),
-        slots: [slot],
-        evaluation,
-        notes: boundedText(input.notes, 2_000),
-      };
-      eventType = "planning.plan.created";
-    } else if (action === "field_open") {
+    if (action === "field_open") {
       domain = "field";
       recordType = "FIELD_SESSION";
       title = boundedText(input.title, 160, "Sessione di cantiere");
@@ -1298,52 +1198,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         return Response.json({ error: "assigned_delivery_driver_report_required" }, { status: 403 });
       }
 
-      if (action === "planning_publish") {
-        if (domain !== "planning" || row.status !== "DRAFT") return Response.json({ error: "invalid_planning_transition" }, { status: 409 });
-        const planData = planningData(row);
-        const selectedResourceIds = Array.isArray(payload.selectedResourceIds)
-          ? stringIds(payload.selectedResourceIds).slice(0, 64)
-          : [...planningResourceIds(payload)].slice(0, 64);
-        const window = planningWindow(payload);
-        if (!selectedResourceIds.length || !planData.slots.length || !window) {
-          return Response.json({ error: "planning_draft_requires_revalidation" }, { status: 409 });
-        }
-        let canonicalResources: PlanningResource[];
-        try {
-          canonicalResources = await resolvePlanningResources(
-            context.tenantId,
-            selectedResourceIds,
-            window,
-            job.module === "mission" ? "mission" : "operations",
-            row.id,
-          );
-        } catch (error) {
-          if (error instanceof PlanningRegistryError) {
-            return Response.json({ error: error.code, detail: error.message }, { status: 409 });
-          }
-          throw error;
-        }
-        if (canonicalResources.some((resource) => (resource.kind === "person" || resource.kind === "team")
-          && !hasCapability(context, "workforce.registry.read")
-          && !hasCapability(context, "workforce.read.all"))) {
-          return Response.json({ error: "workforce_registry_access_required" }, { status: 403 });
-        }
-        if (canonicalResources.some((resource) => (resource.kind === "asset" || resource.kind === "vehicle")
-          && !hasCapability(context, "asset.read"))) {
-          return Response.json({ error: "asset_registry_access_required" }, { status: 403 });
-        }
-        const evaluation = evaluatePlanningAgainstTenant(
-          planData.slots,
-          canonicalResources,
-          (await activePlanningRows(context.tenantId)).filter((plan) => plan.id !== row.id),
-        );
-        if (!evaluation.feasible && input.allowConflicts !== true) {
-          return Response.json({ error: "planning_conflicts", status: "CONFLICTED", evaluation }, { status: 409 });
-        }
-        status = "PUBLISHED";
-        payload = { ...payload, selectedResourceIds, resources: canonicalResources, evaluation, publishedAt: now, publishedBy: context.actorId };
-        eventType = "planning.plan.published";
-      } else if (action === "field_close") {
+      if (action === "field_close") {
         if (domain !== "field" || row.status !== "OPEN") return Response.json({ error: "invalid_field_transition" }, { status: 409 });
         if (Object.prototype.hasOwnProperty.call(input, "endedAt")) {
           return Response.json({ error: "field_end_time_is_server_owned" }, { status: 400 });
@@ -2384,7 +2239,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.version, materialRequest.version),
       )) as never);
     }
-    const results = await db.batch(statements as [never, ...never[]]);
+    const results = await db.batch(statements as [never, ...never[]]) as unknown[];
     const reservationConflict = inventoryReservationUpdateIndexes.some((index) => {
       const result = results[missionInventoryStatementOffset + index];
       return !Array.isArray(result) || result.length === 0;

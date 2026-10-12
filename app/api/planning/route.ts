@@ -353,8 +353,9 @@ export async function GET() {
     const jobById = new Map(visibleJobs.map((job) => [job.id, job]));
     const jobViews = visibleJobs.map((job) => {
       const payload = parseJobPayload(job.payloadJson);
-      const status = payload.statusCode || job.status;
-      const location = payload.worksite || payload.location || job.detail || null;
+      const status = typeof payload.statusCode === "string" && payload.statusCode ? payload.statusCode : job.status;
+      const location = [payload.worksite, payload.location, job.detail]
+        .find((value): value is string => typeof value === "string" && Boolean(value.trim()))?.trim() ?? null;
       return {
         id: job.id,
         code: job.canonicalCode,

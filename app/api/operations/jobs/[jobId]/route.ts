@@ -58,7 +58,7 @@ const ASSIGNMENT_ROLE_OPTIONS = [
   { value: "SQUADRA_OPERATIVA", label: "Squadra operativa", target: "team", allowedRoles: [] },
 ] as const;
 
-function eligibleAssignmentRoleCodes(roles: readonly string[]) {
+function eligibleAssignmentRoleCodes(roles: readonly string[]): string[] {
   return ASSIGNMENT_ROLE_OPTIONS.flatMap((option) => option.target === "person"
     && option.allowedRoles.some((role) => roles.includes(role))
     ? [option.value]
@@ -127,7 +127,7 @@ async function assignmentOptions(
       && (membershipRoles.get(id) ?? []).some((role) => COMMESSA_ACTIVITY_ROLES.has(role))))];
     const status = safeText(payload.statusCode ?? payload.status, row.status).toUpperCase();
     if (!memberMembershipIds.length || ["INACTIVE", "SUSPENDED", "ARCHIVED", "CANCELLED"].includes(status)) return [];
-    return [{ id: row.id, label: row.title, memberMembershipIds, eligibleRoleCodes: ["SQUADRA_OPERATIVA"] }];
+    return [{ id: row.id, label: row.title, memberMembershipIds, eligibleRoleCodes: ["SQUADRA_OPERATIVA"] as string[] }];
   });
   return { people, teams };
 }
@@ -1122,10 +1122,10 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       const roleCode = boundedText(input.role, 80);
       const roleOption = ASSIGNMENT_ROLE_OPTIONS.find((option) => option.value === roleCode);
       if (!roleOption) return Response.json({ error: "assignment_role_invalid", allowed: ASSIGNMENT_ROLE_OPTIONS.map(({ value, label, target }) => ({ value, label, target })) }, { status: 400 });
-      if (responsibleOption && !responsibleOption.eligibleRoleCodes.includes(roleOption.value)) {
+      if (responsibleOption && (roleOption.target !== "person" || !responsibleOption.eligibleRoleCodes.includes(roleOption.value))) {
         return Response.json({ error: "assignment_role_not_allowed_for_person", role: roleOption.value }, { status: 409 });
       }
-      if (teamOption && !teamOption.eligibleRoleCodes.includes(roleOption.value)) {
+      if (teamOption && (roleOption.target !== "team" || !teamOption.eligibleRoleCodes.includes(roleOption.value))) {
         return Response.json({ error: "assignment_role_not_allowed_for_team", role: roleOption.value }, { status: 409 });
       }
       const responsible = responsibleOption?.label ?? "Da assegnare";

@@ -6,8 +6,10 @@ export type ScopeRow = {
   id?: string | null;
   canonicalCode?: string | null;
   title?: string | null;
+  detail?: string | null;
   module?: string | null;
   recordType?: string | null;
+  status?: string | null;
   payloadJson?: string | null;
 };
 

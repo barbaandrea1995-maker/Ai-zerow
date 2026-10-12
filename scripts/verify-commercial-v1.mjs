@@ -377,9 +377,11 @@ assert(journeyRoute.includes("driverId") && journeyRoute.includes("vehicleId"), 
 assert(journeyRoute.includes("mission_free_text_resources_not_allowed"), "Mission creation must reject free-text resources");
 assert(journeyRoute.includes("assertMissionResourceSelection"), "Mission creation must validate resource lifecycle and time-window availability");
 assert(journeyRoute.includes("mission_resource_conflict"), "Mission creation must expose resource conflict readback");
-assert(journeyRoute.includes("resolvePlanningResources") && journeyRoute.includes("input.resourceIds") && journeyRoute.includes("valid_planning_resources_required"), "Legacy journey planning must use canonical resource IDs");
+assert(journeyRoute.includes("planning_module_required") && journeyRoute.includes("/planning?jobId="), "Journey planning actions must be routed to the canonical Planning module");
 assert(!journeyRoute.includes('responsible: boundedText(input.responsible'), "Journey planning must not persist free-text responsibility");
-assert(journeyRoute.includes("planning_end_must_follow_start"), "Planning must validate temporal order");
+const canonicalPlanningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
+assert(canonicalPlanningRoute.includes("resolvePlanningResources") && canonicalPlanningRoute.includes("input.resourceIds"), "Canonical Planning must resolve server-side resource IDs");
+assert(canonicalPlanningRoute.includes("Date.parse(endsAt) <= Date.parse(startsAt)"), "Planning must validate temporal order");
 assert(journeyRoute.includes("proof_of_delivery_recipient_required"), "Delivery must require POD identity");
 assert(journeyRoute.includes("normalizeMissionPodEvidence") && journeyRoute.includes("pod_document_not_verified"), "Delivery must validate typed POD evidence and clean document state");
 assert(journeyRoute.includes("mission_pod_evidence_required") && journeyRoute.includes("storedMissionPodEvidence"), "POD verification must block incomplete evidence with a server-side readback");

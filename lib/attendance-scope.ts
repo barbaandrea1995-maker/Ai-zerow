@@ -8,7 +8,7 @@ import {
 } from "@/lib/operational-scope";
 
 type WarehouseRow = { id: string; status: string };
-type AttendanceScopeRow = ScopeRow & { jobId?: string | null };
+type AttendanceScopeRow = ScopeRow & { id: string; status: string; jobId?: string | null };
 
 export type AttendanceServiceMode = "FIELD" | "DRIVER" | "WAREHOUSE" | "SUPERVISOR";
 
@@ -183,7 +183,7 @@ export function resolveAttendanceTargets(args: {
   const assignmentTokens = [...scopeTokens, ...resourceIds];
   const scope = warehouseScope(context, warehouses, workforceRows);
   const targets: AttendanceTarget[] = [];
-  const missionByJob = new Map<string, ScopeRow[]>();
+  const missionByJob = new Map<string, AttendanceScopeRow[]>();
   for (const row of missionRows) missionByJob.set(row.jobId ?? "", [...(missionByJob.get(row.jobId ?? "") ?? []), row]);
 
   for (const job of jobs) {
@@ -208,7 +208,7 @@ export function resolveAttendanceTargets(args: {
         rowMatchesContext(plan, context, assignmentTokens)
       ));
       const planPayload = firstPlan ? parseScopePayload(firstPlan.payloadJson) : {};
-      const title = text(payload, "title") ?? job.title;
+      const title = text(payload, "title") ?? job.title ?? "Commessa";
       targets.push({
         id: `field:${job.id}`,
         kind: "FIELD",
@@ -217,7 +217,7 @@ export function resolveAttendanceTargets(args: {
         warehouseId: null,
         code: job.canonicalCode ?? null,
         title,
-        detail: text(payload, "description", "client") ?? job.detail,
+        detail: text(payload, "description", "client") ?? job.detail ?? "Attività assegnata",
         location: text(payload, "worksite", "location") ?? text(planPayload, "location"),
         activityLabel: activityLabel(payload) ?? text(planPayload, "title"),
         startsAt: firstPlan ? firstSlotValue(planPayload, "startsAt") : null,
@@ -236,7 +236,7 @@ export function resolveAttendanceTargets(args: {
         ? missionPayload.route as Record<string, unknown>
         : {};
       const stops = Array.isArray(route.stops) ? route.stops : [];
-      const title = text(payload, "title") ?? job.title;
+      const title = text(payload, "title") ?? job.title ?? "Commessa";
       targets.push({
         id: `driver:${driverMission.id}`,
         kind: "DRIVER",

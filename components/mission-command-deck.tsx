@@ -392,9 +392,10 @@ function snapshotCargoAssets(payload: Record<string, unknown>) {
 
 function snapshotAssetLabel(payload: Record<string, unknown>, assetId: string) {
   const snapshot = payload.resourceSnapshot;
-  const records = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && Array.isArray((snapshot as Record<string, unknown>).cargoAssets)
+  const cargoAssets = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
     ? (snapshot as Record<string, unknown>).cargoAssets
-    : [];
+    : null;
+  const records: unknown[] = Array.isArray(cargoAssets) ? cargoAssets : [];
   const match = records.find((value) => value && typeof value === "object" && !Array.isArray(value) && text((value as Record<string, unknown>).id, "") === assetId);
   if (match && typeof match === "object" && !Array.isArray(match)) {
     const record = match as Record<string, unknown>;

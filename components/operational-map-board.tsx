@@ -250,7 +250,7 @@ function toLiveFeatures(data: OperationalMapLivePayload, filter: OperationalMapF
         properties: {
           id: `location:${location.id}`,
           label: location.label,
-          code: location.code,
+          code: location.code ?? null,
           entityType: location.entityType,
           detail: location.description || location.address || location.latestEvent?.eventType || "Sede operativa",
           address: location.address,
@@ -542,14 +542,14 @@ function LeafletMapSurface({ mapFilter, selectedMarker, onSelectMarker, onFilter
       tooltip.className = "zerow-map-tooltip-content";
       const tooltipTitle = document.createElement("strong");
       tooltipTitle.textContent = label;
-      tooltip.append(tooltipTitle);
+      tooltip.appendChild(tooltipTitle);
       const tooltipCategory = document.createElement("span");
       tooltipCategory.textContent = categoryLabel;
-      tooltip.append(tooltipCategory);
+      tooltip.appendChild(tooltipCategory);
       if (detail) {
         const tooltipDetail = document.createElement("span");
         tooltipDetail.textContent = detail;
-        tooltip.append(tooltipDetail);
+        tooltip.appendChild(tooltipDetail);
       }
       marker.bindTooltip(tooltip, { direction: "top", offset: [0, -4], className: "zerow-map-tooltip", opacity: 1, sticky: true });
       marker.on("click", () => onSelectMarker(id)).addTo(layers);
