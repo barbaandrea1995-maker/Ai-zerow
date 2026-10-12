@@ -37,8 +37,31 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 type JsonObject = Record<string, unknown>;
 type JourneyDomain = "planning" | "field" | "warehouse" | "mission";
+type JourneyBatchItem = {
+  _prepare(): {
+    getQuery(): { sql: string; params: unknown[] };
+    mapResult(result: unknown, isFromBatch?: boolean): unknown;
+  };
+};
 const FIELD_ACTIVITY_ROLES = new Set(["owner", "admin", "manager", "technical", "field_supervisor", "worker", "driver", "maintenance"]);
 const FIELD_SUPERVISOR_ROLES = new Set(["owner", "admin", "manager", "technical", "field_supervisor"]);
+
+/**
+ * Drizzle's D1 batch adapter assumes every item with bound parameters exposes
+ * an internal `.stmt`. `db.run(sql\`...\`)` is a SQLiteRaw item and has no such
+ * property, so a mixed batch throws before D1 receives any statement. Prepare
+ * every item through the native D1 binding instead, then preserve Drizzle's
+ * result mapping. D1 still executes the batch atomically and in order.
+ */
+async function runJourneyBatch(db: ReturnType<typeof getDb>, items: readonly unknown[]) {
+  const prepared = items.map((item) => (item as JourneyBatchItem)._prepare());
+  const statements = prepared.map((query) => {
+    const built = query.getQuery();
+    return db.$client.prepare(built.sql).bind(...built.params);
+  });
+  const results = await db.$client.batch(statements);
+  return results.map((result, index) => prepared[index].mapResult(result, true));
+}
 
 const DOMAIN_READ_CAPABILITY: Record<JourneyDomain | "documents", string> = {
   planning: "planning.read",
@@ -2335,7 +2358,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       )) as never);
     }
     processingStage = action === "material_review" ? "material_review_batch" : "journey_batch";
-    const results = await db.batch(statements as [never, ...never[]]) as unknown[];
+    const results = await runJourneyBatch(db, statements) as unknown[];
     processingStage = action === "material_review" ? "material_review_readback" : "journey_readback";
     const reservationConflict = inventoryReservationUpdateIndexes.some((index) => {
       const result = results[missionInventoryStatementOffset + index];
