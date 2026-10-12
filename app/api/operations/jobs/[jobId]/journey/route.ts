@@ -237,6 +237,37 @@ async function fieldWorkforceOptions(context: AuthorityContext) {
   return { people, supervisors, teams };
 }
 
+async function materialCatalogOptions(context: AuthorityContext) {
+  if (!hasCapability(context, "warehouse.request")) return [];
+  const rows = await getDb().select({
+    id: inventoryItems.id,
+    sku: inventoryItems.sku,
+    name: inventoryItems.name,
+    unit: inventoryItems.unit,
+    status: inventoryItems.status,
+  }).from(inventoryItems).where(eq(inventoryItems.tenantId, context.tenantId))
+    .orderBy(inventoryItems.name).limit(2_000);
+  const catalog = new Map<string, { id: string; sku: string; name: string; unit: string; unitLabel: string }>();
+  for (const item of rows) {
+    if (["ARCHIVED", "INACTIVE", "DISABLED", "CANCELLED"].includes(item.status.toUpperCase())) continue;
+    const unit = inventoryUnitForCode(item.unit);
+    const name = item.name.trim();
+    if (!unit || !name) continue;
+    const sku = item.sku.trim();
+    const key = sku
+      ? `sku:${sku.toLocaleUpperCase("it-IT")}::${name.toLocaleLowerCase("it-IT")}::${unit.code}`
+      : `name:${name.toLocaleLowerCase("it-IT")}::${unit.code}`;
+    if (!catalog.has(key)) catalog.set(key, {
+      id: item.id,
+      sku,
+      name,
+      unit: unit.code,
+      unitLabel: unit.label,
+    });
+  }
+  return [...catalog.values()];
+}
+
 function stringIds(value: unknown) {
   return Array.isArray(value)
     ? [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
@@ -457,9 +488,12 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
     return { access: allowed ? "granted" : "restricted", count: domainRecords.length, records: domainRecords };
   };
   const payload = parseJobPayload(job.payloadJson);
-  const workforce = hasCapability(context, "field.write")
-    ? await fieldWorkforceOptions(context)
-    : { people: [], supervisors: [], teams: [] };
+  const [workforce, materialCatalog] = await Promise.all([
+    hasCapability(context, "field.write")
+      ? fieldWorkforceOptions(context)
+      : Promise.resolve({ people: [], supervisors: [], teams: [] }),
+    materialCatalogOptions(context),
+  ]);
   const missionReports = visibleRecords
     .filter((record) => record.domain === "mission" && record.recordType === "TRANSPORT")
     .map((record) => {
@@ -534,11 +568,13 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
     options: {
       documentCategories: OPERATIONAL_DOCUMENT_CATEGORIES,
       inventoryUnits: INVENTORY_UNIT_CATALOG,
+      materialCatalog,
       workforce,
       missionMaterialRequests,
       catalogAuthority: {
         documentCategories: "SERVER_CONTRACT",
         inventoryUnits: "SERVER_CONTRACT",
+        materialCatalog: "TENANT_INVENTORY_ITEM_CATALOG",
         workforce: "TENANT_AUTHORITY_REGISTRY",
         missionMaterialRequests: "TENANT_JOURNEY_REGISTRY",
       },
@@ -565,6 +601,26 @@ function normalizeLines(value: unknown) {
     };
   });
   return lines.every(Boolean) ? lines as NonNullable<(typeof lines)[number]>[] : null;
+}
+
+function normalizeMaterialRequestSelections(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) return null;
+  const lines = value.map((candidate, index) => {
+    if (!isRecord(candidate)) return null;
+    const itemId = boundedText(candidate.itemId, 120);
+    const quantityMilli = quantityToMilli(candidate.quantity);
+    if (!itemId || quantityMilli === null) return null;
+    return {
+      id: boundedText(candidate.id, 80, `line-${index + 1}`),
+      itemId,
+      quantityMilli,
+    };
+  });
+  if (!lines.every(Boolean)) return null;
+  const selections = lines as NonNullable<(typeof lines)[number]>[];
+  if (new Set(selections.map((line) => line.id)).size !== selections.length
+    || new Set(selections.map((line) => line.itemId)).size !== selections.length) return null;
+  return selections;
 }
 
 class MissionInventoryError extends Error {
@@ -952,14 +1008,45 @@ export async function POST(request: Request, routeContext: RouteContext) {
       domain = "warehouse";
       recordType = "MATERIAL_REQUEST";
       title = boundedText(input.title, 160, "Richiesta materiali");
-      const lines = normalizeLines(input.lines);
-      if (!lines) return Response.json({ error: "valid_material_lines_required", maxLines: 50 }, { status: 400 });
-      if (lines.some((line) => line.itemId)) {
-        return Response.json({
-          error: "material_request_must_use_description",
-          message: "La richiesta di cantiere descrive il fabbisogno; il magazzino associa l’articolo canonico durante la revisione.",
-        }, { status: 400 });
+      const selections = normalizeMaterialRequestSelections(input.lines);
+      if (!selections) return Response.json({ error: "material_catalog_item_required", maxLines: 50 }, { status: 400 });
+      const serverCatalog = await materialCatalogOptions(context);
+      const catalogById = new Map(serverCatalog.map((item) => [item.id, item]));
+      if (selections.some((line) => !catalogById.has(line.itemId))) {
+        return Response.json({ error: "material_catalog_selection_unavailable" }, { status: 409 });
       }
+      const selectedItemIds = selections.map((line) => line.itemId);
+      const selectedItems = await db.select({
+        id: inventoryItems.id,
+        sku: inventoryItems.sku,
+        name: inventoryItems.name,
+        unit: inventoryItems.unit,
+        status: inventoryItems.status,
+      }).from(inventoryItems).where(and(
+        eq(inventoryItems.tenantId, context.tenantId),
+        inArray(inventoryItems.id, selectedItemIds),
+      ));
+      const selectedItemById = new Map(selectedItems.map((item) => [item.id, item]));
+      if (selectedItemById.size !== selectedItemIds.length) {
+        return Response.json({ error: "material_catalog_selection_unavailable" }, { status: 409 });
+      }
+      const lines = selections.map((selection) => {
+        const item = selectedItemById.get(selection.itemId);
+        const unit = item ? inventoryUnitForCode(item.unit) : null;
+        if (!item || ["ARCHIVED", "INACTIVE", "DISABLED", "CANCELLED"].includes(item.status.toUpperCase()) || !unit) return null;
+        return {
+          id: selection.id,
+          itemId: item.id,
+          description: item.name,
+          sku: item.sku,
+          unit: unit.code,
+          quantity: milliToQuantity(selection.quantityMilli),
+        };
+      });
+      if (lines.some((line) => !line)) {
+        return Response.json({ error: "material_catalog_selection_unavailable" }, { status: 409 });
+      }
+      const canonicalLines = lines as NonNullable<(typeof lines)[number]>[];
       const jobPayload = parseJobPayload(job.payloadJson);
       const canonicalDeliveryPoint = boundedText(jobPayload.worksite || jobPayload.location, 240);
       if (!canonicalDeliveryPoint) return Response.json({ error: "job_canonical_location_required" }, { status: 422 });
@@ -972,8 +1059,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         deliveryPointSource: "JOB_CANONICAL_LOCATION",
         deliveryInstructions: boundedText(input.deliveryInstructions, 500),
         notes: boundedText(input.notes, 2_000),
-        lines,
-        requestedLines: lines,
+        catalogSource: "TENANT_INVENTORY_ITEM_CATALOG",
+        lines: canonicalLines,
+        requestedLines: canonicalLines,
       };
       eventType = "warehouse.material_request.created";
     } else if (action === "mission_create") {
@@ -1264,7 +1352,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
             : [];
           const originalItemIds = [...new Set(originalLines.flatMap((line) => line.itemId ? [line.itemId] : []))];
           const originalItems = originalItemIds.length
-            ? await db.select({ id: inventoryItems.id, name: inventoryItems.name }).from(inventoryItems).where(and(
+            ? await db.select({ id: inventoryItems.id, name: inventoryItems.name, sku: inventoryItems.sku }).from(inventoryItems).where(and(
               eq(inventoryItems.tenantId, context.tenantId),
               inArray(inventoryItems.id, originalItemIds),
             ))
@@ -1277,7 +1365,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           const canonicalLines = reviewedLines.map((line) => {
             const item = line.itemId ? reviewedItemById.get(line.itemId) : null;
             if (!item || item.unit !== line.unit) return null;
-            return { ...line, description: item.name, unit: item.unit };
+            return { ...line, description: item.name, sku: item.sku, unit: item.unit };
           });
           if (canonicalLines.some((line) => !line)) {
             return Response.json({ error: "inventory_unit_mismatch", message: "L’unità richiesta deve coincidere con quella del materiale registrato." }, { status: 409 });
@@ -1293,7 +1381,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
             const originalItem = requested.itemId ? originalItemById.get(requested.itemId) : null;
             const requestedMaterial = (originalItem?.name ?? requested.description).trim().toLocaleLowerCase("it-IT");
             const fulfilledMaterial = line.description.trim().toLocaleLowerCase("it-IT");
-            return requestedMaterial !== fulfilledMaterial;
+            const requestedSku = originalItem?.sku.trim().toLocaleUpperCase("it-IT") ?? "";
+            const fulfilledSku = reviewedItemById.get(line.itemId!)?.sku.trim().toLocaleUpperCase("it-IT") ?? "";
+            const materialChanged = requestedSku && fulfilledSku
+              ? requestedSku !== fulfilledSku
+              : requestedMaterial !== fulfilledMaterial;
+            return materialChanged;
           });
           if (decision === "APPROVED" && fulfilledMaterialChanged) {
             return Response.json({ error: "material_change_requires_modified_decision" }, { status: 409 });

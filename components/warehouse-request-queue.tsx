@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 type WarehouseOption = { id: string; code: string; name: string; locationLabel: string; status: string };
-type ReviewLine = { id: string; itemId: string; description: string; unit: string; quantity: number };
+type ReviewLine = { id: string; itemId: string; description: string; sku: string; unit: string; quantity: number };
 type RequestRecord = {
   id: string;
   jobId: string;
@@ -38,7 +38,7 @@ function payloadLines(value: unknown): ReviewLine[] {
     const description = typeof line.description === "string" ? line.description : typeof line.name === "string" ? line.name : "Materiale richiesto";
     const unit = typeof line.unit === "string" ? line.unit : "PZ";
     return Number.isFinite(quantity) && quantity > 0
-      ? [{ id: typeof line.id === "string" && line.id ? line.id : `line-${index + 1}`, itemId: typeof line.itemId === "string" ? line.itemId : "", description, unit, quantity }]
+      ? [{ id: typeof line.id === "string" && line.id ? line.id : `line-${index + 1}`, itemId: typeof line.itemId === "string" ? line.itemId : "", description, sku: typeof line.sku === "string" ? line.sku : "", unit, quantity }]
       : [];
   });
 }
@@ -304,7 +304,7 @@ export function WarehouseRequestQueue({
             {(deliveryInstructions || requestNotes) && <div className="mt-3 grid gap-2 sm:grid-cols-2">{deliveryInstructions && <p className="rounded-lg border border-cyan-300/10 bg-cyan-300/[.025] px-3 py-2 text-[10px] leading-5 text-slate-400"><span className="font-semibold text-cyan-100/70">Istruzioni consegna: </span>{deliveryInstructions}</p>}{requestNotes && <p className="rounded-lg border border-white/[.06] bg-black/15 px-3 py-2 text-[10px] leading-5 text-slate-500"><span className="font-semibold text-slate-300">Nota richiedente: </span>{requestNotes}</p>}</div>}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">{requestedLines.map((line) => {
               const item = warehouseStock.find((candidate) => candidate.id === line.itemId);
-              return <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[.07] bg-black/20 px-3 py-2" key={line.id}><div className="min-w-0"><p className="truncate text-xs font-medium text-slate-200">{line.description}</p><p className="mt-1 font-mono text-[9px] text-slate-600">{line.quantity.toLocaleString("it-IT")} {line.unit}{item ? ` · ${item.sku}` : ""}</p></div>{item && <span className="shrink-0 text-[9px] text-lime-100">libero {formatQuantity(item.available, item.unit)}</span>}</div>;
+              return <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[.07] bg-black/20 px-3 py-2" key={line.id}><div className="min-w-0"><p className="truncate text-xs font-medium text-slate-200">{line.description}</p><p className="mt-1 font-mono text-[9px] text-slate-600">{line.quantity.toLocaleString("it-IT")} {line.unit}{item?.sku || line.sku ? ` · ${item?.sku ?? line.sku}` : ""}</p></div>{item && <span className="shrink-0 text-[9px] text-lime-100">libero {formatQuantity(item.available, item.unit)}</span>}</div>;
             })}</div>
             {request.status === "APPROVED" && request.mission && <div className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Truck className="size-4" />{request.mission.title} · {request.mission.status}</p>{warehouseId && <p className="font-mono text-[9px] text-slate-500">{String(warehouse.code ?? "DEPOSITO")} · {String(warehouse.name ?? "")}</p>}</div><div className="mt-3 space-y-2">{requestedLines.filter((line, index, lines) => line.itemId && lines.findIndex((candidate) => candidate.itemId === line.itemId) === index).map((line) => {
               const grouped = linesByItem.get(`${request.id}:${line.itemId}`);
