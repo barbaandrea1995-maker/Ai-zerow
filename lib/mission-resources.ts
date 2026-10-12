@@ -21,7 +21,7 @@ export type MissionResource = {
   available: boolean;
   simulationEligible: boolean;
   conflict: { recordId: string; title: string; startsAt: string; endsAt: string } | null;
-  custody: { assignmentId: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
+  custody: { assignmentId: string; assignmentKind: string; assigneeName: string; assigneeActorId: string; assigneeMembershipId: string; startsAt: string; endsAt: string | null } | null;
   qualifications: string[];
   usageMode: AssetUsageMode | null;
   transportCapabilities: TransportCapability[];
@@ -67,7 +67,6 @@ export class MissionResourceError extends Error {
       | "vehicle_transport_capability_missing"
       | "vehicle_capacity_exceeded"
       | "cargo_asset_not_transportable"
-      | "cargo_asset_assigned_to_other_person"
       | "mission_window_invalid",
     public readonly details?: Record<string, unknown>,
   ) {
@@ -203,7 +202,17 @@ function referencesForRecord(payload: JsonObject) {
   if (Array.isArray(payload.resourceIds)) {
     ids.push(...payload.resourceIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()));
   }
-  return [...new Set(ids)];
+  const cargoIds = new Set([
+    ...(typeof payload.cargoAssetId === "string" ? [payload.cargoAssetId] : []),
+    ...(Array.isArray(payload.cargoAssetIds) ? payload.cargoAssetIds.filter((value): value is string => typeof value === "string") : []),
+  ]);
+  const deliveredCargoIds = new Set<string>();
+  if (isRecord(payload.cargoCustody)) {
+    for (const [assetId, custody] of Object.entries(payload.cargoCustody)) {
+      if (isRecord(custody) && upper(custody.state) === "DELIVERED") deliveredCargoIds.add(assetId);
+    }
+  }
+  return [...new Set(ids)].filter((id) => !cargoIds.has(id) || !deliveredCargoIds.has(id));
 }
 
 async function activeAssignments(tenantId: string, excludeRecordId?: string) {
@@ -275,6 +284,7 @@ async function activeAssetCustody(tenantId: string) {
       return [{
         assignmentId: row.id,
         assetId,
+        assignmentKind,
         assigneeName: stringValue(payload.assigneeName, "Persona assegnata"),
         assigneeActorId: stringValue(payload.assigneeActorId),
         assigneeMembershipId: stringValue(payload.assigneeMembershipId),
@@ -331,7 +341,7 @@ export async function getMissionResourceCatalog(args: {
         assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY,
       ))
       : undefined;
-    const custodyMismatch = custody && (!selectedDriver || !sameCustodian(custody, selectedDriver))
+    const custodyMismatch = resource.kind === "vehicle" && custody && (!selectedDriver || !sameCustodian(custody, selectedDriver))
       ? { recordId: custody.assignmentId, title: `Affidata a ${custody.assigneeName}`, startsAt: custody.startsAt, endsAt: custody.endsAt ?? window?.endsAt ?? custody.startsAt }
       : null;
     const missingModeCapabilities = resource.kind === "vehicle"
@@ -441,19 +451,19 @@ export async function assertMissionResourceSelection(args: {
   }
   for (const selectedCargoAsset of cargoAssets) {
     if (!selectedCargoAsset) continue;
-    const custodyMismatch = selectedCargoAsset.custody && !sameCustodian(selectedCargoAsset.custody, driver);
-    if (custodyMismatch && !args.simulationOnly) {
-      throw new MissionResourceError("cargo_asset_assigned_to_other_person", {
-        resourceId: selectedCargoAsset.id,
-        assignedTo: selectedCargoAsset.custody?.assigneeName,
-        assignmentId: selectedCargoAsset.custody?.assignmentId,
-      });
-    }
     const cargoReady = args.simulationOnly ? selectedCargoAsset.simulationEligible : selectedCargoAsset.available;
     if (!cargoReady) throw new MissionResourceError(selectedCargoAsset.conflict ? "mission_resource_conflict" : "cargo_asset_unavailable", { resourceId: selectedCargoAsset.id, conflict: selectedCargoAsset.conflict });
   }
 
   const resolvedCargoAssets = cargoAssets.flatMap((resource) => resource ? [resource] : []);
+  const cargoOperationalAssignees = resolvedCargoAssets.flatMap((resource) => resource.custody ? [{
+    assetId: resource.id,
+    assignmentId: resource.custody.assignmentId,
+    actorId: resource.custody.assigneeActorId,
+    membershipId: resource.custody.assigneeMembershipId,
+    name: resource.custody.assigneeName,
+    assignmentKind: resource.custody.assignmentKind,
+  }] : []);
   const capacity = evaluateCargoCapacity(vehicle.maxPayloadKg, resolvedCargoAssets.map((resource) => resource.weightKg));
   if (capacity.exceeds) {
     throw new MissionResourceError("vehicle_capacity_exceeded", {
@@ -463,8 +473,8 @@ export async function assertMissionResourceSelection(args: {
       unknownCargoCount: capacity.unknownCargoCount,
     });
   }
-  const custodyWarnings = [vehicle, ...resolvedCargoAssets]
+  const custodyWarnings = [vehicle]
     .filter((resource) => resource.custody && !sameCustodian(resource.custody, driver))
     .map((resource) => ({ resourceId: resource.id, resourceName: resource.label, assignedTo: resource.custody!.assigneeName }));
-  return { driver, vehicle, cargoAsset, cargoAssets: resolvedCargoAssets, window: catalog.window!, capacity, custodyWarnings };
+  return { driver, vehicle, cargoAsset, cargoAssets: resolvedCargoAssets, cargoOperationalAssignees, window: catalog.window!, capacity, custodyWarnings };
 }

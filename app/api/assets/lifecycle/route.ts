@@ -1,14 +1,27 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
-import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { getAuthorityContext, hasCapability, publicAuthorityContext, type AuthorityContext } from "@/lib/authority-context";
 import { recordForResponse } from "@/lib/s04-adapter";
-import { canReadAllAssets, parseScopePayload, rowMatchesContext } from "@/lib/operational-scope";
+import { canReadAllAssets, canReadAllMissions, parseScopePayload, rowMatchesContext } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
 
 type JsonObject = Record<string, unknown>;
 type AssetLifecycleStatus = "AVAILABLE" | "MAINTENANCE" | "BLOCKED";
+type AssetMovementState = "RESERVED" | "IN_TRANSIT" | "AWAITING_RECEIPT" | "DELIVERED";
+type AssetMovement = {
+  state: AssetMovementState;
+  missionId: string;
+  missionTitle: string;
+  plannedAt: string;
+  driverName: string;
+  vehicleName: string;
+  location: string;
+  receivedBy: string;
+  updatedAt: string;
+  operationalAssignee: JsonObject | null;
+};
 
 const ACTIONS = {
   maintenance_open: { next: "MAINTENANCE" as AssetLifecycleStatus, allowed: ["AVAILABLE"] },
@@ -32,6 +45,92 @@ function parseJson(value: string) {
   } catch {
     return {};
   }
+}
+
+function cargoIds(payload: JsonObject) {
+  const directIds = Array.isArray(payload.cargoAssetIds)
+    ? payload.cargoAssetIds.filter((value): value is string => typeof value === "string")
+    : [];
+  const snapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+  const snapshotIds = Array.isArray(snapshot.cargoAssets)
+    ? snapshot.cargoAssets.flatMap((entry) => isRecord(entry) && typeof entry.id === "string" ? [entry.id] : [])
+    : [];
+  return [...new Set([...directIds, bounded(payload.cargoAssetId, 160), ...snapshotIds].filter(Boolean))];
+}
+
+function movementEvent(payload: JsonObject, assetId: string) {
+  const timeline = Array.isArray(payload.operationalTimeline) ? payload.operationalTimeline : [];
+  return [...timeline].reverse().find((entry) => {
+    if (!isRecord(entry)) return false;
+    const ids = Array.isArray(entry.assetIds) ? entry.assetIds : [];
+    return entry.assetId === assetId || ids.includes(assetId);
+  }) as JsonObject | undefined;
+}
+
+function missionMovement(row: typeof jobJourneyRecords.$inferSelect, payload: JsonObject, assetId: string): AssetMovement | null {
+  if (row.status === "CANCELLED" || !cargoIds(payload).includes(assetId)) return null;
+  const custodyMap = isRecord(payload.cargoCustody) ? payload.cargoCustody : {};
+  const custody = isRecord(custodyMap[assetId]) ? custodyMap[assetId] as JsonObject : {};
+  const event = movementEvent(payload, assetId) ?? {};
+  const eventType = bounded(event.type, 40).toUpperCase();
+  const proofEntries = Array.isArray(payload.proofOfDeliveries) ? payload.proofOfDeliveries : [];
+  const proofMatchesAsset = (entry: unknown) => {
+    if (!isRecord(entry)) return false;
+    const ids = Array.isArray(entry.assetIds) ? entry.assetIds : [];
+    return entry.assetId === assetId || ids.includes(assetId);
+  };
+  const proof = [...proofEntries].reverse().find(proofMatchesAsset);
+  const legacyProof = proofMatchesAsset(payload.proofOfDelivery) ? payload.proofOfDelivery : null;
+  const proofEntry = isRecord(proof) ? proof : isRecord(legacyProof) ? legacyProof : {};
+  const custodyState = bounded(custody.state, 32).toUpperCase();
+  const state: AssetMovementState | null = custodyState === "IN_TRANSIT" || eventType === "LOAD_CONFIRMED"
+    ? "IN_TRANSIT"
+    : custodyState === "AWAITING_RECEIPT" || eventType === "UNLOAD_CONFIRMED"
+      ? "AWAITING_RECEIPT"
+      : custodyState === "DELIVERED" || eventType === "DELIVERY_CONFIRMED" || (row.status !== "PLANNED" && (proofEntry.assetId === assetId || (Array.isArray(proofEntry.assetIds) && proofEntry.assetIds.includes(assetId))))
+        ? "DELIVERED"
+        : ["PLANNED", "DISPATCHED", "PARTIAL_DELIVERY"].includes(row.status)
+          ? "RESERVED"
+          : null;
+  if (!state) return null;
+  const snapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+  const driver = isRecord(snapshot.driver) ? snapshot.driver : {};
+  const vehicle = isRecord(snapshot.vehicle) ? snapshot.vehicle : {};
+  const cargo = Array.isArray(snapshot.cargoAssets)
+    ? snapshot.cargoAssets.find((entry) => isRecord(entry) && entry.id === assetId)
+    : null;
+  const cargoAssignee = isRecord(cargo) && isRecord(cargo.operationalAssignee)
+    ? cargo.operationalAssignee
+    : isRecord(custody.operationalAssignee) ? custody.operationalAssignee : null;
+  return {
+    state,
+    missionId: row.id,
+    missionTitle: row.title,
+    plannedAt: bounded(payload.plannedAt, 40),
+    driverName: bounded(custody.driverName, 160, bounded(driver.label, 160)),
+    vehicleName: bounded(custody.vehicleName, 160, bounded(vehicle.label, 160)),
+    location: bounded(custody.location, 240, bounded(event.destination, 240, bounded(event.location, 240, bounded(payload.dropoff, 240, bounded(payload.pickup, 240))))),
+    receivedBy: bounded(custody.receivedBy, 160, bounded(proofEntry.recipient, 160)),
+    updatedAt: bounded(custody.updatedAt, 40, bounded(event.recordedAt, 40, row.updatedAt)),
+    operationalAssignee: cargoAssignee,
+  };
+}
+
+function missionMovementVisibleToActor(
+  row: typeof jobJourneyRecords.$inferSelect,
+  payload: JsonObject,
+  context: AuthorityContext,
+) {
+  if (rowMatchesContext(row, context)) return true;
+  const snapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+  const cargoSnapshots = Array.isArray(snapshot.cargoAssets) ? snapshot.cargoAssets : [];
+  const assignees = [
+    ...(Array.isArray(payload.cargoOperationalAssignees) ? payload.cargoOperationalAssignees : []),
+    ...cargoSnapshots.flatMap((entry) => isRecord(entry) && isRecord(entry.operationalAssignee) ? [entry.operationalAssignee] : []),
+  ];
+  return assignees.some((value) => isRecord(value)
+    && ((typeof value.actorId === "string" && value.actorId === context.actorId)
+      || (typeof value.membershipId === "string" && value.membershipId === context.membershipId)));
 }
 
 async function readJson(request: Request) {
@@ -77,11 +176,42 @@ export async function GET(request: Request) {
     const visibleRows = canReadAllAssets(context)
       ? rows
       : rows.filter((row) => rowMatchesContext(row, context) || assignedAssetIds.has(row.id) || (row.canonicalCode ? assignedAssetIds.has(row.canonicalCode) : false));
+    const canReadAllMissionMovement = canReadAllMissions(context);
+    const missionRows = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.domain, "mission"),
+        eq(jobJourneyRecords.recordType, "TRANSPORT"),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(2_000);
+    const physicalMovementByAsset = new Map<string, AssetMovement>();
+    const reservedMovementByAsset = new Map<string, AssetMovement>();
+    const deliveredMovementByAsset = new Map<string, AssetMovement>();
+    for (const mission of missionRows) {
+      const missionPayload = parseJson(mission.payloadJson);
+      if (!canReadAllMissionMovement && !missionMovementVisibleToActor(mission, missionPayload, context)) continue;
+      for (const cargoId of cargoIds(missionPayload)) {
+        const movement = missionMovement(mission, missionPayload, cargoId);
+        if (!movement) continue;
+        if (movement.state === "DELIVERED") {
+          if (!deliveredMovementByAsset.has(cargoId)) deliveredMovementByAsset.set(cargoId, movement);
+        } else if (movement.state === "RESERVED") {
+          if (!reservedMovementByAsset.has(cargoId)) reservedMovementByAsset.set(cargoId, movement);
+        } else if (!physicalMovementByAsset.has(cargoId)) {
+          physicalMovementByAsset.set(cargoId, movement);
+        }
+      }
+    }
+    const movementByAsset = new Map([...deliveredMovementByAsset, ...reservedMovementByAsset, ...physicalMovementByAsset]);
     const assets = visibleRows.filter((row) => row.module === "assets").map((row) => {
       const payload = parseJson(row.payloadJson);
-      return { ...recordForResponse(row), lifecycle: { status: bounded(payload.lifecycleStatus, 24, "AVAILABLE"), maintenance: isRecord(payload.maintenance) ? payload.maintenance : null } };
+      return {
+        ...recordForResponse(row),
+        lifecycle: { status: bounded(payload.lifecycleStatus, 24, "AVAILABLE"), maintenance: isRecord(payload.maintenance) ? payload.maintenance : null },
+        ...(movementByAsset.has(row.id) || (row.canonicalCode && movementByAsset.has(row.canonicalCode))
+          ? { movement: movementByAsset.get(row.id) ?? (row.canonicalCode ? movementByAsset.get(row.canonicalCode) : undefined) }
+          : {}),
+      };
     });
-    return Response.json({ context: publicAuthorityContext(context), assets, readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() } }, { headers: { "cache-control": "private, no-store" } });
+    return Response.json({ context: publicAuthorityContext(context), assets, readback: { status: "verified", scope: "tenant", missionMovement: canReadAllMissionMovement ? "tenant" : "actor_scope", checkedAt: new Date().toISOString() } }, { headers: { "cache-control": "private, no-store" } });
   } catch {
     return Response.json({ error: "asset_lifecycle_readback_unavailable" }, { status: 503 });
   }

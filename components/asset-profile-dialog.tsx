@@ -158,7 +158,7 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
   return <form className="space-y-4" onSubmit={submit}>
         <DialogHeader>
           <DialogTitle>Modifica scheda risorsa</DialogTitle>
-          <DialogDescription className="text-slate-500">La disponibilità operativa non cambia la tipologia: solo “Mezzo” crea un vettore di trasporto, mentre “Attrezzatura” o “Asset” possono essere il carico. Il codice canonico resta invariato e le missioni rileggono il profilo dal server.</DialogDescription>
+          <DialogDescription className="text-slate-500">Tipologia e profilo descrivono l’uso fisico della risorsa. L’affidamento identifica chi la utilizza sul campo; ogni missione registra separatamente autista e mezzo vettore. Solo “Mezzo” crea un vettore di trasporto, mentre “Attrezzatura” o “Asset” possono essere il carico. Il codice canonico resta invariato e le missioni rileggono il profilo dal server.</DialogDescription>
         </DialogHeader>
         {asset && <div className="flex items-center justify-between gap-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-cyan-100/70">CODICE CANONICO</p><p className="mt-1 font-mono text-xs text-slate-200">{asset.canonicalCode ?? asset.id}</p></div><span className="text-right text-[9px] leading-4 text-slate-500">Identificativo stabile<br />QR e storico conservati</span></div>}
         <label className="block text-xs text-slate-400">Denominazione<Input autoFocus className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={120} onChange={(event) => setTitle(event.target.value)} required value={title} /></label>

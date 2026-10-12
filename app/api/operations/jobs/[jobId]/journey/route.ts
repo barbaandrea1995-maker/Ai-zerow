@@ -225,6 +225,33 @@ function parseJson(value: string) {
   }
 }
 
+function operationalAssigneeForCargo(payload: JsonObject, assetId: string) {
+  const snapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+  const entries = Array.isArray(snapshot.cargoAssets) ? snapshot.cargoAssets : [];
+  const cargoSnapshot = entries.find((entry) => isRecord(entry) && boundedText(entry.id, 160) === assetId);
+  if (isRecord(cargoSnapshot) && isRecord(cargoSnapshot.operationalAssignee)) return cargoSnapshot.operationalAssignee;
+  return null;
+}
+
+function updateCargoCustody(
+  payload: JsonObject,
+  assetIds: string[],
+  state: "IN_TRANSIT" | "AWAITING_RECEIPT" | "DELIVERED",
+  details: JsonObject,
+) {
+  const current = isRecord(payload.cargoCustody) ? payload.cargoCustody : {};
+  return assetIds.reduce<JsonObject>((next, assetId) => ({
+    ...next,
+    [assetId]: {
+      ...(isRecord(current[assetId]) ? current[assetId] : {}),
+      state,
+      operationalAssignee: operationalAssigneeForCargo(payload, assetId),
+      assetId,
+      ...details,
+    },
+  }), { ...current });
+}
+
 async function fieldWorkforceOptions(context: AuthorityContext) {
   const canReadRegistry = hasCapability(context, "workforce.registry.read")
     || hasCapability(context, "workforce.read.all")
@@ -1221,6 +1248,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         vehicleId: resources.vehicle.id,
         cargoAssetId: resources.cargoAsset?.id ?? null,
         cargoAssetIds: resources.cargoAssets.map((asset) => asset.id),
+        cargoOperationalAssignees: resources.cargoOperationalAssignees,
         transportMode,
         resourceIds: [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)],
         planningPlanId: planningPlan?.id ?? null,
@@ -1239,12 +1267,40 @@ export async function POST(request: Request, routeContext: RouteContext) {
           })()
           : null,
         resourceSnapshot: {
-          driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
-          vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label, entityType: "VEHICLE", usageMode: resources.vehicle.usageMode, transportCapabilities: resources.vehicle.transportCapabilities, maxPayloadKg: resources.vehicle.maxPayloadKg },
+          driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label, actorId: resources.driver.actorId, membershipId: resources.driver.membershipId },
+          vehicle: {
+            id: resources.vehicle.id,
+            code: resources.vehicle.code,
+            label: resources.vehicle.label,
+            entityType: "VEHICLE",
+            usageMode: resources.vehicle.usageMode,
+            transportCapabilities: resources.vehicle.transportCapabilities,
+            maxPayloadKg: resources.vehicle.maxPayloadKg,
+            operationalAssignee: resources.vehicle.custody ? {
+              actorId: resources.vehicle.custody.assigneeActorId,
+              membershipId: resources.vehicle.custody.assigneeMembershipId,
+              name: resources.vehicle.custody.assigneeName,
+              assignmentId: resources.vehicle.custody.assignmentId,
+              assignmentKind: resources.vehicle.custody.assignmentKind,
+            } : null,
+          },
           cargoAsset: resources.cargoAsset
             ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label, entityType: "CARGO", weightKg: resources.cargoAsset.weightKg }
             : null,
-          cargoAssets: resources.cargoAssets.map((asset) => ({ id: asset.id, code: asset.code, label: asset.label, entityType: "CARGO", weightKg: asset.weightKg })),
+          cargoAssets: resources.cargoAssets.map((asset) => ({
+            id: asset.id,
+            code: asset.code,
+            label: asset.label,
+            entityType: "CARGO",
+            weightKg: asset.weightKg,
+            operationalAssignee: asset.custody ? {
+              actorId: asset.custody.assigneeActorId,
+              membershipId: asset.custody.assigneeMembershipId,
+              name: asset.custody.assigneeName,
+              assignmentId: asset.custody.assignmentId,
+              assignmentKind: asset.custody.assignmentKind,
+            } : null,
+          })),
           capacityCheck: { maxPayloadKg: resources.vehicle.maxPayloadKg, knownCargoWeightKg: resources.capacity.knownWeightKg, unknownCargoCount: resources.capacity.unknownCargoCount },
         },
         notes: boundedText(input.notes, 2_000),
@@ -1729,6 +1785,24 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "mission_stop_asset_set_incomplete", stopId: selectedStop.id, plannedAssetIds, requestedAssetIds: actionAssetIds }, { status: 409 });
         }
         const actionAssetId = actionAssetIds[0] ?? null;
+        const resourceSnapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+        const driverSnapshot = isRecord(resourceSnapshot.driver) ? resourceSnapshot.driver : {};
+        const vehicleSnapshot = isRecord(resourceSnapshot.vehicle) ? resourceSnapshot.vehicle : {};
+        const isLoadAction = action === "mission_load";
+        const operationalAssignees = actionAssetIds.flatMap((assetId) => {
+          const assignee = operationalAssigneeForCargo(payload, assetId);
+          return assignee ? [{ assetId, assignee }] : [];
+        });
+        const custodyTransfer = {
+          state: isLoadAction ? "IN_TRANSIT" : "AWAITING_RECEIPT",
+          assetIds: actionAssetIds,
+          operationalAssignees,
+          temporaryCustodian: isLoadAction ? { actorId: boundedText(driverSnapshot.actorId, 160), resourceId: boundedText(payload.driverId, 160), name: boundedText(driverSnapshot.label, 160, "Autista missione") } : null,
+          transport: { driverId: boundedText(payload.driverId, 160), vehicleId: boundedText(payload.vehicleId, 160), vehicleLabel: boundedText(vehicleSnapshot.label, 160) },
+          location: boundedText(selectedStop.label, 240, boundedText(payload.pickup, 240)),
+          updatedAt: now,
+          updatedBy: context.actorId,
+        };
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
           : [];
@@ -1743,6 +1817,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           note: boundedText(input.note, 2_000),
           assetId: actionAssetId,
           assetIds: actionAssetIds,
+          custodyTransfer,
           materialItemIds: routeStopMaterialActionEntries(selectedStop, action === "mission_load" ? "LOAD" : "DELIVER")
             .flatMap((entry) => entry.itemId ? [entry.itemId] : []),
           source: "mission-driver-action",
@@ -1764,6 +1839,18 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = row.status;
         payload = {
           ...payload,
+          cargoCustody: updateCargoCustody(payload, actionAssetIds, isLoadAction ? "IN_TRANSIT" : "AWAITING_RECEIPT", {
+            missionId: row.id,
+            driverId: boundedText(payload.driverId, 160),
+            driverName: boundedText(driverSnapshot.label, 160, "Autista missione"),
+            vehicleId: boundedText(payload.vehicleId, 160),
+            vehicleName: boundedText(vehicleSnapshot.label, 160),
+            temporaryCustodianActorId: isLoadAction ? boundedText(driverSnapshot.actorId, 160) : null,
+            temporaryCustodianResourceId: isLoadAction ? boundedText(payload.driverId, 160) : null,
+            location: custodyTransfer.location,
+            updatedAt: now,
+            updatedBy: context.actorId,
+          }),
           operationalTimeline: [...timeline, actionEvent].slice(-500),
           lastOperationalEvent: actionEvent,
           ...(action === "mission_load"
@@ -1859,9 +1946,27 @@ export async function POST(request: Request, routeContext: RouteContext) {
             message: "Prima della conferma di consegna devi registrare lo scarico di tutte le righe materiali.",
           }, { status: 422 });
         }
+        const resourceSnapshot = isRecord(payload.resourceSnapshot) ? payload.resourceSnapshot : {};
+        const driverSnapshot = isRecord(resourceSnapshot.driver) ? resourceSnapshot.driver : {};
+        const vehicleSnapshot = isRecord(resourceSnapshot.vehicle) ? resourceSnapshot.vehicle : {};
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
           : [];
+        const deliveryDestination = boundedText(selectedMissionStop.label, 240, boundedText(payload.dropoff, 240));
+        const cargoCustody = updateCargoCustody(payload, deliveryAssetIds, "DELIVERED", {
+          missionId: row.id,
+          driverId: boundedText(payload.driverId, 160),
+          vehicleId: boundedText(payload.vehicleId, 160),
+          temporaryCustodianActorId: null,
+          driverName: boundedText(driverSnapshot.label, 160, "Autista missione"),
+          vehicleName: boundedText(vehicleSnapshot.label, 160, "Mezzo missione"),
+          location: deliveryDestination,
+          deliveredAt: now,
+          deliveredBy: context.actorId,
+          receivedBy: recipient,
+          updatedAt: now,
+          updatedBy: context.actorId,
+        });
         const deliveryEvent = {
           id: crypto.randomUUID(),
           type: "DELIVERY_CONFIRMED",
@@ -1873,6 +1978,24 @@ export async function POST(request: Request, routeContext: RouteContext) {
           recipient,
           assetId: deliveryAssetId,
           assetIds: deliveryAssetIds,
+          destination: deliveryDestination,
+          operationalAssignees: deliveryAssetIds.flatMap((assetId) => {
+            const assignee = operationalAssigneeForCargo(payload, assetId);
+            return assignee ? [{ assetId, assignee }] : [];
+          }),
+          custodyTransfer: {
+            state: "DELIVERED",
+            assetIds: deliveryAssetIds,
+            operationalAssignees: deliveryAssetIds.flatMap((assetId) => {
+              const assignee = operationalAssigneeForCargo(payload, assetId);
+              return assignee ? [{ assetId, assignee }] : [];
+            }),
+            temporaryCustodianActorId: null,
+            receivedBy: recipient,
+            location: deliveryDestination,
+            updatedAt: now,
+            updatedBy: context.actorId,
+          },
           evidenceType: podEvidence.type,
           evidenceReference: podEvidence.reference,
           documentId: podEvidence.documentId,
@@ -1901,6 +2024,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         status = allDeliveryStopsComplete ? "DELIVERED" : row.status === "PARTIAL_DELIVERY" ? "PARTIAL_DELIVERY" : "DISPATCHED";
         payload = {
           ...payload,
+          cargoCustody,
           warehouseReadback,
           proofOfDelivery: proofEntry,
           proofOfDeliveries,

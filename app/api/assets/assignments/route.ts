@@ -185,7 +185,18 @@ function resourceIds(payload: JsonObject) {
   if (Array.isArray(payload.resources)) {
     ids.push(...payload.resources.map((resource) => isRecord(resource) ? resource.id : null));
   }
-  return [...new Set(ids.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()))];
+  const cargoIds = new Set([
+    ...(typeof payload.cargoAssetId === "string" ? [payload.cargoAssetId] : []),
+    ...(Array.isArray(payload.cargoAssetIds) ? payload.cargoAssetIds.filter((value): value is string => typeof value === "string") : []),
+  ]);
+  const deliveredCargoIds = new Set<string>();
+  if (isRecord(payload.cargoCustody)) {
+    for (const [assetId, custody] of Object.entries(payload.cargoCustody)) {
+      if (isRecord(custody) && upper(custody.state) === "DELIVERED") deliveredCargoIds.add(assetId);
+    }
+  }
+  return [...new Set(ids.filter((value): value is string => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()))]
+    .filter((id) => !cargoIds.has(id) || !deliveredCargoIds.has(id));
 }
 
 function journeyWindow(payload: JsonObject) {
