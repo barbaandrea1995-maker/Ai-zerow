@@ -923,6 +923,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   }
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
 
+  let processingStage = "resolve_job";
   try {
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
@@ -975,7 +976,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let missionActionEvent: JsonObject | null = null;
     let missionInventoryStatements: unknown[] = [];
     const inventoryReservationUpdateIndexes: number[] = [];
-    const inventoryReservationGuards: Array<{ itemId: string; version: number; reservedMilli: number; sideKey: string }> = [];
+    const inventoryReservationGuards: Array<{ itemId: string; version: number; reservedMilli: number; quantityMilli: number; sideKey: string; eventId: string }> = [];
 
     if (action === "field_open") {
       domain = "field";
@@ -1297,6 +1298,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         payload = { ...payload, endedAt: now, summary };
         eventType = "field.session.closed";
       } else if (action === "material_review") {
+        processingStage = "material_review_preflight";
         if (domain !== "warehouse" || row.recordType !== "MATERIAL_REQUEST" || row.status !== "REQUESTED") {
           return Response.json({ error: "invalid_material_request_transition" }, { status: 409 });
         }
@@ -1423,7 +1425,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
             const sideKey = `material-request:${row.id}:reserve:${item.id}`.slice(0, 160);
             const inventoryEventId = crypto.randomUUID();
             inventoryReservationUpdateIndexes.push(missionInventoryStatements.length);
-            inventoryReservationGuards.push({ itemId: item.id, version: nextVersion, reservedMilli: nextReserved, sideKey });
+            inventoryReservationGuards.push({ itemId: item.id, version: nextVersion, reservedMilli: nextReserved, quantityMilli, sideKey, eventId: inventoryEventId });
             missionInventoryStatements.push(db.update(inventoryItems).set({
               reservedMilli: nextReserved,
               status: nextStatus,
@@ -2332,7 +2334,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.version, materialRequest.version),
       )) as never);
     }
+    processingStage = action === "material_review" ? "material_review_batch" : "journey_batch";
     const results = await db.batch(statements as [never, ...never[]]) as unknown[];
+    processingStage = action === "material_review" ? "material_review_readback" : "journey_readback";
     const reservationConflict = inventoryReservationUpdateIndexes.some((index) => {
       const result = results[missionInventoryStatementOffset + index];
       return !Array.isArray(result) || result.length === 0;
@@ -2349,6 +2353,89 @@ export async function POST(request: Request, routeContext: RouteContext) {
         return Response.json({ error: "material_request_link_unavailable" }, { status: 503 });
       }
     }
+    if (action === "material_review") {
+      const reservationKeys = inventoryReservationGuards.map(({ sideKey }) => sideKey);
+      const expectedItemIds = inventoryReservationGuards.map(({ itemId }) => itemId);
+      const [verifiedRecordRows, verifiedItems, verifiedMovements, verifiedEvents, verifiedOutbox, verifiedReconciliations] = await Promise.all([
+        db.select().from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          eq(jobJourneyRecords.jobId, job.id),
+          eq(jobJourneyRecords.id, recordId),
+          eq(jobJourneyRecords.version, nextVersion),
+          eq(jobJourneyRecords.status, status),
+        )).limit(1),
+        db.select().from(inventoryItems).where(and(
+          eq(inventoryItems.tenantId, context.tenantId),
+          inArray(inventoryItems.id, expectedItemIds),
+        )),
+        db.select().from(inventoryMovements).where(and(
+          eq(inventoryMovements.tenantId, context.tenantId),
+          inArray(inventoryMovements.idempotencyKey, reservationKeys),
+        )),
+        db.select().from(s06Events).where(and(
+          eq(s06Events.tenantId, context.tenantId),
+          inArray(s06Events.idempotencyKey, [idempotencyKey, ...reservationKeys]),
+        )),
+        db.select().from(s06Outbox).where(and(
+          eq(s06Outbox.tenantId, context.tenantId),
+          inArray(s06Outbox.eventId, [eventId, ...inventoryReservationGuards.map((guard) => guard.eventId)]),
+        )),
+        db.select().from(s06Reconciliations).where(and(
+          eq(s06Reconciliations.tenantId, context.tenantId),
+          inArray(s06Reconciliations.aggregateId, [recordId, ...expectedItemIds]),
+        )),
+      ]);
+      const verifiedRecord = verifiedRecordRows[0];
+      const reviewedPayload = verifiedRecord ? parseJson(verifiedRecord.payloadJson) : {};
+      const stockReservation = isRecord(reviewedPayload.stockReservation) ? reviewedPayload.stockReservation : {};
+      const itemById = new Map(verifiedItems.map((item) => [item.id, item]));
+      const movementByKey = new Map(verifiedMovements.map((movement) => [movement.idempotencyKey, movement]));
+      const eventByKey = new Map(verifiedEvents.map((event) => [event.idempotencyKey, event]));
+      const outboxEventIds = new Set(verifiedOutbox.map((entry) => entry.eventId));
+      const reconciliationKeys = new Set(verifiedReconciliations.map((entry) => `${entry.aggregateType}:${entry.aggregateId}:${entry.expectedVersion}:${entry.status}`));
+      const reservationRequired = status === "APPROVED";
+      const reservationReadbackComplete = inventoryReservationGuards.every((guard) => {
+        const item = itemById.get(guard.itemId);
+        const movement = movementByKey.get(guard.sideKey);
+        const event = eventByKey.get(guard.sideKey);
+        return Boolean(item
+          && item.version === guard.version
+          && item.reservedMilli === guard.reservedMilli
+          && movement
+          && movement.movementType === "RESERVE"
+          && movement.quantityMilli === guard.quantityMilli
+          && event
+          && event.eventType === "warehouse.inventory.reserve"
+          && event.aggregateId === guard.itemId
+          && outboxEventIds.has(event.eventId)
+          && reconciliationKeys.has(`inventory.item:${guard.itemId}:${guard.version}:SITES_READBACK_VERIFIED`));
+      });
+      const requestEvent = eventByKey.get(idempotencyKey);
+      const reviewReadbackComplete = Boolean(verifiedRecord
+        && (!reservationRequired || (stockReservation.status === "RESERVED" && reservationReadbackComplete))
+        && requestEvent
+        && requestEvent.eventId === eventId
+        && outboxEventIds.has(eventId)
+        && reconciliationKeys.has(`job.journey.warehouse:${recordId}:${nextVersion}:SITES_READBACK_VERIFIED`));
+      if (!reviewReadbackComplete) {
+        console.error("material_review_readback_incomplete", {
+          stage: processingStage,
+          recordFound: Boolean(verifiedRecord),
+          reservationCount: inventoryReservationGuards.length,
+          movementCount: verifiedMovements.length,
+          eventCount: verifiedEvents.length,
+          outboxCount: verifiedOutbox.length,
+        });
+        return Response.json({ error: "material_review_readback_unavailable", message: "La revisione non è stata confermata dal registro. Aggiorna la richiesta prima di riprovare." }, { status: 503 });
+      }
+      return Response.json({
+        readback: { status: "verified", scope: "tenant", checkedAt: new Date().toISOString() },
+        mutation: { action, record: recordForResponse(verifiedRecord!), eventId, idempotent: false },
+      }, {
+        status: existing ? 200 : 201,
+        headers: { "cache-control": "private, no-store" },
+      });
+    }
     return Response.json({
       ...(await journeyReadback(context, job)),
       mutation: { action, record: recordForResponse(changed), eventId, idempotent: false },
@@ -2362,6 +2449,13 @@ export async function POST(request: Request, routeContext: RouteContext) {
     }
     const message = error instanceof Error ? error.message : "";
     if (/unique|constraint/i.test(message)) return Response.json({ error: "journey_idempotency_or_version_conflict" }, { status: 409 });
+    const errorWithCode = error instanceof Error ? error as Error & { code?: unknown } : null;
+    console.error("job_journey_write_failed", {
+      action,
+      stage: processingStage,
+      errorName: error instanceof Error ? error.name : "unknown",
+      errorCode: typeof errorWithCode?.code === "string" ? errorWithCode.code.slice(0, 80) : null,
+    });
     return Response.json({ error: "job_journey_write_unavailable" }, { status: 503 });
   }
 }

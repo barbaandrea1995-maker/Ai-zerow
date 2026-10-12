@@ -54,6 +54,7 @@ function serverErrorMessage(code: string | undefined) {
   if (code === "material_change_requires_modified_decision") return "Hai scelto un materiale o una quantità diversa: usa ‘Modifica e approva’ e spiega la sostituzione.";
   if (code === "material_rejection_reason_required") return "Indica il motivo del rifiuto.";
   if (code === "warehouse_assignment_required") return "Il tuo profilo non è assegnato a questo deposito.";
+  if (code === "job_journey_write_unavailable" || code === "material_review_readback_unavailable") return "Il server non ha confermato la revisione. Sto rileggendo la richiesta e le scorte prima di farti riprovare.";
   return code ? `Operazione non completata · ${code}` : "Operazione non completata. Riprova.";
 }
 
@@ -87,16 +88,19 @@ export function WarehouseRequestQueue({
   const [pickBusyId, setPickBusyId] = useState("");
   const openedDeepLink = useRef(false);
 
-  const loadRequests = useCallback(async (quiet = false) => {
+  const loadRequests = useCallback(async (quiet = false): Promise<RequestRecord[] | null> => {
     if (quiet) setRefreshing(true);
     else setLoading(true);
     try {
       const response = await fetch("/api/warehouse/requests", { cache: "no-store" });
       const result = await response.json() as RequestPayload;
       if (!response.ok) throw new Error(result.error ?? "warehouse_requests_readback_unavailable");
-      setRequests(result.requests ?? []);
+      const nextRequests = result.requests ?? [];
+      setRequests(nextRequests);
+      return nextRequests;
     } catch {
       if (!quiet) onNotice("La coda richieste non è disponibile. Il registro scorte resta consultabile.");
+      return null;
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -214,6 +218,22 @@ export function WarehouseRequestQueue({
       });
       const result = await response.json() as { error?: string; readback?: { status?: string }; mutation?: { action?: string; eventId?: string; record?: { version?: number } } };
       if (!response.ok) {
+        if (response.status >= 500) {
+          const refreshedRequests = await loadRequests(true);
+          const refreshedRequest = refreshedRequests?.find((request) => request.id === activeRequest.id);
+          const reservation = objectValue(refreshedRequest?.payload.stockReservation);
+          if (refreshedRequest?.status === "APPROVED" && reservation.status === "RESERVED") {
+            setActiveRequest(null);
+            onNotice("Prenotazione confermata dal registro: quantità riservate nel deposito.");
+            await onRefresh();
+            return;
+          }
+          if (refreshedRequest?.status === "REQUESTED") {
+            await loadStock(reviewWarehouseId);
+            onNotice("Revisione non registrata: la richiesta è ancora in attesa e le scorte non risultano prenotate. Puoi riprovare dopo l’aggiornamento.");
+            return;
+          }
+        }
         onNotice(serverErrorMessage(result.error));
         if (response.status === 409) await Promise.all([loadRequests(true), loadStock(reviewWarehouseId)]);
         return;
