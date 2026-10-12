@@ -21,8 +21,8 @@ for (const relativePath of [
   assert.ok(existsSync(join(root, relativePath)), `Missing built deployment input: ${relativePath}`);
 }
 
-const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-assert.match(commitSha, /^[0-9a-f]{40}$/, "Unable to resolve the full source commit SHA");
+const commitSha = process.argv[2] ?? "";
+assert.match(commitSha, /^[0-9a-f]{40}$/, "Pass the full source commit SHA as the first argument");
 const archivePath = resolve(process.argv[2] || `/tmp/ai-zerow-${hosting.project_id}-${commitSha.slice(0, 8)}.tar.gz`);
 execFileSync("tar", [
   "-czf",
