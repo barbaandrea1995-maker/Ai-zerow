@@ -1366,29 +1366,32 @@ export default function MissionCommandDeck() {
     if (!requestedMaterialRequestId || state !== "ready") return;
     if (createFromRequestHandled.current === requestedMaterialRequestId) return;
     createFromRequestHandled.current = requestedMaterialRequestId;
-    const request = materialRequests.find((candidate) => candidate.id === requestedMaterialRequestId);
-    if (!request) {
-      notify("La richiesta approvata non è disponibile nel perimetro Missioni corrente.");
+    const timer = window.setTimeout(() => {
+      const request = materialRequests.find((candidate) => candidate.id === requestedMaterialRequestId);
+      if (!request) {
+        notify("La richiesta approvata non è disponibile nel perimetro Missioni corrente.");
+        router.replace("/mission", { scroll: false });
+        return;
+      }
+      if (request.scheduledMissionId) {
+        setQuery("");
+        setStatusFilter("ALL");
+        setAttentionFilter("ALL");
+        setSelectedId(request.scheduledMissionId);
+        notify("La richiesta è già collegata a una missione: ho aperto il record esistente.");
+        router.replace(`/mission?missionId=${encodeURIComponent(request.scheduledMissionId)}`, { scroll: false });
+        return;
+      }
+      if (request.status !== "APPROVED") {
+        notify("La richiesta deve essere approvata e prenotata dal magazzino prima della programmazione.");
+        router.replace("/mission", { scroll: false });
+        return;
+      }
+      openCreate(request);
+      notify("Richiesta riletta dal server: deposito, commessa e materiali sono già collegati.");
       router.replace("/mission", { scroll: false });
-      return;
-    }
-    if (request.scheduledMissionId) {
-      setQuery("");
-      setStatusFilter("ALL");
-      setAttentionFilter("ALL");
-      setSelectedId(request.scheduledMissionId);
-      notify("La richiesta è già collegata a una missione: ho aperto il record esistente.");
-      router.replace(`/mission?missionId=${encodeURIComponent(request.scheduledMissionId)}`, { scroll: false });
-      return;
-    }
-    if (request.status !== "APPROVED") {
-      notify("La richiesta deve essere approvata e prenotata dal magazzino prima della programmazione.");
-      router.replace("/mission", { scroll: false });
-      return;
-    }
-    openCreate(request);
-    notify("Richiesta riletta dal server: deposito, commessa e materiali sono già collegati.");
-    router.replace("/mission", { scroll: false });
+    }, 0);
+    return () => window.clearTimeout(timer);
   // L’apertura da magazzino dipende dal contratto URL e dai record riletti dal server.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [materialRequests, notify, requestedMaterialRequestId, router, state]);
@@ -1474,6 +1477,12 @@ export default function MissionCommandDeck() {
           approved_material_request_required: "la richiesta materiali non risulta approvata",
           material_request_requires_warehouse_to_job: "una richiesta materiali approvata deve viaggiare dal deposito alla commessa collegata",
           mission_resource_conflict: "una delle risorse è già occupata nella finestra scelta",
+          vehicle_assigned_to_other_driver: "il mezzo è affidato a un’altra persona; verifica con l’autista custode oppure usa la modalità prova senza prenotare",
+          cargo_asset_assigned_to_other_person: "l’asset da trasportare è affidato a un’altra persona; verifica la custodia prima della missione reale",
+          vehicle_transport_capability_missing: "il mezzo non è abilitato a trasportare questo tipo di carico",
+          vehicle_capacity_exceeded: "il peso del carico supera la portata utile censita del mezzo",
+          cargo_asset_not_transportable: "un elemento selezionato non è configurato come carico trasportabile",
+          vehicle_transport_profile_required: "la risorsa non è configurata come mezzo di trasporto: correggi la tipologia nella scheda Asset",
           mission_driver_and_vehicle_required: "seleziona un autista e un mezzo disponibili",
           material_request_link_unavailable: "il collegamento tra richiesta e missione non è stato confermato dal registro",
         };
@@ -1517,6 +1526,10 @@ export default function MissionCommandDeck() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    if (modal === "create" && field(form, "simulationOnly") === "1") {
+      notify("Modalità prova attiva: nessuna missione creata. Disattivala solo quando vuoi pianificare davvero.");
+      return;
+    }
     if (modal === "create") {
       const jobId = selectedRequest?.jobId || createJobId || field(form, "jobId") || "";
       const mode = selectedRequest ? "WAREHOUSE_TO_JOB" : field(form, "transportMode") as TransportMode;

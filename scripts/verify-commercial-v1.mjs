@@ -490,7 +490,11 @@ assert(missionResourceRoute.includes("server_validated_ids_only") && missionReso
 const missionResourceFields = await readFile(join(root, "components", "mission-resource-fields.tsx"), "utf8");
 assert(missionResourceFields.includes("/api/mission/resources") && missionResourceFields.includes('name="driverId"') && missionResourceFields.includes('name="vehicleId"'), "Mission UI must select registered driver and vehicle IDs");
 assert(!missionResourceFields.includes('name="driver"') && !missionResourceFields.includes('name="vehicle"'), "Mission UI must not reintroduce free-text driver or vehicle fields");
-assert(missionResourceFields.includes("onCargoAssetsChange") && missionResourceFields.includes("Seleziona uno o più asset reali"), "Mission resource selector must support multiple assets with readable identity");
+assert(missionResourceFields.includes("onCargoAssetsChange") && missionResourceFields.includes("CARICO / ASSET TRASPORTATI") && missionResourceFields.includes("resourceLabel"), "Mission resource selector must support multiple cargo assets with readable identity");
+assert(missionResourceFields.includes("/api/mission/resources/simulate") && missionResourceFields.includes("nessuna missione o prenotazione"), "Mission dry-run must be explicit and non-persistent");
+assert(missionDeck.includes('field(form, "simulationOnly") === "1"') && missionDeck.includes("nessuna missione creata"), "The dry-run UI must block the mission write path while simulation is selected");
+const missionResourceRules = await readFile(join(root, "lib", "mission-resource-rules.ts"), "utf8");
+assert(missionResourceRules.includes("missionResourceKind") && missionResourceRules.includes("sameCustodian") && missionResourceRules.includes("evaluateCargoCapacity"), "Mission resource rules must separate type, custody and physical capacity");
 const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
 assert(!planningJourney.includes('name="responsible"'), "Planning UI must not reintroduce a free-text responsible field");
 assert(missionControl.includes("transportMode") && missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes("operatingTransportModes"), "Mission UI must expose only tenant-enabled transport modes");

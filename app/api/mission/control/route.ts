@@ -557,11 +557,12 @@ export async function POST(request: Request) {
       resourceIds: [resources.driver.id, resources.vehicle.id, ...resources.cargoAssets.map((asset) => asset.id)],
       resourceSnapshot: {
         driver: { id: resources.driver.id, code: resources.driver.code, label: resources.driver.label },
-        vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label },
+        vehicle: { id: resources.vehicle.id, code: resources.vehicle.code, label: resources.vehicle.label, entityType: "VEHICLE", usageMode: resources.vehicle.usageMode, transportCapabilities: resources.vehicle.transportCapabilities, maxPayloadKg: resources.vehicle.maxPayloadKg },
         cargoAsset: resources.cargoAsset
-          ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label }
+          ? { id: resources.cargoAsset.id, code: resources.cargoAsset.code, label: resources.cargoAsset.label, entityType: "CARGO", weightKg: resources.cargoAsset.weightKg }
           : null,
-        cargoAssets: resources.cargoAssets.map((asset) => ({ id: asset.id, code: asset.code, label: asset.label })),
+        cargoAssets: resources.cargoAssets.map((asset) => ({ id: asset.id, code: asset.code, label: asset.label, entityType: "CARGO", weightKg: asset.weightKg })),
+        capacityCheck: { maxPayloadKg: resources.vehicle.maxPayloadKg, knownCargoWeightKg: resources.capacity.knownWeightKg, unknownCargoCount: resources.capacity.unknownCargoCount },
       },
       notes: boundedText(input.notes, 2_000),
       route: routeSummaryForPayload(routeProjection),

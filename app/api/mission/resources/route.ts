@@ -18,6 +18,7 @@ export async function GET(request: Request) {
   const plannedEndAt = url.searchParams.get("plannedEndAt")?.trim() || undefined;
   const excludeRecordId = url.searchParams.get("excludeMissionId")?.trim() || undefined;
   const transportMode = url.searchParams.get("transportMode")?.trim() || undefined;
+  const driverId = url.searchParams.get("driverId")?.trim() || undefined;
 
   try {
     const catalog = await getMissionResourceCatalog({
@@ -26,6 +27,7 @@ export async function GET(request: Request) {
       plannedEndAt,
       excludeRecordId,
       transportMode,
+      driverId,
     });
     return Response.json({
       context: publicAuthorityContext(context),

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
@@ -87,6 +87,16 @@ export async function POST(request: Request) {
   const location = bounded(input.location, 240);
   const notes = bounded(input.notes, 2_000);
   const capacityValue = input.capacity === "" || input.capacity === null || input.capacity === undefined ? null : Number(input.capacity);
+  const maxPayloadValue = input.maxPayloadKg === "" || input.maxPayloadKg === null || input.maxPayloadKg === undefined ? null : Number(input.maxPayloadKg);
+  const weightValue = input.weightKg === "" || input.weightKg === null || input.weightKg === undefined ? null : Number(input.weightKg);
+  const transportable = typeof input.transportable === "boolean" ? input.transportable : true;
+  if (input.transportable !== undefined && typeof input.transportable !== "boolean") return Response.json({ error: "asset_transportable_flag_invalid" }, { status: 400 });
+  if (input.pairedCargoAssetIds !== undefined && (!Array.isArray(input.pairedCargoAssetIds) || input.pairedCargoAssetIds.some((value) => typeof value !== "string"))) {
+    return Response.json({ error: "asset_pair_list_invalid" }, { status: 400 });
+  }
+  const pairedCargoAssetIds = Array.isArray(input.pairedCargoAssetIds)
+    ? [...new Set(input.pairedCargoAssetIds.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean))]
+    : [];
 
   if (!assetId || !expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))) return Response.json({ error: "asset_and_version_required" }, { status: 400 });
   if (idempotencyKey.length < 8) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
@@ -94,6 +104,10 @@ export async function POST(request: Request) {
   if (!("asset vehicle equipment".split(" ").includes(entityType))) return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   if (!isAssetUsageMode(usageMode)) return Response.json({ error: "unknown_asset_usage_mode" }, { status: 400 });
   if (capacityValue !== null && (!Number.isFinite(capacityValue) || capacityValue < 0 || capacityValue > 10_000_000)) return Response.json({ error: "asset_capacity_invalid" }, { status: 400 });
+  if (maxPayloadValue !== null && (!Number.isFinite(maxPayloadValue) || maxPayloadValue <= 0 || maxPayloadValue > 100_000)) return Response.json({ error: "asset_payload_capacity_invalid" }, { status: 400 });
+  if (weightValue !== null && (!Number.isFinite(weightValue) || weightValue <= 0 || weightValue > 1_000_000)) return Response.json({ error: "asset_weight_invalid" }, { status: 400 });
+  if (pairedCargoAssetIds.length > 50) return Response.json({ error: "asset_pair_limit_exceeded" }, { status: 400 });
+  if (entityType !== "vehicle" && pairedCargoAssetIds.length) return Response.json({ error: "vehicle_only_asset_pairing" }, { status: 400 });
 
   const requestedCapabilities = Array.isArray(input.transportCapabilities) ? input.transportCapabilities : [];
   if (requestedCapabilities.some((value) => !isTransportCapability(value))) return Response.json({ error: "unknown_asset_transport_capability" }, { status: 400 });
@@ -108,6 +122,25 @@ export async function POST(request: Request) {
     const asset = await assetForTenant(context.tenantId, assetId);
     if (!asset) return Response.json({ error: "asset_not_found" }, { status: 404 });
     if (!(await assetInWriterScope(asset, context))) return Response.json({ error: "asset_scope_forbidden" }, { status: 403 });
+
+    const pairRows = pairedCargoAssetIds.length
+      ? await db.select().from(s04Records).where(and(
+        eq(s04Records.tenantId, context.tenantId),
+        eq(s04Records.module, "assets"),
+        inArray(s04Records.id, pairedCargoAssetIds),
+      ))
+      : [];
+    if (pairRows.length !== pairedCargoAssetIds.length) return Response.json({ error: "paired_asset_not_found" }, { status: 400 });
+    for (const pair of pairRows) {
+      if (!(await assetInWriterScope(pair, context))) return Response.json({ error: "asset_scope_forbidden" }, { status: 403 });
+      const pairPayload = parseJson(pair.payloadJson);
+      const pairType = bounded(pairPayload.entityType || pairPayload.resourceKind || pairPayload.kind, 24).toUpperCase();
+      const pairIsCargo = pairType === "ASSET" || pairType === "EQUIPMENT"
+        || (!pairType && ["ASSET", "EQUIPMENT"].includes(pair.recordType.toUpperCase()));
+      if (pair.id === asset.id || !pairIsCargo || pairPayload.transportable === false) {
+        return Response.json({ error: "paired_asset_must_be_cargo" }, { status: 400 });
+      }
+    }
 
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
@@ -129,7 +162,7 @@ export async function POST(request: Request) {
       : 0;
     const profileVersion = currentProfileVersion + 1;
     const now = new Date().toISOString();
-    const assetProfile = { usageMode, transportCapabilities };
+    const assetProfile = { usageMode, transportCapabilities, maxPayloadKg: entityType === "vehicle" ? maxPayloadValue : null };
     const nextPayload: JsonObject = {
       ...currentPayload,
       title,
@@ -139,6 +172,10 @@ export async function POST(request: Request) {
       operationalProfile: usageMode,
       transportCapabilities,
       assetProfile,
+      transportable: entityType === "vehicle" ? false : transportable,
+      weightKg: entityType === "vehicle" ? null : weightValue,
+      maxPayloadKg: entityType === "vehicle" ? maxPayloadValue : null,
+      pairedCargoAssetIds: entityType === "vehicle" ? pairedCargoAssetIds : [],
       brand,
       model,
       registration,
@@ -177,7 +214,7 @@ export async function POST(request: Request) {
         aggregateType: "asset",
         aggregateId: asset.id,
         aggregateVersion: profileVersion,
-        payloadJson: JSON.stringify({ entityType, usageMode, transportCapabilities, profileVersion }),
+        payloadJson: JSON.stringify({ entityType, usageMode, transportCapabilities, pairedCargoAssetIds: entityType === "vehicle" ? pairedCargoAssetIds : [], maxPayloadKg: entityType === "vehicle" ? maxPayloadValue : null, profileVersion }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,
