@@ -41,7 +41,7 @@ export function requiredVehicleCapabilities(transportMode: string, cargoCount: n
 }
 
 export function evaluateCargoCapacity(maxPayloadKg: number | null, cargoWeightsKg: Array<number | null>) {
-  const knownWeightKg = cargoWeightsKg.reduce((sum, weight) => sum + (weight ?? 0), 0);
+  const knownWeightKg = cargoWeightsKg.reduce<number>((sum, weight) => sum + (weight ?? 0), 0);
   const unknownCargoCount = cargoWeightsKg.filter((weight) => weight === null).length;
   const exceeds = maxPayloadKg !== null && knownWeightKg > maxPayloadKg;
   return { knownWeightKg, unknownCargoCount, exceeds };

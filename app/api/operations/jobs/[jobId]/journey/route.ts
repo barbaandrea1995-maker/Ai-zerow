@@ -110,6 +110,10 @@ function routeStopKind(row: typeof routeStops.$inferSelect) {
   return boundedText(metadata.kind, 32).toUpperCase();
 }
 
+function routeStopLabel(row: typeof routeStops.$inferSelect, fallback = "") {
+  return boundedText(parseJson(row.evidenceJson).label, 240, fallback);
+}
+
 function routeStopCompleted(row: typeof routeStops.$inferSelect) {
   return row.status === "COMPLETED" || row.deliveryStatus === "CONFIRMED";
 }
@@ -1799,7 +1803,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           operationalAssignees,
           temporaryCustodian: isLoadAction ? { actorId: boundedText(driverSnapshot.actorId, 160), resourceId: boundedText(payload.driverId, 160), name: boundedText(driverSnapshot.label, 160, "Autista missione") } : null,
           transport: { driverId: boundedText(payload.driverId, 160), vehicleId: boundedText(payload.vehicleId, 160), vehicleLabel: boundedText(vehicleSnapshot.label, 160) },
-          location: boundedText(selectedStop.label, 240, boundedText(payload.pickup, 240)),
+          location: routeStopLabel(selectedStop, boundedText(payload.pickup, 240)),
           updatedAt: now,
           updatedBy: context.actorId,
         };
@@ -1952,7 +1956,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         const timeline = Array.isArray(payload.operationalTimeline)
           ? payload.operationalTimeline.filter((entry): entry is JsonObject => isRecord(entry))
           : [];
-        const deliveryDestination = boundedText(selectedMissionStop.label, 240, boundedText(payload.dropoff, 240));
+        const deliveryDestination = routeStopLabel(selectedMissionStop, boundedText(payload.dropoff, 240));
         const cargoCustody = updateCargoCustody(payload, deliveryAssetIds, "DELIVERED", {
           missionId: row.id,
           driverId: boundedText(payload.driverId, 160),

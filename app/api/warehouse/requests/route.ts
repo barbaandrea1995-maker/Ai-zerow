@@ -23,7 +23,7 @@ export async function GET() {
   const canReview = hasCapability(context, "warehouse.review");
   const canFulfill = hasCapability(context, "warehouse.write");
   if (!canReview && !canFulfill) {
-    return Response.json({ error: "forbidden", capability: "warehouse.review_or_write" }, { status: 403 });
+    return Response.json({ error: "forbidden", requiredCapabilities: ["warehouse.review", "warehouse.write"], match: "any" }, { status: 403 });
   }
   try {
     const db = getDb();

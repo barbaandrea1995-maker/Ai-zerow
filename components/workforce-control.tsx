@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -223,7 +224,7 @@ export default function WorkforceControl() {
   return <main className="zw-app-shell zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]"><div aria-hidden="true" className="zw-command-ambient" /><section className="relative min-w-0">
     <header className="zw-command-topbar sticky top-0 z-20 flex min-h-[72px] items-center gap-3 px-4 py-3 sm:gap-5 sm:px-7">
       <IconButton className="lg:hidden" label="Apri menu"><Menu className="size-4" /></IconButton>
-      <button aria-label="Apri Persone" className="zw-command-topbar__brand flex shrink-0 items-center gap-3 text-left" onClick={() => navigate("/workforce")} type="button"><span className="grid size-10 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[.07] text-lime-200"><Users className="size-5" /></span><span><span className="block text-sm font-semibold text-slate-100">Persone</span><span className="mt-0.5 hidden text-[10px] uppercase tracking-[.16em] text-slate-500 sm:block">Anagrafica e squadre</span></span></button>
+      <button aria-label="Apri Persone" className="zw-command-topbar__brand flex shrink-0 items-center gap-3 text-left" onClick={() => navigate("/workforce")} type="button"><span className="grid size-10 place-items-center overflow-hidden rounded-xl border border-lime-300/25 bg-black text-lime-200"><Image alt="AI-ZEROW" className="size-full object-cover" height={40} src="/ai-zerow-icon.jpeg" width={40} /></span><span><span className="block text-sm font-semibold text-slate-100">Persone</span><span className="mt-0.5 hidden text-[10px] uppercase tracking-[.16em] text-slate-500 sm:block">Anagrafica e squadre</span></span></button>
       <div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/[.04] px-3 py-1.5 text-[9px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300" />{refreshing ? "AGGIORNAMENTO" : payload?.readback?.status === "verified" ? "DATI AGGIORNATI" : "DATI OPERATIVI"}</span><IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton><IconButton className="zw-command-topbar__refresh" label="Aggiorna persone" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{canReadCommunication && <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div>
     </header>
 

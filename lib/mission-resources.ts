@@ -38,6 +38,10 @@ type JsonObject = Record<string, unknown>;
 
 const RESOURCE_READ_PAGE_SIZE = 500;
 
+function isRecord(value: unknown): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 async function readAllById<T extends { id: string }>(fetchPage: (afterId?: string) => Promise<T[]>) {
   const rows: T[] = [];
   let afterId: string | undefined;

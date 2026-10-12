@@ -53,7 +53,7 @@ for (const entry of registry) {
   });
 }
 
-assert.equal(registry.length, 19, "Commercial registry must cover all commercial and account surfaces");
+assert.equal(registry.length, 21, "Commercial registry must cover all commercial and account surfaces");
 assert(modules.every((item) => item.pageExists), "Every commercial module must have a route page");
 assert(modules.filter((item) => registry.find((entry) => entry.id === item.id)?.navigation !== false).every((item) => item.navigation === "PASS"), "Every primary module must be represented in canonical navigation");
 assert(modules.every((item) => item.officialMark === "PASS"), "Every commercial module must use the official ZEROW mark");

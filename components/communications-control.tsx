@@ -92,7 +92,7 @@ const navItems: Array<{ label: string; href: string; icon: LucideIcon; capabilit
   { label: "PROCUREMENT", href: "/procurement", icon: FileCheck2, capability: "procurement.read" },
   { label: "GOVERNANCE", href: "/governance", icon: LockKeyhole, capability: "governance.read" },
   { label: "COMUNICAZIONI", href: "/communications", icon: MessageSquareText, capability: "communication.read" },
-  { label: "EXTERNALS", href: "/externals", icon: Link2, capability: "externals.read" },
+  { label: "EXTERNALS", href: "/externals", icon: Link2, capability: "external_adapters.read" },
   { label: "EVENTS / LEDGER", href: "/events", icon: FileCheck2, capability: "events.read" },
   { label: "AUTHORITY", href: "/onboarding", icon: ShieldCheck, capability: "authority.read" },
 ];

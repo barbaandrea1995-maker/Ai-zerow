@@ -42,6 +42,10 @@ export async function GET(request: Request) {
     if (error instanceof MissionResourceError) {
       return Response.json({ error: error.code, details: error.details ?? null }, { status: 400 });
     }
+    console.error("[mission/resources] catalog read failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : "unknown_failure",
+    });
     return Response.json({ error: "mission_resource_catalog_unavailable" }, { status: 503 });
   }
 }

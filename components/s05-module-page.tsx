@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- This legacy shell renders the bundled brand mark without a remote image source. */
+
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Activity, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign, FileCheck2, FileText, Gauge, Layers3, Menu, MessageSquare, Network, Plus, Search, Send, RefreshCw, ShieldCheck, ShoppingCart, Users, X, type LucideIcon } from "lucide-react";

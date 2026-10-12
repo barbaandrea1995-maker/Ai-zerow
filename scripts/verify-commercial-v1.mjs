@@ -36,7 +36,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 assert.equal(packageJson.scripts["verify:runtime"], "node scripts/verify-runtime-smoke.mjs", "Runtime smoke verification must remain runnable from the package scripts");
-assert.equal(packageJson.scripts["audit:release"], "node scripts/audit-release-surface.mjs", "Release surface audit must remain runnable from the package scripts");
+assert(packageJson.scripts["audit:release"]?.includes("node scripts/audit-release-surface.mjs"), "Release surface audit must remain runnable from the package scripts");
+assert.equal(packageJson.scripts.typecheck, "tsc --noEmit --pretty false", "The release gate must keep a runnable full TypeScript check");
+assert.equal(packageJson.scripts["audit:integrity"], "node --experimental-strip-types scripts/audit-system-integrity.mjs", "The release gate must keep the cross-module integrity audit runnable");
 assert.equal(packageJson.scripts["audit:e2e"], "node scripts/audit-e2e-contract.mjs", "E2E contract audit must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["audit:ui"], "node scripts/audit-ui-alignment.mjs", "UI alignment audit must remain runnable from the package scripts");
 assert.equal(packageJson.scripts["verify:company-ai-assets"], "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs", "Company AI personal asset context must have a runnable regression test");

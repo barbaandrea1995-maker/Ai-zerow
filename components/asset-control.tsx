@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- QR previews are runtime-generated data URLs and must be rendered verbatim. */
+
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";

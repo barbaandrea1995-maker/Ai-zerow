@@ -80,8 +80,7 @@ function assignmentRows(rows: readonly ScopeRow[]) {
 
 export function canReadAllWarehouses(context: AuthorityContext) {
   return context.roles.some((role) => ["owner", "admin", "manager", "office", "auditor"].includes(role))
-    || context.capabilities.includes("tenant.manage")
-    || context.capabilities.includes("warehouse.manage");
+    || context.capabilities.includes("tenant.manage");
 }
 
 export function warehouseScope(

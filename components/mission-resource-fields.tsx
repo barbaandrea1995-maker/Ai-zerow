@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CircleAlert, LoaderCircle, ShieldCheck, Truck } from "lucide-react";
+import { CircleAlert, LoaderCircle, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import type { TransportMode } from "@/lib/tenant-operating-model";
 import { sameCustodian } from "@/lib/mission-resource-rules";
 
@@ -118,39 +118,57 @@ export function MissionResourceFields({
 }: MissionResourceFieldsProps) {
   const [catalog, setCatalog] = useState<ResourceCatalog | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [catalogIssue, setCatalogIssue] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
   const [simulationMode, setSimulationMode] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const autoPairedIds = useRef<string[]>([]);
+  const onCargoOptionsChangeRef = useRef(onCargoOptionsChange);
+  const onCargoAssetsChangeRef = useRef(onCargoAssetsChange);
 
   useEffect(() => {
+    onCargoOptionsChangeRef.current = onCargoOptionsChange;
+    onCargoAssetsChangeRef.current = onCargoAssetsChange;
+  }, [onCargoOptionsChange, onCargoAssetsChange]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
       if (!plannedAt) {
         setCatalog(null);
-        onCargoOptionsChange?.([]);
+        setCatalogIssue("");
+        onCargoOptionsChangeRef.current?.([]);
         setState("idle");
         return;
       }
       setState("loading");
+      setCatalogIssue("");
       const params = new URLSearchParams({ plannedAt });
       if (plannedEndAt) params.set("plannedEndAt", plannedEndAt);
       if (transportMode) params.set("transportMode", transportMode);
       if (driverId) params.set("driverId", driverId);
-      void fetch(`/api/mission/resources?${params.toString()}`, { cache: "no-store" })
+      void fetch(`/api/mission/resources?${params.toString()}`, { cache: "no-store", signal: controller.signal })
         .then(async (response) => {
-          const payload = await response.json() as { catalog?: ResourceCatalog };
-          if (!response.ok || !payload.catalog) throw new Error("mission_resources_unavailable");
+          const payload = await response.json() as { catalog?: ResourceCatalog; error?: string };
+          if (!response.ok || !payload.catalog) throw new Error(payload.error ?? "mission_resources_unavailable");
           setCatalog(payload.catalog);
-          onCargoOptionsChange?.(payload.catalog.cargoAssets.filter((resource) => resource.cargoLoadable));
+          onCargoOptionsChangeRef.current?.(payload.catalog.cargoAssets.filter((resource) => resource.cargoLoadable));
           setState("ready");
         })
-        .catch(() => {
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
           setCatalog(null);
+          onCargoOptionsChangeRef.current?.([]);
+          setCatalogIssue(error instanceof Error ? error.message : "mission_resources_unavailable");
           setState("error");
         });
     }, 140);
-    return () => window.clearTimeout(timer);
-  }, [plannedAt, plannedEndAt, transportMode, driverId, onCargoOptionsChange]);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [plannedAt, plannedEndAt, transportMode, driverId, reloadToken]);
 
   const selectedDriver = useMemo(() => catalog?.drivers.find((resource) => resource.id === driverId) ?? null, [catalog, driverId]);
   const selectedVehicle = useMemo(() => catalog?.vehicles.find((resource) => resource.id === vehicleId) ?? null, [catalog, vehicleId]);
@@ -164,7 +182,8 @@ export function MissionResourceFields({
   const selectableCargo = useMemo(() => catalog?.cargoAssets.filter((resource) => resource.cargoLoadable && (simulationMode ? resource.simulationEligible : resource.available)) ?? [], [catalog, simulationMode]);
 
   useEffect(() => {
-    if (!catalog || !vehicleId || !onCargoAssetsChange) {
+    const changeCargoAssets = onCargoAssetsChangeRef.current;
+    if (!catalog || !vehicleId || !changeCargoAssets) {
       autoPairedIds.current = [];
       return;
     }
@@ -173,8 +192,8 @@ export function MissionResourceFields({
     const retained = selectedCargoIds.filter((id) => !autoPairedIds.current.includes(id));
     const next = [...new Set([...retained, ...allowedPairs])];
     autoPairedIds.current = allowedPairs;
-    if (next.length !== selectedCargoIds.length || next.some((id, index) => id !== selectedCargoIds[index])) onCargoAssetsChange(next);
-  }, [catalog, vehicleId, selectableCargo, selectedCargoIds, onCargoAssetsChange]);
+    if (next.length !== selectedCargoIds.length || next.some((id, index) => id !== selectedCargoIds[index])) changeCargoAssets(next);
+  }, [catalog, vehicleId, selectableCargo, selectedCargoIds]);
 
   const changeCargoSelection = (assetId: string, checked: boolean) => {
     const next = checked
@@ -228,9 +247,9 @@ export function MissionResourceFields({
       <div className="sm:col-span-2 rounded-2xl border border-cyan-300/15 bg-cyan-300/[.03] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/75">CARICO / ASSET TRASPORTATI</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Il mezzo è il vettore. Ogni asset conserva il proprio utilizzatore operativo; autista e utilizzatore possono essere persone diverse. Gli asset abbinati al mezzo vengono proposti se trasportabili e liberi nella finestra.</p></div><span className="shrink-0 rounded-full border border-cyan-300/20 px-2 py-1 font-mono text-[9px] text-cyan-100">{selectedCargoIds.length} SELEZIONATI</span></div><div className="mt-3 space-y-1.5">{catalog?.cargoAssets.filter((resource) => resource.cargoLoadable && (resource.available || resource.simulationEligible || selectedCargoIds.includes(resource.id))).map((resource) => { const selected = selectedCargoIds.includes(resource.id); const usable = simulationMode ? resource.simulationEligible : resource.available; const paired = selectedVehicle?.pairedCargoAssetIds.includes(resource.id) ?? false; return <label className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 text-[10px] ${selected ? "border-lime-300/25 bg-lime-300/[.055]" : "border-white/[.08] bg-black/20"}`} key={resource.id}><input aria-label={`Seleziona carico ${resourceLabel(resource)}`} checked={selected} className="mt-0.5 size-3.5 accent-lime-300" disabled={!usable && !selected} onChange={(event) => changeCargoSelection(resource.id, event.target.checked)} type="checkbox" /><span className="min-w-0 flex-1"><span className="block font-semibold text-slate-200">{resourceLabel(resource)}{paired ? <span className="ml-2 rounded-full border border-lime-300/20 px-1.5 py-0.5 text-[8px] text-lime-200">ABBINATO</span> : null}</span><span className="mt-1 block text-[9px] text-slate-600">{resource.code ?? resource.id}{resource.weightKg !== null ? ` · ${resource.weightKg} kg` : " · peso non censito"}{resource.custody ? ` · utilizzatore operativo: ${resource.custody.assigneeName}` : " · senza assegnatario operativo"}</span></span></label>; }) ?? null}{selectableCargo.length === 0 && <p className="rounded-xl border border-dashed border-cyan-300/15 px-3 py-2 text-[10px] text-slate-600">{!hasDate ? "Inserisci prima data e ora." : "Nessun asset di carico compatibile nella finestra."}</p>}</div><div className="mt-3 rounded-xl border border-lime-300/15 bg-lime-300/[.025] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.14em] text-slate-500">UTILIZZATORE OPERATIVO</p>{selectedCargoAssignees.length ? <div className="mt-1 space-y-1">{selectedCargoAssignees.map((assignee) => <p className="text-[10px] text-slate-200" key={assignee.id}>{assignee.label} <span className="text-slate-500">· resta assegnato a {assignee.name}{assignee.assignmentKind === "LONG_TERM" ? " · lungo termine" : " · temporaneo"}</span></p>)}</div> : <p className="mt-1 text-[10px] text-slate-400">Nessun utilizzatore operativo assegnato. Il ricevente effettivo sarà registrato alla consegna.</p>}<p className="mt-2 text-[9px] leading-4 text-slate-600">La missione registra separatamente lo scarico, il ricevente reale e la prova di consegna; non cambia l’assegnazione dell’asset.</p></div>{transportMode === "ASSET_TRANSFER" && selectedCargoIds.length === 0 && <p className="mt-2 text-[10px] text-rose-200">Seleziona almeno un asset per un trasferimento asset.</p>}</div>
     <div className="sm:col-span-2 rounded-2xl border border-amber-300/15 bg-amber-300/[.025] p-3"><label className="flex items-start gap-2 text-[10px] text-slate-300"><input checked={simulationMode} className="mt-0.5 size-3.5 accent-amber-300" onChange={(event) => { setSimulationMode(event.target.checked); setSimulationResult(null); }} type="checkbox" /><span><span className="block font-semibold text-amber-100">Modalità prova · nessuna missione o prenotazione</span><span className="mt-1 block leading-4 text-slate-500">Mostra risorse impegnate per verificare la finestra. Il server mantiene il vincolo tra assegnatario del mezzo e autista; l’assegnatario operativo del carico può essere diverso. Con la prova attiva, “Crea e rileggi” è bloccato.</span></span></label>{simulationMode && <div className="mt-3"><button className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/[.08] px-3 text-[10px] font-semibold text-amber-100 disabled:opacity-50" disabled={simulating || !driverId || !vehicleId || !hasDate} onClick={() => void simulateSelection()} type="button">{simulating ? <LoaderCircle className="size-3.5 animate-spin" /> : <Truck className="size-3.5" />}Verifica selezione senza salvare</button>{simulationResult?.validation?.result === "PASSED" && <div className="mt-2 rounded-xl border border-lime-300/20 bg-lime-300/[.04] p-3 text-[10px] leading-5 text-lime-100"><p className="font-semibold">Simulazione superata · nessuna scrittura eseguita</p><p className="text-slate-400">Driver, mezzo, carico, capability e finestra sono coerenti. Portata: {simulationResult.validation.capacity?.maxPayloadKg ? `${simulationResult.validation.capacity.knownCargoWeightKg} / ${simulationResult.validation.capacity.maxPayloadKg} kg` : "da censire per controllo peso completo"}{simulationResult.validation.capacity?.unknownCargoCount ? ` · ${simulationResult.validation.capacity.unknownCargoCount} pesi mancanti` : ""}.</p>{simulationResult.custodyOverride?.map((warning) => <p className="text-amber-100" key={warning.resourceId}>Solo prova: {warning.resourceName} resta affidato a {warning.assignedTo}.</p>)}</div>}{simulationResult?.error && <p className="mt-2 flex items-start gap-2 rounded-xl border border-rose-300/20 bg-rose-300/[.04] p-3 text-[10px] leading-5 text-rose-100"><CircleAlert className="mt-0.5 size-3.5 shrink-0" />{simulationErrorMessage(simulationResult)}</p>}</div>}</div>
     {state === "idle" && <p className="text-[10px] text-slate-600 sm:col-span-2">Inserisci la data pianificata per verificare risorse e conflitti.</p>}
-    {state === "error" && <p className="text-[10px] text-amber-200 sm:col-span-2">Registro risorse non disponibile: la missione non può essere confermata.</p>}
     {state === "ready" && catalog?.availability === "NO_RESOURCES" && <p className="text-[10px] text-amber-200 sm:col-span-2">Nessuna coppia autista-mezzo reale disponibile in questa finestra. Puoi usare la modalità prova senza prenotare risorse.</p>}
     {state === "ready" && catalog && <p className="text-[10px] text-slate-600 sm:col-span-2">Disponibili per missione reale: {catalog.totals.availableDrivers} autisti · {catalog.totals.availableVehicles} mezzi · {catalog.totals.availableCargoAssets} carichi.</p>}
     </fieldset>
+    {state === "error" && <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[.035] p-3"><p className="text-[10px] leading-5 text-amber-100">Il registro risorse server-side non ha risposto. La missione resta bloccata finché autista, mezzo e carico non vengono riletti.{catalogIssue === "resource_registry_access_required" ? " Il profilo non dispone dell’accesso al catalogo." : ""}</p><button className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-amber-300/25 bg-black/20 px-3 text-[10px] font-semibold text-amber-100" onClick={() => setReloadToken((value) => value + 1)} type="button"><RefreshCw className="size-3.5" />Riprova lettura</button></div>}
   </>;
 }
