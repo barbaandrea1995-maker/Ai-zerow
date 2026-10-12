@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import { hasCapability } from "@/lib/authority-context";
 import {
   companyAiRateLimit,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai-rate-limit";
 import { askCompanyAiWithOpenAi } from "@/lib/company-ai-openai";
 import { searchCompanyAiKnowledge } from "@/lib/company-ai-knowledge";
+import { buildCompanyAiPersonalAssetContext } from "@/lib/company-ai-personal-assets";
 import { getLocationContextForCommand } from "@/lib/location-intelligence/company-ai-tools";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import {
@@ -156,10 +157,66 @@ export async function POST(request: Request) {
         inArray(s04Records.module, readableModules),
       )).orderBy(desc(s04Records.updatedAt)).limit(36)
       : [];
+    const personalAssetAssignments = hasCapability(context!, "asset.read")
+      ? await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context!.tenantId),
+        eq(jobJourneyRecords.domain, "assets"),
+        eq(jobJourneyRecords.recordType, "ASSET_ASSIGNMENT"),
+        or(
+          sql`CASE WHEN json_valid(${jobJourneyRecords.payloadJson}) THEN json_extract(${jobJourneyRecords.payloadJson}, '$.assigneeActorId') END = ${context!.actorId}`,
+          sql`CASE WHEN json_valid(${jobJourneyRecords.payloadJson}) THEN json_extract(${jobJourneyRecords.payloadJson}, '$.assigneeMembershipId') END = ${context!.membershipId}`,
+        ),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(1000)
+      : [];
+    const personalAssetIds = [...new Set(personalAssetAssignments.map((row) => {
+      try {
+        const payload = parseObject(row.payloadJson);
+        return typeof payload.assetId === "string" && payload.assetId.trim() ? payload.assetId.trim() : row.jobId;
+      } catch {
+        return row.jobId;
+      }
+    }).filter(Boolean))];
+    const personalAssetCatalog = personalAssetIds.length
+      ? await db.select({
+        id: s04Records.id,
+        canonicalCode: s04Records.canonicalCode,
+        title: s04Records.title,
+        detail: s04Records.detail,
+        status: s04Records.status,
+        payloadJson: s04Records.payloadJson,
+      }).from(s04Records).where(and(
+        eq(s04Records.tenantId, context!.tenantId),
+        eq(s04Records.module, "assets"),
+        inArray(s04Records.id, personalAssetIds),
+      )).limit(1000)
+      : [];
+    const personalAssetContext = buildCompanyAiPersonalAssetContext({
+      tenantId: context!.tenantId,
+      actorId: context!.actorId,
+      membershipId: context!.membershipId,
+      assignments: personalAssetAssignments,
+      assets: personalAssetCatalog,
+    });
     const scopeTokens = teamScopeTokens(operationalRows, context!);
     const visibleOperationalRows = canReadAllOperations(context!)
       ? operationalRows
       : operationalRows.filter((row) => rowMatchesContext(row, context!, scopeTokens));
+    const personallyAssignedAssetCodes = new Set(personalAssetContext.map((record) => record.id));
+    const companyAiOperationalContext = [
+      ...personalAssetContext,
+      ...visibleOperationalRows
+        .filter((row) => row.module !== "assets" || !personallyAssignedAssetCodes.has(row.canonicalCode ?? row.id))
+        .map((row) => ({
+          id: row.canonicalCode ?? row.id,
+          module: row.module,
+          title: row.title,
+          detail: row.detail,
+          meta: row.meta,
+          status: row.status,
+          progress: row.progress,
+          updatedAt: row.updatedAt,
+        })),
+    ];
     const knowledgeHints = searchCompanyAiKnowledge(command, { limit: 6 });
     let locationContext: unknown[] = [];
     try {
@@ -174,23 +231,14 @@ export async function POST(request: Request) {
       prompt: command,
       actionType,
       approvalRequired,
-      operationalContext: visibleOperationalRows.map((row) => ({
-        id: row.canonicalCode ?? row.id,
-        module: row.module,
-        title: row.title,
-        detail: row.detail,
-        meta: row.meta,
-        status: row.status,
-        progress: row.progress,
-        updatedAt: row.updatedAt,
-      })),
+      operationalContext: companyAiOperationalContext,
       knowledgeContext: knowledgeHints,
       locationContext,
     });
     const fallbackMessage = approvalRequired
       ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi scrittura."
-      : visibleOperationalRows.length
-        ? `Ho trovato ${visibleOperationalRows.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
+      : companyAiOperationalContext.length
+        ? `Ho trovato ${companyAiOperationalContext.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
         : "Non risultano record operativi autorizzati nel readback. Nessuna conclusione viene inventata.";
     const answer = aiOutcome.result?.answer || fallbackMessage;
     const aiRuntime = {
@@ -208,7 +256,7 @@ export async function POST(request: Request) {
       citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
       suggestedActions: aiOutcome.result?.suggestedActions ?? [],
       limitations: aiOutcome.result?.limitations ?? [],
-      contextRecordIds: visibleOperationalRows.map((row) => row.canonicalCode ?? row.id),
+      contextRecordIds: companyAiOperationalContext.map((record) => record.id),
       locationContextEventIds: locationContext.flatMap((item) => {
         if (!isRecord(item) || typeof item.id !== "string") return [];
         return [item.id];

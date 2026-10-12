@@ -25,6 +25,18 @@ function requireContract(source, pattern, label) {
   assert.ok(pattern.test(source), `Missing contract: ${label}`);
 }
 
+const commandAskRoute = await read("app/api/command/ask/route.ts");
+const personalAssetContext = await read("lib/company-ai-personal-assets.ts");
+const companyAiAdapter = await read("lib/company-ai-openai.ts");
+requireContract(commandAskRoute, /eq\(jobJourneyRecords\.tenantId, context!\.tenantId\)/, "Company AI asset assignments are tenant scoped");
+requireContract(commandAskRoute, /eq\(jobJourneyRecords\.recordType, "ASSET_ASSIGNMENT"\)/, "Company AI reads the asset custody registry");
+requireContract(commandAskRoute, /buildCompanyAiPersonalAssetContext\(/, "Company AI enriches its context with personal asset custody");
+requireContract(commandAskRoute, /operationalContext: companyAiOperationalContext/, "personal asset custody reaches the model context");
+requireContract(personalAssetContext, /payload\.assigneeActorId.*actorId/, "personal assignment is filtered by authenticated actor");
+requireContract(personalAssetContext, /payload\.assigneeMembershipId.*membershipId/, "personal assignment supports tenant membership identity");
+requireContract(personalAssetContext, /status === "RETURNED" \|\| status === "CANCELLED"/, "returned or cancelled custody is excluded");
+requireContract(companyAiAdapter, /personal_asset_assignment.*assegnazioni effettive/, "Company AI distinguishes personal custody from catalog presence");
+
 const teamRoute = await read("app/api/authority/teams/route.ts");
 const onboarding = await read("app/onboarding/page.tsx");
 const resourceLibrary = await read("lib/planning-resources.ts");
