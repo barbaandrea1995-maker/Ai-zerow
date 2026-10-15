@@ -1,6 +1,6 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { assetCustodyLocations, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { canReadAllAssets, rowMatchesContext } from "@/lib/operational-scope";
 import { recordForResponse } from "@/lib/s04-adapter";
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
   const model = bounded(input.model, 100);
   const registration = bounded(input.registration, 40);
   const serialNumber = bounded(input.serialNumber, 120);
-  const location = bounded(input.location, 240);
+  const warehouseId = bounded(input.warehouseId, 160);
   const notes = bounded(input.notes, 2_000);
   const capacityValue = input.capacity === "" || input.capacity === null || input.capacity === undefined ? null : Number(input.capacity);
   const maxPayloadValue = input.maxPayloadKg === "" || input.maxPayloadKg === null || input.maxPayloadKg === undefined ? null : Number(input.maxPayloadKg);
@@ -122,6 +122,20 @@ export async function POST(request: Request) {
     const asset = await assetForTenant(context.tenantId, assetId);
     if (!asset) return Response.json({ error: "asset_not_found" }, { status: 404 });
     if (!(await assetInWriterScope(asset, context))) return Response.json({ error: "asset_scope_forbidden" }, { status: 403 });
+
+    const [warehouse] = warehouseId ? await db.select().from(tenantWarehouses).where(and(
+      eq(tenantWarehouses.tenantId, context.tenantId),
+      eq(tenantWarehouses.id, warehouseId),
+      eq(tenantWarehouses.status, "active"),
+    )).limit(1) : [];
+    if (warehouseId && !warehouse) return Response.json({ error: "asset_warehouse_not_found" }, { status: 400 });
+    const [warehouseLocation] = warehouse ? await db.select().from(geoLocations).where(and(
+      eq(geoLocations.tenantId, context.tenantId),
+      eq(geoLocations.entityType, "MAGAZZINO"),
+      eq(geoLocations.entityId, warehouse.id),
+      eq(geoLocations.status, "ACTIVE"),
+    )).limit(1) : [];
+    if (warehouse && !warehouseLocation) return Response.json({ error: "asset_warehouse_location_not_canonical" }, { status: 409 });
 
     const pairRows = pairedCargoAssetIds.length
       ? await db.select().from(s04Records).where(and(
@@ -180,7 +194,9 @@ export async function POST(request: Request) {
       model,
       registration,
       serialNumber,
-      location,
+      warehouseId: warehouse?.id ?? null,
+      locationId: warehouseLocation?.id ?? null,
+      location: warehouse?.name ?? "",
       capacity: capacityValue,
       notes,
       profileVersion,
@@ -214,7 +230,7 @@ export async function POST(request: Request) {
         aggregateType: "asset",
         aggregateId: asset.id,
         aggregateVersion: profileVersion,
-        payloadJson: JSON.stringify({ entityType, usageMode, transportCapabilities, pairedCargoAssetIds: entityType === "vehicle" ? pairedCargoAssetIds : [], maxPayloadKg: entityType === "vehicle" ? maxPayloadValue : null, profileVersion }),
+        payloadJson: JSON.stringify({ entityType, usageMode, transportCapabilities, pairedCargoAssetIds: entityType === "vehicle" ? pairedCargoAssetIds : [], maxPayloadKg: entityType === "vehicle" ? maxPayloadValue : null, profileVersion, physicalCustody: { status: warehouse ? "AT_WAREHOUSE" : "UNKNOWN", warehouseId: warehouse?.id ?? null, locationId: warehouseLocation?.id ?? null } }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,
@@ -234,9 +250,39 @@ export async function POST(request: Request) {
         detail: "Profilo asset aggiornato dal catalogo server-side con controllo versione.",
         createdAt: now, updatedAt: now,
       }),
+      db.insert(assetCustodyLocations).values({
+        id: `ASSET-CUSTODY-${asset.id}`,
+        tenantId: context.tenantId,
+        assetId: asset.id,
+        warehouseId: warehouse?.id ?? null,
+        locationId: warehouseLocation?.id ?? null,
+        status: warehouse ? "AT_WAREHOUSE" : "UNKNOWN",
+        source: "ASSET_PROFILE",
+        version: 1,
+        effectiveAt: now,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }).onConflictDoUpdate({
+        target: [assetCustodyLocations.tenantId, assetCustodyLocations.assetId],
+        set: {
+          warehouseId: warehouse?.id ?? null,
+          locationId: warehouseLocation?.id ?? null,
+          status: warehouse ? "AT_WAREHOUSE" : "UNKNOWN",
+          source: "ASSET_PROFILE",
+          version: sql`${assetCustodyLocations.version} + 1`,
+          effectiveAt: now,
+          updatedAt: now,
+        },
+      }),
     ]);
     const readback = await assetForTenant(context.tenantId, asset.id);
-    if (!readback || readback.updatedAt !== now || parseJson(readback.payloadJson).profileVersion !== profileVersion) {
+    const [custodyReadback] = await db.select().from(assetCustodyLocations).where(and(
+      eq(assetCustodyLocations.tenantId, context.tenantId),
+      eq(assetCustodyLocations.assetId, asset.id),
+    )).limit(1);
+    if (!readback || readback.updatedAt !== now || parseJson(readback.payloadJson).profileVersion !== profileVersion
+      || !custodyReadback || custodyReadback.warehouseId !== (warehouse?.id ?? null)) {
       return Response.json({ error: "asset_profile_readback_unavailable" }, { status: 503 });
     }
     return Response.json({ asset: recordForResponse(readback), eventId, idempotent: false, readback: "verified" }, { headers: { "cache-control": "private, no-store" } });

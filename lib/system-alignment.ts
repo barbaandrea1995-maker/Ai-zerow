@@ -82,6 +82,15 @@ export type AlignmentLocation = {
   status: string;
 };
 
+export type AlignmentAssetCustody = {
+  id: string;
+  tenantId: string;
+  assetId: string;
+  warehouseId: string | null;
+  locationId: string | null;
+  status: string;
+};
+
 export type AlignmentGeofence = {
   id: string;
   tenantId: string;
@@ -146,6 +155,7 @@ export type AlignmentSnapshot = {
   inventoryMovements: AlignmentTenantScopedRow[];
   qrs: AlignmentQr[];
   locations: AlignmentLocation[];
+  assetCustody: AlignmentAssetCustody[];
   geofences: AlignmentGeofence[];
   routePlans: AlignmentRoutePlan[];
   routeStops: AlignmentRouteStop[];
@@ -199,6 +209,7 @@ type TenantCounts = {
   workflows: number;
   trackingSessions: number;
   companyAiScopes: number;
+  assetCustody: number;
 };
 
 export type TenantAlignmentSummary = {
@@ -336,6 +347,7 @@ function tenantCounts(snapshot: AlignmentSnapshot, tenantId: string): TenantCoun
     workflows: valuesForTenant(snapshot.workflows, tenantId).length,
     trackingSessions: valuesForTenant(snapshot.trackingSessions, tenantId).length,
     companyAiScopes: valuesForTenant(snapshot.companyAiScopes, tenantId).length,
+    assetCustody: valuesForTenant(snapshot.assetCustody, tenantId).length,
   };
 }
 
@@ -344,6 +356,9 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
   const activeTenantIds = activeTenants.map((tenant) => tenant.id);
   const activeLocations = snapshot.locations.filter((row) => upper(row.status) === "ACTIVE");
   const activeGeofences = snapshot.geofences.filter((row) => upper(row.status) === "ACTIVE");
+  const resolvedCustodyKeys = new Set(snapshot.assetCustody
+    .filter((row) => upper(row.status) !== "UNKNOWN" && Boolean(row.warehouseId || row.locationId))
+    .map((row) => `${row.tenantId}:${row.assetId}`));
   const locationKeys = new Set(activeLocations.map((row) => canonicalPlaceKey(row.tenantId, row.entityType, row.entityId)));
   const geofenceLocationKeys = new Set(activeGeofences.map((row) => `${row.tenantId}:${row.locationId}`));
   const qrKeys = new Set(snapshot.qrs.map((row) => qrEntityKey(row.tenantId, row.entityType, row.entityId)));
@@ -375,7 +390,7 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
         || locationKeys.has(canonicalPlaceKey(tenant.id, "MEZZO", row.id));
       const payload = parseObject(row.payloadJson);
       const locationId = typeof payload.locationId === "string" ? payload.locationId : "";
-      return !direct && !locationId;
+      return !direct && !locationId && !resolvedCustodyKeys.has(`${tenant.id}:${row.id}`);
     }).length;
     const companyFields = [
       tenant.legalForm && tenant.legalForm !== "OTHER" ? tenant.legalForm : null,
@@ -484,7 +499,8 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
       const payload = parseObject(row.payloadJson);
       return !locationKeys.has(canonicalPlaceKey(tenant.id, "ASSET", row.id))
         && !locationKeys.has(canonicalPlaceKey(tenant.id, "MEZZO", row.id))
-        && typeof payload.locationId !== "string";
+        && typeof payload.locationId !== "string"
+        && !resolvedCustodyKeys.has(`${tenant.id}:${row.id}`);
     }).map((row) => `${tenant.id}:${row.id}`));
 
   const routePlanKeys = new Set(snapshot.routePlans.map((row) => `${row.tenantId}:${row.id}`));

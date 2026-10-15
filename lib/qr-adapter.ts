@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { qrCodes } from "@/db/schema";
+import { qrCodeAliases, qrCodes } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -70,7 +70,7 @@ export function directoryMatch(entityType: QrEntityType, entityId: string): QrDi
 export function parsePayload(input: string): QrDirectoryMatch | null {
   const value = input.trim();
   const parts = value.split("|");
-  if (parts.length !== 3 || parts[0] !== "AZ1") return null;
+  if (parts.length !== 3 || parts[0].toUpperCase() !== "AZ1") return null;
   const rawType = parts[1].toLowerCase();
   const entityType = rawType === "asset" ? "asset" : rawType === "material" ? "material" : rawType === "warehouse" ? "warehouse" : rawType === "commessa" ? "commessa" : null;
   const entityId = parts[2].trim();
@@ -79,15 +79,20 @@ export function parsePayload(input: string): QrDirectoryMatch | null {
 }
 
 export function inferRawCode(input: string): QrDirectoryMatch | null {
-  const value = input.trim().toUpperCase();
-  if (!value) return null;
-  const canonical = parsePayload(value);
+  const raw = input.trim();
+  if (!raw) return null;
+  // Canonical payload IDs are case-sensitive. Parse before normalizing the
+  // raw shortcut so material codes such as 50x50 are never corrupted.
+  const canonical = parsePayload(raw);
   if (canonical) return canonical;
-  if (/^A-[A-Z0-9-]+$/.test(value)) return directoryMatch("asset", value);
-  if (/^(MAT|SKU)-[A-Z0-9-]+$/.test(value)) return directoryMatch("material", value);
+  const value = raw.toUpperCase();
+  if (/^(A|ASSET|MEZZI)-[A-Z0-9-]+$/.test(value)) return directoryMatch("asset", value);
+  if (/^(MAT|SKU)-[A-Z0-9-]+$/.test(value)) return directoryMatch("material", raw);
   if (/^(REQ|SCAN|WH)-[A-Z0-9-]+$/.test(value)) return directoryMatch("warehouse", value);
-  if (/^(#|OP-|JOB-|COMM-)?[0-9]{3,}$/.test(value)) {
-    return directoryMatch("commessa", value.replace(/^#|^(OP-|JOB-|COMM-)/, ""));
+  if (/^(OP-|JOB-|COMM-)[0-9]{3,}$/.test(value)) return directoryMatch("commessa", value);
+  if (/^#[0-9]{3,}$/.test(value)) return directoryMatch("commessa", value.slice(1));
+  if (/^[0-9]{3,}$/.test(value)) {
+    return directoryMatch("commessa", value);
   }
   return null;
 }
@@ -138,6 +143,16 @@ export async function getQrByPayload(tenantId: string, payload: string) {
     .from(qrCodes)
     .where(and(eq(qrCodes.tenantId, tenantId), eq(qrCodes.payload, payload)))
     .limit(1);
+  return row ?? null;
+}
+
+export async function getQrAlias(tenantId: string, payload: string) {
+  const db = getDb();
+  const [row] = await db.select().from(qrCodeAliases).where(and(
+    eq(qrCodeAliases.tenantId, tenantId),
+    eq(qrCodeAliases.aliasPayload, payload),
+    eq(qrCodeAliases.status, "ACTIVE"),
+  )).limit(1);
   return row ?? null;
 }
 

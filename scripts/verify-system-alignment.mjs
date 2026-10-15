@@ -11,7 +11,7 @@ const targetId = "tenant:operating";
 function snapshot(overrides = {}) {
   return {
     tenants: [], memberships: [], warehouses: [], records: [], journeys: [], inventoryItems: [], inventoryMovements: [],
-    qrs: [], locations: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
+    qrs: [], locations: [], assetCustody: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
     aiLedger: [], documents: [], domainRecords: [], workflows: [], trackingSessions: [], companyAiScopes: [],
     resolverProbe: { rawAssetCodeSupported: true, mixedCaseEntityIdPreserved: true }, truncated: false, ...overrides,
   };

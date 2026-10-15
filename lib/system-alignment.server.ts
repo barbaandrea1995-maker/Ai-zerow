@@ -1,6 +1,7 @@
 import { asc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
+  assetCustodyLocations,
   companyAiJobScopes,
   geoLocations,
   geofences,
@@ -55,7 +56,7 @@ export async function getSystemAlignmentReport() {
   if (tenantIds.length === 0) {
     return buildSystemAlignmentReport({
       tenants: [], memberships: [], warehouses: [], records: [], journeys: [], inventoryItems: [], inventoryMovements: [],
-      qrs: [], locations: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
+      qrs: [], locations: [], assetCustody: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
       aiLedger: [], documents: [], domainRecords: [], workflows: [], trackingSessions: [], companyAiScopes: [], resolverProbe, truncated: false,
     });
   }
@@ -69,6 +70,7 @@ export async function getSystemAlignmentReport() {
     movements,
     qrs,
     locations,
+    custody,
     fences,
     plans,
     stops,
@@ -105,6 +107,8 @@ export async function getSystemAlignmentReport() {
       .from(qrCodes).where(inArray(qrCodes.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ id: geoLocations.id, tenantId: geoLocations.tenantId, entityType: geoLocations.entityType, entityId: geoLocations.entityId, status: geoLocations.status })
       .from(geoLocations).where(inArray(geoLocations.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
+    db.select({ id: assetCustodyLocations.id, tenantId: assetCustodyLocations.tenantId, assetId: assetCustodyLocations.assetId, warehouseId: assetCustodyLocations.warehouseId, locationId: assetCustodyLocations.locationId, status: assetCustodyLocations.status })
+      .from(assetCustodyLocations).where(inArray(assetCustodyLocations.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ id: geofences.id, tenantId: geofences.tenantId, locationId: geofences.locationId, entityType: geofences.entityType, entityId: geofences.entityId, status: geofences.status })
       .from(geofences).where(inArray(geofences.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ id: routePlans.id, tenantId: routePlans.tenantId, missionId: routePlans.missionId, jobId: routePlans.jobId, driverId: routePlans.driverId, vehicleId: routePlans.vehicleId, status: routePlans.status })
@@ -125,7 +129,7 @@ export async function getSystemAlignmentReport() {
     db.select({ tenantId: s05Records.tenantId }).from(s05Records).where(inArray(s05Records.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
   ]);
 
-  const boundedCollections = [memberships, warehouses, records, journeys, inventory, movements, qrs, locations, fences, plans, stops, events, outbox, reconciliations, aiLedger, documents, workflows, tracking, scopes, s05];
+  const boundedCollections = [memberships, warehouses, records, journeys, inventory, movements, qrs, locations, custody, fences, plans, stops, events, outbox, reconciliations, aiLedger, documents, workflows, tracking, scopes, s05];
   const snapshot: AlignmentSnapshot = {
     tenants: tenantRows,
     memberships,
@@ -136,6 +140,7 @@ export async function getSystemAlignmentReport() {
     inventoryMovements: movements,
     qrs,
     locations,
+    assetCustody: custody,
     geofences: fences,
     routePlans: plans,
     routeStops: stops,

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { CheckCircle2, LoaderCircle, Package, Truck, Wrench } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { CheckCircle2, LoaderCircle, MapPin, Package, Truck, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ type AssetProfileDialogProps = {
 
 type EntityType = "asset" | "vehicle" | "equipment";
 type SaveResponse = { error?: string; asset?: AssetProfileRecord; readback?: string };
+type WarehouseOption = { id: string; code: string; name: string; locationLabel: string; status: string };
 
 const usageLabels: Record<AssetUsageMode, { label: string; detail: string }> = {
   OPERATIONAL: { label: "Operativo", detail: "Attività di cantiere e uso interno; non abilita il mezzo alle consegne." },
@@ -43,6 +44,10 @@ const capabilityLabels: Record<TransportCapability, string> = {
 
 function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function selectedType(value: unknown): EntityType {
@@ -79,7 +84,9 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
   const [model, setModel] = useState(() => stringValue(payload.model));
   const [registration, setRegistration] = useState(() => stringValue(payload.registration));
   const [serialNumber, setSerialNumber] = useState(() => stringValue(payload.serialNumber));
-  const [location, setLocation] = useState(() => stringValue(payload.location));
+  const [warehouseId, setWarehouseId] = useState(() => stringValue(objectValue(payload.physicalCustody).warehouseId || payload.warehouseId));
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [warehousesBusy, setWarehousesBusy] = useState(true);
   const [capacity, setCapacity] = useState(() => payload.capacity === undefined || payload.capacity === null ? "" : String(payload.capacity));
   const [maxPayloadKg, setMaxPayloadKg] = useState(() => payload.maxPayloadKg === undefined || payload.maxPayloadKg === null ? "" : String(payload.maxPayloadKg));
   const [weightKg, setWeightKg] = useState(() => payload.weightKg === undefined || payload.weightKg === null ? "" : String(payload.weightKg));
@@ -88,6 +95,19 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
   const [notes, setNotes] = useState(() => stringValue(payload.notes));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/authority/warehouses", { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json() as { warehouses?: WarehouseOption[]; error?: string };
+        if (!response.ok) throw new Error(result.error ?? "warehouse_readback_unavailable");
+        if (active) setWarehouses((result.warehouses ?? []).filter((warehouse) => warehouse.status === "active"));
+      })
+      .catch(() => { if (active) setError("Il catalogo ubicazioni server-side non è disponibile. Riprova prima di salvare."); })
+      .finally(() => { if (active) setWarehousesBusy(false); });
+    return () => { active = false; };
+  }, []);
 
   function toggleCapability(capability: TransportCapability) {
     setTransportCapabilities((current) => current.includes(capability)
@@ -116,7 +136,7 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
           model,
           registration,
           serialNumber,
-          location,
+          warehouseId,
           capacity,
           maxPayloadKg: entityType === "vehicle" ? maxPayloadKg : "",
           weightKg: entityType === "vehicle" ? "" : weightKg,
@@ -137,6 +157,8 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
         forbidden: "Il tuo ruolo non può modificare questa risorsa.",
         asset_scope_forbidden: "La risorsa è fuori dal tuo perimetro operativo.",
         transport_capability_required: "Seleziona almeno un tipo di trasporto consentito.",
+        asset_warehouse_not_found: "Il magazzino selezionato non è più attivo.",
+        asset_warehouse_location_not_canonical: "Il magazzino non ha ancora un luogo server-side verificato.",
       };
       setError(messages[code] ?? "Modifica non salvata. Verifica i dati e riprova.");
     } finally {
@@ -173,12 +195,12 @@ function AssetProfileForm({ asset, assets, onOpenChange, onSaved, onNotice }: Om
           <label className="text-xs text-slate-400">Modello<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={100} onChange={(event) => setModel(event.target.value)} value={model} /></label>
           <label className="text-xs text-slate-400">Targa / identificativo<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={40} onChange={(event) => setRegistration(event.target.value)} value={registration} /></label>
           <label className="text-xs text-slate-400">Numero seriale<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={120} onChange={(event) => setSerialNumber(event.target.value)} value={serialNumber} /></label>
-          <label className="text-xs text-slate-400">Ubicazione<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={240} onChange={(event) => setLocation(event.target.value)} value={location} /></label>
+          <label className="text-xs text-slate-400">Ubicazione fisica · registro server-side<span className="relative mt-2 block"><MapPin className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-cyan-200/70" /><select className="h-11 w-full rounded-xl border border-white/10 bg-black/30 pl-10 pr-3 text-sm text-slate-100" disabled={warehousesBusy} onChange={(event) => setWarehouseId(event.target.value)} value={warehouseId}><option value="">Ubicazione da definire</option>{warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name} · {warehouse.locationLabel}</option>)}</select></span><span className="mt-1 block text-[9px] leading-4 text-slate-600">La posizione fisica è separata da affidamento personale, autista e missione.</span></label>
           <label className="text-xs text-slate-400">Capacità nominale catalogo<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0" onChange={(event) => setCapacity(event.target.value)} step="0.01" type="number" value={capacity} /></label>
         </div>
         {entityType === "vehicle" ? <section className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.03] p-3"><label className="block text-xs text-slate-400">Portata utile massima (kg)<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0.01" onChange={(event) => setMaxPayloadKg(event.target.value)} placeholder="Dato tecnico del mezzo" step="0.01" type="number" value={maxPayloadKg} /></label><p className="mt-2 text-[9px] leading-4 text-slate-600">Separata dalla capacità generica. Se censita, il server controlla il peso totale del carico prima di registrare la missione.</p><div className="mt-3"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100/75">ASSET ABBINATI AL MEZZO</p><p className="mt-1 text-[9px] leading-4 text-slate-600">Collega qui l’attrezzatura che viaggia stabilmente con questo veicolo; in missione verrà proposta automaticamente, senza confondere la custodia personale.</p><div className="mt-2 max-h-44 space-y-1 overflow-y-auto">{pairOptions.length ? pairOptions.map((candidate) => { const checked = pairedCargoAssetIds.includes(candidate.id); const name = stringValue(candidate.payload?.title || candidate.payload?.description, candidate.detail || candidate.title); const modelLabel = [stringValue(candidate.payload?.brand), stringValue(candidate.payload?.model), stringValue(candidate.payload?.registration)].filter(Boolean).join(" · "); const disabled = candidate.payload?.transportable === false && !checked; return <label className="flex items-start gap-2 rounded-lg border border-white/[.07] bg-black/20 p-2.5 text-[10px] text-slate-300" key={candidate.id}><input checked={checked} className="mt-0.5 size-3.5 accent-lime-300" disabled={disabled} onChange={(event) => setPairedCargoAssetIds((current) => event.target.checked ? [...new Set([...current, candidate.id])] : current.filter((id) => id !== candidate.id))} type="checkbox" /><span className="min-w-0"><span className="block font-semibold text-slate-200">{name}</span><span className="mt-0.5 block text-[9px] text-slate-600">{[candidate.canonicalCode || candidate.id, modelLabel].filter(Boolean).join(" · ")}{candidate.payload?.transportable === false ? " · non trasportabile" : ""}</span></span></label>; }) : <p className="rounded-lg border border-dashed border-white/10 p-3 text-[10px] text-slate-600">Nessun asset trasportabile nel catalogo.</p>}</div></div></section> : <section className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.03] p-3"><label className="flex items-start gap-2 text-xs text-slate-300"><input checked={transportable} className="mt-0.5 size-4 accent-lime-300" onChange={(event) => setTransportable(event.target.checked)} type="checkbox" /><span><span className="block font-semibold">Trasportabile come carico</span><span className="mt-1 block text-[9px] leading-4 text-slate-600">Esclude questa risorsa dal manifesto quando non è un bene fisico trasportabile.</span></span></label><label className="mt-3 block text-xs text-slate-400">Peso dell’asset (kg)<Input className="mt-2 border-white/10 bg-black/30 text-slate-100" min="0.01" onChange={(event) => setWeightKg(event.target.value)} placeholder="Opzionale, da scheda tecnica" step="0.01" type="number" value={weightKg} /></label></section>}
         <label className="block text-xs text-slate-400">Note<Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={2000} onChange={(event) => setNotes(event.target.value)} value={notes} /></label>
         {error && <p className="rounded-xl border border-rose-300/20 bg-rose-300/[.05] p-3 text-[10px] leading-5 text-rose-100">{error}</p>}
-        <DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 font-semibold text-[#050705] hover:bg-lime-200" disabled={saving || !asset} type="submit">{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}Salva modifiche</Button></DialogFooter>
+        <DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 font-semibold text-[#050705] hover:bg-lime-200" disabled={saving || warehousesBusy || !asset} type="submit">{saving || warehousesBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}Salva modifiche</Button></DialogFooter>
   </form>;
 }

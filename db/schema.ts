@@ -785,3 +785,90 @@ export const locationAccessAudit = sqliteTable("location_access_audit", {
   tenantCreatedIdx: index("location_access_audit_tenant_created_idx").on(table.tenantId, table.createdAt),
   tenantActorIdx: index("location_access_audit_tenant_actor_created_idx").on(table.tenantId, table.actorId, table.createdAt),
 }));
+
+/**
+ * Current physical custody for an asset. This registry deliberately keeps
+ * physical position separate from personal assignment, driver duty and
+ * mission cargo: those concepts have different lifecycles and authorities.
+ * Changes are mirrored in S06, so this row can stay the current read model.
+ */
+export const assetCustodyLocations = sqliteTable("asset_custody_locations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  assetId: text("asset_id").notNull(),
+  warehouseId: text("warehouse_id").references(() => tenantWarehouses.id),
+  locationId: text("location_id"),
+  status: text("status").notNull().default("UNKNOWN"),
+  source: text("source").notNull().default("ASSET_PROFILE"),
+  version: integer("version").notNull().default(1),
+  effectiveAt: text("effective_at").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantAssetUnique: uniqueIndex("asset_custody_locations_tenant_asset_uq").on(table.tenantId, table.assetId),
+  tenantWarehouseStatusIdx: index("asset_custody_locations_tenant_warehouse_status_idx").on(table.tenantId, table.warehouseId, table.status, table.updatedAt),
+}));
+
+/** One approved tenant reconciliation is a durable, idempotent operation. */
+export const tenantAlignmentRuns = sqliteTable("tenant_alignment_runs", {
+  id: text("id").primaryKey(),
+  sourceTenantId: text("source_tenant_id").notNull().references(() => tenants.id),
+  targetTenantId: text("target_tenant_id").notNull().references(() => tenants.id),
+  contractVersion: text("contract_version").notNull(),
+  manifestHash: text("manifest_hash").notNull(),
+  status: text("status").notNull().default("APPROVED"),
+  dryRunJson: text("dry_run_json").notNull().default("{}"),
+  resultJson: text("result_json").notNull().default("{}"),
+  approvedBy: text("approved_by").notNull(),
+  approvalSource: text("approval_source").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text("completed_at"),
+}, (table) => ({
+  sourceTargetContractUnique: uniqueIndex("tenant_alignment_runs_source_target_contract_uq").on(table.sourceTenantId, table.targetTenantId, table.contractVersion),
+  targetStatusIdx: index("tenant_alignment_runs_target_status_idx").on(table.targetTenantId, table.status, table.updatedAt),
+}));
+
+/**
+ * Provenance map for every copied, matched, suppressed or aliased record.
+ * Source rows are retained, making rollback a status change rather than a
+ * reconstruction from lossy transformed data.
+ */
+export const tenantAlignmentLinks = sqliteTable("tenant_alignment_links", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull().references(() => tenantAlignmentRuns.id),
+  sourceTenantId: text("source_tenant_id").notNull().references(() => tenants.id),
+  sourceRegistry: text("source_registry").notNull(),
+  sourceId: text("source_id").notNull(),
+  targetTenantId: text("target_tenant_id").notNull().references(() => tenants.id),
+  targetRegistry: text("target_registry").notNull(),
+  targetId: text("target_id"),
+  resolution: text("resolution").notNull(),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  sourceUnique: uniqueIndex("tenant_alignment_links_source_uq").on(table.sourceTenantId, table.sourceRegistry, table.sourceId),
+  runIdx: index("tenant_alignment_links_run_idx").on(table.runId, table.sourceRegistry),
+  targetIdx: index("tenant_alignment_links_target_idx").on(table.targetTenantId, table.targetRegistry, table.targetId),
+}));
+
+/**
+ * Historical or erroneous labels resolve to one canonical QR payload without
+ * duplicating the target registry row or changing case-sensitive entity IDs.
+ */
+export const qrCodeAliases = sqliteTable("qr_code_aliases", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id),
+  aliasPayload: text("alias_payload").notNull(),
+  canonicalPayload: text("canonical_payload").notNull(),
+  sourceTenantId: text("source_tenant_id"),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("ACTIVE"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantAliasUnique: uniqueIndex("qr_code_aliases_tenant_alias_uq").on(table.tenantId, table.aliasPayload),
+  tenantCanonicalIdx: index("qr_code_aliases_tenant_canonical_idx").on(table.tenantId, table.canonicalPayload, table.status),
+}));

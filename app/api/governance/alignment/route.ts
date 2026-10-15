@@ -1,10 +1,14 @@
 import {
-  SITES_TENANT_ID,
   getAuthorityContext,
   getSitesAuthorityContext,
   hasCapability,
 } from "@/lib/authority-context";
 import { getSystemAlignmentReport } from "@/lib/system-alignment.server";
+import {
+  TENANT_ALIGNMENT_ACTORS,
+  TENANT_ALIGNMENT_SOURCE_ID,
+  TENANT_ALIGNMENT_TARGET_ID,
+} from "@/lib/tenant-alignment-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +21,9 @@ export async function GET() {
   if (!hasCapability(context, "governance.read") || !hasCapability(context, "tenant.manage")) {
     return Response.json({ error: "forbidden", capability: "tenant.manage" }, { status: 403 });
   }
-  const ownsSiteRoot = sitesContext?.tenantId === SITES_TENANT_ID
+  const ownsSiteRoot = sitesContext?.identityProvider === "sites"
+    && sitesContext.actorId === TENANT_ALIGNMENT_ACTORS.sitesOwner
+    && [TENANT_ALIGNMENT_SOURCE_ID, TENANT_ALIGNMENT_TARGET_ID].includes(sitesContext.tenantId as typeof TENANT_ALIGNMENT_SOURCE_ID | typeof TENANT_ALIGNMENT_TARGET_ID)
     && sitesContext.roles.includes("owner")
     && hasCapability(sitesContext, "tenant.manage");
   if (!ownsSiteRoot) {

@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { qrCodes, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { assetCustodyLocations, qrCodes, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
 import {
   adapterError,
   assertS04Tenant,
@@ -58,6 +58,54 @@ async function scopedReadModel(
   return rows.filter((row) => rowMatchesContext(row, context, scopeTokens));
 }
 
+async function responseRecords(
+  context: NonNullable<Awaited<ReturnType<typeof getS04Context>>>,
+  moduleKey: S04Module,
+  rows: Awaited<ReturnType<typeof scopedReadModel>>,
+) {
+  const records = rows.map(recordForResponse);
+  if (moduleKey !== "assets" || rows.length === 0) return records;
+  const db = getDb();
+  const custodyRows = await db.select().from(assetCustodyLocations).where(and(
+    eq(assetCustodyLocations.tenantId, context.tenantId),
+    inArray(assetCustodyLocations.assetId, rows.map((row) => row.id)),
+  ));
+  const warehouseIds = [...new Set(custodyRows.map((row) => row.warehouseId).filter((value): value is string => Boolean(value)))];
+  const warehouseRows = warehouseIds.length
+    ? await db.select().from(tenantWarehouses).where(and(eq(tenantWarehouses.tenantId, context.tenantId), inArray(tenantWarehouses.id, warehouseIds)))
+    : [];
+  const custodyByAsset = new Map(custodyRows.map((row) => [row.assetId, row] as const));
+  const warehouseById = new Map(warehouseRows.map((row) => [row.id, row] as const));
+  return records.map((record) => {
+    const custody = custodyByAsset.get(record.id);
+    const warehouse = custody?.warehouseId ? warehouseById.get(custody.warehouseId) : null;
+    if (!custody) return record;
+    const physicalCustody = {
+      id: custody.id,
+      status: custody.status,
+      warehouseId: custody.warehouseId,
+      locationId: custody.locationId,
+      warehouseCode: warehouse?.code ?? null,
+      warehouseName: warehouse?.name ?? null,
+      locationLabel: warehouse?.locationLabel ?? null,
+      source: custody.source,
+      version: custody.version,
+      effectiveAt: custody.effectiveAt,
+      updatedAt: custody.updatedAt,
+    };
+    return {
+      ...record,
+      payload: {
+        ...record.payload,
+        physicalCustody,
+        warehouseId: custody.warehouseId,
+        locationId: custody.locationId,
+        location: warehouse?.name ?? "Ubicazione da definire",
+      },
+    };
+  });
+}
+
 export async function GET(_request: Request, routeContext: RouteContext) {
   const moduleKey = await resolveModule(routeContext);
   if (!moduleKey) return invalidModuleResponse();
@@ -68,7 +116,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
 
   try {
     const rows = await scopedReadModel(context!, moduleKey);
-    return Response.json(s04Envelope(context!, moduleKey, rows.map(recordForResponse)), {
+    return Response.json(s04Envelope(context!, moduleKey, await responseRecords(context!, moduleKey, rows)), {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
@@ -176,7 +224,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (!existingRecord) return Response.json({ error: "s04_idempotency_readback_unavailable" }, { status: 503 });
       const records = await scopedReadModel(context!, moduleKey);
       return Response.json({
-        ...s04Envelope(context!, moduleKey, records.map(recordForResponse)),
+        ...s04Envelope(context!, moduleKey, await responseRecords(context!, moduleKey, records)),
         created: recordForResponse(existingRecord),
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
@@ -311,7 +359,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
     const records = await scopedReadModel(context!, moduleKey);
     return Response.json({
-      ...s04Envelope(context!, moduleKey, records.map(recordForResponse)),
+      ...s04Envelope(context!, moduleKey, await responseRecords(context!, moduleKey, records)),
       created: recordForResponse(row),
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });

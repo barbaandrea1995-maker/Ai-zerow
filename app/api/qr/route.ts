@@ -4,6 +4,7 @@ import { inventoryItems, qrCodes, s04Records } from "@/db/schema";
 import {
   canonicalPayload,
   directoryMatch,
+  getQrAlias,
   getQrByPayload,
   getQrContext,
   getQrReadModel,
@@ -38,8 +39,10 @@ export async function GET(request: Request) {
       });
     }
 
-    const storedDirect = await getQrByPayload(context!.tenantId, code);
-    const match = inferRawCode(code) ?? (storedDirect ? directoryMatch(
+    const alias = await getQrAlias(context!.tenantId, code);
+    const resolvedInput = alias?.canonicalPayload ?? code;
+    const storedDirect = await getQrByPayload(context!.tenantId, resolvedInput);
+    const match = inferRawCode(resolvedInput) ?? (storedDirect ? directoryMatch(
       storedDirect.entityType as QrEntityType,
       storedDirect.entityId,
     ) : null);
@@ -69,8 +72,9 @@ export async function GET(request: Request) {
         ...(asset ? { title: asset.title, detail: asset.detail } : {}),
         ...(material ? { title: material.name, detail: `${material.sku} · ${material.location}` } : {}),
         canonicalPayload: canonical,
-        source: stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : material ? "sites-inventory-readback" : "sites-directory-fallback",
+        source: alias ? "sites-d1-alias" : stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : material ? "sites-inventory-readback" : "sites-directory-fallback",
       },
+      alias: alias ? { payload: alias.aliasPayload, canonicalPayload: alias.canonicalPayload, reason: alias.reason } : null,
       record: stored ? qrRecordForResponse(stored) : null,
       asset: asset ? { id: asset.id, canonicalCode: asset.canonicalCode, title: asset.title, detail: asset.detail } : null,
       material: material ? { id: material.id, sku: material.sku, name: material.name, unit: material.unit, location: material.location, warehouseId: material.warehouseId } : null,
@@ -95,7 +99,7 @@ export async function POST(request: Request) {
   }
 
   const entityTypeValue = typeof payload.entityType === "string" ? payload.entityType.trim().toLowerCase() : "";
-  const entityId = typeof payload.entityId === "string" ? payload.entityId.trim().toUpperCase() : "";
+  const entityId = typeof payload.entityId === "string" ? payload.entityId.trim() : "";
   const formatValue = typeof payload.format === "string" ? payload.format.trim().toUpperCase() : "QR";
   const entityType: QrEntityType = isQrEntityType(entityTypeValue) ? entityTypeValue : "asset";
   const format: QrFormat = isQrFormat(formatValue) ? formatValue : "QR";
@@ -103,7 +107,7 @@ export async function POST(request: Request) {
   if (!isQrEntityType(entityTypeValue)) {
     return Response.json({ error: "entity_type_must_be_asset_material_warehouse_or_commessa" }, { status: 400 });
   }
-  if (!/^[A-Z0-9_:#-]{1,80}$/.test(entityId)) {
+  if (!/^[A-Za-z0-9_:#-]{1,80}$/.test(entityId)) {
     return Response.json({ error: "entity_id_invalid" }, { status: 400 });
   }
   if (typeof payload.label === "string" && payload.label.trim().length > 120) {
