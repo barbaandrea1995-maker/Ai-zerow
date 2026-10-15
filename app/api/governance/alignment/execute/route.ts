@@ -83,7 +83,11 @@ export async function POST(request: Request) {
     if (error instanceof TenantAlignmentBlockedError) {
       return Response.json({ error: "tenant_alignment_blocked", dryRun: error.dryRun }, { status: 409 });
     }
-    console.error("tenant_alignment_execution_failed", error);
-    return Response.json({ error: "tenant_alignment_execution_failed" }, { status: 503 });
+    const diagnostic = error instanceof Error ? error.message.slice(0, 1_000) : "unknown_error";
+    console.error(diagnostic, error);
+    return Response.json({
+      error: "tenant_alignment_execution_failed",
+      ...(checked.service ? { diagnostic } : {}),
+    }, { status: 503 });
   }
 }
