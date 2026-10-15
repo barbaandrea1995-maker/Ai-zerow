@@ -362,7 +362,7 @@ function validateState(state: AlignmentState, manifestHash: string) {
   if (!sourceScope || sourceScope.updatedAt !== TENANT_ALIGNMENT_EXPECTED_UPDATED_AT.sourceCompanyAiScope) blockers.push("source_company_ai_scope_changed_or_missing");
   const sourcePreference = state.sourcePreferenceRows[0];
   if (!sourcePreference || sourcePreference.updatedAt !== TENANT_ALIGNMENT_EXPECTED_UPDATED_AT.sourceDashboardPreference) blockers.push("source_dashboard_preference_changed_or_missing");
-  if (state.targetPreferenceRows.length) warnings.push("target_dashboard_preference_already_present_source_layout_will_not_overwrite");
+  if (state.targetPreferenceRows.length && !completedRun) warnings.push("target_dashboard_preference_already_present_source_layout_will_not_overwrite");
 
   const sourceWrongQr = one(state.qrRows, (row) => row.id === TENANT_ALIGNMENT_IDS.sourceWrongQr);
   const targetChiusiniQr = one(state.qrRows, (row) => row.id === TENANT_ALIGNMENT_IDS.targetChiusiniQr);
@@ -409,6 +409,9 @@ export async function getTenantAlignmentDryRun(): Promise<TenantAlignmentDryRun>
   await ensureTenantAlignmentSchema();
   const [state, manifestHash] = await Promise.all([readAlignmentState(), tenantAlignmentManifestHash()]);
   const { blockers, warnings, completedRun } = validateState(state, manifestHash);
+  const preferenceWasCopied = completedRun
+    ? state.linkRows.some((link) => link.sourceId === TENANT_ALIGNMENT_IDS.sourceDashboardPreference && link.resolution === "COPY_IF_TARGET_EMPTY")
+    : state.targetPreferenceRows.length === 0;
   return {
     contractVersion: TENANT_ALIGNMENT_CONTRACT_VERSION,
     runId: TENANT_ALIGNMENT_RUN_ID,
@@ -429,7 +432,7 @@ export async function getTenantAlignmentDryRun(): Promise<TenantAlignmentDryRun>
     },
     expectedResult: {
       activeTenantRoots: 1,
-      clonedRecords: state.targetPreferenceRows.length ? 9 : 10,
+      clonedRecords: preferenceWasCopied ? 10 : 9,
       matchedRecords: 4,
       provenanceLinks: 16,
       canonicalAssetCustodyRows: 3,

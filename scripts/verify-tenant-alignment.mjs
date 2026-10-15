@@ -48,6 +48,7 @@ assert(executor.includes('status: "archived"'), "source tenant must be archived"
 assert(executor.includes('status: "removed"'), "source memberships must be removed from authority");
 assert(!/db\.delete\s*\(/.test(executor), "alignment must not delete source rows");
 assert(executor.includes("TARGET_PREFERENCE_PRESERVED"), "target preference must win when already present");
+assert(executor.includes("preferenceWasCopied"), "applied readback must retain the actual preference collision result");
 assert(executor.includes("MATCH_PERSON_ROLE_NOT_UNIONED"), "identity link must preserve role separation");
 
 const qrAdapter = await fs.readFile(path.join(root, "lib", "qr-adapter.ts"), "utf8");
