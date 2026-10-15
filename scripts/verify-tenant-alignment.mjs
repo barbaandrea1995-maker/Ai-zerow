@@ -41,6 +41,8 @@ assert(!/^\s*(INSERT|UPDATE|DELETE)\b/im.test(migration), "migration must remain
 
 const executor = await fs.readFile(path.join(root, "lib", "tenant-alignment-executor.server.ts"), "utf8");
 assert(executor.includes("db.batch"), "executor must use one D1 batch");
+assert(executor.includes("CREATE TABLE IF NOT EXISTS tenant_alignment_runs"), "runtime must bootstrap additive alignment registries when Sites has not applied D1 migrations");
+assert(executor.includes("await ensureTenantAlignmentSchema()"), "dry-run and execution must install the bounded additive schema first");
 assert(executor.includes('status: "archived"'), "source tenant must be archived");
 assert(executor.includes('status: "removed"'), "source memberships must be removed from authority");
 assert(!/db\.delete\s*\(/.test(executor), "alignment must not delete source rows");
@@ -77,6 +79,7 @@ console.log(JSON.stringify({
     "immutable_manifest",
     "exact_approval_envelope",
     "schema_only_migration",
+    "bounded_runtime_schema_bootstrap",
     "single_batch_executor",
     "logical_rollback",
     "role_separation",

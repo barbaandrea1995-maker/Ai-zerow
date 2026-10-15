@@ -52,7 +52,8 @@ export async function GET(request: Request) {
     return Response.json({ ...dryRun, authority: checked.service ? "owner-private-service-boundary" : "sites-owner" }, {
       headers: { "cache-control": "private, no-store" },
     });
-  } catch {
+  } catch (error) {
+    console.error("tenant_alignment_dry_run_failed", error);
     return Response.json({ error: "tenant_alignment_dry_run_unavailable" }, { status: 503 });
   }
 }
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
     if (error instanceof TenantAlignmentBlockedError) {
       return Response.json({ error: "tenant_alignment_blocked", dryRun: error.dryRun }, { status: 409 });
     }
+    console.error("tenant_alignment_execution_failed", error);
     return Response.json({ error: "tenant_alignment_execution_failed" }, { status: 503 });
   }
 }

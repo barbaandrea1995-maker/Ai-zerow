@@ -94,6 +94,89 @@ const WRONG_QR_PAYLOAD = "AZ1|WAREHOUSE|CHIUS-GHIS-50X50" as const;
 const CANONICAL_CHIUSINI_QR = "AZ1|MATERIAL|CHIUS-GHIS-50x50" as const;
 const PLANNED_WRITE_GROUPS = 23;
 
+// Sites deploys the Worker artifact independently from D1. Keep this bounded
+// bootstrap next to the immutable alignment executor so a newly published
+// version can install its additive registry tables before the first dry-run.
+// Every statement is idempotent and no business row is inserted or changed.
+const TENANT_ALIGNMENT_SCHEMA_DDL = [
+  `CREATE TABLE IF NOT EXISTS tenant_alignment_runs (
+    id text PRIMARY KEY NOT NULL,
+    source_tenant_id text NOT NULL,
+    target_tenant_id text NOT NULL,
+    contract_version text NOT NULL,
+    manifest_hash text NOT NULL,
+    status text DEFAULT 'APPROVED' NOT NULL,
+    dry_run_json text DEFAULT '{}' NOT NULL,
+    result_json text DEFAULT '{}' NOT NULL,
+    approved_by text NOT NULL,
+    approval_source text NOT NULL,
+    created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at text,
+    FOREIGN KEY (source_tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action,
+    FOREIGN KEY (target_tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS tenant_alignment_runs_source_target_contract_uq ON tenant_alignment_runs (source_tenant_id, target_tenant_id, contract_version)",
+  "CREATE INDEX IF NOT EXISTS tenant_alignment_runs_target_status_idx ON tenant_alignment_runs (target_tenant_id, status, updated_at)",
+  `CREATE TABLE IF NOT EXISTS tenant_alignment_links (
+    id text PRIMARY KEY NOT NULL,
+    run_id text NOT NULL,
+    source_tenant_id text NOT NULL,
+    source_registry text NOT NULL,
+    source_id text NOT NULL,
+    target_tenant_id text NOT NULL,
+    target_registry text NOT NULL,
+    target_id text,
+    resolution text NOT NULL,
+    metadata_json text DEFAULT '{}' NOT NULL,
+    created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES tenant_alignment_runs(id) ON UPDATE no action ON DELETE no action,
+    FOREIGN KEY (source_tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action,
+    FOREIGN KEY (target_tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS tenant_alignment_links_source_uq ON tenant_alignment_links (source_tenant_id, source_registry, source_id)",
+  "CREATE INDEX IF NOT EXISTS tenant_alignment_links_run_idx ON tenant_alignment_links (run_id, source_registry)",
+  "CREATE INDEX IF NOT EXISTS tenant_alignment_links_target_idx ON tenant_alignment_links (target_tenant_id, target_registry, target_id)",
+  `CREATE TABLE IF NOT EXISTS asset_custody_locations (
+    id text PRIMARY KEY NOT NULL,
+    tenant_id text NOT NULL,
+    asset_id text NOT NULL,
+    warehouse_id text,
+    location_id text,
+    status text DEFAULT 'UNKNOWN' NOT NULL,
+    source text DEFAULT 'ASSET_PROFILE' NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    effective_at text NOT NULL,
+    created_by text NOT NULL,
+    created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action,
+    FOREIGN KEY (warehouse_id) REFERENCES tenant_warehouses(id) ON UPDATE no action ON DELETE no action
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS asset_custody_locations_tenant_asset_uq ON asset_custody_locations (tenant_id, asset_id)",
+  "CREATE INDEX IF NOT EXISTS asset_custody_locations_tenant_warehouse_status_idx ON asset_custody_locations (tenant_id, warehouse_id, status, updated_at)",
+  `CREATE TABLE IF NOT EXISTS qr_code_aliases (
+    id text PRIMARY KEY NOT NULL,
+    tenant_id text NOT NULL,
+    alias_payload text NOT NULL,
+    canonical_payload text NOT NULL,
+    source_tenant_id text,
+    reason text NOT NULL,
+    status text DEFAULT 'ACTIVE' NOT NULL,
+    created_by text NOT NULL,
+    created_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON UPDATE no action ON DELETE no action
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS qr_code_aliases_tenant_alias_uq ON qr_code_aliases (tenant_id, alias_payload)",
+  "CREATE INDEX IF NOT EXISTS qr_code_aliases_tenant_canonical_idx ON qr_code_aliases (tenant_id, canonical_payload, status)",
+] as const;
+
+async function ensureTenantAlignmentSchema() {
+  const db = getDb();
+  await db.$client.batch(TENANT_ALIGNMENT_SCHEMA_DDL.map((statement) => db.$client.prepare(statement)));
+}
+
 function parseObject(value: string): JsonObject {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -323,6 +406,7 @@ function validateState(state: AlignmentState, manifestHash: string) {
 }
 
 export async function getTenantAlignmentDryRun(): Promise<TenantAlignmentDryRun> {
+  await ensureTenantAlignmentSchema();
   const [state, manifestHash] = await Promise.all([readAlignmentState(), tenantAlignmentManifestHash()]);
   const { blockers, warnings, completedRun } = validateState(state, manifestHash);
   return {
@@ -425,6 +509,7 @@ function executionReadback(state: AlignmentState, manifestHash: string, idempote
 }
 
 export async function executeTenantAlignment(approvedBy: string = TENANT_ALIGNMENT_ACTORS.sitesOwner): Promise<TenantAlignmentExecutionResult> {
+  await ensureTenantAlignmentSchema();
   const [before, manifestHash] = await Promise.all([readAlignmentState(), tenantAlignmentManifestHash()]);
   const validation = validateState(before, manifestHash);
   if (validation.completedRun && validation.blockers.length === 0) return executionReadback(before, manifestHash, true);
