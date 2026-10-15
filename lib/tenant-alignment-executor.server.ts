@@ -759,7 +759,7 @@ export async function executeTenantAlignment(approvedBy: string = TENANT_ALIGNME
       updatedAt: now,
       completedAt: now,
     }).onConflictDoNothing(),
-    db.insert(tenantAlignmentLinks).values(links).onConflictDoNothing(),
+    ...links.map((link) => db.insert(tenantAlignmentLinks).values(link).onConflictDoNothing()),
     db.insert(s06Events).values({
       eventId: TENANT_ALIGNMENT_IDS.event,
       tenantId: TENANT_ALIGNMENT_TARGET_ID,

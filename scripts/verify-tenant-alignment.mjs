@@ -41,6 +41,7 @@ assert(!/^\s*(INSERT|UPDATE|DELETE)\b/im.test(migration), "migration must remain
 
 const executor = await fs.readFile(path.join(root, "lib", "tenant-alignment-executor.server.ts"), "utf8");
 assert(executor.includes("db.batch"), "executor must use one D1 batch");
+assert(executor.includes("...links.map((link)"), "provenance links must stay below the D1 per-statement variable ceiling");
 assert(executor.includes("CREATE TABLE IF NOT EXISTS tenant_alignment_runs"), "runtime must bootstrap additive alignment registries when Sites has not applied D1 migrations");
 assert(executor.includes("await ensureTenantAlignmentSchema()"), "dry-run and execution must install the bounded additive schema first");
 assert(executor.includes('status: "archived"'), "source tenant must be archived");
