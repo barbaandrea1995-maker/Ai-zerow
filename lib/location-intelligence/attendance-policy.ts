@@ -152,9 +152,17 @@ async function resolveAttachment({
 export async function resolveAttendanceOperationalContext({
   context,
   job,
+  preferredMissionId,
 }: {
   context: AuthorityContext;
   job: JobRow;
+  /**
+   * The mission captured when the attendance session opened. It lets
+   * check-out close the same tracking session after the mission advances to
+   * DELIVERED/POD_VERIFIED/RECONCILED/CLOSED, without making terminal
+   * missions eligible for a brand-new driver check-in.
+   */
+  preferredMissionId?: string;
 }): Promise<AttendanceOperationalContext> {
   const tenantId = context.tenantId;
   const jobFence = await jobGeofence(tenantId, job);
@@ -172,9 +180,12 @@ export async function resolveAttendanceOperationalContext({
     eq(jobJourneyRecords.jobId, job.id),
     eq(jobJourneyRecords.domain, "mission"),
     eq(jobJourneyRecords.recordType, "TRANSPORT"),
-    inArray(jobJourneyRecords.status, ["PLANNED", "DISPATCHED"]),
+    ...(preferredMissionId
+      ? [eq(jobJourneyRecords.id, preferredMissionId)]
+      : [inArray(jobJourneyRecords.status, ["PLANNED", "DISPATCHED"])]),
   )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(100);
-  const missionMatch = missionRows.map((row) => ({ row, payload: parseJsonObject(row.payloadJson) })).find(({ payload: missionPayload }) => {
+  const missionMatch = missionRows.map((row) => ({ row, payload: parseJsonObject(row.payloadJson) })).find(({ row, payload: missionPayload }) => {
+    if (preferredMissionId && row.id !== preferredMissionId) return false;
     const assignedDriverId = stringValue(missionPayload.driverId);
     const assignedActorId = stringValue(missionPayload.driverActorId);
     return Boolean(assignedDriverId && (assignedDriverId === driverId || assignedDriverId === context.actorId))

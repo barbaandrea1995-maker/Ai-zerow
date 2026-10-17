@@ -1,6 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { inventoryItems, qrCodes, s04Records } from "@/db/schema";
+import { inventoryItems, qrCodes, s04Records, tenantWarehouses } from "@/db/schema";
+import { parseJobPayload } from "@/lib/operations-contract";
 import {
   canonicalPayload,
   directoryMatch,
@@ -15,6 +16,7 @@ import {
   qrAdapterError,
   qrEnvelope,
   qrRecordForResponse,
+  type QrDirectoryMatch,
   type QrEntityType,
   type QrFormat,
 } from "@/lib/qr-adapter";
@@ -23,6 +25,79 @@ export const dynamic = "force-dynamic";
 
 function invalidBody() {
   return Response.json({ error: "invalid_json" }, { status: 400 });
+}
+
+function objectPayload(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function payloadText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function resolveCatalogEntity(
+  tenantId: string,
+  entityType: QrEntityType,
+  entityId: string,
+): Promise<QrDirectoryMatch | null> {
+  const db = getDb();
+  if (entityType === "asset" || entityType === "commessa") {
+    const moduleKey = entityType === "asset" ? "assets" : "operations";
+    const [record] = await db.select().from(s04Records).where(and(
+      eq(s04Records.tenantId, tenantId),
+      eq(s04Records.module, moduleKey),
+      or(eq(s04Records.id, entityId), eq(s04Records.canonicalCode, entityId)),
+    )).limit(1);
+    if (!record) return null;
+    const canonicalId = record.canonicalCode?.trim() || record.id;
+    const payload = objectPayload(record.payloadJson);
+    const job = entityType === "commessa" ? parseJobPayload(record.payloadJson) : null;
+    const title = entityType === "commessa"
+      ? job?.title || record.detail || canonicalId
+      : payloadText(payload.title) || payloadText(payload.description) || record.detail || canonicalId;
+    const detail = entityType === "commessa"
+      ? job?.description || job?.location || record.detail
+      : [payloadText(payload.brand), payloadText(payload.model), payloadText(payload.registration)].filter(Boolean).join(" · ") || record.detail;
+    return {
+      ...directoryMatch(entityType, canonicalId),
+      title,
+      detail,
+    };
+  }
+
+  if (entityType === "material") {
+    const [item] = await db.select().from(inventoryItems).where(and(
+      eq(inventoryItems.tenantId, tenantId),
+      or(
+        eq(inventoryItems.id, entityId),
+        eq(inventoryItems.sku, entityId),
+        eq(inventoryItems.barcode, entityId),
+        eq(inventoryItems.qrCode, entityId),
+      ),
+    )).limit(1);
+    if (!item) return null;
+    return {
+      ...directoryMatch("material", item.sku),
+      title: item.name,
+      detail: `${item.sku} · ${item.location}`,
+    };
+  }
+
+  const [warehouse] = await db.select().from(tenantWarehouses).where(and(
+    eq(tenantWarehouses.tenantId, tenantId),
+    or(eq(tenantWarehouses.id, entityId), eq(tenantWarehouses.code, entityId)),
+  )).limit(1);
+  if (!warehouse) return null;
+  return {
+    ...directoryMatch("warehouse", warehouse.code),
+    title: warehouse.name,
+    detail: `${warehouse.code} · ${warehouse.locationLabel}`,
+  };
 }
 
 export async function GET(request: Request) {
@@ -50,33 +125,36 @@ export async function GET(request: Request) {
       return Response.json({ error: "code_not_resolved", code }, { status: 404 });
     }
 
-    const canonical = canonicalPayload(match.entityType, match.entityId);
+    const resolvedMatch = await resolveCatalogEntity(context!.tenantId, match.entityType, match.entityId);
+    if (!resolvedMatch) {
+      return Response.json({ error: "catalog_entity_not_found", entityType: match.entityType, entityId: match.entityId }, { status: 404 });
+    }
+
+    const canonical = canonicalPayload(resolvedMatch.entityType, resolvedMatch.entityId);
     const stored = storedDirect ?? await getQrByPayload(context!.tenantId, canonical);
-    const [asset] = match.entityType === "asset"
+    const [asset] = resolvedMatch.entityType === "asset"
       ? await getDb().select().from(s04Records).where(and(
         eq(s04Records.tenantId, context!.tenantId),
         eq(s04Records.module, "assets"),
-        eq(s04Records.canonicalCode, match.entityId),
+        or(eq(s04Records.id, resolvedMatch.entityId), eq(s04Records.canonicalCode, resolvedMatch.entityId)),
       )).limit(1)
       : [];
-    const [material] = match.entityType === "material"
+    const [material] = resolvedMatch.entityType === "material"
       ? await getDb().select().from(inventoryItems).where(and(
         eq(inventoryItems.tenantId, context!.tenantId),
-        eq(inventoryItems.sku, match.entityId),
+        or(eq(inventoryItems.id, resolvedMatch.entityId), eq(inventoryItems.sku, resolvedMatch.entityId)),
       )).limit(1)
       : [];
     return Response.json({
       ...qrEnvelope(context!, stored ? [qrRecordForResponse(stored)] : []),
       resolved: {
-        ...match,
-        ...(asset ? { title: asset.title, detail: asset.detail } : {}),
-        ...(material ? { title: material.name, detail: `${material.sku} · ${material.location}` } : {}),
+        ...resolvedMatch,
         canonicalPayload: canonical,
-        source: alias ? "sites-d1-alias" : stored ? "sites-d1-registry" : asset ? "sites-asset-readback" : material ? "sites-inventory-readback" : "sites-directory-fallback",
+        source: alias ? "sites-d1-alias" : stored ? "sites-d1-registry" : "sites-catalog-readback",
       },
       alias: alias ? { payload: alias.aliasPayload, canonicalPayload: alias.canonicalPayload, reason: alias.reason } : null,
       record: stored ? qrRecordForResponse(stored) : null,
-      asset: asset ? { id: asset.id, canonicalCode: asset.canonicalCode, title: asset.title, detail: asset.detail } : null,
+      asset: asset ? { id: asset.id, canonicalCode: asset.canonicalCode, title: resolvedMatch.title, detail: resolvedMatch.detail } : null,
       material: material ? { id: material.id, sku: material.sku, name: material.name, unit: material.unit, location: material.location, warehouseId: material.warehouseId } : null,
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
@@ -114,11 +192,19 @@ export async function POST(request: Request) {
     return Response.json({ error: "label_too_long" }, { status: 400 });
   }
 
-  const match = directoryMatch(entityType, entityId);
+  let match: QrDirectoryMatch | null;
+  try {
+    match = await resolveCatalogEntity(context!.tenantId, entityType, entityId);
+  } catch (error) {
+    return Response.json({ error: qrAdapterError(error), module: "qr-barcode" }, { status: 503 });
+  }
+  if (!match) {
+    return Response.json({ error: "catalog_entity_not_found", entityType, entityId }, { status: 404 });
+  }
   const label = typeof payload.label === "string" && payload.label.trim().length > 1
     ? payload.label.trim()
     : match.title;
-  const code = canonicalPayload(entityType, entityId);
+  const code = canonicalPayload(entityType, match.entityId);
   const now = new Date().toISOString();
 
   try {
@@ -139,7 +225,7 @@ export async function POST(request: Request) {
         tenantId: context!.tenantId,
         format,
         entityType,
-        entityId,
+        entityId: match.entityId,
         label,
         payload: code,
         createdBy: context!.actorId,

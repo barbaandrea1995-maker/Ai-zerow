@@ -22,6 +22,7 @@
     "verify:mission-resources": "node --experimental-strip-types scripts/verify-mission-resource-rules.mjs",
     "package:sites": "node scripts/package-sites-deployment.mjs",
     "verify:runtime": "node scripts/verify-runtime-smoke.mjs",
+    "verify:http-surface": "node scripts/verify-http-surface.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

@@ -341,7 +341,7 @@ export async function GET() {
         version: mission.version,
         payload: {
           ...effectivePayload,
-          missionReport: buildMissionReportReadback(effectivePayload),
+          missionReport: buildMissionReportReadback(effectivePayload, { missionIdentity: mission.title || mission.id }),
         },
         createdAt: mission.createdAt,
         updatedAt: mission.updatedAt,

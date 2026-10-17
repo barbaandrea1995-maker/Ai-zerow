@@ -38,7 +38,11 @@ export async function POST(request: Request) {
   }
 
   const sessionId = bounded(input.trackingSessionId, 160);
-  const source = bounded(input.provider ?? input.trackingSource, 40).toUpperCase() || "NATIVE_DEVICE";
+  const submittedSource = bounded(input.provider ?? input.trackingSource, 40).toUpperCase() || "NATIVE_MOBILE_APP";
+  // NATIVE_DEVICE is the provider registry name; NATIVE_MOBILE_APP is the
+  // canonical sample source. Accept the registry alias at this API boundary
+  // so the default and the provider catalog cannot disagree.
+  const source = submittedSource === "NATIVE_DEVICE" ? "NATIVE_MOBILE_APP" : submittedSource;
   const recordedAt = bounded(input.recordedAt, 40);
   const recordedTime = Date.parse(recordedAt);
   const coordinates = input.coordinates && typeof input.coordinates === "object" && !Array.isArray(input.coordinates)

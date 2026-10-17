@@ -181,7 +181,7 @@ function eventLines(timeline: JsonObject[]) {
 
 export function buildMissionReportReadback(
   payload: JsonObject,
-  options: { textOverride?: string } = {},
+  options: { textOverride?: string; missionIdentity?: string } = {},
 ): MissionReportReadback {
   const saved = isRecord(payload.missionReport) ? payload.missionReport : {};
   const reportText = text(options.textOverride ?? saved.text);
@@ -190,10 +190,17 @@ export function buildMissionReportReadback(
   const proofEntries = deliveryProofEntries(payload);
   const latestProof = proofEntries.at(-1) ?? {};
   const missionException = storedMissionException(payload.missionException);
+  const missionIdentity = text(
+    options.missionIdentity
+      ?? payload.missionTitle
+      ?? payload.title
+      ?? payload.missionCode
+      ?? payload.missionId,
+  );
   const missing: string[] = [];
   const questions: string[] = [];
 
-  if (!text(payload.title)) {
+  if (!missionIdentity) {
     missing.push("mission_identity");
     questions.push("Qual è il riferimento della missione da riportare in ufficio?");
   }
@@ -256,7 +263,7 @@ export function buildMissionReportReadback(
   const routeLines = stopActionLines(stops);
   const timelineLines = eventLines(timeline);
   const draft = reportText || [
-    `Missione: ${text(payload.title, "da identificare")}`,
+    `Missione: ${missionIdentity || "da identificare"}`,
     `Autista: ${text(recordAt(driver, "label") ?? recordAt(driver, "code") ?? payload.driverId, "da verificare")}`,
     `Mezzo: ${text(recordAt(vehicle, "label") ?? recordAt(vehicle, "code") ?? payload.vehicleId, "da verificare")}`,
     `Asset/materiale: ${cargoLabel}`,
@@ -269,7 +276,7 @@ export function buildMissionReportReadback(
   ].join("\n");
 
   const fields: MissionReportField[] = [
-    { key: "mission", label: "Missione", value: text(payload.title, "Identità non disponibile"), status: text(payload.title) ? "known" : "missing", source: "Registro missioni" },
+    { key: "mission", label: "Missione", value: missionIdentity || "Identità non disponibile", status: missionIdentity ? "known" : "missing", source: "Registro missioni" },
     { key: "driver", label: "Autista", value: text(recordAt(driver, "label") ?? recordAt(driver, "code") ?? payload.driverId, "Non disponibile"), status: (driver || text(payload.driverId)) ? "known" : "missing", source: "Workforce / Planning" },
     { key: "vehicle", label: "Mezzo", value: text(recordAt(vehicle, "label") ?? recordAt(vehicle, "code") ?? payload.vehicleId, "Non disponibile"), status: (vehicle || text(payload.vehicleId)) ? "known" : "missing", source: "Asset / Planning" },
     { key: "cargo", label: "Asset o materiale", value: cargoAssets.length ? cargoLabel : "Nessun asset associato", status: cargoAssets.length || text(payload.cargoAssetId) ? "known" : "optional", source: "Asset / Magazzino" },

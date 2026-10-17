@@ -1,13 +1,15 @@
 "use client";
 
-import { createAuthClient } from "@neondatabase/auth/next";
 import { useState } from "react";
 import type {
   NeonAuthContextResult,
   NeonTenantMembership,
 } from "@/lib/neon-auth/tenant-context";
 
-const authClient = createAuthClient();
+async function getAuthClient() {
+  const { createAuthClient } = await import("@neondatabase/auth/next");
+  return createAuthClient();
+}
 
 type ReadbackState = {
   status: number;
@@ -30,6 +32,7 @@ export default function AuthAbClient({
     setMessage(null);
 
     try {
+      const authClient = await getAuthClient();
       const result = await authClient.signIn.email({ email, password });
       if (result.error) {
         setMessage(result.error.message ?? "auth_sign_in_failed");
@@ -48,6 +51,7 @@ export default function AuthAbClient({
     setBusy(true);
     setMessage(null);
     try {
+      const authClient = await getAuthClient();
       await authClient.signOut();
       window.location.reload();
     } catch {

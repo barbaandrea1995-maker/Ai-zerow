@@ -27,6 +27,28 @@ import { tenantWarehouseAccess, warehouseIdIsAllowed } from "@/lib/warehouse-acc
 export const dynamic = "force-dynamic";
 
 type JsonObject = Record<string, unknown>;
+type InventoryBatchItem = {
+  _prepare(): {
+    getQuery(): { sql: string; params: unknown[] };
+    mapResult(result: unknown, isFromBatch?: boolean): unknown;
+  };
+};
+
+/**
+ * D1's Drizzle adapter cannot safely batch ORM statements together with
+ * SQLiteRaw items returned by db.run(sql``). Prepare every statement through
+ * the native binding so inventory, ledger, outbox and reconciliation remain
+ * one atomic transaction.
+ */
+async function runInventoryBatch(db: ReturnType<typeof getDb>, items: readonly unknown[]) {
+  const prepared = items.map((item) => (item as InventoryBatchItem)._prepare());
+  const statements = prepared.map((query) => {
+    const built = query.getQuery();
+    return db.$client.prepare(built.sql).bind(...built.params);
+  });
+  const results = await db.$client.batch(statements);
+  return results.map((result, index) => prepared[index].mapResult(result, true));
+}
 
 const MUTATION_ACTIONS = {
   receive: "RECEIVE",
@@ -485,7 +507,13 @@ export async function POST(request: Request) {
       if (!missionId) return Response.json({ error: "mission_id_required", message: "Il prelievo deve riferirsi alla missione che evaderà la richiesta approvata." }, { status: 400 });
       const mission = canonicalJobId ? await requireMission(context.tenantId, canonicalJobId, missionId) : null;
       if (!mission) return Response.json({ error: "mission_not_found" }, { status: 404 });
-      if (mission.status !== "PLANNED") return Response.json({ error: "mission_not_loadable", status: mission.status }, { status: 409 });
+      // Dispatch records the driver's departure workflow, but the physical
+      // warehouse pick can legitimately be confirmed immediately afterwards
+      // at the pickup geofence.  Restrict later lifecycle states while keeping
+      // PLANNED and DISPATCHED aligned with the Missioni journey.
+      if (!["PLANNED", "DISPATCHED"].includes(mission.status)) {
+        return Response.json({ error: "mission_not_loadable", status: mission.status }, { status: 409 });
+      }
       const missionPayload = parseObject(mission.payloadJson);
       const materialRequestId = boundedText(missionPayload.materialRequestId, 120);
       if (!materialRequestId) return Response.json({ error: "approved_material_request_required_for_pick" }, { status: 409 });
@@ -559,7 +587,7 @@ export async function POST(request: Request) {
       version: nextVersion,
     });
 
-    const results = await db.batch([
+    const results = await runInventoryBatch(db, [
       db.update(inventoryItems).set({
         onHandMilli: nextOnHand,
         reservedMilli: nextReserved,

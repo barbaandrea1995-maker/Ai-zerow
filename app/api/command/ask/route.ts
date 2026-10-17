@@ -12,6 +12,7 @@ import { searchCompanyAiKnowledge } from "@/lib/company-ai-knowledge";
 import { buildCompanyAiPersonalAssetContext } from "@/lib/company-ai-personal-assets";
 import { getLocationContextForCommand } from "@/lib/location-intelligence/company-ai-tools";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { parseJobPayload } from "@/lib/operations-contract";
 import {
   getS07Context,
   getS07Ledger,
@@ -206,16 +207,19 @@ export async function POST(request: Request) {
       ...personalAssetContext,
       ...visibleOperationalRows
         .filter((row) => row.module !== "assets" || !personallyAssignedAssetCodes.has(row.canonicalCode ?? row.id))
-        .map((row) => ({
-          id: row.canonicalCode ?? row.id,
-          module: row.module,
-          title: row.title,
-          detail: row.detail,
-          meta: row.meta,
-          status: row.status,
-          progress: row.progress,
-          updatedAt: row.updatedAt,
-        })),
+        .map((row) => {
+          const operation = row.module === "operations" ? parseJobPayload(row.payloadJson) : null;
+          return {
+            id: row.canonicalCode ?? row.id,
+            module: row.module,
+            title: operation?.title || row.title,
+            detail: operation?.description || row.detail,
+            meta: operation?.location || row.meta,
+            status: operation?.statusCode || row.status,
+            progress: operation?.progress ?? row.progress,
+            updatedAt: row.updatedAt,
+          };
+        }),
     ];
     const knowledgeHints = searchCompanyAiKnowledge(command, { limit: 6 });
     let locationContext: unknown[] = [];

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { ArrowLeft, LockKeyhole, ShieldAlert } from "lucide-react";
 import { getAuthorityContext } from "@/lib/authority-context";
 import { firstAuthorizedPath } from "@/lib/command-dashboard";

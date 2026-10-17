@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { s04Records } from "@/db/schema";
 import { GET as read, POST as write } from "@/app/api/s05/[module]/route";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { parseJobPayload } from "@/lib/operations-contract";
 
 export const GET = (request: Request) => read(request, { params: Promise.resolve({ module: "communications" }) });
 
@@ -58,10 +59,10 @@ export async function POST(request: Request) {
   if (recordType === "VOICE_PROPOSAL" && channel !== "VOICE") return Response.json({ error: "voice_proposal_requires_voice_channel" }, { status: 400 });
   if (channel === "VOICE" && !requiresAcknowledgement) return Response.json({ error: "voice_requires_acknowledgement" }, { status: 400 });
 
-  let job: { id: string; canonicalCode: string | null; title: string } | null = null;
+  let job: { id: string; canonicalCode: string | null; title: string; payloadJson: string } | null = null;
   if (jobRef) {
     try {
-      const rows = await getDb().select({ id: s04Records.id, canonicalCode: s04Records.canonicalCode, title: s04Records.title })
+      const rows = await getDb().select({ id: s04Records.id, canonicalCode: s04Records.canonicalCode, title: s04Records.title, payloadJson: s04Records.payloadJson })
         .from(s04Records)
         .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations"), or(eq(s04Records.id, jobRef), eq(s04Records.canonicalCode, jobRef))))
         .limit(1);
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
   }
 
   const providerStatus = channel === "VOICE" ? "EXTERNAL_DEFERRED" : "SITES_READBACK_ONLY";
+  const jobTitle = job ? parseJobPayload(job.payloadJson).title || job.title : null;
   const safePayload = {
     title,
     detail,
@@ -87,7 +89,7 @@ export async function POST(request: Request) {
     audienceRef,
     jobId: job?.id ?? null,
     jobCode: job?.canonicalCode ?? null,
-    jobTitle: job?.title ?? null,
+    jobTitle,
     requiresAcknowledgement,
     deliveryStatus: "PENDING_EXTERNAL_CONSUMER",
     providerStatus,

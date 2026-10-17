@@ -68,6 +68,7 @@ const commandAnalyticsRoute = await read("app/api/command/analytics/route.ts");
 const commandReadinessRoute = await read("app/api/command/readiness/route.ts");
 const commandSurface = await read("components/command-surface.tsx");
 const commandDashboard = await read("lib/command-dashboard.ts");
+const qrRoute = await read("app/api/qr/route.ts");
 
 requireContract(teamRoute, /hasCapability\(context, "authority\.read"\)/, "team read capability gate");
 requireContract(teamRoute, /hasCapability\(context, "authority\.manage"\)/, "team write capability gate");
@@ -118,6 +119,12 @@ requireContract(communicationsSurface, /getAllowedCommandNavigation\(capabilitie
 requireContract(settingsSurface, /CommandMobileNav active="settings"/, "operational navigation in settings");
 requireContract(commandMapRoute, /MAP_READ_PAGE_SIZE/, "control map pages all canonical records");
 requireContract(commandMapRoute, /max\(locationSamples\.recordedAt\)/, "control map reads the latest GPS point per vehicle");
+requireContract(qrRoute, /resolveCatalogEntity\(/, "QR identities are resolved from server-side tenant catalogs");
+requireContract(qrRoute, /eq\(s04Records\.tenantId, tenantId\)/, "QR asset and commessa lookup is tenant scoped");
+requireContract(qrRoute, /eq\(inventoryItems\.tenantId, tenantId\)/, "QR material lookup is tenant scoped");
+requireContract(qrRoute, /eq\(tenantWarehouses\.tenantId, tenantId\)/, "QR warehouse lookup is tenant scoped");
+requireContract(qrRoute, /catalog_entity_not_found/, "QR rejects missing catalog entities instead of verifying ghosts");
+requireContract(qrRoute, /parseJobPayload\(record\.payloadJson\)/, "QR commessa labels use the commercial payload");
 requireContract(commandMapRoute, /eq\(trackingSessions\.status, "ACTIVE"\)/, "control map only reads positions from active attendance tracking sessions");
 requireContract(commandMapRoute, /eq\(locationSamples\.trackingSessionId, sample\.trackingSessionId\)/, "control map cannot mix a prior tracking session position into the current session");
 requireContract(commandMapRoute, /eq\(geoLocations\.status, "TEMPORARY"\)/, "control map reads explicitly temporary mission places");
@@ -263,6 +270,7 @@ console.log(JSON.stringify({
     commandSurfaceActions: "PASS",
     tenantAndRoleGuards: "PASS",
     readbackLedger: "PASS",
+    qrCatalogResolution: "PASS",
   },
   interactions: {
     buttonsScanned: buttonInventory.length,

@@ -79,7 +79,7 @@ export async function GET(request: Request, routeContext: RouteContext) {
       : [];
     return Response.json({
       context: publicAuthorityContext(context),
-      job: { id: job.id, code: job.canonicalCode, title: job.title, module: jobModule, location: canonicalLocation },
+      job: { id: job.id, code: job.canonicalCode, title: jobPayload.title || job.title, module: jobModule, location: canonicalLocation },
       activityType,
       catalogs: planningCatalog(),
       options: {

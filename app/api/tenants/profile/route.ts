@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { s06Events, s06Outbox, s06Reconciliations, tenants } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
@@ -69,29 +69,60 @@ export async function PATCH(request: Request) {
     return Response.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const requestedProfile = typeof input.operatingProfile === "string" ? input.operatingProfile.trim() : "";
-  const requestedDomains = input.operatingDomains;
-  let profile: OperatingProfileId;
-  if (requestedProfile) {
-    if (!isOperatingProfileId(requestedProfile)) return Response.json({ error: "invalid_operating_profile" }, { status: 400 });
-    profile = requestedProfile;
-  } else {
-    profile = profileForDomains(requestedDomains);
-  }
-  const domains = domainsForProfile(profile);
-  const transportModes = resolveTransportModesForProfile(input.transportModes, profile);
-  const companyProfile = input.companyProfile === undefined ? null : normalizeCompanyProfile(input.companyProfile);
-  const companyProfileError = companyProfile ? validateCompanyProfile(companyProfile) : null;
-  if (companyProfileError) {
-    return Response.json({ error: "company_profile_invalid", field: companyProfileError.field, detail: companyProfileError.detail }, { status: 400 });
+  const patchesOperatingProfile = Object.hasOwn(input, "operatingProfile");
+  const patchesOperatingDomains = Object.hasOwn(input, "operatingDomains");
+  const patchesTransportModes = Object.hasOwn(input, "transportModes");
+  const patchesCompanyProfile = Object.hasOwn(input, "companyProfile");
+  if (!patchesOperatingProfile && !patchesOperatingDomains && !patchesTransportModes && !patchesCompanyProfile) {
+    return Response.json({ error: "tenant_profile_patch_required" }, { status: 400 });
   }
 
   try {
     const db = getDb();
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, context.tenantId)).limit(1);
     if (!tenant) return Response.json({ error: "tenant_not_provisioned" }, { status: 409 });
+
+    const currentProfile = isOperatingProfileId(tenant.operatingProfile)
+      ? tenant.operatingProfile
+      : context.operatingProfile || DEFAULT_OPERATING_PROFILE;
+    const requestedProfile = typeof input.operatingProfile === "string" ? input.operatingProfile.trim() : "";
+    let profile: OperatingProfileId;
+    if (patchesOperatingProfile) {
+      if (!isOperatingProfileId(requestedProfile)) return Response.json({ error: "invalid_operating_profile" }, { status: 400 });
+      profile = requestedProfile;
+    } else if (patchesOperatingDomains) {
+      profile = profileForDomains(input.operatingDomains);
+    } else {
+      profile = currentProfile;
+    }
+    const profileChanged = profile !== currentProfile || patchesOperatingDomains;
+    const domains = profileChanged
+      ? domainsForProfile(profile)
+      : parseOperatingDomains(tenant.operatingDomainsJson);
+    const transportModes = patchesTransportModes
+      ? resolveTransportModesForProfile(input.transportModes, profile)
+      : profileChanged
+        ? transportModesForProfile(profile)
+        : parseTransportModes(tenant.operatingTransportModesJson, profile);
+    const companyProfile = patchesCompanyProfile ? normalizeCompanyProfile(input.companyProfile) : null;
+    const companyProfileError = companyProfile ? validateCompanyProfile(companyProfile) : null;
+    if (companyProfileError) {
+      return Response.json({ error: "company_profile_invalid", field: companyProfileError.field, detail: companyProfileError.detail }, { status: 400 });
+    }
+
     const now = new Date().toISOString();
     const eventId = crypto.randomUUID();
+    const aggregateType = "tenant.operating_profile";
+    const [latestEvent] = await db.select({ version: s06Events.aggregateVersion })
+      .from(s06Events)
+      .where(and(
+        eq(s06Events.tenantId, context.tenantId),
+        eq(s06Events.aggregateType, aggregateType),
+        eq(s06Events.aggregateId, context.tenantId),
+      ))
+      .orderBy(desc(s06Events.aggregateVersion))
+      .limit(1);
+    const aggregateVersion = (latestEvent?.version ?? 0) + 1;
     const tenantUpdates = {
       operatingProfile: profile,
       operatingDomainsJson: JSON.stringify(domains),
@@ -126,9 +157,9 @@ export async function PATCH(request: Request) {
         source: "sites-tenant-onboarding",
         occurredAt: now,
         observedAt: now,
-        aggregateType: "tenant.operating_profile",
+        aggregateType,
         aggregateId: context.tenantId,
-        aggregateVersion: 1,
+        aggregateVersion,
         payloadJson: JSON.stringify({ profile, domains, transportModes, companyProfile }),
         correlationId: crypto.randomUUID(),
         causationId: null,
@@ -137,7 +168,7 @@ export async function PATCH(request: Request) {
         createdAt: now,
       }),
       db.insert(s06Outbox).values({ id: crypto.randomUUID(), tenantId: context.tenantId, eventId, topic: "zerow.tenant.operating_profile.updated", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0, createdAt: now, updatedAt: now }),
-      db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType: "tenant.operating_profile", aggregateId: context.tenantId, expectedVersion: 1, observedVersion: 1, status: "SITES_READBACK_VERIFIED", detail: "Perimetro operativo tenant aggiornato e letto dal control plane Sites.", createdAt: now, updatedAt: now }),
+      db.insert(s06Reconciliations).values({ id: crypto.randomUUID(), tenantId: context.tenantId, aggregateType, aggregateId: context.tenantId, expectedVersion: aggregateVersion, observedVersion: aggregateVersion, status: "SITES_READBACK_VERIFIED", detail: "Perimetro operativo tenant aggiornato e letto dal control plane Sites.", createdAt: now, updatedAt: now }),
     ]);
     const refreshed = await getAuthorityContext();
     return Response.json({
@@ -147,9 +178,14 @@ export async function PATCH(request: Request) {
       operatingDomains: domains,
       transportModes,
       profile: profileView(profile),
+      aggregateVersion,
       readback: "verified",
     }, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("s06_events_aggregate_version_uq") || message.includes("s06_events.tenant_id, s06_events.aggregate_type")) {
+      return Response.json({ error: "tenant_profile_concurrent_update" }, { status: 409 });
+    }
     return Response.json({ error: errorCode(error) }, { status: 503 });
   }
 }

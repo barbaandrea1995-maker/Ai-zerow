@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, CheckCircle2, ClipboardCheck, LoaderCircle, PackageCheck, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";

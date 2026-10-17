@@ -29,7 +29,12 @@ function invalidModuleResponse() {
 export async function GET(_request: Request, routeContext: RouteContext) {
   const moduleKey = await resolveModule(routeContext);
   if (!moduleKey) return invalidModuleResponse();
-  const context = await getS05Context();
+  let context: Awaited<ReturnType<typeof getS05Context>>;
+  try {
+    context = await getS05Context();
+  } catch (error) {
+    return Response.json({ error: s05Error(error), module: moduleKey }, { status: 503 });
+  }
   const denied = s05AccessDenied(context, moduleKey, "read");
   if (denied) return denied;
 
@@ -46,7 +51,12 @@ export async function GET(_request: Request, routeContext: RouteContext) {
 export async function POST(request: Request, routeContext: RouteContext) {
   const moduleKey = await resolveModule(routeContext);
   if (!moduleKey) return invalidModuleResponse();
-  const context = await getS05Context();
+  let context: Awaited<ReturnType<typeof getS05Context>>;
+  try {
+    context = await getS05Context();
+  } catch (error) {
+    return Response.json({ error: s05Error(error), module: moduleKey }, { status: 503 });
+  }
   const denied = s05AccessDenied(context, moduleKey, "write");
   if (denied) return denied;
 

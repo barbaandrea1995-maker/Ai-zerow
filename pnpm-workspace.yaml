@@ -19,6 +19,7 @@ packageImportMethod: clone-or-copy
 verifyDepsBeforeRun: false
 optimisticRepeatInstall: false
 overrides:
+  '@babel/core': 7.29.6
   '@better-auth/api-key': 1.6.23
   '@better-auth/core': 1.6.23
   baseline-browser-mapping: 2.11.0

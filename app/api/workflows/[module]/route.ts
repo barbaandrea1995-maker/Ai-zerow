@@ -16,6 +16,7 @@ import {
   type W10Module,
 } from "@/lib/w10-contract";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { parseJobPayload } from "@/lib/operations-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -83,12 +84,13 @@ function arrayValue(value: unknown): W10Line[] | null {
 
 function jobForResponse(row: typeof s04Records.$inferSelect) {
   const payload = jsonValue(row.payloadJson);
+  const job = parseJobPayload(row.payloadJson);
   return {
     id: row.id,
     code: row.canonicalCode ?? null,
-    title: row.title,
-    client: textValue(payload.client ?? payload.customer ?? payload.committente, "Cliente da verificare") || null,
-    location: textValue(payload.location ?? payload.address ?? payload.cantiere, row.meta) || null,
+    title: job.title || row.title,
+    client: job.client || textValue(payload.customer ?? payload.committente, "Cliente da verificare") || null,
+    location: job.location || textValue(payload.worksite ?? payload.address ?? payload.cantiere, row.meta) || null,
     status: row.status,
   };
 }

@@ -262,9 +262,14 @@ export async function POST(request: Request, routeContext: RouteContext) {
       if (correctionNote.length < 8) return Response.json({ error: "correction_note_required" }, { status: 400 });
     }
 
+    const currentPayload = latest ? parseJson(latest.payloadJson) : {};
+    const storedOperational = isRecord(currentPayload.operationalContext) ? currentPayload.operationalContext : {};
+    const preferredMissionId = action === "check_in"
+      ? undefined
+      : bounded(storedOperational.missionId, 120) || undefined;
     failureStage = "resolve_operational_context";
     const location = sanitizeLocation(input.location);
-    const operational = await resolveAttendanceOperationalContext({ context, job });
+    const operational = await resolveAttendanceOperationalContext({ context, job, preferredMissionId });
     const requiresLocation = action === "check_in" || action === "check_out";
     if (requiresLocation && !location) {
       return Response.json({ error: "location_required_for_attendance", reason: "timestamp_and_geolocation_are_required_for_entry_and_exit" }, { status: 400 });
@@ -286,7 +291,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
     }
     const locationWithGeofence = location ? { ...location, geofence: attendanceGeofence } : null;
 
-    const currentPayload = latest ? parseJson(latest.payloadJson) : {};
     const transitions = Array.isArray(currentPayload.transitions) ? currentPayload.transitions.filter(isRecord).slice(-49) : [];
     const previousCorrection = [...transitions].reverse().find((item) => item.action === "correction_request");
     const requestedCorrectionAt = previousCorrection && typeof previousCorrection.correctionAt === "string"
@@ -302,7 +306,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let trackingSessionId: string | null = null;
     let trackingOperation: "start" | "pause" | "resume" | "close" | null = null;
     failureStage = "resolve_tracking_context";
-    const storedOperational = isRecord(currentPayload.operationalContext) ? currentPayload.operationalContext : {};
     const targetIsDriver = action === "correction_approve"
       ? bounded(storedOperational.mode, 16).toUpperCase() === "DRIVER"
       : operational.mode === "DRIVER";

@@ -1,3 +1,5 @@
+import { staticAssetResponse } from "@/lib/static-asset-response";
+
 export async function GET(request: Request) {
-  return fetch(new URL("/icons/ai-zerow-180.png", request.url));
+  return staticAssetResponse(request, "/icons/ai-zerow-180.png");
 }

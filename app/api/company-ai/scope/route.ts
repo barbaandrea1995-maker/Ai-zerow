@@ -13,6 +13,7 @@ import {
 } from "@/lib/company-ai-knowledge";
 import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { parseJobPayload } from "@/lib/operations-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -131,7 +132,7 @@ export async function GET(request: Request) {
       context: publicAuthorityContext(context!),
       contract: { route: "/api/company-ai/scope", source: "company-ai-scope-link", directWrite: false, readback: "sites-d1-verified" },
       pack: getCompanyAiKnowledgePackSummary(),
-      job: { id: job.id, canonicalCode: job.canonicalCode, title: job.title },
+      job: { id: job.id, canonicalCode: job.canonicalCode, title: parseJobPayload(job.payloadJson).title || job.title },
       scopes: rows.map(scopeForResponse),
       latest: rows[0] ? scopeForResponse(rows[0]) : null,
       readback: { status: "SCOPE_READBACK_VERIFIED", count: rows.length, checkedAt: new Date().toISOString() },

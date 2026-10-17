@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { CheckCircle2, CircleGauge, LoaderCircle, MapPin, Navigation, PackageCheck, Play, RefreshCw, Send, ShieldCheck, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";

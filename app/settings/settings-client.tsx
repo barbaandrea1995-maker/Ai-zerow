@@ -1,8 +1,7 @@
 "use client";
 
-import { createAuthClient } from "@neondatabase/auth/next";
 import Image from "next/image";
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, KeyRound, LogOut, Mail, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
@@ -11,7 +10,10 @@ import { CommandMobileNav } from "@/components/command-mobile-nav";
 import GpsProviderControl from "@/components/gps-provider-control";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
 
-const authClient = createAuthClient();
+async function getAuthClient() {
+  const { createAuthClient } = await import("@neondatabase/auth/next");
+  return createAuthClient();
+}
 
 export default function SettingsClient({ actor, canManageLocation, allowedNavigation, role, roles }: {
   actor: AccountActor;
@@ -31,6 +33,7 @@ export default function SettingsClient({ actor, canManageLocation, allowedNaviga
     setMessage(null);
 
     try {
+      const authClient = await getAuthClient();
       const result = await authClient.requestPasswordReset({
         email: actor.email,
         redirectTo: `${window.location.origin}/login`,
@@ -57,6 +60,7 @@ export default function SettingsClient({ actor, canManageLocation, allowedNaviga
     setMessage(null);
 
     try {
+      const authClient = await getAuthClient();
       await authClient.signOut();
       router.replace("/login");
     } catch {

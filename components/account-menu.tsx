@@ -1,7 +1,6 @@
 "use client";
 
-import { createAuthClient } from "@neondatabase/auth/next";
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChevronDown, KeyRound, LogOut, Settings, ShieldCheck } from "lucide-react";
@@ -14,7 +13,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const authClient = createAuthClient();
+async function getAuthClient() {
+  const { createAuthClient } = await import("@neondatabase/auth/next");
+  return createAuthClient();
+}
 
 export type AccountActor = {
   email: string;
@@ -41,6 +43,7 @@ export function AccountMenu({ actor }: { actor: AccountActor }) {
     setError(null);
 
     try {
+      const authClient = await getAuthClient();
       await authClient.signOut();
       router.replace("/login");
     } catch {

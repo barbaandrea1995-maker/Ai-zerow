@@ -189,7 +189,10 @@ export async function POST(request: Request) {
         label: bounded(input.label, 120) || providerType,
         status: configured ? "READY" : "NOT_CONFIGURED",
         endpointUrl: bounded(input.endpointUrl, 240),
-        tokenReference: configured ? "SERVER_RUNTIME_SECRET" : "",
+        // Native mobile tracking is authenticated by the signed application
+        // session and has no provider token. Only an actually configured
+        // Traccar adapter may advertise a server-side secret reference.
+        tokenReference: providerType === "TRACCAR" && configured ? "SERVER_RUNTIME_SECRET" : "",
         configJson: JSON.stringify({ source: "server_provider_configuration", configured }),
         createdBy: context.actorId,
         createdAt: now,

@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- QR previews are runtime-generated data URLs and must be rendered verbatim. */
 
 import Image from "next/image";
-import Link from "next/link";
+import Link from "@/components/app-link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";

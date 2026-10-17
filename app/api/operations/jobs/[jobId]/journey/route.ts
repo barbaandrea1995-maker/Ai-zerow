@@ -566,7 +566,10 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
         missionId: record.id,
         status: record.status,
         warehouseReadback,
-        readback: buildMissionReportReadback({ ...missionPayload, warehouseReadback }),
+        readback: buildMissionReportReadback(
+          { ...missionPayload, warehouseReadback },
+          { missionIdentity: record.title || record.id },
+        ),
       };
     });
   const missionMaterialRequests = hasCapability(context, ACTION_CAPABILITY.mission_create)
@@ -2159,7 +2162,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (reportText.length < 2) return Response.json({ error: "mission_report_text_required" }, { status: 400 });
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
         payload = { ...payload, warehouseReadback };
-        const reportReadback = buildMissionReportReadback(payload, { textOverride: reportText });
+        const reportReadback = buildMissionReportReadback(payload, { textOverride: reportText, missionIdentity: row.title || row.id });
         if (action === "mission_report_submit" && !reportReadback.completeness.ready) {
           return Response.json({
             error: "mission_report_completeness_unmet",
@@ -2202,7 +2205,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
           return Response.json({ error: "mission_report_self_review_forbidden", message: "Chi invia il rapportino non può approvare la propria missione." }, { status: 403 });
         }
         const warehouseReadback = await readMissionWarehouseReadback(context.tenantId, job.id, payload, row.id);
-        const reportReadback = buildMissionReportReadback({ ...payload, warehouseReadback });
+        const reportReadback = buildMissionReportReadback(
+          { ...payload, warehouseReadback },
+          { missionIdentity: row.title || row.id },
+        );
         if (!reportReadback.completeness.ready) {
           return Response.json({
             error: "mission_report_completeness_unmet",
@@ -2249,7 +2255,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           }, { status: 422 });
         }
         payload = { ...payload, warehouseReadback };
-        const reportReadback = buildMissionReportReadback(payload);
+        const reportReadback = buildMissionReportReadback(payload, { missionIdentity: row.title || row.id });
         const savedReport = isRecord(payload.missionReport) ? payload.missionReport : {};
         if (!["SUBMITTED", "APPROVED"].includes(boundedText(savedReport.status, 24).toUpperCase()) || !reportReadback.completeness.ready) {
           return Response.json({
