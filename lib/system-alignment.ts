@@ -145,6 +145,27 @@ export type AlignmentReconciliation = {
 
 export type AlignmentTenantScopedRow = { tenantId: string };
 
+export type AlignmentExecutionReceipt = {
+  runId: string;
+  contractVersion: string;
+  manifestHash: string;
+  status: string;
+  sourceTenantId: string;
+  targetTenantId: string;
+  sourceTenantStatus: string | null;
+  targetTenantStatus: string | null;
+  completedAt: string | null;
+  linkCount: number;
+  clonedRecords: number;
+  matchedRecords: number;
+  sourceArchived: boolean;
+  historicalStreamsRetained: boolean;
+  sourceRowsDeleted: boolean | null;
+  rollback: string | null;
+  contractVerified: boolean;
+  manifestVerified: boolean;
+};
+
 export type AlignmentSnapshot = {
   tenants: AlignmentTenant[];
   memberships: AlignmentMembership[];
@@ -172,6 +193,7 @@ export type AlignmentSnapshot = {
     rawAssetCodeSupported: boolean;
     mixedCaseEntityIdPreserved: boolean;
   };
+  execution: AlignmentExecutionReceipt | null;
   truncated: boolean;
 };
 
@@ -235,8 +257,8 @@ export type AlignmentConflict = {
 
 export type SystemAlignmentReport = {
   contract: {
-    version: "ALIGNMENT_BASELINE_V1";
-    mode: "READ_ONLY_DRY_RUN";
+    version: string;
+    mode: "READ_ONLY_DRY_RUN" | "POST_ALIGNMENT_READBACK";
     directWrite: false;
     writeOperations: 0;
   };
@@ -253,6 +275,9 @@ export type SystemAlignmentReport = {
   };
   tenants: TenantAlignmentSummary[];
   gates: AlignmentGate[];
+  execution: (AlignmentExecutionReceipt & {
+    verification: "VERIFIED" | "INCONSISTENT";
+  }) | null;
   dryRun: {
     targetTenantId: string | null;
     sourceTenantIds: string[];
@@ -352,6 +377,22 @@ function tenantCounts(snapshot: AlignmentSnapshot, tenantId: string): TenantCoun
 }
 
 export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = new Date()): SystemAlignmentReport {
+  const execution = snapshot.execution ? {
+    ...snapshot.execution,
+    verification: (
+      upper(snapshot.execution.status) === "COMPLETED"
+      && lower(snapshot.execution.sourceTenantStatus) === "archived"
+      && lower(snapshot.execution.targetTenantStatus) === "active"
+      && snapshot.execution.sourceArchived
+      && snapshot.execution.historicalStreamsRetained
+      && snapshot.execution.sourceRowsDeleted === false
+      && snapshot.execution.completedAt !== null
+      && snapshot.execution.linkCount === 16
+      && snapshot.execution.contractVerified
+      && snapshot.execution.manifestVerified
+    ) ? "VERIFIED" as const : "INCONSISTENT" as const,
+  } : null;
+  const alignmentApplied = execution?.status.toUpperCase() === "COMPLETED";
   const activeTenants = snapshot.tenants.filter((tenant) => ["active", "onboarding"].includes(lower(tenant.status)));
   const activeTenantIds = activeTenants.map((tenant) => tenant.id);
   const activeLocations = snapshot.locations.filter((row) => upper(row.status) === "ACTIVE");
@@ -587,7 +628,7 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
       count: invalidStockIds.length,
       detail: invalidStockIds.length ? "Saldo, prenotazione o collegamento deposito non valido." : "Saldi, prenotazioni e riferimenti deposito risultano coerenti.",
       entityIds: cappedIds(invalidStockIds),
-      nextAction: invalidStockIds.length ? "Riconciliare le righe prima di migrare il registro scorte." : "Nessuna",
+      nextAction: invalidStockIds.length ? "Riconciliare le righe prima di consentire nuove prenotazioni o prelievi." : "Nessuna",
     },
     {
       id: "event-readback",
@@ -596,7 +637,7 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
       count: eventProblemIds.length,
       detail: `${snapshot.events.length} eventi · ${snapshot.outbox.length} outbox · ${snapshot.reconciliations.length} riconciliazioni · ${eventProblemIds.length} disallineamenti.`,
       entityIds: cappedIds(eventProblemIds),
-      nextAction: eventProblemIds.length ? "Conservare la provenienza e chiudere i readback mancanti prima della migrazione." : "Nessuna",
+      nextAction: eventProblemIds.length ? "Conservare la provenienza e chiudere i readback mancanti prima di considerare il registro coerente." : "Nessuna",
     },
   ];
 
@@ -618,7 +659,12 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
   const status: AlignmentStatus = blockedGates ? "BLOCKED" : reviewGates ? "REVIEW" : "READY";
 
   return {
-    contract: { version: "ALIGNMENT_BASELINE_V1", mode: "READ_ONLY_DRY_RUN", directWrite: false, writeOperations: 0 },
+    contract: {
+      version: alignmentApplied && execution ? execution.contractVersion : "ALIGNMENT_BASELINE_V1",
+      mode: alignmentApplied ? "POST_ALIGNMENT_READBACK" : "READ_ONLY_DRY_RUN",
+      directWrite: false,
+      writeOperations: 0,
+    },
     status,
     generatedAt: now.toISOString(),
     summary: {
@@ -632,6 +678,7 @@ export function buildSystemAlignmentReport(snapshot: AlignmentSnapshot, now = ne
     },
     tenants: tenantSummaries,
     gates,
+    execution,
     dryRun: {
       targetTenantId,
       sourceTenantIds,

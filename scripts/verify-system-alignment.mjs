@@ -13,7 +13,7 @@ function snapshot(overrides = {}) {
     tenants: [], memberships: [], warehouses: [], records: [], journeys: [], inventoryItems: [], inventoryMovements: [],
     qrs: [], locations: [], assetCustody: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
     aiLedger: [], documents: [], domainRecords: [], workflows: [], trackingSessions: [], companyAiScopes: [],
-    resolverProbe: { rawAssetCodeSupported: true, mixedCaseEntityIdPreserved: true }, truncated: false, ...overrides,
+    resolverProbe: { rawAssetCodeSupported: true, mixedCaseEntityIdPreserved: true }, execution: null, truncated: false, ...overrides,
   };
 }
 
@@ -84,13 +84,49 @@ assert.equal(report.gates.find((gate) => gate.id === "mission-route")?.status, "
 assert(report.dryRun.conflicts.some((conflict) => conflict.registry === "WAREHOUSE_CODE" && conflict.key === "WH-0001"));
 assert(report.dryRun.conflicts.some((conflict) => conflict.registry === "S04_CANONICAL_CODE" && conflict.key === "assets:ASSET-0001"));
 
+const appliedReport = buildSystemAlignmentReport(snapshot({
+  tenants: [tenant(targetId, true)],
+  execution: {
+    runId: "TENANT-ALIGNMENT-2026-10-15-V1",
+    contractVersion: "TENANT_ALIGNMENT_V1",
+    manifestHash: "manifest-hash",
+    status: "COMPLETED",
+    sourceTenantId: legacyId,
+    targetTenantId: targetId,
+    sourceTenantStatus: "archived",
+    targetTenantStatus: "active",
+    completedAt: "2026-10-15T12:00:00.000Z",
+    linkCount: 16,
+    clonedRecords: 9,
+    matchedRecords: 4,
+    sourceArchived: true,
+    historicalStreamsRetained: true,
+    sourceRowsDeleted: false,
+    rollback: "REACTIVATE_SOURCE_AND_DISABLE_CLONES_USING_ALIGNMENT_LINKS",
+    contractVerified: true,
+    manifestVerified: true,
+  },
+}));
+assert.equal(appliedReport.contract.mode, "POST_ALIGNMENT_READBACK");
+assert.equal(appliedReport.contract.version, "TENANT_ALIGNMENT_V1");
+assert.equal(appliedReport.execution?.verification, "VERIFIED");
+assert.equal(appliedReport.execution?.linkCount, 16);
+assert.equal(appliedReport.execution?.sourceRowsDeleted, false);
+
+const incompleteReadback = buildSystemAlignmentReport(snapshot({
+  execution: { ...appliedReport.execution, verification: undefined, linkCount: 15 },
+}));
+assert.equal(incompleteReadback.execution?.verification, "INCONSISTENT");
+
 const routeSource = await fs.readFile(path.join(root, "app/api/governance/alignment/route.ts"), "utf8");
 const serverSource = await fs.readFile(path.join(root, "lib/system-alignment.server.ts"), "utf8");
 assert(!/export\s+async\s+function\s+(POST|PUT|PATCH|DELETE)/.test(routeSource), "Alignment API must remain GET-only");
 assert(!/\.\s*(insert|update|delete)\s*\(/.test(serverSource), "Alignment readback must not mutate D1");
+assert(serverSource.includes("tenantAlignmentRuns"), "Alignment readback must load the durable execution receipt");
+assert(serverSource.includes("tenantAlignmentLinks"), "Alignment readback must count provenance links");
 
 console.log(JSON.stringify({
   status: "PASS", contract: report.contract.version, targetRecommendation: report.summary.recommendedTargetTenantId,
   blockedGates: report.summary.blockedGates, reviewGates: report.summary.reviewGates, conflicts: report.summary.conflicts,
-  checks: ["read_only_contract", "target_scoring", "canonical_places", "qr_registry", "identity_review", "route_integrity", "collision_manifest"],
+  checks: ["read_only_contract", "post_alignment_receipt", "provenance_readback", "target_scoring", "canonical_places", "qr_registry", "identity_review", "route_integrity", "collision_manifest"],
 }, null, 2));

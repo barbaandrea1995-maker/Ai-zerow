@@ -18,6 +18,8 @@ import {
   s06Outbox,
   s06Reconciliations,
   s07AiLedger,
+  tenantAlignmentLinks,
+  tenantAlignmentRuns,
   tenantMemberships,
   tenantWarehouses,
   tenants,
@@ -26,27 +28,95 @@ import {
 } from "@/db/schema";
 import { inferRawCode } from "@/lib/qr-adapter";
 import { buildSystemAlignmentReport, type AlignmentSnapshot } from "@/lib/system-alignment";
+import {
+  TENANT_ALIGNMENT_CONTRACT_VERSION,
+  TENANT_ALIGNMENT_RUN_ID,
+  TENANT_ALIGNMENT_SOURCE_ID,
+  TENANT_ALIGNMENT_TARGET_ID,
+  tenantAlignmentManifestHash,
+} from "@/lib/tenant-alignment-contract";
 
 const AUDIT_ROW_LIMIT = 5_001;
 
+function parseAlignmentResult(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function arrayLength(value: unknown) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
 export async function getSystemAlignmentReport() {
   const db = getDb();
-  const tenantRows = await db.select({
-    id: tenants.id,
-    slug: tenants.slug,
-    name: tenants.name,
-    status: tenants.status,
-    legalForm: tenants.legalForm,
-    vatNumber: tenants.vatNumber,
-    taxCode: tenants.taxCode,
-    registeredAddress: tenants.registeredAddress,
-    registeredCity: tenants.registeredCity,
-    businessEmail: tenants.businessEmail,
-    businessPhone: tenants.businessPhone,
-    operatingTransportModesJson: tenants.operatingTransportModesJson,
-  }).from(tenants)
-    .where(or(eq(tenants.status, "active"), eq(tenants.status, "onboarding")))
-    .orderBy(asc(tenants.createdAt));
+  const [tenantRows, alignmentRunRows, alignmentLinkRows, alignmentTenantRows, expectedManifestHash] = await Promise.all([
+    db.select({
+      id: tenants.id,
+      slug: tenants.slug,
+      name: tenants.name,
+      status: tenants.status,
+      legalForm: tenants.legalForm,
+      vatNumber: tenants.vatNumber,
+      taxCode: tenants.taxCode,
+      registeredAddress: tenants.registeredAddress,
+      registeredCity: tenants.registeredCity,
+      businessEmail: tenants.businessEmail,
+      businessPhone: tenants.businessPhone,
+      operatingTransportModesJson: tenants.operatingTransportModesJson,
+    }).from(tenants)
+      .where(or(eq(tenants.status, "active"), eq(tenants.status, "onboarding")))
+      .orderBy(asc(tenants.createdAt)),
+    db.select({
+      id: tenantAlignmentRuns.id,
+      sourceTenantId: tenantAlignmentRuns.sourceTenantId,
+      targetTenantId: tenantAlignmentRuns.targetTenantId,
+      contractVersion: tenantAlignmentRuns.contractVersion,
+      manifestHash: tenantAlignmentRuns.manifestHash,
+      status: tenantAlignmentRuns.status,
+      resultJson: tenantAlignmentRuns.resultJson,
+      completedAt: tenantAlignmentRuns.completedAt,
+    }).from(tenantAlignmentRuns).where(eq(tenantAlignmentRuns.id, TENANT_ALIGNMENT_RUN_ID)).limit(1),
+    db.select({ id: tenantAlignmentLinks.id })
+      .from(tenantAlignmentLinks)
+      .where(eq(tenantAlignmentLinks.runId, TENANT_ALIGNMENT_RUN_ID))
+      .limit(AUDIT_ROW_LIMIT),
+    db.select({ id: tenants.id, status: tenants.status })
+      .from(tenants)
+      .where(inArray(tenants.id, [TENANT_ALIGNMENT_SOURCE_ID, TENANT_ALIGNMENT_TARGET_ID])),
+    tenantAlignmentManifestHash(),
+  ]);
+
+  const alignmentRun = alignmentRunRows[0];
+  const alignmentResult = alignmentRun ? parseAlignmentResult(alignmentRun.resultJson) : {};
+  const tenantStatus = new Map(alignmentTenantRows.map((tenant) => [tenant.id, tenant.status]));
+  const execution = alignmentRun ? {
+    runId: alignmentRun.id,
+    contractVersion: alignmentRun.contractVersion,
+    manifestHash: alignmentRun.manifestHash,
+    status: alignmentRun.status,
+    sourceTenantId: alignmentRun.sourceTenantId,
+    targetTenantId: alignmentRun.targetTenantId,
+    sourceTenantStatus: tenantStatus.get(alignmentRun.sourceTenantId) ?? null,
+    targetTenantStatus: tenantStatus.get(alignmentRun.targetTenantId) ?? null,
+    completedAt: alignmentRun.completedAt,
+    linkCount: alignmentLinkRows.length,
+    clonedRecords: arrayLength(alignmentResult.cloned),
+    matchedRecords: arrayLength(alignmentResult.matched),
+    sourceArchived: alignmentResult.sourceArchived === true,
+    historicalStreamsRetained: alignmentResult.historicalStreamsRetained === true,
+    sourceRowsDeleted: typeof alignmentResult.sourceRowsDeleted === "boolean" ? alignmentResult.sourceRowsDeleted : null,
+    rollback: typeof alignmentResult.rollback === "string" ? alignmentResult.rollback : null,
+    contractVerified: alignmentRun.contractVersion === TENANT_ALIGNMENT_CONTRACT_VERSION
+      && alignmentRun.sourceTenantId === TENANT_ALIGNMENT_SOURCE_ID
+      && alignmentRun.targetTenantId === TENANT_ALIGNMENT_TARGET_ID,
+    manifestVerified: alignmentRun.manifestHash === expectedManifestHash,
+  } : null;
 
   const tenantIds = tenantRows.map((tenant) => tenant.id);
   const resolverProbe = {
@@ -57,7 +127,7 @@ export async function getSystemAlignmentReport() {
     return buildSystemAlignmentReport({
       tenants: [], memberships: [], warehouses: [], records: [], journeys: [], inventoryItems: [], inventoryMovements: [],
       qrs: [], locations: [], assetCustody: [], geofences: [], routePlans: [], routeStops: [], events: [], outbox: [], reconciliations: [],
-      aiLedger: [], documents: [], domainRecords: [], workflows: [], trackingSessions: [], companyAiScopes: [], resolverProbe, truncated: false,
+      aiLedger: [], documents: [], domainRecords: [], workflows: [], trackingSessions: [], companyAiScopes: [], resolverProbe, execution, truncated: false,
     });
   }
 
@@ -154,6 +224,7 @@ export async function getSystemAlignmentReport() {
     trackingSessions: tracking,
     companyAiScopes: scopes,
     resolverProbe,
+    execution,
     truncated: boundedCollections.some((rows) => rows.length >= AUDIT_ROW_LIMIT),
   };
   return buildSystemAlignmentReport(snapshot);
