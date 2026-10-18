@@ -273,6 +273,11 @@ function assignmentRecord(jobId: string, assignment: NonNullable<JobPayload["ass
 
 function journeyWorkspaceRecord(row: typeof jobJourneyRecords.$inferSelect) {
   const payload = parsePayload(row.payloadJson);
+  const recordModule = row.domain === "warehouse"
+    ? "warehouse" as const
+    : row.domain === "mission"
+      ? "mission" as const
+      : "operations" as const;
   const tone = row.status === "BLOCKED" || row.status === "CORRECTION_REQUESTED"
     ? "amber" as const
     : row.status === "COMPLETED" || row.status === "APPROVED" || row.status === "CLOSED"
@@ -280,7 +285,7 @@ function journeyWorkspaceRecord(row: typeof jobJourneyRecords.$inferSelect) {
       : "cyan" as const;
   return {
     id: row.id,
-    module: "operations" as const,
+    module: recordModule,
     recordType: row.recordType.toLowerCase(),
     title: row.title,
     detail: typeof payload.notes === "string" ? payload.notes : `${row.domain} · ${row.status}`,
@@ -575,6 +580,8 @@ async function workspaceResponse(
   });
   const journeyRecords = journeyRows.map(journeyWorkspaceRecord);
   const planningJourney = journeyRecords.filter((record) => record.recordType === "plan" && !isWarehouseStaffRecord(record));
+  const warehouseJourney = journeyRecords.filter((record) => record.module === "warehouse");
+  const missionJourney = journeyRecords.filter((record) => record.module === "mission" && !isWarehouseStaffRecord(record));
   const allAttendanceJourneyRows = journeyRows.filter((row) => row.domain === "field" && row.recordType.toUpperCase() === "ATTENDANCE");
   const canReadAttendanceRoster = hasCapability(context, "attendance.read")
     || hasCapability(context, "attendance.approve")
@@ -599,11 +606,16 @@ async function workspaceResponse(
       ...(visibleAssignment ? [visibleAssignment] : []),
       ...planningJourney,
       ...(canReadWorkforce ? byModule("workforce").filter((record) => !isWarehouseStaffRecord(record)) : []),
+      ...(canReadMission ? missionJourney : []),
       ...(canReadMission ? byModule("mission").filter((record) => !isWarehouseStaffRecord(record)) : []),
     ]
     : [];
   const resourceRecords = canReadAssets ? byModule("assets") : [];
-  const materialRecords = canReadWarehouse ? byModule("warehouse") : [];
+  // Material requests and reviews are canonical journey records. Include
+  // them alongside legacy S04 projections so the commessa dossier reflects
+  // the same server-side request, reservation and linked mission seen by the
+  // Magazzino module.
+  const materialRecords = canReadWarehouse ? [...warehouseJourney, ...byModule("warehouse")] : [];
   const fieldRecords = canReadField ? [...evidence, ...attendanceJourney] : [];
   const reportDate = activeRapportinoDate(reportPayload.rapportino);
   const reportIsApproved = isRecord(reportPayload.rapportino)

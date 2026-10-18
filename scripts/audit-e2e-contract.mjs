@@ -161,7 +161,7 @@ requireContract(membershipRoute, /rolesJson: authorityRolesJson/, "multi-role me
 requireContract(membershipRoute, /action === "set_role" \|\| action === "set_roles"/, "multi-role membership update");
 requireContract(membershipRoute, /target\.actorId === context\.actorId/ , "self-role change boundary");
 requireContract(membershipRoute, /requestedRoles\.includes\("owner"\)/, "owner authority preservation");
-requireContract(warehouseRoute, /operation === "manage" \? "tenant\.manage"/, "warehouse owner onboarding gate");
+requireContract(warehouseRoute, /operation === "manage" \? "warehouse\.register"/, "warehouse domain capability gate");
 requireContract(warehouseRoute, /latitudeE6: Math\.round/, "server coordinate normalization");
 requireContract(warehouseRoute, /geofenceRadiusMeters/, "warehouse geofence persistence");
 requireContract(warehouseRoute, /warehouse\.location\.created/, "warehouse location event ledger");

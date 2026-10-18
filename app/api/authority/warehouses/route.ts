@@ -30,7 +30,10 @@ function numberValue(value: unknown) {
 async function gate(operation: "read" | "manage") {
   const context = await getAuthorityContext();
   if (!context) return { context: null, response: Response.json({ error: "unauthenticated" }, { status: 401 }) };
-  const capability = operation === "manage" ? "tenant.manage" : "warehouse.read";
+  // Warehouse configuration is a business-domain action. `tenant.manage`
+  // alone is intentionally insufficient because an Owner of an
+  // operations-only tenant must not cross the server-side domain boundary.
+  const capability = operation === "manage" ? "warehouse.register" : "warehouse.read";
   if (!hasCapability(context, capability)) {
     return { context: null, response: Response.json({ error: "forbidden", capability }, { status: 403 }) };
   }

@@ -14,6 +14,30 @@ function runtimeSecret(name: string) {
   return typeof local === "string" ? local.trim() : "";
 }
 
+export function e2eGeoapifyFixtureEnabled() {
+  return runtimeSecret("ZEROW_E2E_GEOAPIFY_FIXTURE") === "1";
+}
+
+function e2eGeocodeCandidate(address: string): GeocodeCandidate {
+  const marinetti = /marinetti/i.test(address);
+  return {
+    provider: ACTIVE_GEOCODING_PROVIDER,
+    providerPlaceId: marinetti ? "e2e-geoapify-marinetti-00143-roma" : "e2e-geoapify-catullo-00071-pomezia",
+    formattedAddress: marinetti
+      ? "Viale Filippo Tommaso Marinetti, 00143 Roma RM, Italia"
+      : "Via Catullo 93, 00071 Pomezia RM, Italia",
+    latitude: marinetti ? 41.74162 : 41.665742,
+    longitude: marinetti ? 12.48948 : 12.50144,
+    street: marinetti ? "Viale Filippo Tommaso Marinetti" : "Via Catullo",
+    streetNumber: marinetti ? "" : "93",
+    city: marinetti ? "Roma" : "Pomezia",
+    province: "RM",
+    postalCode: marinetti ? "00143" : "00071",
+    country: "IT",
+    confidence: 1,
+  };
+}
+
 function baseUrl(value: string) {
   return value.trim().replace(/\/+$/, "");
 }
@@ -25,7 +49,7 @@ export type LocationProviderStatus = {
 };
 
 export function getLocationProviderStatus(): LocationProviderStatus {
-  const geoapifyConfigured = Boolean(runtimeSecret("GEOAPIFY_API_KEY"));
+  const geoapifyConfigured = Boolean(runtimeSecret("GEOAPIFY_API_KEY")) || e2eGeoapifyFixtureEnabled();
   const traccarConfigured = Boolean(runtimeSecret("TRACCAR_BASE_URL") && runtimeSecret("TRACCAR_API_TOKEN"));
   const postgisConfigured = Boolean(runtimeSecret("LOCATION_DATABASE_URL"));
   return {
@@ -52,6 +76,12 @@ export async function geocodeAddress(address: string): Promise<{
   candidates: GeocodeCandidate[];
 }> {
   const apiKey = runtimeSecret("GEOAPIFY_API_KEY");
+  // Deterministic, opt-in fixture for isolated full-story tests. It is never
+  // enabled by application code or production configuration and avoids
+  // copying a production provider secret into a local workspace.
+  if (!apiKey && e2eGeoapifyFixtureEnabled()) {
+    return { status: "used", candidates: [e2eGeocodeCandidate(address)] };
+  }
   if (!apiKey) return { status: "not_configured", candidates: [] };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
