@@ -78,11 +78,11 @@ const terminologyRules = [
 ];
 
 const expectedNavigation = {
-  "owner-desktop": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: false },
-  "owner-mobile": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: true },
-  "worker-mobile": { profile: "field", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true },
-  "delivery-driver-mobile": { profile: "driver", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true },
-  "warehouse-mobile": { profile: "warehouse", labels: ["Home", "Comunicazioni", "AI", "Magazzino", "Impostazioni"], visible: true },
+  "owner-desktop": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: false, links: [] },
+  "owner-mobile": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: true, links: [["Home", "/command"], ["Mappa", "/command#operational-map"], ["AI", "/command#company-ai"], ["Commesse", "/operations"]] },
+  "worker-mobile": { profile: "field", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Presenze", "/presenze"], ["Impostazioni", "/settings"]] },
+  "delivery-driver-mobile": { profile: "driver", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Presenze", "/presenze"], ["Impostazioni", "/settings"]] },
+  "warehouse-mobile": { profile: "warehouse", labels: ["Home", "Comunicazioni", "AI", "Magazzino", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Magazzino", "/warehouse"], ["Impostazioni", "/settings"]] },
 };
 
 function delay(milliseconds) {
@@ -236,6 +236,7 @@ try {
   });
 
   const results = [];
+  const navigationInteractions = [];
   for (const profile of profiles) {
     currentCase = null;
     await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
@@ -375,6 +376,35 @@ try {
         returnByValue: true,
       }, sessionId);
       snapshot = finalEvaluation.result?.value || snapshot;
+      const hitTargetEvaluation = await cdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const rail = document.querySelector(".zw-mobile-nav--global");
+          const mobileHeader = document.querySelector(".zw-mobile-shell-header");
+          const visible = (element) => Boolean(element)
+            && getComputedStyle(element).display !== "none"
+            && getComputedStyle(element).visibility !== "hidden"
+            && element.getBoundingClientRect().height > 0;
+          return {
+            mobileHeader: {
+              count: document.querySelectorAll(".zw-mobile-shell-header").length,
+              visible: visible(mobileHeader),
+            },
+            visibleLocalTopbars: [...document.querySelectorAll(".zw-command-topbar, .zw-module-local-header")]
+              .filter((element) => visible(element)).length,
+            hitTargets: rail ? [...rail.querySelectorAll(".zw-mobile-nav__item")].map((element) => {
+              const rect = element.getBoundingClientRect();
+              const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+              return {
+                label: element.getAttribute("aria-label") || "",
+                reachable: Boolean(hit && (hit === element || element.contains(hit))),
+                pointerEvents: getComputedStyle(element).pointerEvents,
+              };
+            }) : [],
+          };
+        })()`,
+        returnByValue: true,
+      }, sessionId);
+      snapshot.shellContract = hitTargetEvaluation.result?.value || null;
       let screenshot = null;
       if (screenshotDirectory) {
         const routeLabel = route === "/" ? "home" : route.replace(/^\//, "").replaceAll(/[^a-z0-9]+/gi, "-").replace(/-$/, "");
@@ -390,6 +420,77 @@ try {
         horizontalOverflow: Math.max(0, (snapshot?.scrollWidth || 0) - (snapshot?.clientWidth || 0)),
         errors: errors.slice(errorStart),
       });
+
+      if (profile.id === "owner-mobile" && route === "/command") {
+        await cdp.send("Runtime.evaluate", {
+          expression: `document.querySelector('[data-navigation-action="open-module-menu"]')?.click()`,
+        }, sessionId);
+        await delay(350);
+        const menuEvaluation = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const sidebar = document.querySelector(".zw-global-workspace-sidebar");
+            const rect = sidebar?.getBoundingClientRect();
+            const open = Boolean(sidebar && rect && rect.right > 0 && rect.left <= 1 && getComputedStyle(sidebar).display !== "none");
+            sidebar?.querySelector('button[aria-label="Chiudi menu"]')?.click();
+            return { open };
+          })()`,
+          returnByValue: true,
+        }, sessionId);
+        navigationInteractions.push({
+          profile: profile.id,
+          route,
+          action: "open-module-menu",
+          passed: menuEvaluation.result?.value?.open === true,
+        });
+      }
+      currentCase = null;
+    }
+
+    const expectedProfileNavigation = expectedNavigation[profile.id];
+    if (expectedProfileNavigation?.visible) {
+      const interactionStart = expectedProfileNavigation.profile === "control" ? "/command" : "/";
+      for (const [label, expectedDestination] of expectedProfileNavigation.links) {
+        currentCase = { profile: profile.id, route: `navigation:${label}` };
+        await cdp.send("Page.navigate", { url: `${baseUrl}${interactionStart}` }, sessionId);
+        const readyDeadline = Date.now() + 12_000;
+        while (Date.now() < readyDeadline) {
+          const readyEvaluation = await cdp.send("Runtime.evaluate", {
+            expression: `document.readyState === "complete" && Boolean(document.querySelector(".zw-mobile-nav--global"))`,
+            returnByValue: true,
+          }, sessionId);
+          if (readyEvaluation.result?.value === true) break;
+          await delay(200);
+        }
+        const clickEvaluation = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const target = [...document.querySelectorAll(".zw-mobile-nav__item")]
+              .find((element) => element.getAttribute("aria-label") === ${JSON.stringify(label)});
+            if (!target) return false;
+            target.click();
+            return true;
+          })()`,
+          returnByValue: true,
+        }, sessionId);
+        let destination = "";
+        const destinationDeadline = Date.now() + 12_000;
+        while (Date.now() < destinationDeadline) {
+          const destinationEvaluation = await cdp.send("Runtime.evaluate", {
+            expression: `location.pathname + location.hash`,
+            returnByValue: true,
+          }, sessionId);
+          destination = destinationEvaluation.result?.value || "";
+          if (destination === expectedDestination) break;
+          await delay(200);
+        }
+        navigationInteractions.push({
+          profile: profile.id,
+          route: interactionStart,
+          action: `navigate:${label}`,
+          expectedDestination,
+          destination,
+          passed: clickEvaluation.result?.value === true && destination === expectedDestination,
+        });
+      }
       currentCase = null;
     }
   }
@@ -424,10 +525,16 @@ try {
     if (item.navigation?.source !== "authority-server") issues.push(`source:${item.navigation?.source || "missing"}`);
     if (item.navigation?.visible !== expected.visible) issues.push(`visibility:${String(item.navigation?.visible)}`);
     if (JSON.stringify(item.navigation?.labels ?? []) !== JSON.stringify(expected.labels)) issues.push(`labels:${JSON.stringify(item.navigation?.labels ?? [])}`);
+    const mobile = item.profile.endsWith("mobile");
+    if (item.shellContract?.mobileHeader?.count !== 1) issues.push(`mobile-header-count:${item.shellContract?.mobileHeader?.count ?? 0}`);
+    if (item.shellContract?.mobileHeader?.visible !== mobile) issues.push(`mobile-header-visibility:${String(item.shellContract?.mobileHeader?.visible)}`);
+    if (mobile && item.shellContract?.visibleLocalTopbars !== 0) issues.push(`local-topbars-visible:${item.shellContract?.visibleLocalTopbars}`);
+    if (expected.visible && item.shellContract?.hitTargets?.some((target) => !target.reachable || target.pointerEvents === "none")) issues.push("navigation-hit-target-blocked");
     return issues.length ? [{ profile: item.profile, route: item.route, issues }] : [];
   });
+  const navigationInteractionIssues = navigationInteractions.filter((item) => !item.passed);
 
-  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues }, null, 2));
+  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues, navigationInteractions, navigationInteractionIssues }, null, 2));
 
   assert.deepEqual(routeFailures.map(({ profile, route }) => ({ profile, route })), [], "Every authorized browser surface must render");
   assert.deepEqual(overflows.map(({ profile, route, horizontalOverflow }) => ({ profile, route, horizontalOverflow })), [], "Browser surfaces must not overflow horizontally");
@@ -435,6 +542,7 @@ try {
   assert.deepEqual(unexpectedNetworkIssues, [], "Browser surfaces must not emit unexpected HTTP or network failures");
   assert.deepEqual(terminologyIssues, [], "Browser surfaces must use the canonical product terminology");
   assert.deepEqual(navigationIssues, [], "Every browser surface must use one canonical server-derived role navigation");
+  assert.deepEqual(navigationInteractionIssues, [], "Every mobile-navigation destination and module-menu action must work in the browser");
 
   console.log(JSON.stringify({
     status: "PASS",
@@ -449,6 +557,7 @@ try {
     horizontalOverflows: overflows.length,
     terminologyIssues: terminologyIssues.length,
     navigationIssues: navigationIssues.length,
+    navigationInteractions: navigationInteractions.length,
     outputPath: outputPath || null,
     screenshotDirectory: screenshotDirectory || null,
   }, null, 2));

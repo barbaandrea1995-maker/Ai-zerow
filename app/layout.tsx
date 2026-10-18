@@ -41,7 +41,13 @@ export default async function RootLayout({
   try {
     const context = await getAuthorityContext();
     if (context) {
-      authority = { role: context.role, roles: context.roles, capabilities: context.capabilities };
+      authority = {
+        role: context.role,
+        roles: context.roles,
+        capabilities: context.capabilities,
+        actorName: context.actorName,
+        actorEmail: context.actorEmail,
+      };
       mobileNavigation = mobileNavigationForAuthority(context);
     }
   } catch {
@@ -51,7 +57,7 @@ export default async function RootLayout({
 
   return (
     <html lang="it">
-      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls initialAuthority={authority} mobileNavigation={mobileNavigation} /></body>
+      <body className={authority ? "antialiased zw-commercial-shell" : "antialiased"}><PwaRegister />{children}<GlobalModuleControls initialAuthority={authority} mobileNavigation={mobileNavigation} /></body>
     </html>
   );
 }

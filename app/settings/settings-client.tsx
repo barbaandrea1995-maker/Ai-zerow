@@ -81,7 +81,7 @@ export default function SettingsClient({ actor, canManageLocation, allowedNaviga
       <div className="zw-command-ambient" aria-hidden="true" />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_74%_0%,rgba(190,255,60,0.08),transparent_25%),radial-gradient(circle_at_18%_78%,rgba(70,110,120,0.08),transparent_27%)]" />
       <div className="relative mx-auto max-w-6xl px-4 py-5 sm:px-7 sm:py-8">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
+        <header className="zw-module-local-header flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
           <div className="flex items-center gap-3">
             <Link
               aria-label="Torna al command center"

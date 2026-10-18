@@ -15,7 +15,6 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import Link from "@/components/app-link";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
 import type {
   MobileNavigationContract,
@@ -36,6 +35,8 @@ type CommandMobileNavProps = {
   allowedNavigation?: CommandNavigationId[];
   role?: string;
   roles?: string[];
+  menuOpen?: boolean;
+  onOpenModuleMenu?: () => void;
 };
 
 const iconByItem: Record<MobileNavigationItemId, LucideIcon> = {
@@ -73,17 +74,34 @@ function activeNavigation(pathname: string, hash: string): string {
  * intentionally return null so a module can never create a second bar or
  * derive destinations from client-side role guesses.
  */
-export function CommandMobileNav({ active, contract, global = false }: CommandMobileNavProps) {
+export function CommandMobileNav({
+  active,
+  contract,
+  global = false,
+  menuOpen = false,
+  onOpenModuleMenu,
+}: CommandMobileNavProps) {
   if (!global || !contract?.items.length) return null;
-  return <GlobalMobileNavigation active={active} contract={contract} />;
+  return (
+    <GlobalMobileNavigation
+      active={active}
+      contract={contract}
+      menuOpen={menuOpen}
+      onOpenModuleMenu={onOpenModuleMenu}
+    />
+  );
 }
 
 function GlobalMobileNavigation({
   active,
   contract,
+  menuOpen,
+  onOpenModuleMenu,
 }: {
   active?: LegacyActive;
   contract: MobileNavigationContract;
+  menuOpen: boolean;
+  onOpenModuleMenu?: () => void;
 }) {
   const pathname = usePathname();
   const [hash, setHash] = useState("");
@@ -108,20 +126,46 @@ function GlobalMobileNavigation({
     >
       {contract.items.map((item) => {
         const Icon = iconByItem[item.id];
-        const selected = item.activeNavigation.includes(current);
+        const selected = item.action === "open-module-menu"
+          ? menuOpen || item.activeNavigation.includes(current)
+          : item.activeNavigation.includes(current);
+        const content = (
+          <>
+            <span className="zw-mobile-nav__icon">
+              <Icon aria-hidden="true" className="size-[18px]" />
+            </span>
+            <span className="zw-mobile-nav__label">{item.label}</span>
+          </>
+        );
+
+        if (item.action === "open-module-menu") {
+          return (
+            <button
+              aria-current={selected ? "page" : undefined}
+              aria-expanded={menuOpen}
+              aria-label={item.label}
+              className="zw-mobile-nav__item"
+              data-navigation-action={item.action}
+              key={item.id}
+              onClick={onOpenModuleMenu}
+              type="button"
+            >
+              {content}
+            </button>
+          );
+        }
+
+        if (!item.href) return null;
         return (
-          <Link
+          <a
             aria-current={selected ? "page" : undefined}
             aria-label={item.label}
             className={item.primary ? "zw-mobile-nav__item zw-mobile-nav__item--ai" : "zw-mobile-nav__item"}
             href={item.href}
             key={item.id}
           >
-            <span className="zw-mobile-nav__icon">
-              <Icon aria-hidden="true" className="size-[18px]" />
-            </span>
-            <span className="zw-mobile-nav__label">{item.label}</span>
-          </Link>
+            {content}
+          </a>
         );
       })}
     </nav>

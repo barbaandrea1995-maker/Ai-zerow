@@ -2031,7 +2031,7 @@ main > div > aside:not(.zw-workspace-sidebar) {
 
 .zw-global-workspace-sidebar {
   position: fixed !important;
-  z-index: 110 !important;
+  z-index: 1300 !important;
 }
 
 @media (max-width: 767px) {
@@ -2062,14 +2062,14 @@ main > div > aside:not(.zw-workspace-sidebar) {
   .zw-command-sidebar {
     width: min(340px, calc(100vw - 20px));
     max-width: calc(100vw - 20px);
-    z-index: 110 !important;
+    z-index: 1300 !important;
     padding-top: calc(12px + env(safe-area-inset-top));
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
     box-shadow: 24px 0 80px rgba(0, 0, 0, .72), inset -1px 0 rgba(255, 255, 255, .04), 0 0 0 1px rgba(200, 255, 34, .04);
   }
 
   .zw-command-sidebar-backdrop {
-    z-index: 100 !important;
+    z-index: 1250 !important;
   }
 
   .zw-command-sidebar > nav {
@@ -2484,11 +2484,6 @@ main > div > aside:not(.zw-workspace-sidebar) {
   background: rgba(4, 7, 5, .65);
 }
 
-/* Warehouse follows the compact module header used by Asset, Planning and Workforce. */
-.zw-warehouse-module .zw-module-hero {
-  display: none;
-}
-
 @media (max-width: 1279px) {
   .zw-widget-frame--compact,
   .zw-widget-frame--standard { grid-column: span 6; }
@@ -2672,9 +2667,14 @@ body.zw-commercial-shell button:disabled {
 }
 
 body.zw-commercial-shell [data-slot="dialog-content"] {
+  z-index: 2010 !important;
   max-height: min(92dvh, 980px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+body.zw-commercial-shell [data-slot="dialog-overlay"] {
+  z-index: 2000 !important;
 }
 
 .zw-operational-home__hero {
@@ -2704,7 +2704,12 @@ body.zw-commercial-shell [data-slot="dialog-content"] {
 }
 
 .zw-mobile-nav--global {
-  contain: layout paint;
+  contain: layout;
+  overflow: visible;
+}
+
+.zw-mobile-shell-header {
+  display: none;
 }
 
 @media (min-width: 768px) {
@@ -2714,6 +2719,121 @@ body.zw-commercial-shell [data-slot="dialog-content"] {
 }
 
 @media (max-width: 767px) {
+  body.has-zerow-mobile-header > main,
+  body.has-zerow-mobile-header .zw-app-shell {
+    padding-top: calc(64px + env(safe-area-inset-top));
+  }
+
+  body.has-zerow-mobile-header .zw-command-topbar,
+  body.has-zerow-mobile-header .zw-module-local-header {
+    display: none !important;
+  }
+
+  .zw-mobile-shell-header {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 1100;
+    display: flex;
+    height: calc(64px + env(safe-area-inset-top));
+    align-items: center;
+    gap: 8px;
+    padding: env(safe-area-inset-top) 10px 0;
+    border-bottom: 1px solid rgba(200, 255, 34, .14);
+    background:
+      linear-gradient(90deg, rgba(200, 255, 34, .04), transparent 34%),
+      linear-gradient(180deg, rgba(7, 12, 8, .985), rgba(3, 6, 4, .94));
+    box-shadow: 0 14px 38px rgba(0, 0, 0, .4), inset 0 -1px rgba(255, 255, 255, .025);
+    backdrop-filter: blur(24px);
+  }
+
+  .zw-mobile-shell-header__control {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    place-items: center;
+    border: 1px solid rgba(200, 255, 34, .14);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, .28);
+    color: rgba(210, 225, 215, .72);
+    touch-action: manipulation;
+  }
+
+  .zw-mobile-shell-header__brand {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .zw-mobile-shell-header__mark {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    overflow: hidden;
+    place-items: center;
+    border: 1px solid rgba(216, 255, 82, .45);
+    border-radius: 11px;
+    background: #000;
+    box-shadow: 0 0 20px rgba(200, 255, 34, .12);
+  }
+
+  .zw-mobile-shell-header__copy {
+    display: block;
+    min-width: 0;
+  }
+
+  .zw-mobile-shell-header__copy > span,
+  .zw-mobile-shell-header__copy > strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .zw-mobile-shell-header__copy > span {
+    color: rgba(200, 255, 34, .68);
+    font-size: .47rem;
+    font-weight: 700;
+    letter-spacing: .18em;
+  }
+
+  .zw-mobile-shell-header__copy > strong {
+    max-width: 31vw;
+    margin-top: 2px;
+    color: #f4f8f2;
+    font-size: .76rem;
+    font-weight: 650;
+    letter-spacing: .015em;
+  }
+
+  .zw-mobile-shell-header__actions {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+  }
+
+  .zw-mobile-shell-header__actions button[aria-label^="Apri menu account"] {
+    width: 40px;
+    height: 40px;
+    padding: 3px;
+    border-radius: 12px;
+  }
+
+  .zw-mobile-shell-header__actions button[aria-label^="Apri menu account"] > span:first-child {
+    width: 32px;
+    height: 32px;
+  }
+
+  .zw-mobile-shell-header__actions button[aria-label^="Apri menu account"] > svg {
+    display: none;
+  }
+
   body.has-zerow-mobile-nav > main,
   body.has-zerow-mobile-nav .zw-app-shell {
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
@@ -2753,7 +2873,7 @@ body.zw-commercial-shell [data-slot="dialog-content"] {
     right: 10px;
     bottom: max(10px, env(safe-area-inset-bottom));
     left: 10px;
-    z-index: 120;
+    z-index: 1200;
     min-height: 70px;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: end;
@@ -2778,6 +2898,10 @@ body.zw-commercial-shell [data-slot="dialog-content"] {
     font-size: clamp(.49rem, 2.15vw, .6rem);
     letter-spacing: -.015em;
     line-height: 1.1;
+    appearance: none;
+    background-color: transparent;
+    font-family: inherit;
+    touch-action: manipulation;
   }
 
   .zw-mobile-nav--global .zw-mobile-nav__item[aria-current="page"] {
@@ -2807,7 +2931,7 @@ body.zw-commercial-shell [data-slot="dialog-content"] {
     bottom: calc(102px + env(safe-area-inset-bottom)) !important;
   }
 
-  body:has([role="dialog"]) .zw-mobile-nav--global {
+  body:has([role="dialog"]) :is(.zw-mobile-nav--global, .zw-mobile-shell-header) {
     opacity: 0;
     pointer-events: none;
     transform: translateY(110%);

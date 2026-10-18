@@ -49,6 +49,13 @@ for (const [role, capabilities] of Object.entries(ROLE_CAPABILITIES)) {
   assert.equal(contract.items.filter((item) => item.primary).length, 1, `${role} must have one primary AI destination`);
 
   for (const item of contract.items) {
+    if (item.action) {
+      assert.equal(item.id, "more", `${role} may expose an action only for the module menu`);
+      assert.equal(item.action, "open-module-menu", `${role} module-menu action must be canonical`);
+      assert.equal(item.href, undefined, `${role} module menu must not fake a page destination`);
+      continue;
+    }
+    assert.equal(typeof item.href, "string", `${role} navigation destinations must have an href`);
     const capability = capabilityByHref[item.href];
     if (capability) assert(capabilities.includes(capability), `${role} may not receive ${item.href} without ${capability}`);
     if (item.href.startsWith("/command")) assert(capabilities.includes("command.read"), `${role} may not receive COMMAND anchors without command.read`);

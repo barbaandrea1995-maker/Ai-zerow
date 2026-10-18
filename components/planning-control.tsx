@@ -778,7 +778,7 @@ export default function PlanningControl() {
       </header>
 
       <div className="mx-auto w-full max-w-[1440px] px-4 pb-28 pt-6 sm:px-7 lg:pb-10">
-        <section className="carbon-card overflow-hidden rounded-3xl p-5 sm:p-7">
+        <section className="zw-module-hero carbon-card overflow-hidden rounded-3xl p-5 sm:p-7">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div className="max-w-3xl"><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/75">PIANIFICAZIONE · CONTROL ROOM</p><h1 className="mt-2 text-2xl font-semibold tracking-[-.035em] text-slate-50 sm:text-3xl">Piano operativo aziendale</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Coordina commesse e missioni con persone, squadre, mezzi e attrezzature realmente disponibili. Ogni pubblicazione viene ricontrollata dal server.</p></div><div className="flex flex-wrap gap-2">{canReadMission && <Button className="h-10 border-white/10 bg-black/20 text-slate-300 hover:border-cyan-300/25 hover:bg-cyan-300/[.05] hover:text-cyan-100" onClick={() => navigate("/mission")} variant="outline"><Truck className="size-4" />Apri missioni<ArrowUpRight className="size-3.5" /></Button>}{canWritePlanning && <Button className="h-10 bg-lime-300 px-4 font-semibold text-[#050705] hover:bg-lime-200" disabled={!selectedJob?.planningEligible} onClick={() => openCreate()}><Target className="size-4" />Nuova attività</Button>}</div></div>
         </section>
 

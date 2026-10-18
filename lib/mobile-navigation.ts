@@ -27,7 +27,8 @@ export type MobileNavigationProfile =
 export type MobileNavigationItem = {
   id: MobileNavigationItemId;
   label: string;
-  href: string;
+  href?: string;
+  action?: "open-module-menu";
   primary?: boolean;
   activeNavigation: string[];
 };
@@ -69,7 +70,7 @@ const capabilityByItem: Partial<Record<MobileNavigationItemId, string>> = {
 
 function isAuthorized(item: MobileNavigationItem, capabilities: ReadonlySet<string>) {
   if (item.id === "home" || item.id === "more") return true;
-  if (item.id === "ai" && item.href.startsWith("/command")) return capabilities.has("command.read");
+  if (item.id === "ai" && item.href?.startsWith("/command")) return capabilities.has("command.read");
   const required = capabilityByItem[item.id];
   return !required || capabilities.has(required);
 }
@@ -109,18 +110,13 @@ function operationalItems(profile: Exclude<MobileNavigationProfile, "control">):
   ];
 }
 
-function controlItems(capabilities: ReadonlySet<string>): MobileNavigationItem[] {
-  const moreHref = capabilities.has("authority.read")
-    ? "/onboarding"
-    : capabilities.has("settings.read")
-      ? "/settings"
-      : "/command";
+function controlItems(): MobileNavigationItem[] {
   return [
     { id: "home", label: "Home", href: "/command", activeNavigation: ["home", "command"] },
     { id: "map", label: "Mappa", href: "/command#operational-map", activeNavigation: ["map"] },
     { id: "ai", label: "AI", href: "/command#company-ai", primary: true, activeNavigation: ["ai", "company-ai"] },
     { id: "operations", label: "Commesse", href: "/operations", activeNavigation: ["operations"] },
-    { id: "more", label: "Altro", href: moreHref, activeNavigation: ["more", "settings"] },
+    { id: "more", label: "Altro", action: "open-module-menu", activeNavigation: ["more", "settings"] },
   ];
 }
 
@@ -137,7 +133,7 @@ export function mobileNavigationForAuthority(authority: NavigationAuthority): Mo
   const capabilities = new Set(authority.capabilities);
   const hasControlRole = normalizedRoles.some((role) => CONTROL_ROLES.has(role));
   const profile = hasControlRole ? "control" : focusedProfile(authority.role, roles) ?? "control";
-  const candidates = profile === "control" ? controlItems(capabilities) : operationalItems(profile);
+  const candidates = profile === "control" ? controlItems() : operationalItems(profile);
   const items = candidates.filter((item) => isAuthorized(item, capabilities));
 
   // Every canonical profile has exactly five authorized destinations. A

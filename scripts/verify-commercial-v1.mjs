@@ -298,7 +298,8 @@ const globalModuleControls = await readFile(join(root, "components", "global-mod
 const rootLayout = await readFile(join(root, "app", "layout.tsx"), "utf8");
 assert(mobileNavigation.includes("if (!global || !contract?.items.length) return null"), "Module-local mobile navigation must fail closed");
 assert(mobileNavigationContract.includes("mobileNavigationForAuthority") && mobileNavigationContract.includes('source: "authority-server"'), "Mobile destinations must come from the server authority contract");
-assert(globalModuleControls.includes("<CommandMobileNav contract={mobileNavigation} global"), "Only the global shell may render the role navigation");
+assert(/<CommandMobileNav[\s\S]{0,240}?contract=\{mobileNavigation\}[\s\S]{0,240}?global/.test(globalModuleControls), "Only the global shell may render the role navigation");
+assert(!mobileNavigation.includes('from "@/components/app-link"') && mobileNavigation.includes("<a"), "Mobile destinations must retain browser-native navigation in the PWA");
 assert(rootLayout.includes("mobileNavigationForAuthority(context)"), "The root server layout must derive navigation from D1 authority");
 
 const preferencesRoute = await readFile(join(root, "app", "api", "command", "preferences", "route.ts"), "utf8");

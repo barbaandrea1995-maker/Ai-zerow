@@ -10,6 +10,7 @@ const mobileNavigationSource = await fs.readFile(path.join(root, "lib/mobile-nav
 const mobileNavigationComponent = await fs.readFile(path.join(root, "components/command-mobile-nav.tsx"), "utf8");
 const globalControlsSource = await fs.readFile(path.join(root, "components/global-module-controls.tsx"), "utf8");
 const rootLayoutSource = await fs.readFile(path.join(root, "app/layout.tsx"), "utf8");
+const serviceWorkerSource = await fs.readFile(path.join(root, "public/sw.js"), "utf8");
 
 async function exists(relative) {
   return fs.access(path.join(root, relative)).then(() => true).catch(() => false);
@@ -64,10 +65,19 @@ assert(modules.every((item) => item.carbonSurface === "PASS"), "Every commercial
 assert(modules.every((item) => item.shell === "CANONICAL"), "Every commercial module must use the canonical application shell");
 assert(rootLayoutSource.includes("mobileNavigationForAuthority(context)"), "Root layout must resolve mobile navigation from server authority");
 assert(rootLayoutSource.includes("mobileNavigation={mobileNavigation}"), "Root layout must pass the server navigation contract to global controls");
-assert(globalControlsSource.includes("<CommandMobileNav contract={mobileNavigation} global"), "Global controls must own the only rendered mobile navigation");
+assert(/<CommandMobileNav[\s\S]{0,240}?contract=\{mobileNavigation\}[\s\S]{0,240}?global/.test(globalControlsSource), "Global controls must own the only rendered mobile navigation");
+assert(globalControlsSource.includes("<MobileShellHeader"), "Global controls must provide one shared mobile module header");
+assert(globalControlsSource.includes("onOpenModuleMenu={() => setMobileOpen(true)}"), "The mobile module-menu action must open the canonical sidebar");
 assert(mobileNavigationComponent.includes("if (!global || !contract?.items.length) return null"), "Module-local mobile navigation calls must fail closed");
 assert(mobileNavigationComponent.includes('data-navigation-source={contract.source}'), "Rendered navigation must expose its authority source for runtime verification");
+assert(!mobileNavigationComponent.includes('from "@/components/app-link"'), "The PWA bottom bar must use native navigation instead of the experimental client router");
+assert(mobileNavigationComponent.includes("<a"), "The PWA bottom bar must retain a browser-native navigation fallback");
 assert(mobileNavigationSource.includes('source: "authority-server"'), "Mobile navigation contract must declare a server-side authority source");
+assert(mobileNavigationSource.includes('action: "open-module-menu"'), "Control navigation must expose Altro as an action instead of a fake destination");
+assert(rootLayoutSource.includes('authority ? "antialiased zw-commercial-shell"'), "Authenticated pages must receive the commercial shell before hydration");
+assert(serviceWorkerSource.includes("isCacheableStaticAsset"), "The PWA cache must use an explicit static-asset allowlist");
+assert(serviceWorkerSource.includes('fetch(request, { cache: "no-store" })'), "Authenticated navigation must always read the current server authority");
+assert(!/const PRECACHE\s*=\s*\[[^\]]*(?:"\/"|"\/command")/.test(serviceWorkerSource), "Personalized pages must never be precached");
 
 const localRefresh = modules.filter((item) => item.refresh === "LOCAL").length;
 const localBack = modules.filter((item) => item.back === "LOCAL").length;

@@ -20,6 +20,7 @@ import {
 import type { AuthorityContext } from "@/lib/authority-context";
 import type {
   MobileNavigationContract,
+  MobileNavigationItem,
   MobileNavigationProfile,
 } from "@/lib/mobile-navigation";
 
@@ -105,7 +106,9 @@ export default function OperationalHome({
   const copy = PROFILE_COPY[profile];
   const PrimaryIcon = copy.primaryIcon;
   const rolePurpose = ROLE_METADATA[authority.role]?.purpose ?? "Accesso al perimetro operativo autorizzato.";
-  const quickDestinations = (navigation?.items ?? []).filter((item) => item.id !== "home");
+  const quickDestinations = (navigation?.items ?? []).filter(
+    (item): item is MobileNavigationItem & { href: string } => item.id !== "home" && typeof item.href === "string",
+  );
 
   return (
     <main className="zw-app-shell zw-command-ultra zw-operational-home min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
