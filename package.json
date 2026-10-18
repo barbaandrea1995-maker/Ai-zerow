@@ -24,6 +24,7 @@
     "verify:creation-flows": "node scripts/verify-creation-flows.mjs",
     "verify:operating-profiles": "node scripts/verify-operating-profile-flows.mjs",
     "verify:domain-flows": "node scripts/verify-domain-flows.mjs",
+    "verify:office-modules": "node scripts/verify-office-module-flows.mjs",
     "verify:mission-resources": "node --experimental-strip-types scripts/verify-mission-resource-rules.mjs",
     "verify:mobile-navigation": "node --experimental-strip-types scripts/verify-mobile-navigation.mjs",
     "package:sites": "node scripts/package-sites-deployment.mjs",

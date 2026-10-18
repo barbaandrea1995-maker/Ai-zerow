@@ -133,9 +133,21 @@ async function requireOwner() {
   // existing tenant owner context.
   const identity = await getAuthenticatedIdentity();
   if (identity) {
-    const rows = await tenantRows(identity.identityProvider, identity.actorId);
-    if (rows.length === 0) {
-      return { context: null, identity, initialSetup: true, response: null };
+    try {
+      const rows = await tenantRows(identity.identityProvider, identity.actorId);
+      if (rows.length === 0) {
+        return { context: null, identity, initialSetup: true, response: null };
+      }
+    } catch (error) {
+      // A missing/unavailable tenant registry is an infrastructure boundary,
+      // not an unhandled application error. Fail closed and return a bounded
+      // server-side code so onboarding can show a retryable state.
+      return {
+        context: null,
+        identity: null,
+        initialSetup: false,
+        response: Response.json({ error: errorCode(error) }, { status: 503 }),
+      };
     }
   }
 
