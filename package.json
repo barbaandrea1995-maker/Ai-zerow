@@ -21,6 +21,7 @@
     "audit:e2e": "node scripts/audit-e2e-contract.mjs",
     "verify:commercial": "node --experimental-strip-types scripts/verify-commercial-v1.mjs",
     "verify:company-ai-assets": "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs",
+    "verify:creation-flows": "node scripts/verify-creation-flows.mjs",
     "verify:domain-flows": "node scripts/verify-domain-flows.mjs",
     "verify:mission-resources": "node --experimental-strip-types scripts/verify-mission-resource-rules.mjs",
     "verify:mobile-navigation": "node --experimental-strip-types scripts/verify-mobile-navigation.mjs",

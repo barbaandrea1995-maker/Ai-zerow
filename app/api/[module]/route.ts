@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { assetCustodyLocations, qrCodes, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
+import { assetCustodyLocations, geoLocations, qrCodes, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantWarehouses } from "@/db/schema";
 import {
   adapterError,
   assertS04Tenant,
@@ -15,7 +15,12 @@ import {
 import { allocateServerName, CanonicalCodeConflictError } from "@/lib/server-naming";
 import { canonicalPayload } from "@/lib/qr-adapter";
 import { canReadAllAssets, canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
-import { assetTransportCapabilities as canonicalAssetTransportCapabilities, normalizeAssetUsageMode } from "@/lib/asset-contract";
+import {
+  assetTransportCapabilities as canonicalAssetTransportCapabilities,
+  isAssetUsageMode,
+  isTransportCapability,
+  normalizeAssetUsageMode,
+} from "@/lib/asset-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -171,13 +176,32 @@ export async function POST(request: Request, routeContext: RouteContext) {
   const detail = typeof payload.detail === "string" ? payload.detail.trim() : "";
   const meta = typeof payload.meta === "string" ? payload.meta.trim() : "";
   const status = typeof payload.status === "string" ? payload.status.trim() : "READ MODEL";
-  const entityType = typeof payload.entityType === "string" ? payload.entityType.trim().toLowerCase() : undefined;
+  const requestedEntityType = typeof payload.entityType === "string" ? payload.entityType.trim().toLowerCase() : undefined;
+  const entityType = moduleKey === "assets" ? requestedEntityType || "asset" : requestedEntityType;
+  const requestedUsageMode = typeof payload.usageMode === "string"
+    ? payload.usageMode.trim().toUpperCase()
+    : typeof payload.operationalProfile === "string"
+      ? payload.operationalProfile.trim().toUpperCase()
+      : "";
   const assetUsageMode = moduleKey === "assets"
     ? normalizeAssetUsageMode(payload.usageMode || payload.operationalProfile, entityType)
     : null;
+  const requestedTransportCapabilities = Array.isArray(payload.transportCapabilities) ? payload.transportCapabilities : [];
   const assetTransportCapabilities = moduleKey === "assets"
-    ? canonicalAssetTransportCapabilities({ ...payload, entityType, usageMode: assetUsageMode })
+    ? assetUsageMode === "OPERATIONAL"
+      ? []
+      : canonicalAssetTransportCapabilities({ ...payload, entityType, usageMode: assetUsageMode })
     : null;
+  const assetWarehouseId = moduleKey === "assets" && typeof payload.warehouseId === "string"
+    ? payload.warehouseId.trim().slice(0, 160)
+    : "";
+  const assetMaxPayloadKg = moduleKey === "assets" && payload.maxPayloadKg !== undefined && payload.maxPayloadKg !== null && payload.maxPayloadKg !== ""
+    ? Number(payload.maxPayloadKg)
+    : null;
+  const assetWeightKg = moduleKey === "assets" && payload.weightKg !== undefined && payload.weightKg !== null && payload.weightKg !== ""
+    ? Number(payload.weightKg)
+    : null;
+  const assetTransportable = moduleKey === "assets" && typeof payload.transportable === "boolean" ? payload.transportable : true;
   const rawBarcode = typeof payload.barcode === "string" ? payload.barcode.trim() : "";
   const barcode = rawBarcode.slice(0, 120);
   const tone = typeof payload.tone === "string" && VALID_TONES.has(payload.tone) ? payload.tone : "lime";
@@ -204,6 +228,27 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (moduleKey === "assets" && entityType && !["asset", "vehicle", "equipment"].includes(entityType)) {
     return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   }
+  if (moduleKey === "assets" && requestedUsageMode && !isAssetUsageMode(requestedUsageMode)) {
+    return Response.json({ error: "unknown_asset_usage_mode" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && entityType !== "vehicle" && assetUsageMode !== "OPERATIONAL") {
+    return Response.json({ error: "non_vehicle_transport_usage_invalid" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && requestedTransportCapabilities.some((value) => !isTransportCapability(value))) {
+    return Response.json({ error: "unknown_asset_transport_capability" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && assetUsageMode !== "OPERATIONAL" && (!requestedTransportCapabilities.length || !assetTransportCapabilities?.length)) {
+    return Response.json({ error: "transport_capability_required" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && payload.transportable !== undefined && typeof payload.transportable !== "boolean") {
+    return Response.json({ error: "asset_transportable_flag_invalid" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && assetMaxPayloadKg !== null && (!Number.isFinite(assetMaxPayloadKg) || assetMaxPayloadKg <= 0 || assetMaxPayloadKg > 100_000)) {
+    return Response.json({ error: "asset_payload_capacity_invalid" }, { status: 400 });
+  }
+  if (moduleKey === "assets" && assetWeightKg !== null && (!Number.isFinite(assetWeightKg) || assetWeightKg <= 0 || assetWeightKg > 1_000_000)) {
+    return Response.json({ error: "asset_weight_invalid" }, { status: 400 });
+  }
   try {
     assertS04Tenant(context!, context!.tenantId);
     const now = new Date().toISOString();
@@ -223,11 +268,33 @@ export async function POST(request: Request, routeContext: RouteContext) {
       )).limit(1);
       if (!existingRecord) return Response.json({ error: "s04_idempotency_readback_unavailable" }, { status: 503 });
       const records = await scopedReadModel(context!, moduleKey);
+      const responseRows = await responseRecords(context!, moduleKey, records);
       return Response.json({
-        ...s04Envelope(context!, moduleKey, await responseRecords(context!, moduleKey, records)),
-        created: recordForResponse(existingRecord),
+        ...s04Envelope(context!, moduleKey, responseRows),
+        created: responseRows.find((record) => record.id === existingRecord.id) ?? recordForResponse(existingRecord),
         idempotent: true,
       }, { headers: { "cache-control": "no-store" } });
+    }
+    const [assetWarehouse] = moduleKey === "assets" && assetWarehouseId
+      ? await db.select().from(tenantWarehouses).where(and(
+        eq(tenantWarehouses.tenantId, context!.tenantId),
+        eq(tenantWarehouses.id, assetWarehouseId),
+        eq(tenantWarehouses.status, "active"),
+      )).limit(1)
+      : [];
+    if (moduleKey === "assets" && assetWarehouseId && !assetWarehouse) {
+      return Response.json({ error: "asset_warehouse_not_found" }, { status: 400 });
+    }
+    const [assetWarehouseLocation] = moduleKey === "assets" && assetWarehouse
+      ? await db.select().from(geoLocations).where(and(
+        eq(geoLocations.tenantId, context!.tenantId),
+        eq(geoLocations.entityType, "MAGAZZINO"),
+        eq(geoLocations.entityId, assetWarehouse.id),
+        eq(geoLocations.status, "ACTIVE"),
+      )).limit(1)
+      : [];
+    if (moduleKey === "assets" && assetWarehouse && !assetWarehouseLocation) {
+      return Response.json({ error: "asset_warehouse_location_not_canonical" }, { status: 409 });
     }
     const naming = moduleKey === "operations" || moduleKey === "assets"
       ? await allocateServerName({
@@ -263,9 +330,17 @@ export async function POST(request: Request, routeContext: RouteContext) {
         usageMode: assetUsageMode,
         operationalProfile: assetUsageMode,
         transportCapabilities: assetTransportCapabilities,
+        transportable: entityType === "vehicle" ? false : assetTransportable,
+        weightKg: entityType === "vehicle" ? null : assetWeightKg,
+        maxPayloadKg: entityType === "vehicle" ? assetMaxPayloadKg : null,
+        pairedCargoAssetIds: [],
+        warehouseId: assetWarehouse?.id ?? null,
+        locationId: assetWarehouseLocation?.id ?? null,
+        location: assetWarehouse?.name ?? "",
         assetProfile: {
           usageMode: assetUsageMode,
           transportCapabilities: assetTransportCapabilities,
+          maxPayloadKg: entityType === "vehicle" ? assetMaxPayloadKg : null,
         },
       } : {}),
       barcode: barcode || undefined,
@@ -308,7 +383,21 @@ export async function POST(request: Request, routeContext: RouteContext) {
         aggregateType,
         aggregateId: id,
         aggregateVersion: 1,
-        payloadJson: JSON.stringify({ module: moduleKey, recordType, canonicalCode: naming?.canonicalCode ?? null, source: "sites-s04-adapter" }),
+        payloadJson: JSON.stringify({
+          module: moduleKey,
+          recordType,
+          canonicalCode: naming?.canonicalCode ?? null,
+          source: "sites-s04-adapter",
+          ...(moduleKey === "assets" ? {
+            entityType,
+            usageMode: assetUsageMode,
+            physicalCustody: {
+              status: assetWarehouse ? "AT_WAREHOUSE" : "UNKNOWN",
+              warehouseId: assetWarehouse?.id ?? null,
+              locationId: assetWarehouseLocation?.id ?? null,
+            },
+          } : {}),
+        }),
         correlationId: crypto.randomUUID(),
         causationId: null,
         idempotencyKey,
@@ -349,6 +438,20 @@ export async function POST(request: Request, routeContext: RouteContext) {
         createdAt: now,
         updatedAt: now,
       })] : []),
+      ...(moduleKey === "assets" ? [db.insert(assetCustodyLocations).values({
+        id: `ASSET-CUSTODY-${id}`,
+        tenantId: context!.tenantId,
+        assetId: id,
+        warehouseId: assetWarehouse?.id ?? null,
+        locationId: assetWarehouseLocation?.id ?? null,
+        status: assetWarehouse ? "AT_WAREHOUSE" : "UNKNOWN",
+        source: "ASSET_REGISTRATION",
+        version: 1,
+        effectiveAt: now,
+        createdBy: context!.actorId,
+        createdAt: now,
+        updatedAt: now,
+      })] : []),
     ]);
 
     const [row] = await db.select().from(s04Records).where(and(
@@ -358,9 +461,10 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (!row) return Response.json({ error: "s04_readback_unavailable" }, { status: 503 });
 
     const records = await scopedReadModel(context!, moduleKey);
+    const responseRows = await responseRecords(context!, moduleKey, records);
     return Response.json({
-      ...s04Envelope(context!, moduleKey, await responseRecords(context!, moduleKey, records)),
-      created: recordForResponse(row),
+      ...s04Envelope(context!, moduleKey, responseRows),
+      created: responseRows.find((record) => record.id === row.id) ?? recordForResponse(row),
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {

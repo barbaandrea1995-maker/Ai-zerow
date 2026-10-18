@@ -103,6 +103,28 @@ function missionResponse(row: typeof jobJourneyRecords.$inferSelect, job: typeof
   };
 }
 
+function missionCreateResponse(
+  row: typeof jobJourneyRecords.$inferSelect,
+  job: typeof s04Records.$inferSelect | null,
+  idempotent: boolean,
+  eventId: string,
+) {
+  const response = missionResponse(row, job, idempotent);
+  return {
+    ...response,
+    mutation: {
+      action: "mission_create",
+      record: response.record,
+      eventId,
+    },
+    readback: {
+      status: "verified",
+      scope: "tenant",
+      checkedAt: new Date().toISOString(),
+    },
+  };
+}
+
 export async function GET() {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
@@ -464,16 +486,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const resources = await assertMissionResourceSelection({
-      tenantId: context.tenantId,
-      driverId,
-      vehicleId,
-      cargoAssetId: cargoAssetId || undefined,
-      cargoAssetIds,
-      transportMode,
-      plannedAt,
-      plannedEndAt: plannedEndAt || undefined,
-    });
     const db = getDb();
     const [existingEvent] = await db.select().from(s06Events).where(and(
       eq(s06Events.tenantId, context.tenantId),
@@ -492,8 +504,22 @@ export async function POST(request: Request) {
         eq(s04Records.module, "mission"),
       )).limit(1);
       if (!existingJob) return Response.json({ error: "mission_idempotency_key_conflict" }, { status: 409 });
-      return Response.json({ ...missionResponse(existingRecord, existingJob ?? null, true), context: publicAuthorityContext(context) }, { headers: { "cache-control": "private, no-store" } });
+      return Response.json({ ...missionCreateResponse(existingRecord, existingJob ?? null, true, existingEvent.eventId), context: publicAuthorityContext(context) }, { headers: { "cache-control": "private, no-store" } });
     }
+
+    // Idempotency is resolved before availability. On a replay, the mission
+    // itself reserves these resources and would otherwise be misreported as a
+    // new overlap instead of returning the already committed readback.
+    const resources = await assertMissionResourceSelection({
+      tenantId: context.tenantId,
+      driverId,
+      vehicleId,
+      cargoAssetId: cargoAssetId || undefined,
+      cargoAssetIds,
+      transportMode,
+      plannedAt,
+      plannedEndAt: plannedEndAt || undefined,
+    });
 
     const now = new Date().toISOString();
     const jobId = crypto.randomUUID();
@@ -668,7 +694,7 @@ export async function POST(request: Request) {
     const [createdJob] = await db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.id, jobId))).limit(1);
     const [createdRecord] = await db.select().from(jobJourneyRecords).where(and(eq(jobJourneyRecords.tenantId, context.tenantId), eq(jobJourneyRecords.id, missionId))).limit(1);
     if (!createdRecord) return Response.json({ error: "mission_readback_unavailable" }, { status: 503 });
-    return Response.json({ ...missionResponse(createdRecord, createdJob ?? null, false), context: publicAuthorityContext(context), eventId }, { status: 201, headers: { "cache-control": "private, no-store" } });
+    return Response.json({ ...missionCreateResponse(createdRecord, createdJob ?? null, false, eventId), context: publicAuthorityContext(context), eventId }, { status: 201, headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     if (error instanceof MissionResourceError) {
       return Response.json({ error: error.code, details: error.details ?? null }, { status: error.code === "mission_resource_conflict" ? 409 : 400 });

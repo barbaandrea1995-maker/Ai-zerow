@@ -192,6 +192,8 @@ type MissionPayload = {
 type MissionCreateResponse = {
   error?: string;
   message?: string;
+  missionId?: string;
+  record?: { id?: string; status?: string; payload?: Record<string, unknown> };
   readback?: { status?: string };
   mutation?: {
     action?: string;
@@ -1490,6 +1492,7 @@ export default function MissionCommandDeck() {
     setBusy(true);
     try {
       const standalone = jobId === "__standalone__";
+      const hasMaterialRequest = typeof body.materialRequestId === "string" && body.materialRequestId.trim().length > 0;
       const url = standalone
         ? "/api/mission/control"
         : "/api/operations/jobs/" + encodeURIComponent(jobId) + "/journey";
@@ -1525,7 +1528,7 @@ export default function MissionCommandDeck() {
         notify("Missione non creata: " + (result.message ?? errorLabels[result.error ?? ""] ?? result.error ?? "errore"));
         return;
       }
-      const createdMissionId = result.mutation?.record?.id ?? "";
+      const createdMissionId = result.mutation?.record?.id ?? result.record?.id ?? result.missionId ?? "";
       if (!createdMissionId || result.readback?.status !== "verified") {
         notify("La missione è stata ricevuta, ma il readback server non è completo. Aggiorna il registro prima di procedere.");
         await refresh();
@@ -1539,7 +1542,9 @@ export default function MissionCommandDeck() {
       setSelectedId(createdMissionId);
       setModal(null);
       router.replace(`/mission?missionId=${encodeURIComponent(createdMissionId)}`, { scroll: false });
-      notify("Missione creata, richiesta collegata e readback verificato. È pronta per il prelievo in magazzino.");
+      notify(hasMaterialRequest
+        ? "Missione creata, richiesta collegata e readback verificato. È pronta per il prelievo in magazzino."
+        : "Missione creata e riletta dal registro server-side.");
     } catch {
       notify("Connessione non disponibile: nessuna missione modificata.");
     } finally {

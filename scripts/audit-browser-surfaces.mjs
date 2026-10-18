@@ -12,6 +12,7 @@ const screenshotDirectory = process.env.ZEROW_BROWSER_SCREENSHOT_DIR || "";
 const requestedProfiles = new Set((process.env.ZEROW_BROWSER_PROFILES || "").split(",").map((value) => value.trim()).filter(Boolean));
 const requestedRoutes = new Set((process.env.ZEROW_BROWSER_ROUTES || "").split(",").map((value) => value.trim()).filter(Boolean));
 const includeWarehouseProfile = process.env.ZEROW_INCLUDE_WAREHOUSE_PROFILE === "1";
+const verifyCreationDialogs = process.env.ZEROW_VERIFY_CREATION_DIALOGS === "1";
 
 const ownerRoutes = [
   "/", "/command", "/onboarding", "/operations", "/workforce", "/planning", "/presenze",
@@ -237,6 +238,7 @@ try {
 
   const results = [];
   const navigationInteractions = [];
+  const creationFormInteractions = [];
   for (const profile of profiles) {
     currentCase = null;
     await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
@@ -443,6 +445,115 @@ try {
           passed: menuEvaluation.result?.value?.open === true,
         });
       }
+      if (verifyCreationDialogs && profile.id === "owner-mobile" && ["/onboarding", "/assets", "/mission"].includes(route)) {
+        const buttonLabel = route === "/onboarding" ? "Nuovo magazzino" : route === "/assets" ? "Nuovo asset" : "Nuova missione";
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 600, deviceScaleFactor: 1, mobile: true }, sessionId);
+        let openEvaluation = { result: { value: false } };
+        const formReadyDeadline = Date.now() + 12_000;
+        while (Date.now() < formReadyDeadline && openEvaluation.result?.value !== true) {
+          openEvaluation = await cdp.send("Runtime.evaluate", {
+            expression: `(() => {
+              const button = [...document.querySelectorAll("button")].find((element) => (element.textContent || "").trim().includes(${JSON.stringify(buttonLabel)}));
+              if (!button || button.disabled) return false;
+              button.click();
+              return true;
+            })()`,
+            returnByValue: true,
+          }, sessionId);
+          if (openEvaluation.result?.value !== true) await delay(250);
+        }
+        await delay(650);
+
+        let initialAssetUsageOptions = [];
+        if (route === "/assets") {
+          const initialEvaluation = await cdp.send("Runtime.evaluate", {
+            expression: `(() => [...(document.querySelector('select[aria-label="Profilo di utilizzo asset"]')?.options || [])].map((option) => option.value))()`,
+            returnByValue: true,
+          }, sessionId);
+          initialAssetUsageOptions = initialEvaluation.result?.value ?? [];
+          await cdp.send("Runtime.evaluate", {
+            expression: `(() => {
+              const select = document.querySelector('select[aria-label="Tipologia asset"]');
+              if (!select) return false;
+              select.value = "vehicle";
+              select.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
+            })()`,
+            returnByValue: true,
+          }, sessionId);
+          await delay(250);
+        }
+
+        const dialogEvaluation = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const dialog = document.querySelector('[data-slot="dialog-content"][data-state="open"]');
+            if (!dialog) return { open: false };
+            const style = getComputedStyle(dialog);
+            const rect = dialog.getBoundingClientRect();
+            const before = dialog.scrollTop;
+            dialog.scrollTop = dialog.scrollHeight;
+            const after = dialog.scrollTop;
+            const text = dialog.textContent || "";
+            const common = {
+              open: true,
+              title: dialog.querySelector('[data-slot="dialog-title"]')?.textContent?.trim() || "",
+              overflowY: style.overflowY,
+              touchAction: style.touchAction,
+              clientHeight: dialog.clientHeight,
+              scrollHeight: dialog.scrollHeight,
+              scrollMoved: dialog.scrollHeight <= dialog.clientHeight + 1 || after > before,
+              fitsViewport: rect.top >= -1 && rect.bottom <= innerHeight + 1,
+              horizontalOverflow: Math.max(0, dialog.scrollWidth - dialog.clientWidth),
+              closePresent: Boolean(dialog.querySelector('[data-slot="dialog-close"]')),
+            };
+            if (${JSON.stringify(route)} === "/onboarding") return {
+              ...common,
+              hasName: Boolean(dialog.querySelector('#warehouse-name')),
+              hasServerLocation: Boolean(dialog.querySelector('#warehouse-location')) && text.includes("Riconosci luogo"),
+              hasRadius: Boolean(dialog.querySelector('#warehouse-radius')),
+              serverCopy: text.includes("server-side") && text.includes("registro scorte"),
+            };
+            if (${JSON.stringify(route)} === "/assets") return {
+              ...common,
+              hasWarehouseCatalog: (dialog.querySelector('select[aria-label="Ubicazione fisica asset"]')?.options.length || 0) >= 2,
+              freeTextLocationRemoved: !text.includes("Sede / ubicazione"),
+              initialUsageOptions: ${JSON.stringify(initialAssetUsageOptions)},
+              vehicleUsageOptions: [...(dialog.querySelector('select[aria-label="Profilo di utilizzo asset"]')?.options || [])].map((option) => option.value),
+              hasPayloadField: Boolean(dialog.querySelector('input[placeholder="Es. 3500"]')),
+            };
+            return {
+              ...common,
+              hasJobBinding: Boolean(dialog.querySelector('select[aria-label="Commessa o trasporto autonomo"]')),
+              hasTransportMode: Boolean(dialog.querySelector('select[aria-label="Modalità trasporto"]')),
+              hasCanonicalStops: Boolean(dialog.querySelector('select[aria-label="Location canonica tappa 1"]')) && Boolean(dialog.querySelector('select[aria-label="Location canonica tappa 2"]')),
+              hasServerResources: Boolean(dialog.querySelector('select[aria-label="Autista reale"]')) && Boolean(dialog.querySelector('select[aria-label="Mezzo di trasporto"]')),
+              hasReadbackAction: text.includes("Crea e rileggi"),
+            };
+          })()`,
+          returnByValue: true,
+        }, sessionId);
+        const dialog = dialogEvaluation.result?.value ?? { open: false };
+        const commonPassed = openEvaluation.result?.value === true
+          && dialog.open === true
+          && ["auto", "scroll"].includes(dialog.overflowY)
+          && ["pan-y", "auto"].includes(dialog.touchAction)
+          && dialog.scrollMoved === true
+          && dialog.fitsViewport === true
+          && dialog.horizontalOverflow <= 2
+          && dialog.closePresent === true;
+        const formPassed = route === "/onboarding"
+          ? dialog.title === "Configura un magazzino" && dialog.hasName && dialog.hasServerLocation && dialog.hasRadius && dialog.serverCopy
+          : route === "/assets"
+            ? dialog.title === "Registra asset" && dialog.hasWarehouseCatalog && dialog.freeTextLocationRemoved
+              && JSON.stringify(dialog.initialUsageOptions) === JSON.stringify(["OPERATIONAL"])
+              && JSON.stringify(dialog.vehicleUsageOptions) === JSON.stringify(["OPERATIONAL", "TRANSPORT", "DUAL_USE"])
+              && dialog.hasPayloadField
+            : dialog.title === "Nuova missione" && dialog.hasJobBinding && dialog.hasTransportMode && dialog.hasCanonicalStops && dialog.hasServerResources && dialog.hasReadbackAction;
+        creationFormInteractions.push({ profile: profile.id, route, buttonLabel, ...dialog, passed: commonPassed && formPassed });
+        await cdp.send("Runtime.evaluate", { expression: `document.querySelector('[data-slot="dialog-content"][data-state="open"] [data-slot="dialog-close"]')?.click()` }, sessionId);
+        await delay(150);
+        await cdp.send("Emulation.setDeviceMetricsOverride", profile.viewport, sessionId);
+      }
       currentCase = null;
     }
 
@@ -533,8 +644,9 @@ try {
     return issues.length ? [{ profile: item.profile, route: item.route, issues }] : [];
   });
   const navigationInteractionIssues = navigationInteractions.filter((item) => !item.passed);
+  const creationFormIssues = creationFormInteractions.filter((item) => !item.passed);
 
-  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues, navigationInteractions, navigationInteractionIssues }, null, 2));
+  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues, navigationInteractions, navigationInteractionIssues, creationFormInteractions, creationFormIssues }, null, 2));
 
   assert.deepEqual(routeFailures.map(({ profile, route }) => ({ profile, route })), [], "Every authorized browser surface must render");
   assert.deepEqual(overflows.map(({ profile, route, horizontalOverflow }) => ({ profile, route, horizontalOverflow })), [], "Browser surfaces must not overflow horizontally");
@@ -543,6 +655,7 @@ try {
   assert.deepEqual(terminologyIssues, [], "Browser surfaces must use the canonical product terminology");
   assert.deepEqual(navigationIssues, [], "Every browser surface must use one canonical server-derived role navigation");
   assert.deepEqual(navigationInteractionIssues, [], "Every mobile-navigation destination and module-menu action must work in the browser");
+  assert.deepEqual(creationFormIssues, [], "Warehouse, asset and mission creation dialogs must remain complete and scrollable on mobile");
 
   console.log(JSON.stringify({
     status: "PASS",
@@ -558,6 +671,7 @@ try {
     terminologyIssues: terminologyIssues.length,
     navigationIssues: navigationIssues.length,
     navigationInteractions: navigationInteractions.length,
+    creationFormInteractions: creationFormInteractions.length,
     outputPath: outputPath || null,
     screenshotDirectory: screenshotDirectory || null,
   }, null, 2));

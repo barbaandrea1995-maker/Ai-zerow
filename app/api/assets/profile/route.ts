@@ -103,6 +103,7 @@ export async function POST(request: Request) {
   if (title.length < 2) return Response.json({ error: "asset_title_required" }, { status: 400 });
   if (!("asset vehicle equipment".split(" ").includes(entityType))) return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   if (!isAssetUsageMode(usageMode)) return Response.json({ error: "unknown_asset_usage_mode" }, { status: 400 });
+  if (entityType !== "vehicle" && usageMode !== "OPERATIONAL") return Response.json({ error: "non_vehicle_transport_usage_invalid" }, { status: 400 });
   if (capacityValue !== null && (!Number.isFinite(capacityValue) || capacityValue < 0 || capacityValue > 10_000_000)) return Response.json({ error: "asset_capacity_invalid" }, { status: 400 });
   if (maxPayloadValue !== null && (!Number.isFinite(maxPayloadValue) || maxPayloadValue <= 0 || maxPayloadValue > 100_000)) return Response.json({ error: "asset_payload_capacity_invalid" }, { status: 400 });
   if (weightValue !== null && (!Number.isFinite(weightValue) || weightValue <= 0 || weightValue > 1_000_000)) return Response.json({ error: "asset_weight_invalid" }, { status: 400 });
