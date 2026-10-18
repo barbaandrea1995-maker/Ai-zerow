@@ -30,6 +30,21 @@ export type AttendanceTarget = {
   assignmentSource: "COMMESSA" | "PIANIFICAZIONE" | "MISSIONE" | "MAGAZZINO";
   geofencePolicy: "SERVER_VALIDATED";
   trackingPolicy: "NO_CONTINUOUS_TRACKING" | "CHECK_IN_STARTS_TRACKING" | "TIMESTAMP_AND_GEOFENCE";
+  materialPickups?: Array<{
+    requestId: string;
+    title: string;
+    warehouseId: string;
+    warehouseName: string;
+    warehouseLocation: string;
+    lineId: string;
+    itemId: string;
+    description: string;
+    sku: string;
+    unit: string;
+    directQuantityMilli: number;
+    pickedQuantityMilli: number;
+    remainingQuantityMilli: number;
+  }>;
 };
 
 export type WarehouseScope = {
@@ -147,6 +162,33 @@ function plannedResourceIds(payload: Record<string, unknown>) {
   return ids;
 }
 
+/** The server-side assignment predicate shared by Presenze and direct
+ * warehouse pickups. A caller-supplied job id is never sufficient: the actor
+ * must match the commessa, one of its active planning records, or (when
+ * explicitly supplied) an active mission attached to that commessa. */
+export function isActorAssignedToJob(args: {
+  context: AuthorityContext;
+  job: AttendanceScopeRow;
+  planningRows: readonly AttendanceScopeRow[];
+  workforceRows: readonly ScopeRow[];
+  missionRows?: readonly AttendanceScopeRow[];
+}) {
+  const { context, job, planningRows, workforceRows, missionRows = [] } = args;
+  const assignmentTokens = [...teamScopeTokens(workforceRows, context), ...actorResourceIds(context, workforceRows)];
+  const operationAssigned = rowMatchesContext(job, context, assignmentTokens)
+    || planningRows.some((plan) => {
+      if (plan.jobId !== job.id || !isActiveStatus(plan.status)) return false;
+      const planPayload = parseScopePayload(plan.payloadJson);
+      const resources = plannedResourceIds(planPayload);
+      return [...resources].some((id) => assignmentTokens.some((token) => token.toUpperCase() === id.toUpperCase()))
+        || rowMatchesContext(plan, context, assignmentTokens);
+    });
+  const missionAssigned = missionRows.some((mission) => mission.jobId === job.id
+    && isActiveStatus(mission.status)
+    && rowMatchesContext(mission, context, assignmentTokens));
+  return operationAssigned || missionAssigned;
+}
+
 function activityLabel(payload: Record<string, unknown>) {
   const activities = Array.isArray(payload.activities) ? payload.activities : [];
   const first = activities[0];
@@ -188,14 +230,7 @@ export function resolveAttendanceTargets(args: {
   for (const job of jobs) {
     if (String(job.recordType ?? "").toLowerCase() === "adapter-contract") continue;
     const payload = parseScopePayload(job.payloadJson);
-    const operationAssigned = rowMatchesContext(job, context, assignmentTokens)
-      || planningRows.some((plan) => {
-        if (plan.jobId !== job.id || !isActiveStatus(plan.status)) return false;
-        const planPayload = parseScopePayload(plan.payloadJson);
-        const resources = plannedResourceIds(planPayload);
-        return [...resources].some((id) => assignmentTokens.map((value) => value.toUpperCase()).includes(id.toUpperCase()))
-          || rowMatchesContext(plan, context, assignmentTokens);
-      });
+    const operationAssigned = isActorAssignedToJob({ context, job, planningRows, workforceRows });
     const matchingMissions = (missionByJob.get(job.id) ?? []).filter((mission) => {
       if (!isActiveStatus(mission.status)) return false;
       return rowMatchesContext(mission, context, assignmentTokens);

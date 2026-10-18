@@ -20,6 +20,7 @@ import { getAuthorityContext, hasCapability, publicAuthorityContext, type Author
 import { normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import { documentCanDownload } from "@/lib/document-security";
 import { INVENTORY_UNIT_CATALOG, inventoryMovementForResponse, inventoryUnitForCode, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
+import { materialFulfillmentLines, missionDeliveryLines } from "@/lib/material-fulfillment";
 import { OPERATIONAL_DOCUMENT_CATEGORIES } from "@/lib/document-contract";
 import { assertMissionResourceSelection, MissionResourceError } from "@/lib/mission-resources";
 import { parseJobPayload } from "@/lib/operations-contract";
@@ -578,6 +579,8 @@ async function journeyReadback(context: AuthorityContext, job: typeof s04Records
       if (record.domain !== "warehouse" || record.recordType !== "MATERIAL_REQUEST" || record.status !== "APPROVED") return [];
       const requestPayload = parseJson(record.payloadJson);
       if (boundedText(requestPayload.missionId, 120)) return [];
+      const deliveryLines = missionDeliveryLines(requestPayload);
+      if (!deliveryLines?.length) return [];
       const warehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
       return [{
         id: record.id,
@@ -1186,6 +1189,8 @@ export async function POST(request: Request, routeContext: RouteContext) {
         if (requestRow.status !== "APPROVED") return Response.json({ error: "approved_material_request_required" }, { status: 409 });
         const requestPayload = parseJson(requestRow.payloadJson);
         if (boundedText(requestPayload.missionId, 120)) return Response.json({ error: "material_request_already_scheduled" }, { status: 409 });
+        const deliveryLines = missionDeliveryLines(requestPayload);
+        if (!deliveryLines?.length) return Response.json({ error: "material_request_has_no_mission_delivery" }, { status: 409 });
         const warehouse = isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null;
         const warehouseLocation = boundedText(warehouse?.locationLabel, 240);
         if (!warehouseLocation) return Response.json({ error: "fulfillment_warehouse_location_required" }, { status: 422 });
@@ -1267,7 +1272,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
             return {
               id: materialRequest.id,
               title: materialRequest.title,
-              lines: Array.isArray(requestPayload.lines) ? requestPayload.lines : [],
+              lines: missionDeliveryLines(requestPayload) ?? [],
               deliveryPoint: boundedText(requestPayload.deliveryPoint, 240),
               warehouse: isRecord(requestPayload.warehouse) ? requestPayload.warehouse : null,
             };
@@ -1317,17 +1322,12 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const originWarehouseId = boundedText(requestPayload.warehouseId, 120) || boundedText(requestWarehouse?.id, 120);
       const destinationEntityId = boundedText(input.destinationEntityId ?? input.dropoffEntityId, 160);
       const destinationEntityType = boundedText(input.destinationEntityType ?? input.dropoffEntityType, 48).toUpperCase();
-      const requestMaterialActions = Array.isArray(requestPayload.lines)
-        ? requestPayload.lines.flatMap((line) => {
-          if (!isRecord(line)) return [];
-          const itemId = boundedText(line.itemId, 160);
-          if (!itemId) return [];
-          return [{
-            itemId,
-            quantity: typeof line.quantity === "number" || typeof line.quantity === "string" ? String(line.quantity).slice(0, 32) : null,
-            materialRequestId: materialRequest?.id ?? null,
-          }];
-        })
+      const requestMaterialActions = materialRequest
+        ? (missionDeliveryLines(requestPayload) ?? []).flatMap((line) => line.itemId ? [{
+          itemId: line.itemId,
+          quantity: String(line.quantity),
+          materialRequestId: materialRequest?.id ?? null,
+        }] : [])
         : [];
       const cargoActionsForStop = (action: string) => {
         const actions: Array<Record<string, unknown>> = requestMaterialActions.map((line) => ({ action, ...line, assetId: null }));
@@ -1466,6 +1466,27 @@ export async function POST(request: Request, routeContext: RouteContext) {
             return Response.json({ error: "inventory_unit_mismatch", message: "L’unità richiesta deve coincidere con quella del materiale registrato." }, { status: 409 });
           }
           const verifiedLines = canonicalLines as NonNullable<(typeof canonicalLines)[number]>[];
+          const submittedLineById = new Map((input.lines as unknown[]).flatMap((candidate, index) => {
+            if (!isRecord(candidate)) return [];
+            const lineId = boundedText(candidate.id, 80, `line-${index + 1}`);
+            return lineId ? [[lineId, candidate] as const] : [];
+          }));
+          const fulfillmentPlanLines = verifiedLines.map((line) => {
+            const submitted = submittedLineById.get(line.id);
+            const approvedQuantityMilli = quantityToMilli(line.quantity);
+            const directPickupMilli = quantityToMilli(submitted?.directPickupQuantity ?? 0, { allowZero: true });
+            if (approvedQuantityMilli === null || directPickupMilli === null || directPickupMilli > approvedQuantityMilli) return null;
+            return {
+              lineId: line.id,
+              itemId: line.itemId!,
+              approvedQuantityMilli,
+              directPickupMilli,
+              missionDeliveryMilli: approvedQuantityMilli - directPickupMilli,
+            };
+          });
+          if (fulfillmentPlanLines.some((line) => !line)) {
+            return Response.json({ error: "material_fulfillment_split_invalid", message: "La quota di ritiro diretto deve essere compresa tra zero e la quantità approvata." }, { status: 422 });
+          }
           const requestByLineId = new Map(originalLines.map((line) => [line.id, line]));
           if (verifiedLines.some((line) => requestByLineId.get(line.id)?.unit !== line.unit)) {
             return Response.json({ error: "material_unit_change_not_supported", message: "L’unità di misura richiesta deve restare invariata." }, { status: 409 });
@@ -1593,6 +1614,11 @@ export async function POST(request: Request, routeContext: RouteContext) {
               reservedAt: now,
               reservedBy: context.actorId,
               items: [...reservationByItem.values()].map(({ item, quantityMilli }) => ({ itemId: item.id, sku: item.sku, name: item.name, quantity: milliToQuantity(quantityMilli), unit: item.unit })),
+            },
+            fulfillmentPlan: {
+              version: 1,
+              allocationMethod: "LINE_QUANTITY",
+              lines: fulfillmentPlanLines,
             },
           };
         }
@@ -2553,12 +2579,17 @@ export async function POST(request: Request, routeContext: RouteContext) {
       const verifiedRecord = verifiedRecordRows[0];
       const reviewedPayload = verifiedRecord ? parseJson(verifiedRecord.payloadJson) : {};
       const stockReservation = isRecord(reviewedPayload.stockReservation) ? reviewedPayload.stockReservation : {};
+      const fulfillmentReadback = materialFulfillmentLines(reviewedPayload);
       const itemById = new Map(verifiedItems.map((item) => [item.id, item]));
       const movementByKey = new Map(verifiedMovements.map((movement) => [movement.idempotencyKey, movement]));
       const eventByKey = new Map(verifiedEvents.map((event) => [event.idempotencyKey, event]));
       const outboxEventIds = new Set(verifiedOutbox.map((entry) => entry.eventId));
       const reconciliationKeys = new Set(verifiedReconciliations.map((entry) => `${entry.aggregateType}:${entry.aggregateId}:${entry.expectedVersion}:${entry.status}`));
       const reservationRequired = status === "APPROVED";
+      const fulfillmentReadbackComplete = Boolean(fulfillmentReadback
+        && Array.isArray(reviewedPayload.lines)
+        && fulfillmentReadback.length === reviewedPayload.lines.length
+        && fulfillmentReadback.every((line) => line.directPickupMilli + line.missionDeliveryMilli === line.approvedQuantityMilli));
       const reservationReadbackComplete = inventoryReservationGuards.every((guard) => {
         const item = itemById.get(guard.itemId);
         const movement = movementByKey.get(guard.sideKey);
@@ -2577,7 +2608,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       });
       const requestEvent = eventByKey.get(idempotencyKey);
       const reviewReadbackComplete = Boolean(verifiedRecord
-        && (!reservationRequired || (stockReservation.status === "RESERVED" && reservationReadbackComplete))
+        && (!reservationRequired || (stockReservation.status === "RESERVED" && reservationReadbackComplete && fulfillmentReadbackComplete))
         && requestEvent
         && requestEvent.eventId === eventId
         && outboxEventIds.has(eventId)

@@ -452,7 +452,7 @@ export default function EventsControlPage() {
 </div>
 </header>
 <div className="mx-auto max-w-[1760px] px-4 py-5 pb-28 sm:px-7 sm:py-7 lg:pb-7">
-<section className="carbon-card-neon relative overflow-hidden rounded-[26px] p-5 sm:p-7">
+<section className="zw-module-heading carbon-card-neon relative overflow-hidden rounded-[26px] p-5 sm:p-7">
 <div className="pointer-events-none absolute -right-24 -top-32 size-[360px] rounded-full bg-lime-300/[.08] blur-3xl" />
 <div className="pointer-events-none absolute bottom-0 left-1/3 h-24 w-1/2 bg-lime-300/[.05] blur-3xl" />
 <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-center">
@@ -460,8 +460,8 @@ export default function EventsControlPage() {
 <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/75">
 <span className="grid size-6 place-items-center rounded-lg border border-lime-300/25 bg-lime-300/10">
 <Activity className="size-3.5" />
-</span>AI-ZEROW / W11 / EVENT AUTHORITY<span className="size-1 rounded-full bg-lime-300" />{loading ? "READING" : "READBACK VERIFIED"}</div>
-<h1 className="mt-5 max-w-3xl text-[clamp(2.2rem,5.1vw,5rem)] font-bold leading-[.9] tracking-[-.07em] text-slate-50">EVENTS <span className="text-lime-300 drop-shadow-[0_0_22px_rgba(200,255,34,.28)]">UNDER CONTROL.</span>
+</span>AI-ZEROW / W11 / REGISTRO EVENTI<span className="size-1 rounded-full bg-lime-300" />{loading ? "READING" : "LETTURA VERIFICATA"}</div>
+<h1 className="mt-5 max-w-3xl text-[clamp(2.2rem,5.1vw,5rem)] font-bold leading-[.9] tracking-[-.07em] text-slate-50">Eventi sotto controllo
 </h1>
 <p className="mt-5 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">Ledger append-only, delivery boundary e read model Company Twin in un’unica sezione. Ogni fatto resta rileggibile; nessun consumer esterno viene dato per eseguito.</p>
 <div className="mt-6 flex flex-wrap gap-2">

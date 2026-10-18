@@ -53,6 +53,14 @@ const warehouseRoute = await read("app/api/authority/warehouses/route.ts");
 const warehouseCatalogRoute = await read("app/api/warehouse/catalog/route.ts");
 const inventoryRoute = await read("app/api/warehouse/inventory/route.ts");
 const jobJourneyRoute = await read("app/api/operations/jobs/[jobId]/journey/route.ts");
+const materialFulfillment = await read("lib/material-fulfillment.ts");
+const materialPickupRoute = await read("app/api/operations/jobs/[jobId]/material-pickup/route.ts");
+const materialFulfillmentTests = await read("scripts/verify-material-fulfillment.mjs");
+const warehouseRequestsRoute = await read("app/api/warehouse/requests/route.ts");
+const attendanceRoute = await read("app/api/workforce/attendance/route.ts");
+const warehouseQueueSurface = await read("components/warehouse-request-queue.tsx");
+const attendanceSurface = await read("components/operational-attendance-deck.tsx");
+const missionCommandSurface = await read("components/mission-command-deck.tsx");
 const jobJourneySurface = await read("components/job-commercial-journey.tsx");
 const membershipRoute = await read("app/api/authority/memberships/route.ts");
 const warehouseComponent = await read("components/tenant-warehouse-control.tsx");
@@ -179,6 +187,31 @@ requireContract(jobJourneyRoute, /async function materialCatalogOptions\(context
 requireContract(jobJourneyRoute, /eq\(inventoryItems\.tenantId, context\.tenantId\)/, "job material catalog is tenant scoped");
 requireContract(jobJourneyRoute, /material_catalog_selection_unavailable/, "job material selection is revalidated on write");
 requireContract(jobJourneyRoute, /description: item\.name/, "job material name is resolved from canonical inventory");
+requireContract(jobJourneyRoute, /directPickupQuantity/, "warehouse approval accepts a per-line direct pickup allocation");
+requireContract(jobJourneyRoute, /missionDeliveryMilli: approvedQuantityMilli - directPickupMilli/, "approved line quantity is split exactly between pickup and delivery");
+requireContract(jobJourneyRoute, /fulfillmentPlan:\s*\{\s*version: 1/, "approved material split is persisted server-side");
+requireContract(jobJourneyRoute, /material_request_has_no_mission_delivery/, "direct-only requests cannot create an empty delivery mission");
+requireContract(materialFulfillment, /missionDeliveryMilli = approvedQuantityMilli/, "legacy approved requests remain mission-delivery compatible");
+requireContract(materialFulfillment, /directPickupMilli \+ missionDeliveryMilli !== approvedQuantityMilli/, "split readback rejects unbalanced quantities");
+requireContract(materialFulfillment, /plan\.allocationMethod !== "LINE_QUANTITY"/, "split readback validates its allocation contract version");
+requireContract(materialPickupRoute, /hasCapability\(context, "warehouse\.self_pickup"\)/, "direct pickup has a dedicated capability gate");
+requireContract(materialPickupRoute, /isActorAssignedToJob\(\{ context, job, planningRows, workforceRows, missionRows \}\)/, "direct pickup requires a server-verified commessa assignment");
+requireContract(materialPickupRoute, /evaluateAttendanceGeofence\(location, geofence\)/, "direct pickup validates the warehouse geofence server-side");
+requireContract(materialPickupRoute, /quantityMilli > remainingMilli/, "direct pickup cannot exceed its allocated line quantity");
+requireContract(materialPickupRoute, /reservedMilli: nextReserved/, "direct pickup decrements its reservation with physical stock");
+requireContract(materialPickupRoute, /'MATERIAL_PICKUP'/, "direct pickup writes its own append-only warehouse record");
+requireContract(materialPickupRoute, /warehouse\.material_pickup\.recorded/, "direct pickup publishes an S06 audit event");
+requireContract(materialPickupRoute, /SITES_READBACK_VERIFIED/, "direct pickup verifies ledger, outbox and reconciliation readback");
+requireContract(attendanceRoute, /directPickupsByJob/, "Presenze exposes only pending pickups for assigned commesse");
+requireContract(attendanceRoute, /GROUP BY requestId, lineId/, "Presenze totals every immutable pickup event without a history-page cap");
+requireContract(attendanceSurface, /\/material-pickup/, "Presenze records pickup through the server route");
+requireContract(attendanceSurface, /readPickupLocation\(\)/, "pickup obtains an on-demand device position");
+requireContract(warehouseRequestsRoute, /directPickups:/, "warehouse queue reads direct pickup history from the ledger");
+requireContract(warehouseRequestsRoute, /GROUP BY job_id, requestId, lineId/, "warehouse queue receives complete server-side pickup totals despite bounded event details");
+requireContract(warehouseQueueSurface, /missionDeliveryLines\(request\.payload\)/, "warehouse mission controls use only the delivery allocation");
+requireContract(warehouseQueueSurface, /quota consegnata viene programmata in Missioni/, "warehouse UI explains the coexisting pickup and delivery paths");
+requireContract(missionCommandSurface, /missionDeliveryLines\(request\.payload\)/, "Missioni receives only its allocated delivery quantities");
+requireContract(materialFulfillmentTests, /legacy compatibility and mission-only quantities: PASS/, "fulfillment split regression tests cover mixed, direct-only and legacy requests");
 requireContract(jobJourneySurface, /name="itemId"/, "job material UI selects a server catalog item");
 requireContract(jobJourneySurface, /materialCatalog \?\? \[\]\)\.map\(\(item\)/, "job material UI reads server catalog options");
 assert(!jobJourneySurface.includes('name="description"') && !jobJourneySurface.includes('field(form, "description")'), "job material requests must not accept free-text item names");
@@ -271,6 +304,7 @@ console.log(JSON.stringify({
     tenantAndRoleGuards: "PASS",
     readbackLedger: "PASS",
     qrCatalogResolution: "PASS",
+    splitWarehouseFulfillment: "PASS",
   },
   interactions: {
     buttonsScanned: buttonInventory.length,
@@ -285,6 +319,7 @@ console.log(JSON.stringify({
       "authority team create → D1 s04 → s06 event/outbox/reconciliation → team GET readback",
       "warehouse create → server coordinate/geofence validation → D1 location readback",
       "warehouse manager register material → unit/warehouse catalog → append-only inventory readback",
+      "approved warehouse reservation → per-line direct pickup in Presenze or delivery mission → one shared quantity ledger",
       "warehouse operator movement allowed → material registration denied by warehouse.register",
       "multi-role membership → unioned capabilities → tenant-scoped access",
       "planning window → server resource-options → occupied resource disabled → planning write guard",

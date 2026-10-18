@@ -93,6 +93,26 @@ export async function GET() {
         eq(inventoryMovements.movementType, "PICK"),
       )).orderBy(inventoryMovements.createdAt).limit(1_000)
       : [];
+    const pickupJobIds = [...new Set(requestsWithMission.map((row) => row.jobId))];
+    const [directPickupRows, directPickupTotals] = requestsWithMission.length
+      ? await Promise.all([
+        db.select().from(jobJourneyRecords).where(and(
+          eq(jobJourneyRecords.tenantId, context.tenantId),
+          inArray(jobJourneyRecords.jobId, pickupJobIds),
+          eq(jobJourneyRecords.domain, "warehouse"),
+          eq(jobJourneyRecords.recordType, "MATERIAL_PICKUP"),
+        )).orderBy(desc(jobJourneyRecords.createdAt)).limit(1_000),
+        db.$client.prepare(`
+          SELECT job_id AS jobId, json_extract(payload_json, '$.requestId') AS requestId,
+            json_extract(payload_json, '$.lineId') AS lineId,
+            COALESCE(SUM(CAST(json_extract(payload_json, '$.quantityMilli') AS INTEGER)), 0) AS pickedMilli
+          FROM job_journey_records
+          WHERE tenant_id = ? AND job_id IN (${pickupJobIds.map(() => "?").join(",")})
+            AND domain = 'warehouse' AND record_type = 'MATERIAL_PICKUP'
+          GROUP BY job_id, requestId, lineId
+        `).bind(context.tenantId, ...pickupJobIds).all<{ jobId: string; requestId: string | null; lineId: string | null; pickedMilli: number }>(),
+      ])
+      : [[], { results: [] as { jobId: string; requestId: string | null; lineId: string | null; pickedMilli: number }[] }];
     return Response.json({
       context: publicAuthorityContext(context),
       requests: requestsWithMission.map((row) => {
@@ -117,6 +137,25 @@ export async function GET() {
             movementType: movement.movementType,
             quantity: movement.quantityMilli / 1_000,
           })),
+          directPickups: directPickupRows.flatMap((pickup) => {
+            if (pickup.jobId !== row.jobId) return [];
+            const pickupPayload = parsePayload(pickup.payloadJson);
+            if (pickupPayload.requestId !== row.id) return [];
+            const quantityMilli = Number(pickupPayload.quantityMilli);
+            if (!Number.isSafeInteger(quantityMilli) || quantityMilli <= 0) return [];
+            return [{
+              lineId: typeof pickupPayload.lineId === "string" ? pickupPayload.lineId : "",
+              itemId: typeof pickupPayload.itemId === "string" ? pickupPayload.itemId : "",
+              quantity: quantityMilli / 1_000,
+              recordedAt: typeof pickupPayload.recordedAt === "string" ? pickupPayload.recordedAt : pickup.createdAt,
+              actorId: pickup.createdBy,
+            }];
+          }),
+          directPickupTotals: directPickupTotals.results.flatMap((total) => {
+            const quantityMilli = Number(total.pickedMilli);
+            if (total.jobId !== row.jobId || total.requestId !== row.id || !total.lineId || !Number.isSafeInteger(quantityMilli) || quantityMilli < 0) return [];
+            return [{ lineId: total.lineId, quantity: quantityMilli / 1_000 }];
+          }),
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
         };

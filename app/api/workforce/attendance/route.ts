@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, tenantWarehouses } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { resolveAttendanceTargets } from "@/lib/attendance-scope";
+import { materialFulfillmentLines } from "@/lib/material-fulfillment";
 import { parseJobPayload } from "@/lib/operations-contract";
 
 export const dynamic = "force-dynamic";
@@ -82,6 +83,73 @@ export async function GET() {
       || hasCapability(context, "attendance.manage")
       || hasCapability(context, "attendance.approve");
     const targetJobIds = new Set(scope.targets.map((target) => target.jobId).filter((id): id is string => Boolean(id)));
+    const directRequestRows = hasCapability(context, "warehouse.self_pickup") && targetJobIds.size
+      ? await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        inArray(jobJourneyRecords.jobId, [...targetJobIds]),
+        eq(jobJourneyRecords.domain, "warehouse"),
+        eq(jobJourneyRecords.recordType, "MATERIAL_REQUEST"),
+        eq(jobJourneyRecords.status, "APPROVED"),
+      )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500)
+      : [];
+    const directPickupTotals = hasCapability(context, "warehouse.self_pickup") && targetJobIds.size
+      ? await db.$client.prepare(`
+        SELECT json_extract(payload_json, '$.requestId') AS requestId,
+          json_extract(payload_json, '$.lineId') AS lineId,
+          COALESCE(SUM(CAST(json_extract(payload_json, '$.quantityMilli') AS INTEGER)), 0) AS pickedMilli
+        FROM job_journey_records
+        WHERE tenant_id = ? AND job_id IN (${[...targetJobIds].map(() => "?").join(",")})
+          AND domain = 'warehouse' AND record_type = 'MATERIAL_PICKUP'
+        GROUP BY requestId, lineId
+      `).bind(context.tenantId, ...targetJobIds).all<{ requestId: string | null; lineId: string | null; pickedMilli: number }>()
+      : { results: [] as { requestId: string | null; lineId: string | null; pickedMilli: number }[] };
+    const pickupTotals = new Map<string, number>();
+    for (const row of directPickupTotals.results) {
+      const pickedMilli = Number(row.pickedMilli);
+      if (!row.requestId || !row.lineId || !Number.isSafeInteger(pickedMilli) || pickedMilli < 0) {
+        return Response.json({ error: "material_pickup_ledger_readback_unavailable" }, { status: 503 });
+      }
+      pickupTotals.set(`${row.requestId}:${row.lineId}`, pickedMilli);
+    }
+    const directPickupsByJob = new Map<string, NonNullable<(typeof scope.targets)[number]["materialPickups"]>>();
+    for (const requestRow of directRequestRows) {
+      const requestPayload = parseJson(requestRow.payloadJson);
+      const planLines = materialFulfillmentLines(requestPayload);
+      if (!planLines) continue;
+      const warehouseValue = requestPayload.warehouse && typeof requestPayload.warehouse === "object" && !Array.isArray(requestPayload.warehouse)
+        ? requestPayload.warehouse as Record<string, unknown>
+        : {};
+      const warehouseId = typeof requestPayload.warehouseId === "string" ? requestPayload.warehouseId : typeof warehouseValue.id === "string" ? warehouseValue.id : "";
+      const warehouse = warehouseById.get(warehouseId);
+      if (!warehouse || warehouse.status !== "active") continue;
+      for (const line of planLines) {
+        if (!line.itemId || line.directPickupMilli <= 0) continue;
+        const picked = pickupTotals.get(`${requestRow.id}:${line.lineId}`) ?? 0;
+        const remaining = Math.max(0, line.directPickupMilli - picked);
+        if (!remaining) continue;
+        const current = directPickupsByJob.get(requestRow.jobId) ?? [];
+        current.push({
+          requestId: requestRow.id,
+          title: requestRow.title,
+          warehouseId,
+          warehouseName: warehouse.name,
+          warehouseLocation: warehouse.locationLabel,
+          lineId: line.lineId,
+          itemId: line.itemId,
+          description: line.description,
+          sku: line.sku,
+          unit: line.unit,
+          directQuantityMilli: line.directPickupMilli,
+          pickedQuantityMilli: picked,
+          remainingQuantityMilli: remaining,
+        });
+        directPickupsByJob.set(requestRow.jobId, current);
+      }
+    }
+    const attendanceTargets = scope.targets.map((target) => ({
+      ...target,
+      ...(target.jobId && directPickupsByJob.has(target.jobId) ? { materialPickups: directPickupsByJob.get(target.jobId) } : {}),
+    }));
     const records = attendance.filter((row) => jobById.has(row.jobId) || warehouseById.has(row.jobId)).map((row) => {
       const payload = parseJson(row.payloadJson);
       const job = jobById.get(row.jobId);
@@ -122,7 +190,7 @@ export async function GET() {
         geofence: "ENTRY_AND_EXIT_REQUIRE_INSIDE_ASSIGNED_PERIMETER",
       },
       serviceMode: scope.serviceMode,
-      targets: scope.targets,
+      targets: attendanceTargets,
       warehouseScope: scope.warehouseScope,
       assignmentReadback: { status: "verified", source: "tenant-assignment-readback" },
       records,

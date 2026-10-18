@@ -57,6 +57,7 @@ const protectedApiRequests = [
   { path: "/api/release/readiness" },
   { path: "/api/command/overview" },
   { path: "/api/governance/ai-live-check", options: { method: "POST" } },
+  { path: "/api/operations/jobs/unknown/material-pickup", options: { method: "POST", headers: { "content-type": "application/json" }, body: "{}" } },
 ];
 for (const item of protectedApiRequests) {
   const protectedApi = await request(item.path, item.options);
@@ -89,6 +90,7 @@ console.log(JSON.stringify({
     "login_render",
     "protected_release_route",
     "protected_api_fail_closed",
+    "material_pickup_requires_server_authority",
     "release_identity_no_go",
     "pwa_manifest",
     "service_worker_build_binding",

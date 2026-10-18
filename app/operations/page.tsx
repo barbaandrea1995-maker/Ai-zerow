@@ -764,7 +764,7 @@ export default function OperationsPage() {
             </div>
           </header>
           <div className="mx-auto max-w-[1680px] px-4 py-5 sm:px-7 sm:py-7">
-            <div className="zw-module-hero mb-5 flex flex-wrap items-end justify-between gap-4">
+            <div className="zw-module-heading mb-5 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">
                   <span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(190,255,60,0.9)]" />

@@ -10,6 +10,7 @@ import { buildMissionReportReadback } from "@/lib/mission-contract";
 import { buildMissionWarehouseReadback } from "@/lib/mission-inventory-contract";
 import { allocateServerName } from "@/lib/server-naming";
 import { isTransportMode, transportModesForProfile, type TransportMode } from "@/lib/tenant-operating-model";
+import { missionDeliveryLines } from "@/lib/material-fulfillment";
 import {
   canReadAllLocations,
   canReadAllMissions,
@@ -155,7 +156,12 @@ export async function GET() {
     ]);
     const allOperationsVisible = canReadAllOperations(context);
     const allMissionsVisible = canReadAllMissions(context);
-    const requestJobIds = new Set(materialRequestRows.map((request) => request.jobId));
+    const missionEligibleMaterialRequestRows = materialRequestRows.filter((request) => {
+      if (request.status !== "APPROVED") return true;
+      const requestPayload = parseJson(request.payloadJson);
+      return Boolean(boundedText(requestPayload.missionId, 120) || missionDeliveryLines(requestPayload)?.length);
+    });
+    const requestJobIds = new Set(missionEligibleMaterialRequestRows.map((request) => request.jobId));
     const visibleOperationJobs = operationJobs.filter((job) =>
       allOperationsVisible || requestJobIds.has(job.id) || rowMatchesContext(job, context),
     );
@@ -163,7 +169,7 @@ export async function GET() {
     const visibleMissionRows = missions.filter((mission) =>
       allMissionsVisible || visibleJobIds.has(mission.jobId) || rowMatchesContext(mission, context),
     );
-    const visibleMaterialRequestRows = materialRequestRows.filter((request) =>
+    const visibleMaterialRequestRows = missionEligibleMaterialRequestRows.filter((request) =>
       allMissionsVisible || visibleJobIds.has(request.jobId) || rowMatchesContext(request, context),
     );
     const canReadMissionTracking = hasCapability(context, "location.read.current")
@@ -414,7 +420,7 @@ export async function GET() {
         planned: records.filter((record) => record.status === "PLANNED").length,
         dispatched: records.filter((record) => record.status === "DISPATCHED").length,
         delivered: records.filter((record) => record.status === "DELIVERED").length,
-        toSchedule: materialRequests.filter((request) => request.status === "APPROVED" && !request.scheduledMissionId).length,
+        toSchedule: materialRequests.filter((request) => request.status === "APPROVED" && !request.scheduledMissionId && Boolean(missionDeliveryLines(request.payload)?.length)).length,
       },
     }, { headers: { "cache-control": "private, no-store" } });
   } catch {

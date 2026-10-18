@@ -50,6 +50,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { missionDeliveryLines } from "@/lib/material-fulfillment";
 import {
   MISSION_EXCEPTION_LABELS,
   MISSION_EXCEPTION_TYPES,
@@ -279,20 +280,12 @@ function text(value: unknown, fallback = "—") {
 }
 
 function materialRequestLineDrafts(request: MaterialRequest | null): MaterialLineDraft[] {
-  const lines = request?.payload.lines;
-  if (!Array.isArray(lines)) return [];
-  return lines.flatMap((line) => {
-    if (!line || typeof line !== "object" || Array.isArray(line)) return [];
-    const value = line as Record<string, unknown>;
-    const itemId = text(value.itemId, "");
-    if (!itemId) return [];
-    return [{
-      itemId,
-      description: text(value.description ?? value.name, "Materiale"),
-      quantity: typeof value.quantity === "number" || typeof value.quantity === "string" ? String(value.quantity) : "—",
-      unit: text(value.unit, "UNIT"),
-    }];
-  });
+  return (request ? missionDeliveryLines(request.payload) ?? [] : []).flatMap((line) => line.itemId ? [{
+    itemId: line.itemId,
+    description: text(line.description, "Materiale"),
+    quantity: String(line.quantity),
+    unit: text(line.unit, "UNIT"),
+  }] : []);
 }
 
 function cargoOptionLabel(option: MissionCargoOption) {
@@ -457,15 +450,7 @@ function snapshotAssetLabel(payload: Record<string, unknown>, assetId: string) {
 }
 
 function requestLinesLabel(payload: Record<string, unknown>) {
-  if (!Array.isArray(payload.lines)) return "Materiali da definire";
-  const labels = payload.lines.flatMap((line) => {
-    if (!line || typeof line !== "object" || Array.isArray(line)) return [];
-    const value = line as Record<string, unknown>;
-    const description = text(value.description ?? value.name, "Materiale");
-    const quantity = typeof value.quantity === "number" || typeof value.quantity === "string" ? String(value.quantity) : "";
-    const unit = text(value.unit, "");
-    return [`${description} · ${quantity} ${unit}`.trim()];
-  });
+  const labels = (missionDeliveryLines(payload) ?? []).map((line) => `${text(line.description, "Materiale")} · ${line.quantity} ${text(line.unit, "")}`.trim());
   return labels.slice(0, 3).join(" · ") || "Materiali da definire";
 }
 
@@ -1774,7 +1759,7 @@ export default function MissionCommandDeck() {
     <section className="min-w-0 flex-1"><header className="zw-command-topbar sticky top-0 z-20 flex h-[72px] items-center gap-3 px-4 sm:gap-5 sm:px-7"><IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}><Menu className="size-4" /></IconButton><button aria-label="Apri Missioni" className="zw-command-topbar__brand flex shrink-0 items-center gap-2 text-left" onClick={() => navigate("/mission")} type="button"><span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_18px_rgba(200,255,34,.12)]"><Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" /></span><span className="hidden sm:block"><span className="block text-[11px] font-bold tracking-[.18em] text-slate-50">ZEROW</span><span className="block text-[10px] uppercase tracking-[.2em] text-lime-300/75">missioni</span></span></button><IconButton className="hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton><div className="relative hidden min-w-0 flex-1 justify-center md:flex"><div className="relative w-full max-w-[520px]"><Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-600" /><Input aria-label="Cerca missioni" className="h-10 w-full border-lime-300/10 bg-black/35 pl-10 text-sm text-slate-100 placeholder:text-slate-600" onChange={(event) => setQuery(event.target.value)} placeholder="Cerca missione, commessa, tratta, autista…" value={query} /></div></div><div className="flex min-w-0 flex-1 items-center gap-2 md:hidden"><span className="truncate text-xs font-semibold tracking-[.14em] text-slate-200">MISSIONI</span><span className="size-1 rounded-full bg-lime-300" /></div><div className="ml-auto flex min-w-0 items-center gap-2"><TenantSwitcher /><span className="hidden items-center gap-2 rounded-full border border-lime-300/20 bg-lime-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.12em] text-lime-200 sm:flex"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_9px_rgba(200,255,34,.9)]" />{refreshing ? "AGGIORNAMENTO" : "ONLINE"}</span><IconButton label="Torna indietro" onClick={goBack}><ArrowLeft className="size-4" /></IconButton><IconButton label="Aggiorna missioni" onClick={() => void refresh()}><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></IconButton>{capabilities.includes("communication.read") && <IconButton label="Apri comunicazioni" onClick={() => navigate("/communications")}><Bell className="size-4" /></IconButton>}<AccountMenu actor={actor} /></div></header>
 
       <div className="mx-auto w-full max-w-[1600px] px-4 pb-24 pt-5 sm:px-7 sm:pb-8 sm:pt-7">
-        <section className="flex flex-wrap items-end justify-between gap-5 border-b border-white/[.07] pb-5"><div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Truck className="size-3.5" />MISSIONI · FLOTTA E CONSEGNE</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[42px]">Missioni sotto controllo.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Programma consegne, trasferimenti e asset con risorse realmente disponibili. Ogni viaggio resta collegato alla richiesta, alla commessa e alla prova di consegna.</p></div><div className="flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canManageMission || enabledTransportModes.length === 0} onClick={() => openCreate()}><Truck className="size-3.5" />Nuova missione</Button><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href="/planning"><CalendarClock className="size-3.5" />Pianificazione</Link></div></section>
+        <section className="zw-module-heading flex flex-wrap items-end justify-between gap-5 border-b border-white/[.07] pb-5"><div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/80"><Truck className="size-3.5" />MISSIONI · FLOTTA E CONSEGNE</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.06em] text-slate-50 sm:text-[42px]">Missioni sotto controllo.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Programma consegne, trasferimenti e asset con risorse realmente disponibili. Ogni viaggio resta collegato alla richiesta, alla commessa e alla prova di consegna.</p></div><div className="flex flex-wrap gap-2"><Button className="bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={!canManageMission || enabledTransportModes.length === 0} onClick={() => openCreate()}><Truck className="size-3.5" />Nuova missione</Button><Link className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-lime-300/25 bg-lime-300/[.05] px-3 py-2 text-[11px] font-semibold text-lime-100 hover:bg-lime-300/10" href="/planning"><CalendarClock className="size-3.5" />Pianificazione</Link></div></section>
 
         <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><KpiCard label="Totali" value={payload?.summary.total ?? 0} detail="Missioni nel tenant" icon={Truck} tone="cyan" /><KpiCard label="Da programmare" value={counts.toSchedule} detail="Richieste approvate" icon={Package} tone="amber" /><KpiCard label="Pianificate" value={payload?.summary.planned ?? 0} detail="In attesa di partenza" icon={CircleGauge} tone="amber" /><KpiCard label="In viaggio" value={payload?.summary.dispatched ?? 0} detail="Partenza registrata" icon={Route} tone="cyan" /><KpiCard label="POD" value={counts.verified} detail="Prova verificata" icon={FileCheck2} tone="lime" /><KpiCard label="Riconciliate" value={counts.reconciled} detail="Quantità e documento verificati" icon={ClipboardCheck} tone="lime" /><KpiCard label="Chiuse" value={counts.closed} detail="Journey conclusa" icon={CheckCircle2} tone="lime" /></section>
 

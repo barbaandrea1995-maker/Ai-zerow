@@ -135,7 +135,7 @@ export default function OperationalHome({
         </header>
 
         <div className="mx-auto w-full max-w-[1240px] px-4 pb-28 pt-5 sm:px-7 sm:pb-12 sm:pt-8">
-          <section className="zw-operational-home__hero carbon-card carbon-card-neon overflow-hidden rounded-[28px] p-5 sm:p-8 lg:p-10">
+          <section className="zw-operational-home__summary carbon-card carbon-card-neon overflow-hidden rounded-[28px] p-5 sm:p-8 lg:p-10">
             <div className="relative z-10 grid items-end gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
               <div>
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.22em] text-lime-300/75">

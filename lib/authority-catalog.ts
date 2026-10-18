@@ -14,10 +14,11 @@ const ATTENDANCE_SELF = ["attendance.self"];
 const ATTENDANCE_READ = ["attendance.read"];
 const ATTENDANCE_MANAGE = ["attendance.read", "attendance.manage", "attendance.approve"];
 const WAREHOUSE_READ = ["warehouse.read"];
-const WAREHOUSE_REQUEST = ["warehouse.read", "warehouse.request"];
-const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.request", "warehouse.write"];
+const WAREHOUSE_SELF_PICKUP = ["warehouse.self_pickup"];
+const WAREHOUSE_REQUEST = ["warehouse.read", "warehouse.request", ...WAREHOUSE_SELF_PICKUP];
+const WAREHOUSE_WRITE = ["warehouse.read", "warehouse.request", "warehouse.write", ...WAREHOUSE_SELF_PICKUP];
 const WAREHOUSE_REGISTER = [...WAREHOUSE_WRITE, "warehouse.register"];
-const WAREHOUSE_REVIEW = ["warehouse.review"];
+const WAREHOUSE_REVIEW = ["warehouse.review", ...WAREHOUSE_SELF_PICKUP];
 const MISSION_READ = ["mission.read"];
 // Scheduling a mission is a dispatch capability. Reading or executing an
 // assigned mission must not expose the entire driver/vehicle registry.
@@ -130,12 +131,12 @@ export const ROLE_CAPABILITIES = {
     ASSET_READ, DOCUMENTS_READ, COMMUNICATION, COMPANY_AI_READ, QR_WRITE,
   ),
   driver: capabilitySet(
-    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_READ, MISSION_EXECUTE,
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_READ, WAREHOUSE_SELF_PICKUP, MISSION_EXECUTE,
     ASSET_READ, DOCUMENTS_READ, COMMUNICATION, COMPANY_AI_READ, QR_READ, LOCATION_READ_CURRENT,
     LOCATION_DRIVER_TIMELINE,
   ),
   delivery_driver: capabilitySet(
-    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_READ, MISSION_EXECUTE,
+    PLATFORM, OPERATIONS_READ, WORKFORCE_SELF, ATTENDANCE_SELF, WAREHOUSE_READ, WAREHOUSE_SELF_PICKUP, MISSION_EXECUTE,
     MISSION_DELIVERY_EXECUTE, ASSET_READ, DOCUMENTS_READ, COMMUNICATION, COMPANY_AI_READ, QR_READ,
     LOCATION_READ_CURRENT, LOCATION_DRIVER_TIMELINE,
   ),

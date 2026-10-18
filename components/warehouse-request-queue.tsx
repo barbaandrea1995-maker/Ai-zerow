@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { materialFulfillmentLines, missionDeliveryLines } from "@/lib/material-fulfillment";
 
 type WarehouseOption = { id: string; code: string; name: string; locationLabel: string; status: string };
-type ReviewLine = { id: string; itemId: string; description: string; sku: string; unit: string; quantity: number };
+type ReviewLine = { id: string; itemId: string; description: string; sku: string; unit: string; quantity: number; directPickupQuantity: number };
 type RequestRecord = {
   id: string;
   jobId: string;
@@ -22,6 +23,8 @@ type RequestRecord = {
   payload: Record<string, unknown>;
   mission: { id: string; title: string; status: string } | null;
   stockMovements: Array<{ itemId: string; missionId: string | null; movementType: string; quantity: number }>;
+  directPickups?: Array<{ lineId: string; itemId: string; quantity: number; recordedAt: string; actorId: string }>;
+  directPickupTotals?: Array<{ lineId: string; quantity: number }>;
 };
 type StockItem = { id: string; sku: string; name: string; unit: string; warehouseId: string | null; onHand: number; reserved: number; available: number; version: number };
 type InventoryReadback = { items: StockItem[]; movements: Array<{ itemId: string; missionId: string | null; movementType: string; quantity: number }>; readback?: { status?: string } };
@@ -31,15 +34,25 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function payloadLines(value: unknown): ReviewLine[] {
+function payloadLines(value: unknown, fulfillmentPlan?: unknown): ReviewLine[] {
   if (!Array.isArray(value)) return [];
+  const allocations = fulfillmentPlan && typeof fulfillmentPlan === "object" && !Array.isArray(fulfillmentPlan)
+    ? ((fulfillmentPlan as Record<string, unknown>).lines as unknown[] | undefined) ?? []
+    : [];
+  const allocationByLine = new Map(allocations.flatMap((entry) => {
+    const allocation = objectValue(entry);
+    return typeof allocation.lineId === "string" ? [[allocation.lineId, allocation] as const] : [];
+  }));
   return value.flatMap((entry, index) => {
     const line = objectValue(entry);
     const quantity = Number(line.quantity);
     const description = typeof line.description === "string" ? line.description : typeof line.name === "string" ? line.name : "Materiale richiesto";
     const unit = typeof line.unit === "string" ? line.unit : "PZ";
+    const id = typeof line.id === "string" && line.id ? line.id : `line-${index + 1}`;
+    const allocationValue = Number(allocationByLine.get(id)?.directPickupMilli ?? 0);
+    const directPickupMilli = Number.isSafeInteger(allocationValue) ? allocationValue : 0;
     return Number.isFinite(quantity) && quantity > 0
-      ? [{ id: typeof line.id === "string" && line.id ? line.id : `line-${index + 1}`, itemId: typeof line.itemId === "string" ? line.itemId : "", description, sku: typeof line.sku === "string" ? line.sku : "", unit, quantity }]
+      ? [{ id, itemId: typeof line.itemId === "string" ? line.itemId : "", description, sku: typeof line.sku === "string" ? line.sku : "", unit, quantity, directPickupQuantity: Math.max(0, directPickupMilli) / 1_000 }]
       : [];
   });
 }
@@ -141,7 +154,7 @@ export function WarehouseRequestQueue({
         ? String(objectValue(request.payload.warehouse).id)
         : selectedWarehouseId || warehouses[0]?.id || "";
     setActiveRequest(request);
-    setReviewLines(payloadLines(request.payload.requestedLines ?? request.payload.lines));
+    setReviewLines(payloadLines(request.payload.requestedLines ?? request.payload.lines, request.payload.fulfillmentPlan));
     setReviewWarehouseId(defaultWarehouse);
     setDecision("APPROVED");
     setNote("");
@@ -178,7 +191,7 @@ export function WarehouseRequestQueue({
     const grouped = new Map<string, { itemId: string; description: string; unit: string; quantity: number }>();
     for (const request of requests) {
       if (request.status !== "APPROVED" || !request.mission) continue;
-      for (const line of payloadLines(request.payload.lines)) {
+      for (const line of missionDeliveryLines(request.payload) ?? []) {
         if (!line.itemId) continue;
         const existing = grouped.get(`${request.id}:${line.itemId}`);
         grouped.set(`${request.id}:${line.itemId}`, {
@@ -202,8 +215,8 @@ export function WarehouseRequestQueue({
         onNotice("Seleziona un deposito accessibile.");
         return;
       }
-      if (!reviewLines.length || reviewLines.some((line) => !line.itemId || !stockItems.some((item) => item.id === line.itemId) || !Number.isFinite(line.quantity) || line.quantity <= 0)) {
-        onNotice("Associa ogni riga a un articolo registrato e controlla le quantità.");
+      if (!reviewLines.length || reviewLines.some((line) => !line.itemId || !stockItems.some((item) => item.id === line.itemId) || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.directPickupQuantity) || line.directPickupQuantity < 0 || line.directPickupQuantity > line.quantity)) {
+        onNotice("Associa ogni riga a un articolo, controlla le quantità e mantieni il ritiro diretto entro la quantità approvata.");
         return;
       }
     }
@@ -249,7 +262,7 @@ export function WarehouseRequestQueue({
         return;
       }
       setActiveRequest(null);
-      onNotice(decision === "REJECTED" ? "Richiesta respinta con motivazione registrata." : "Quantità riservate nel deposito; richiesta pronta per la programmazione missione.");
+      onNotice(decision === "REJECTED" ? "Richiesta respinta con motivazione registrata." : "Scorte prenotate una sola volta. La quota di ritiro è disponibile in Presenze; l’eventuale quota consegnata resta programmabile in Missioni.");
       await Promise.all([loadRequests(true), onRefresh()]);
     } catch {
       onNotice("Connessione non disponibile: nessuna revisione confermata.");
@@ -305,12 +318,15 @@ export function WarehouseRequestQueue({
   return <>
     <section className="carbon-card mt-4 rounded-2xl border border-amber-300/15 p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-amber-300/25 bg-amber-300/10 text-amber-200"><ClipboardCheck className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/70">FLUSSO COMMESSA → DEPOSITO → MISSIONE</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Richieste e preparazione materiali</h2><p className="mt-1 text-xs leading-5 text-slate-500">Approva le richieste prenotando scorte reali; il magazziniere registra il prelievo sulla missione collegata.</p></div></div>
+      <div className="flex items-start gap-3"><span className="grid size-10 place-items-center rounded-2xl border border-amber-300/25 bg-amber-300/10 text-amber-200"><ClipboardCheck className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/70">FLUSSO COMMESSA → DEPOSITO → CANTIERE / MISSIONE</p><h2 className="mt-1 text-lg font-semibold text-slate-100">Richieste e preparazione materiali</h2><p className="mt-1 text-xs leading-5 text-slate-500">Ogni riga viene prenotata una volta e ripartita: ritiro in Presenze da un operatore assegnato oppure consegna programmata in Missioni.</p></div></div>
         <div className="flex items-center gap-2"><span className="rounded-full border border-amber-300/20 bg-amber-300/[.05] px-3 py-1.5 font-mono text-[10px] text-amber-100">{pendingCount} DA REVISIONARE</span><Button aria-label="Aggiorna richieste magazzino" className="size-9 border-white/10 bg-black/20 p-0 text-slate-400" disabled={refreshing} onClick={() => void loadRequests(true)} variant="outline"><RefreshCw className={refreshing ? "size-4 animate-spin" : "size-4"} /></Button></div>
       </div>
       <div className="mt-4 space-y-3">
         {requests.map((request) => {
-          const requestedLines = payloadLines(request.payload.lines);
+          const requestedLines = payloadLines(request.payload.lines, request.payload.fulfillmentPlan);
+          const fulfillmentLines = materialFulfillmentLines(request.payload) ?? [];
+          const totalDirectMilli = fulfillmentLines.reduce((total, line) => total + line.directPickupMilli, 0);
+          const totalMissionMilli = fulfillmentLines.reduce((total, line) => total + line.missionDeliveryMilli, 0);
           const warehouse = objectValue(request.payload.warehouse);
           const warehouseId = typeof request.payload.warehouseId === "string" ? request.payload.warehouseId : typeof warehouse.id === "string" ? warehouse.id : "";
           const warehouseStock = stockByWarehouse[warehouseId] ?? [];
@@ -319,7 +335,7 @@ export function WarehouseRequestQueue({
             : request.status === "REJECTED"
               ? "RIFIUTATA"
               : request.status === "APPROVED"
-                ? request.mission ? "MISSIONE PROGRAMMATA" : "APPROVATA · DA PIANIFICARE"
+                ? request.mission ? "MISSIONE PROGRAMMATA" : totalMissionMilli > 0 ? "APPROVATA · MISSIONE DA PROGRAMMARE" : "APPROVATA · RITIRO DIRETTO"
                 : request.status.replaceAll("_", " ");
           const deliveryInstructions = typeof request.payload.deliveryInstructions === "string" ? request.payload.deliveryInstructions.trim() : "";
           const neededAt = typeof request.payload.neededAt === "string" ? request.payload.neededAt.trim() : "";
@@ -330,17 +346,22 @@ export function WarehouseRequestQueue({
             {(deliveryInstructions || requestNotes) && <div className="mt-3 grid gap-2 sm:grid-cols-2">{deliveryInstructions && <p className="rounded-lg border border-cyan-300/10 bg-cyan-300/[.025] px-3 py-2 text-[10px] leading-5 text-slate-400"><span className="font-semibold text-cyan-100/70">Istruzioni consegna: </span>{deliveryInstructions}</p>}{requestNotes && <p className="rounded-lg border border-white/[.06] bg-black/15 px-3 py-2 text-[10px] leading-5 text-slate-500"><span className="font-semibold text-slate-300">Nota richiedente: </span>{requestNotes}</p>}</div>}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">{requestedLines.map((line) => {
               const item = warehouseStock.find((candidate) => candidate.id === line.itemId);
-              return <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[.07] bg-black/20 px-3 py-2" key={line.id}><div className="min-w-0"><p className="truncate text-xs font-medium text-slate-200">{line.description}</p><p className="mt-1 font-mono text-[9px] text-slate-600">{line.quantity.toLocaleString("it-IT")} {line.unit}{item?.sku || line.sku ? ` · ${item?.sku ?? line.sku}` : ""}</p></div>{item && <span className="shrink-0 text-[9px] text-lime-100">libero {formatQuantity(item.available, item.unit)}</span>}</div>;
+              const directPicked = request.directPickupTotals?.find((total) => total.lineId === line.id)?.quantity
+                ?? (request.directPickups ?? []).filter((pickup) => pickup.lineId === line.id).reduce((total, pickup) => total + pickup.quantity, 0);
+              const missionQuantity = Math.max(0, line.quantity - line.directPickupQuantity);
+              return <div className="rounded-xl border border-white/[.07] bg-black/20 px-3 py-2" key={line.id}><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-xs font-medium text-slate-200">{line.description}</p><p className="mt-1 font-mono text-[9px] text-slate-600">{line.quantity.toLocaleString("it-IT")} {line.unit}{item?.sku || line.sku ? ` · ${item?.sku ?? line.sku}` : ""}</p></div>{item && <span className="shrink-0 text-[9px] text-lime-100">libero {formatQuantity(item.available, item.unit)}</span>}</div>{request.status === "APPROVED" && <p className="mt-2 text-[9px] leading-4 text-slate-500">Ritiro diretto: {formatQuantity(line.directPickupQuantity, line.unit)}{line.directPickupQuantity > 0 ? ` · già ritirato ${formatQuantity(directPicked, line.unit)}` : ""} · Missione: {formatQuantity(missionQuantity, line.unit)}</p>}</div>;
             })}</div>
-            {request.status === "APPROVED" && request.mission && <div className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Truck className="size-4" />{request.mission.title} · {request.mission.status}</p>{warehouseId && <p className="font-mono text-[9px] text-slate-500">{String(warehouse.code ?? "DEPOSITO")} · {String(warehouse.name ?? "")}</p>}</div><div className="mt-3 space-y-2">{requestedLines.filter((line, index, lines) => line.itemId && lines.findIndex((candidate) => candidate.itemId === line.itemId) === index).map((line) => {
-              const grouped = linesByItem.get(`${request.id}:${line.itemId}`);
-              const item = warehouseStock.find((candidate) => candidate.id === line.itemId);
-              const picked = request.stockMovements.filter((movement) => movement.itemId === line.itemId && movement.missionId === request.mission?.id && movement.movementType === "PICK").reduce((total, movement) => total + movement.quantity, 0);
+            {request.status === "APPROVED" && request.mission && <div className="mt-3 rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Truck className="size-4" />{request.mission.title} · {request.mission.status}</p>{warehouseId && <p className="font-mono text-[9px] text-slate-500">{String(warehouse.code ?? "DEPOSITO")} · {String(warehouse.name ?? "")}</p>}</div><div className="mt-3 space-y-2">{(missionDeliveryLines(request.payload) ?? []).filter((line, index, lines) => line.itemId && lines.findIndex((candidate) => candidate.itemId === line.itemId) === index).map((line) => {
+              const lineItemId = line.itemId;
+              if (!lineItemId) return null;
+              const grouped = linesByItem.get(`${request.id}:${lineItemId}`);
+              const item = warehouseStock.find((candidate) => candidate.id === lineItemId);
+              const picked = request.stockMovements.filter((movement) => movement.itemId === lineItemId && movement.missionId === request.mission?.id && movement.movementType === "PICK").reduce((total, movement) => total + movement.quantity, 0);
               const remaining = Math.max(0, (grouped?.quantity ?? line.quantity) - picked);
-              return <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[.06] bg-black/25 px-3 py-2" key={`${line.id}-pick`}><p className="text-[10px] text-slate-300">{line.description} · prelevato {formatQuantity(picked, line.unit)} / {formatQuantity(grouped?.quantity ?? line.quantity, line.unit)}</p><Button className="h-8 border-lime-300/20 bg-lime-300/[.05] px-2.5 text-[9px] text-lime-100 hover:bg-lime-300/10" disabled={!canFulfill || !item || !remaining || request.mission?.status !== "PLANNED" || pickBusyId === line.itemId} onClick={() => void pickForMission(request, line.itemId)} variant="outline">{pickBusyId === line.itemId ? <LoaderCircle className="size-3 animate-spin" /> : <PackageCheck className="size-3" />}{remaining ? `Preleva ${formatQuantity(remaining, line.unit)}` : "Prelievo completo"}</Button></div>;
+              return <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[.06] bg-black/25 px-3 py-2" key={`${line.id}-pick`}><p className="text-[10px] text-slate-300">{line.description} · prelevato {formatQuantity(picked, line.unit)} / {formatQuantity(grouped?.quantity ?? line.quantity, line.unit)}</p><Button className="h-8 border-lime-300/20 bg-lime-300/[.05] px-2.5 text-[9px] text-lime-100 hover:bg-lime-300/10" disabled={!canFulfill || !item || !remaining || request.mission?.status !== "PLANNED" || pickBusyId === lineItemId} onClick={() => void pickForMission(request, lineItemId)} variant="outline">{pickBusyId === lineItemId ? <LoaderCircle className="size-3 animate-spin" /> : <PackageCheck className="size-3" />}{remaining ? `Preleva ${formatQuantity(remaining, line.unit)}` : "Prelievo completo"}</Button></div>;
             })}</div><p className="mt-2 text-[9px] leading-4 text-slate-600">Il prelievo scala saldo e prenotazione in questo deposito. L’autista conferma il carico alla tappa missione con timestamp e geofence.</p></div>}
             {request.status === "REQUESTED" && canReview && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/[.06] pt-3"><p className="flex items-center gap-2 text-[10px] text-slate-500"><ShieldCheck className="size-3.5 text-amber-200" />Verifica articolo, disponibilità e deposito prima di approvare.</p><Button className="h-9 bg-lime-300 px-3 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" onClick={() => openRequest(request)}><ClipboardCheck className="size-3.5" />Revisiona e assegna</Button></div>}
-            {request.status === "APPROVED" && !request.mission && <div className="mt-3 flex flex-col gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-semibold text-amber-100">Scorte prenotate · missione da programmare</p><p className="mt-1 text-[9px] leading-4 text-slate-500">Deposito, commessa e righe approvate verranno riletti dal server. In Missioni scegli soltanto finestra, autista e mezzo disponibili.</p></div><Link className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-2 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" href={`/mission?requestId=${encodeURIComponent(request.id)}&create=1`}><Truck className="size-3.5" />Programma missione<ArrowRight className="size-3.5" /></Link></div>}
+            {request.status === "APPROVED" && !request.mission && <div className="mt-3 flex flex-col gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-semibold text-amber-100">{totalMissionMilli > 0 ? "Scorte prenotate · quota consegna programmabile" : "Scorte prenotate · ritiro diretto in commessa"}</p><p className="mt-1 text-[9px] leading-4 text-slate-500">{totalDirectMilli > 0 ? "Gli operatori assegnati ritirano la quota diretta da Presenze, con GPS e geofence. " : ""}{totalMissionMilli > 0 ? "La sola quota consegnata viene programmata in Missioni." : "Non serve creare una missione per queste righe."}</p></div>{totalMissionMilli > 0 && <Link className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-lime-300 px-4 py-2 text-[10px] font-semibold text-[#050705] hover:bg-lime-200" href={`/mission?requestId=${encodeURIComponent(request.id)}&create=1`}><Truck className="size-3.5" />Programma missione<ArrowRight className="size-3.5" /></Link>}</div>}
           </article>;
         })}
         {!loading && requests.length === 0 && <div className="rounded-xl border border-dashed border-white/10 p-6 text-center text-xs text-slate-500">Nessuna richiesta o missione materiali nel tuo perimetro.</div>}
@@ -351,17 +372,17 @@ export function WarehouseRequestQueue({
     <Dialog open={Boolean(activeRequest)} onOpenChange={(open) => !open && setActiveRequest(null)}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#080c09] text-slate-100 sm:max-w-[720px]">
         <form className="space-y-4" onSubmit={submitReview}>
-          <DialogHeader><DialogTitle>Revisiona richiesta materiali</DialogTitle><DialogDescription className="text-slate-500">Associa le righe al catalogo del deposito. L’approvazione riserva la quantità, senza registrare un carico fisico.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Revisiona richiesta materiali</DialogTitle><DialogDescription className="text-slate-500">Associa le righe al catalogo e dividi la quantità tra ritiro diretto degli operatori assegnati e consegna con missione. La scorta viene prenotata una sola volta.</DialogDescription></DialogHeader>
           {activeRequest && <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3"><p className="text-[9px] font-mono uppercase tracking-[.14em] text-amber-100/70">{activeRequest.jobCode ?? "COMMESSA"} · {activeRequest.jobTitle}</p><p className="mt-1 text-xs font-semibold text-slate-100">{activeRequest.title}</p><p className="mt-1 text-[10px] leading-5 text-slate-400">Consegna: {typeof activeRequest.payload.deliveryPoint === "string" ? activeRequest.payload.deliveryPoint : "Punto di consegna da definire"}{typeof activeRequest.payload.neededAt === "string" && activeRequest.payload.neededAt && Number.isFinite(Date.parse(activeRequest.payload.neededAt)) ? ` · necessaria entro ${new Date(activeRequest.payload.neededAt).toLocaleString("it-IT")}` : ""}</p>{typeof activeRequest.payload.deliveryInstructions === "string" && activeRequest.payload.deliveryInstructions.trim() && <p className="mt-2 text-[10px] leading-5 text-cyan-100/75">Istruzioni consegna: {activeRequest.payload.deliveryInstructions}</p>}{typeof activeRequest.payload.notes === "string" && activeRequest.payload.notes.trim() && <p className="mt-2 text-[10px] leading-5 text-slate-500">Nota richiedente: {activeRequest.payload.notes}</p>}</div>}
           <label className="block text-xs text-slate-400">Deposito di evasione<select className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100" onChange={(event) => { const id = event.target.value; setReviewWarehouseId(id); setReviewLines((lines) => lines.map((line) => ({ ...line, itemId: "" }))); if (id) void loadStock(id); else setStockItems([]); }} value={reviewWarehouseId}><option value="">Seleziona deposito accessibile</option>{warehouses.filter((warehouse) => warehouse.status === "active").map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name} · {warehouse.locationLabel}</option>)}</select></label>
           <div className="flex flex-wrap items-center gap-3"><label className="flex-1 text-xs text-slate-400">Esito<select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100" onChange={(event) => setDecision(event.target.value as typeof decision)} value={decision}><option value="APPROVED">Approva quantità richieste</option><option value="MODIFIED">Modifica e approva</option><option value="REJECTED">Respingi richiesta</option></select></label><span className="text-[10px] text-slate-600">Le unità di misura restano quelle richieste.</span></div>
           {decision !== "REJECTED" && <div className="space-y-2">{reviewLines.map((line, index) => {
             const unitItems = stockItems.filter((item) => item.unit === line.unit);
             const chosen = unitItems.find((item) => item.id === line.itemId);
-            return <div className="grid gap-2 rounded-xl border border-white/[.08] bg-black/20 p-3 sm:grid-cols-[minmax(0,1fr)_140px]" key={line.id}><label className="min-w-0 text-[10px] text-slate-500">Articolo del registro · richiesta: {line.description}<select className="mt-1 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-100" onChange={(event) => { const itemId = event.target.value; const item = unitItems.find((candidate) => candidate.id === itemId); setReviewLines((lines) => lines.map((current, currentIndex) => currentIndex === index ? { ...current, itemId } : current)); if (item && item.name.trim().toLocaleLowerCase("it-IT") !== line.description.trim().toLocaleLowerCase("it-IT")) setDecision("MODIFIED"); }} value={line.itemId}><option value="">Associa articolo del deposito</option>{unitItems.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.sku} · libero {formatQuantity(item.available, item.unit)}</option>)}</select>{chosen && <span className="mt-1 block text-[9px] text-slate-600">Saldo {formatQuantity(chosen.onHand, chosen.unit)} · già prenotato {formatQuantity(chosen.reserved, chosen.unit)}</span>}</label><label className="text-[10px] text-slate-500">Quantità · {line.unit}<Input className="mt-1 border-white/10 bg-black/30 text-sm text-slate-100" min="0.001" onChange={(event) => { setReviewLines((lines) => lines.map((current, currentIndex) => currentIndex === index ? { ...current, quantity: Number(event.target.value) } : current)); if (Number(event.target.value) !== line.quantity && decision === "APPROVED") setDecision("MODIFIED"); }} step="0.001" type="number" value={line.quantity} /></label>
+            return <div className="grid gap-2 rounded-xl border border-white/[.08] bg-black/20 p-3 sm:grid-cols-[minmax(0,1fr)_130px_150px]" key={line.id}><label className="min-w-0 text-[10px] text-slate-500">Articolo del registro · richiesta: {line.description}<select className="mt-1 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-slate-100" onChange={(event) => { const itemId = event.target.value; const item = unitItems.find((candidate) => candidate.id === itemId); setReviewLines((lines) => lines.map((current, currentIndex) => currentIndex === index ? { ...current, itemId } : current)); if (item && item.name.trim().toLocaleLowerCase("it-IT") !== line.description.trim().toLocaleLowerCase("it-IT")) setDecision("MODIFIED"); }} value={line.itemId}><option value="">Associa articolo del deposito</option>{unitItems.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.sku} · libero {formatQuantity(item.available, item.unit)}</option>)}</select>{chosen && <span className="mt-1 block text-[9px] text-slate-600">Saldo {formatQuantity(chosen.onHand, chosen.unit)} · già prenotato {formatQuantity(chosen.reserved, chosen.unit)}</span>}</label><label className="text-[10px] text-slate-500">Quantità approvata · {line.unit}<Input className="mt-1 border-white/10 bg-black/30 text-sm text-slate-100" min="0.001" onChange={(event) => { const quantity = Number(event.target.value); setReviewLines((lines) => lines.map((current, currentIndex) => currentIndex === index ? { ...current, quantity, directPickupQuantity: Math.min(current.directPickupQuantity, quantity) } : current)); if (quantity !== line.quantity && decision === "APPROVED") setDecision("MODIFIED"); }} step="0.001" type="number" value={line.quantity} /></label><label className="text-[10px] text-lime-100/80">Ritiro diretto · {line.unit}<Input className="mt-1 border-lime-300/15 bg-black/30 text-sm text-slate-100" max={line.quantity} min="0" onChange={(event) => setReviewLines((lines) => lines.map((current, currentIndex) => currentIndex === index ? { ...current, directPickupQuantity: Number(event.target.value) } : current))} step="0.001" type="number" value={line.directPickupQuantity} /><span className="mt-1 block text-[9px] text-slate-600">Missione: {formatQuantity(Math.max(0, line.quantity - line.directPickupQuantity), line.unit)}</span></label>
           </div>; })}{stockLoading && <p className="flex items-center gap-2 text-[10px] text-cyan-100"><LoaderCircle className="size-3 animate-spin" />Lettura catalogo deposito…</p>}{!stockLoading && reviewLines.length > 0 && stockItems.length === 0 && <p className="rounded-lg border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] text-amber-100">Il deposito non ha articoli registrati. Non puoi approvare una richiesta senza associarla al catalogo.</p>}</div>}
           <label className="block text-xs text-slate-400">Nota del responsabile {decision === "REJECTED" || decision === "MODIFIED" ? <span className="text-amber-200">· obbligatoria</span> : <span className="text-slate-600">· opzionale</span>}<Textarea className="mt-2 border-white/10 bg-black/30 text-slate-100" onChange={(event) => setNote(event.target.value)} placeholder={decision === "REJECTED" ? "Motivo del rifiuto…" : "Motivo della modifica o nota di evasione…"} value={note} /></label>
-          <DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (decision !== "REJECTED" && (stockLoading || !reviewWarehouseId || reviewLines.some((line) => !line.itemId || !stockItems.some((item) => item.id === line.itemId))))} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : decision === "REJECTED" ? <ShieldCheck className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}{decision === "REJECTED" ? "Registra rifiuto" : decision === "MODIFIED" ? "Approva quantità modificate" : "Approva e prenota scorte"}</Button></DialogFooter>
+          <DialogFooter><DialogClose asChild><Button className="border-white/10 bg-transparent text-slate-400" type="button" variant="outline">Annulla</Button></DialogClose><Button className="bg-lime-300 text-[#050705] hover:bg-lime-200" disabled={busy || (decision !== "REJECTED" && (stockLoading || !reviewWarehouseId || reviewLines.some((line) => !line.itemId || !stockItems.some((item) => item.id === line.itemId) || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.directPickupQuantity) || line.directPickupQuantity < 0 || line.directPickupQuantity > line.quantity)))} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : decision === "REJECTED" ? <ShieldCheck className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}{decision === "REJECTED" ? "Registra rifiuto" : decision === "MODIFIED" ? "Approva quantità modificate" : "Approva e prenota scorte"}</Button></DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
