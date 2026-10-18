@@ -97,15 +97,15 @@ type NavItem = { id: CommandNavigationId; label: string; path: string; capabilit
 
 const navItems: NavItem[] = [
   { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
-  { id: "operations", label: "OPERATIONS", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
-  { id: "workforce", label: "WORKFORCE", path: "/workforce", capability: "workforce.read", icon: FileCheck2 },
+  { id: "operations", label: "COMMESSE", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
+  { id: "workforce", label: "PERSONE", path: "/workforce", capability: "workforce.read", icon: FileCheck2 },
   { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: FolderOpen },
   { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: CheckCircle2 },
   { id: "assets", label: "ASSET", path: "/assets", capability: "asset.read", icon: Archive },
   { id: "warehouse", label: "MAGAZZINO", path: "/warehouse", capability: "warehouse.read", icon: Layers3 },
   { id: "mission", label: "MISSIONI", path: "/mission", capability: "mission.read", icon: CloudUpload },
   { id: "documents", label: "DOCUMENTI", path: "/documents", capability: "documents.read", icon: FileText },
-  { id: "authority", label: "AUTHORITY", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
+  { id: "authority", label: "AUTORITÀ", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
   { id: "events", label: "EVENTI", path: "/events", capability: "events.read", icon: Info },
   { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: SlidersHorizontal },
 ];
@@ -117,7 +117,7 @@ const accept = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.webp,.heic
 function categoryLabel(value: string) { return categoryLabels[value] ?? value.replaceAll("_", " "); }
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Titolare",
   admin: "Amministratore",
   manager: "Manager",
   office: "Ufficio",

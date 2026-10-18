@@ -23,7 +23,7 @@ export default async function AccessDeniedPage({
         </div>
         <p className="mt-7 text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">AI-ZEROW / AUTHORITY</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-slate-50">Accesso non autorizzato</h1>
-        <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Il tuo ruolo non include questa superficie. Il contenuto non e stato caricato e nessun dato riservato e stato inviato al browser.</p>
+        <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">Il tuo ruolo non include questa sezione. Il contenuto non è stato caricato e nessun dato riservato è stato inviato al browser.</p>
         <div className="carbon-inset mt-6 flex items-center gap-3 rounded-xl p-3">
           <LockKeyhole className="size-4 text-lime-300" />
           <div><p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">Capability richiesta</p><p className="mt-1 font-mono text-xs text-lime-100">{params.required || "module.access"}</p></div>

@@ -2,6 +2,7 @@ import {
   getAuthorityContext,
   hasCapability,
 } from "@/lib/authority-context";
+import { authorityRoleLabel } from "@/lib/authority-catalog";
 import { companyAiLiveRequestFromCheck, getCompanyAiRuntimeStatus } from "@/lib/company-ai-openai";
 import { getExternalAdapter, getExternalSnapshot } from "@/lib/external-adapter";
 import { getS07Ledger } from "@/lib/s07-adapter";
@@ -75,7 +76,7 @@ export async function GET() {
       "Tenant e capability",
       "READY",
       "Il contesto viene risolto server-side prima di costruire il prompt.",
-      `${context.role} · ${context.resourceScope} scope · ${context.identityProvider}`,
+      `${authorityRoleLabel(context.role)} · perimetro ${context.resourceScope} · ${context.identityProvider}`,
       "Nessuna azione richiesta",
     ),
     gate(
@@ -167,6 +168,7 @@ export async function GET() {
     },
     authority: {
       role: context.role,
+      roleLabel: authorityRoleLabel(context.role),
       identityProvider: context.identityProvider,
       tenantScope: context.resourceScope,
       governanceRead: hasCapability(context, "governance.read"),

@@ -83,7 +83,7 @@ const NAV_ICONS: Record<CommandNavigationId, LucideIcon> = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Titolare",
   admin: "Amministratore",
   manager: "Manager",
   office: "Ufficio",

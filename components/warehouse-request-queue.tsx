@@ -90,6 +90,11 @@ export function WarehouseRequestQueue({
   const openedDeepLink = useRef(false);
 
   const loadRequests = useCallback(async (quiet = false): Promise<RequestRecord[] | null> => {
+    if (!canReview && !canFulfill) {
+      setLoading(false);
+      setRefreshing(false);
+      return [];
+    }
     if (quiet) setRefreshing(true);
     else setLoading(true);
     try {
@@ -106,7 +111,7 @@ export function WarehouseRequestQueue({
       setLoading(false);
       setRefreshing(false);
     }
-  }, [onNotice]);
+  }, [canFulfill, canReview, onNotice]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadRequests(), 0);

@@ -5,6 +5,7 @@ import type {
   NeonAuthContextResult,
   NeonTenantMembership,
 } from "@/lib/neon-auth/tenant-context";
+import { authorityRoleLabel } from "@/lib/authority-catalog";
 
 async function getAuthClient() {
   const { createAuthClient } = await import("@neondatabase/auth/next");
@@ -225,7 +226,7 @@ function AuthenticatedPanel({
               {tenant.name}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              ruolo: <span className="text-slate-300">{tenant.role}</span>
+              ruolo: <span className="text-slate-300">{authorityRoleLabel(tenant.role)}</span>
             </p>
             <button
               className="mt-4 rounded-lg border border-lime-300/25 px-3 py-2 text-xs text-lime-100 transition hover:border-lime-300/60 disabled:opacity-50"

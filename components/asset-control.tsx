@@ -126,21 +126,21 @@ type NavItem = { id: CommandNavigationId; label: string; path: string; capabilit
 
 const navItems: NavItem[] = [
   { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
-  { id: "operations", label: "OPERATIONS", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
-  { id: "workforce", label: "WORKFORCE", path: "/workforce", capability: "workforce.read", icon: Users },
+  { id: "operations", label: "COMMESSE", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
+  { id: "workforce", label: "PERSONE", path: "/workforce", capability: "workforce.read", icon: Users },
   { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: CalendarClock },
   { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: Clock3 },
   { id: "assets", label: "ASSET", path: "/assets", capability: "asset.read", icon: Package },
   { id: "warehouse", label: "MAGAZZINO", path: "/warehouse", capability: "warehouse.read", icon: Layers3 },
   { id: "mission", label: "MISSIONI", path: "/mission", capability: "mission.read", icon: Truck },
   { id: "documents", label: "DOCUMENTI", path: "/documents", capability: "documents.read", icon: Package },
-  { id: "authority", label: "AUTHORITY", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
+  { id: "authority", label: "AUTORITÀ", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
   { id: "events", label: "EVENTI", path: "/events", capability: "events.read", icon: Activity },
   { id: "settings", label: "IMPOSTAZIONI", path: "/settings", capability: "settings.read", icon: SlidersHorizontal },
 ];
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner", admin: "Amministratore", manager: "Manager", office: "Ufficio", technical: "Tecnico",
+  owner: "Titolare", admin: "Amministratore", manager: "Manager", office: "Ufficio", technical: "Tecnico",
   field_supervisor: "Caposquadra", worker: "Operatore", warehouse_manager: "Responsabile magazzino",
   warehouse_operator: "Magazziniere", driver: "Autista", delivery_driver: "Autista di consegna", maintenance: "Manutentore", auditor: "Auditor",
 };

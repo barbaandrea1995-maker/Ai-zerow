@@ -82,6 +82,7 @@ import {
   AUTHORITY_ROLES,
   ROLE_CAPABILITIES,
   ROLE_METADATA,
+  authorityRoleLabel,
   type AuthorityRole,
 } from "@/lib/authority-catalog";
 
@@ -226,7 +227,7 @@ const authorityPolicies = [
   {
     icon: CircleGauge,
     title: "Durata sessione",
-    detail: "Governata dal provider di identita",
+    detail: "Governata dal servizio di identità",
     state: "PROVIDER",
   },
   {
@@ -237,8 +238,8 @@ const authorityPolicies = [
   },
   {
     icon: Activity,
-    title: "Log attivita",
-    detail: "Ledger applicativo tenant-scoped",
+    title: "Registro attività",
+    detail: "Registro applicativo separato per azienda",
     state: "PARTIAL",
   },
   {
@@ -286,12 +287,12 @@ const authorityKpis = [
 
 const navItems: Array<{ label: string; id: string; icon: LucideIcon; capability?: string }> = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
-  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
-  { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
-  { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
+  { label: "COMMESSE", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
+  { label: "PERSONE", id: "workforce", icon: Users, capability: "workforce.read" },
+  { label: "FINANZA", id: "finance", icon: Gauge, capability: "finance.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
   { label: "WAREHOUSE", id: "warehouse", icon: Package, capability: "warehouse.read" },
-  { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
+  { label: "MISSIONI", id: "mission", icon: Truck, capability: "mission.read" },
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
   { label: "EVENTS / AUTHORITY", id: "events_authority", icon: ShieldCheck, capability: "authority.read" },
   { label: "PWA / DIAGNOSTICS", id: "pwa", icon: CircleGauge, capability: "command.read" },
@@ -319,7 +320,7 @@ const fallbackTenantFields = [
   {
     key: "environment",
     value: "Sites production",
-    detail: "owner-only publication",
+    detail: "pubblicazione riservata al titolare",
     tone: "lime" as Tone,
   },
   {
@@ -366,8 +367,8 @@ const fallbackTenantFields = [
   },
   {
     key: "approvalContext",
-    value: "owner",
-    detail: "owner approval gate",
+    value: "Titolare",
+    detail: "controllo di approvazione del Titolare",
     tone: "lime" as Tone,
   },
 ];
@@ -693,7 +694,7 @@ function AuthorityVisualDashboard({
             <div className="absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/70 px-2.5 py-2 backdrop-blur">
               <Navigation className="size-3.5 text-lime-300" />
               <span className="text-[10px] font-medium text-slate-300">
-                TENANT / OWNER-PRIVATE
+                TENANT / RISERVATO AL TITOLARE
               </span>
             </div>
             <div className="absolute right-3 top-3 flex flex-col gap-1 rounded-lg border border-white/10 bg-black/75 p-1 backdrop-blur">
@@ -1327,12 +1328,12 @@ export default function OnboardingPage() {
         {
           key: "environment",
           value: authorityContext.environment,
-          detail: "owner-only publication",
+          detail: "pubblicazione riservata al titolare",
           tone: "lime" as Tone,
         },
         {
           key: "role",
-          value: authorityContext.roles?.join(" + ") || authorityContext.role,
+          value: authorityContext.roles?.map((role) => ROLE_METADATA[role as AuthorityRole]?.label ?? role).join(" + ") || ROLE_METADATA[authorityContext.role as AuthorityRole]?.label || authorityContext.role,
           detail: "mansioni server-resolved · capability union",
           tone: "lime" as Tone,
         },
@@ -1374,16 +1375,16 @@ export default function OnboardingPage() {
         },
         {
           key: "approvalContext",
-          value: authorityContext.approvalContext,
-          detail: "owner approval gate",
+          value: authorityContext.approvalContext === "owner" ? ROLE_METADATA.owner.label : authorityContext.approvalContext,
+          detail: "controllo di approvazione del Titolare",
           tone: "lime" as Tone,
         },
       ]
     : fallbackTenantFields;
   const onboardingSteps = [
     {
-      label: "Identita e tenant",
-      detail: "Sessione e membership server-side",
+      label: "Identità e azienda",
+      detail: "Sessione e appartenenza validate dal server",
       state: authorityContext ? "VERIFICATO" : "IN ATTESA",
       ready: Boolean(authorityContext),
     },
@@ -1402,14 +1403,14 @@ export default function OnboardingPage() {
       ready: profiles.length > 0,
     },
     {
-      label: "Visibilita moduli",
-      detail: "Menu, pagine e API capability-gated",
+      label: "Visibilità moduli",
+      detail: "Menu, pagine e API regolati dalle abilitazioni",
       state: "ATTIVO",
       ready: true,
     },
     {
       label: "Company AI",
-      detail: "Tool e approval boundary",
+      detail: "Strumenti e confine di approvazione",
       state: "PARZIALE",
       ready: false,
     },
@@ -1566,7 +1567,7 @@ export default function OnboardingPage() {
       return;
     }
     if (id === "events_authority") return;
-    notify(`${label}: superficie prevista nel prossimo modulo`);
+    notify(`${label}: sezione prevista nel prossimo modulo`);
   };
 
   const selectAuthorityTab = (tab: AuthorityTabId, target: string) => {
@@ -1739,7 +1740,7 @@ export default function OnboardingPage() {
           <button
             className="zw-command-tenant mt-7 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:border-lime-300/25"
             type="button"
-            onClick={() => notify("Workspace ZEROW · contesto owner Sites")}
+            onClick={() => notify("Workspace ZEROW · contesto Titolare Sites")}
           >
             <span className="grid size-8 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/10 text-lime-200">
               <HardHat className="size-4" />
@@ -1749,13 +1750,13 @@ export default function OnboardingPage() {
                 ZEROW workspace
               </span>
               <span className="mt-0.5 block truncate text-[10px] text-slate-600">
-                {authorityContext?.roles?.join(" + ") || authorityContext?.role || "readback pending"} · tenant scoped
+                {(authorityContext?.roles?.map(authorityRoleLabel).join(" + ") || (authorityContext?.role ? authorityRoleLabel(authorityContext.role) : "Rilettura in attesa"))} · perimetro aziendale
               </span>
             </span>
           </button>
           <nav className="mt-6 min-h-0 flex-1 overflow-y-auto" aria-label="Navigazione principale">
             <p className="zw-command-sidebar__nav-caption px-3 text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-700">
-              Authorized workspace
+              Spazio autorizzato
             </p>
             <div className="mt-2 space-y-1">
               {visibleNavItems.map((item) => {
@@ -1822,7 +1823,7 @@ export default function OnboardingPage() {
               <IconButton className="zw-command-topbar__back hidden sm:grid" label="Torna indietro" onClick={() => router.back()}><ArrowLeft className="size-4" /></IconButton>
               <IconButton className="zw-command-topbar__refresh" label="Aggiorna Authority" onClick={() => void refreshAuthority()}><RefreshCw className="size-4" /></IconButton>
               {authorityContext?.capabilities.includes("communication.read") ? <IconButton className="zw-command-topbar__notifications" label="Apri comunicazioni" onClick={() => router.push("/communications")}><Bell className="size-4" /></IconButton> : null}
-              <AccountMenu actor={{ email: authorityContext?.actorEmail ?? "owner@sites.local", name: authorityContext?.actorName ?? "Operatore" }} />
+              <AccountMenu actor={{ email: authorityContext?.actorEmail ?? "titolare@sites.local", name: authorityContext?.actorName ?? "Operatore" }} />
             </div>
           </header>
 
@@ -1880,7 +1881,7 @@ export default function OnboardingPage() {
                     Percorso di attivazione aziendale
                   </h2>
                   <p className="mt-1 text-[11px] text-slate-500">
-                    Prima identita e perimetro, poi persone, moduli, Company AI
+                    Prima identità e perimetro, poi persone, moduli e Company AI
                     e certificazione.
                   </p>
                 </div>
@@ -1995,7 +1996,7 @@ export default function OnboardingPage() {
                     </span>
                     <div>
                       <p className="text-sm font-semibold text-slate-100">
-                        Owner-only Site access
+                        Accesso Sites riservato al titolare
                       </p>
                       <p className="mt-1 text-[11px] text-slate-500">
                         Accesso verificato dal perimetro privato Sites
@@ -2008,15 +2009,15 @@ export default function OnboardingPage() {
                         Account
                       </p>
                       <p className="mt-1 truncate text-xs text-lime-200">
-                        {authorityContext?.actorEmail ?? "owner"}
+                        {authorityContext?.actorEmail ?? "Non disponibile"}
                       </p>
                     </div>
                     <div className="rounded-lg border border-white/10 bg-black/25 p-3">
                       <p className="text-[10px] uppercase tracking-[0.12em] text-slate-600">
-                        App role
+                        Ruolo applicativo
                       </p>
                       <p className="mt-1 text-xs text-lime-200">
-                        {authorityContext?.role ?? "readback pending"}
+                        {authorityContext?.role ? authorityRoleLabel(authorityContext.role) : "Rilettura in attesa"}
                       </p>
                     </div>
                   </div>
@@ -2212,8 +2213,8 @@ export default function OnboardingPage() {
                 </div>
                 <div className="mt-4 flex items-start gap-2 rounded-xl border border-lime-300/20 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-lime-200" />
-                  Visibilita, route e API applicano la stessa capability
-                  server-side. Il client non puo ampliare il proprio perimetro.
+                  Visibilità, pagine e API applicano la stessa abilitazione
+                  sul server. Il browser non può ampliare il proprio perimetro.
                 </div>
               </section>
             </div>
@@ -2227,7 +2228,7 @@ export default function OnboardingPage() {
                   />
                   <p className="mt-1 text-[11px] text-slate-500">
                     Profili persistenti nel database Sites, isolati dal tenant
-                    owner-private.
+                    privato del titolare.
                   </p>
                 </div>
                 <StatusBadge tone={authorityContext ? "lime" : "amber"}>
@@ -2504,7 +2505,7 @@ export default function OnboardingPage() {
             </div>
             <div className="flex items-start gap-2 rounded-xl border border-lime-300/15 bg-lime-300/5 p-3 text-[11px] leading-5 text-lime-100/80">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime-200" />
-              Deny by default: il profilo non puo assegnare capability esterne
+              Accesso negato per impostazione predefinita: il profilo non può assegnare abilitazioni esterne
               al ruolo selezionato.
             </div>
           </div>

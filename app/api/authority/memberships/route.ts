@@ -133,7 +133,7 @@ export async function POST(request: Request) {
         invitation: invitationForResponse(existingByKey),
         idempotent: true,
         inviteUrl: null,
-        message: "L'invito esiste gia. Per sicurezza il token monouso non viene memorizzato; revocalo e creane uno nuovo se il link e stato perso.",
+        message: "L'invito esiste già. Per sicurezza il token monouso non viene memorizzato; revocalo e creane uno nuovo se il link è stato perso.",
       }, { headers: { "cache-control": "private, no-store" } });
     }
 

@@ -40,7 +40,7 @@ export function OperationalAttendanceDeck({ targets, onChanged }: Props) {
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">IL TUO SERVIZIO</p>
           <h2 className="mt-1 text-lg font-semibold text-slate-100" id="operational-attendance-title">Timbrature assegnate</h2>
-          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-500">Questa è l’unica superficie per iniziare o chiudere il servizio. I perimetri arrivano dal server e non possono essere scelti manualmente.</p>
+          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-slate-500">Questa è l’unica sezione per iniziare o chiudere il servizio. I perimetri arrivano dal server e non possono essere scelti manualmente.</p>
         </div>
       </div>
       <span className="inline-flex items-center gap-1.5 rounded-full border border-lime-300/20 bg-lime-300/[.06] px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[.12em] text-lime-100"><ShieldCheck className="size-3.5" />Server-side</span>

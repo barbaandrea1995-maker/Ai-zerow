@@ -81,12 +81,22 @@ export function buildCompanyAiPersonalAssetContext({
     if (!asset) return [];
 
     const code = asset.canonicalCode || asset.id;
+    const assetPayload = objectFromJson(asset.payloadJson);
+    const displayTitle = stringValue(assetPayload.title)
+      || stringValue(payload.assetTitle)
+      || (asset.title !== code ? asset.title : "")
+      || asset.detail
+      || code;
+    const displayDetail = stringValue(assetPayload.detail)
+      || stringValue(assetPayload.description)
+      || asset.detail
+      || displayTitle;
     return [{
       id: code,
       module: "assets",
       recordType: "personal_asset_assignment",
-      title: asset.title,
-      detail: asset.detail,
+      title: displayTitle,
+      detail: displayDetail,
       status: asset.status,
       assignment: {
         kind: stringValue(payload.assignmentKind) || "SHORT_TERM",

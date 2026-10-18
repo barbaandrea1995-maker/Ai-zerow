@@ -56,7 +56,7 @@ export const EXTERNAL_ADAPTERS: ExternalAdapterDefinition[] = [
     status: "READY",
     contract: "Authority context → D1 → API → carbon UI readback",
     gate: "S01–S08 Sites surface and D1 readback verified",
-    capabilities: ["owner auth", "D1 readback", "append-only", "PWA surface"],
+    capabilities: ["autenticazione titolare", "rilettura D1", "sola aggiunta", "sezione PWA"],
     nextAction: "Keep as the local control plane",
   },
   {
@@ -238,7 +238,7 @@ export const EXTERNAL_ADAPTERS: ExternalAdapterDefinition[] = [
     provider: "@Sites",
     boundary: "sites-native",
     status: "READY",
-    contract: "Owner-only saved version, archive and production URL",
+    contract: "Versione salvata, archivio e URL di produzione riservati al titolare",
     gate: "Published Sites version is the same source state as the archive",
     capabilities: ["save version", "private deploy", "readback"],
     nextAction: "Continue publishing through @Sites only",

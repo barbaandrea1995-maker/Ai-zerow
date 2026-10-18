@@ -15,13 +15,13 @@ const assignment = (id, assetId, payload, status = "ACTIVE") => ({
   status,
   payloadJson: JSON.stringify({ assetId, assigneeActorId: actorId, assignmentKind: "LONG_TERM", startsAt: "2026-10-01T08:00:00.000Z", assigneeName: "Andrea Barba", ...payload }),
 });
-const asset = (id, canonicalCode, title) => ({
+const asset = (id, canonicalCode, title, payload = {}) => ({
   id,
   canonicalCode,
   title,
   detail: `${title} detail`,
   status: "AVAILABLE",
-  payloadJson: "{}",
+  payloadJson: JSON.stringify(payload),
 });
 
 const context = buildCompanyAiPersonalAssetContext({
@@ -39,7 +39,7 @@ const context = buildCompanyAiPersonalAssetContext({
     { ...assignment("assignment-other-tenant", "asset-van", {}), tenantId: "tenant-other" },
   ],
   assets: [
-    asset("asset-van", "VEH-0001", "Ford Transit Custom"),
+    asset("asset-van", "VEH-0001", "VEH-0001", { title: "Ford Transit Custom", detail: "Iveco Daily" }),
     asset("asset-bobcat", "AST-0002", "Bobcat E17"),
     asset("asset-other", "AST-0003", "Asset di un'altra persona"),
     asset("asset-returned", "AST-0004", "Asset restituito"),
@@ -47,6 +47,8 @@ const context = buildCompanyAiPersonalAssetContext({
 });
 
 assert.deepEqual(context.map((record) => record.id), ["VEH-0001", "AST-0002"]);
+assert.equal(context[0].title, "Ford Transit Custom");
+assert.equal(context[0].detail, "Iveco Daily");
 assert.equal(context[0].assignment.kind, "LONG_TERM");
 assert.equal(context[0].assignment.status, "ACTIVE");
 assert.equal(context[0].assignment.entityType, "VEHICLE");

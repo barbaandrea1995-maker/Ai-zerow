@@ -117,15 +117,15 @@ type PlanningOptionsResponse = {
 
 const navItems = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
-  { label: "OPERATIONS", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
-  { label: "WORKFORCE", id: "workforce", icon: Users, capability: "workforce.read" },
-  { label: "PLANNING", id: "planning", icon: CalendarClock, capability: "planning.read" },
+  { label: "COMMESSE", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
+  { label: "PERSONE", id: "workforce", icon: Users, capability: "workforce.read" },
+  { label: "PIANIFICAZIONE", id: "planning", icon: CalendarClock, capability: "planning.read" },
   { label: "PRESENZE", id: "attendance", icon: Clock3, capability: "workforce.read" },
-  { label: "FINANCE", id: "finance", icon: Gauge, capability: "finance.read" },
-  { label: "PROCUREMENT", id: "procurement", icon: Package, capability: "procurement.read" },
+  { label: "FINANZA", id: "finance", icon: Gauge, capability: "finance.read" },
+  { label: "ACQUISTI", id: "procurement", icon: Package, capability: "procurement.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
   { label: "WAREHOUSE", id: "warehouse", icon: Layers3, capability: "warehouse.read" },
-  { label: "MISSION", id: "mission", icon: Truck, capability: "mission.read" },
+  { label: "MISSIONI", id: "mission", icon: Truck, capability: "mission.read" },
   { label: "DOCUMENTS", id: "documents", icon: FileText, capability: "documents.read" },
   { label: "GOVERNANCE", id: "governance", icon: ShieldCheck, capability: "governance.read" },
   { label: "COMMUNICATIONS", id: "communications", icon: MessageSquareText, capability: "communication.read" },
@@ -608,7 +608,7 @@ export default function OperationsPage() {
       router.push(destination);
       return;
     }
-    notify(`${label}: superficie non disponibile nel perimetro autorizzato`);
+    notify(`${label}: sezione non disponibile nel perimetro autorizzato`);
   };
 
   const readbackTimeLabel = lastReadbackAt

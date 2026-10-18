@@ -124,7 +124,7 @@ const actionLabels: Record<string, string> = {
 const externalActions = new Set(["external_issue", "receive_partial", "receive"]);
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Proprietario",
+  owner: "Titolare",
   admin: "Amministratore",
   manager: "Responsabile",
   office: "Ufficio",

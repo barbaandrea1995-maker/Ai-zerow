@@ -544,7 +544,7 @@ const integrationsSurface = await readFile(join(root, "components", "external-in
 const externalAdapterContract = await readFile(join(root, "lib", "external-adapter.ts"), "utf8");
 assert(integrationsPage.includes("ExternalIntegrationsControl") && integrationsSurface.includes("/api/externals"), "W14 must use the Integrazioni control deck");
 assert(integrationsSurface.includes("INTEGRATIONS CONTROL") && integrationsSurface.includes("APPEND-ONLY CHECK LOG") && integrationsSurface.includes("NO FAKE HEALTH"), "W14 must expose registry, evidence and no-fake-health boundaries");
-assert(integrationsSurface.includes("tenant.manage") && integrationsSurface.includes("direct external write"), "W14 UI must expose the server-owned write boundary");
+assert(integrationsSurface.includes("tenant.manage") && integrationsSurface.includes("nessuna scrittura esterna diretta"), "W14 UI must expose the server-owned write boundary");
 assert(externalAdapterContract.includes('operation === "write" ? "tenant.manage" : "external_adapters.read"'), "W14 adapter access must align read and write capabilities");
 const pwaPage = await readFile(join(root, "app", "pwa", "diagnostics", "page.tsx"), "utf8");
 const pwaSurface = await readFile(join(root, "components", "pwa-mobile-control.tsx"), "utf8");

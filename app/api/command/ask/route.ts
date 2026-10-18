@@ -36,6 +36,34 @@ function parseObject(value: string) {
   }
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
+
+function commandRequestsPersonalAssets(command: string) {
+  const normalized = command
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const mentionsResource = /\b(asset|attrezzatur[ae]|escavator[ei]|furgon[ei]|mezz[oi]|veicol[oi])\b/.test(normalized);
+  const mentionsAssignment = /\b(assegnat[oi]|affidat[oi]|associat[oi]|in uso|utilizz|miei?|ho)\b/.test(normalized);
+  return mentionsResource && mentionsAssignment;
+}
+
+function personalAssetFallbackMessage(records: ReturnType<typeof buildCompanyAiPersonalAssetContext>) {
+  if (records.length === 0) {
+    return "Nel registro server-side non risultano mezzi o asset assegnati direttamente al tuo profilo.";
+  }
+  const labels = records.map((record) => {
+    const entityType = record.assignment.entityType === "VEHICLE" ? "mezzo" : "asset";
+    const duration = record.assignment.kind === "LONG_TERM" ? "lungo termine" : "breve termine";
+    return `${record.title} (${record.id} · ${entityType} · ${duration})`;
+  });
+  return `Dal registro server-side risultano ${records.length} risorse assegnate direttamente al tuo profilo: ${labels.join("; ")}.`;
+}
+
 export async function POST(request: Request) {
   const context = await getS07Context();
   const denied = s07AccessDenied(context, "write");
@@ -110,6 +138,9 @@ export async function POST(request: Request) {
           ? "Preview già registrata. Serve una decisione di approvazione prima di qualsiasi adapter esterno."
           : "Preview già registrata. Nessuna scrittura è stata eseguita."),
         aiRuntime: isRecord(existingPayload.aiRuntime) ? existingPayload.aiRuntime : undefined,
+        citedRecordIds: stringArray(existingPayload.citedRecordIds),
+        contextRecordIds: stringArray(existingPayload.contextRecordIds),
+        personalAssetRecordIds: stringArray(existingPayload.personalAssetRecordIds),
         suggestedActions: Array.isArray(existingPayload.suggestedActions) ? existingPayload.suggestedActions : [],
         limitations: Array.isArray(existingPayload.limitations) ? existingPayload.limitations : [],
       };
@@ -239,10 +270,13 @@ export async function POST(request: Request) {
       knowledgeContext: knowledgeHints,
       locationContext,
     });
+    const personalAssetRecordIds = personalAssetContext.map((record) => record.id);
     const fallbackMessage = approvalRequired
       ? "Preview registrata. Serve una decisione di approvazione prima di qualsiasi scrittura."
-      : companyAiOperationalContext.length
-        ? `Ho trovato ${companyAiOperationalContext.length} record autorizzati. Il runtime OpenAI non e disponibile; nessuna conclusione viene inventata.`
+      : commandRequestsPersonalAssets(command)
+        ? personalAssetFallbackMessage(personalAssetContext)
+        : companyAiOperationalContext.length
+        ? `Ho trovato ${companyAiOperationalContext.length} elementi autorizzati. Il servizio OpenAI non è disponibile; nessuna conclusione viene inventata.`
         : "Non risultano record operativi autorizzati nel readback. Nessuna conclusione viene inventata.";
     const answer = aiOutcome.result?.answer || fallbackMessage;
     const aiRuntime = {
@@ -261,6 +295,7 @@ export async function POST(request: Request) {
       suggestedActions: aiOutcome.result?.suggestedActions ?? [],
       limitations: aiOutcome.result?.limitations ?? [],
       contextRecordIds: companyAiOperationalContext.map((record) => record.id),
+      personalAssetRecordIds,
       locationContextEventIds: locationContext.flatMap((item) => {
         if (!isRecord(item) || typeof item.id !== "string") return [];
         return [item.id];
@@ -340,6 +375,8 @@ export async function POST(request: Request) {
       message: answer,
       aiRuntime,
       citedRecordIds: aiOutcome.result?.citedRecordIds ?? [],
+      contextRecordIds: companyAiOperationalContext.map((record) => record.id),
+      personalAssetRecordIds,
       suggestedActions: aiOutcome.result?.suggestedActions ?? [],
       limitations: aiOutcome.result?.limitations ?? [],
     };

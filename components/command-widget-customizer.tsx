@@ -91,7 +91,7 @@ export function CommandWidgetCustomizer({
             <div>
               <DialogTitle className="text-base text-slate-50">Componi il tuo Command</DialogTitle>
               <DialogDescription className="mt-1 max-w-xl text-xs leading-5 text-slate-500">
-                Ordine, visibilita e dimensioni vengono salvati sul tuo profilo. I widget non autorizzati non entrano mai nel catalogo.
+                Ordine, visibilità e dimensioni vengono salvati sul tuo profilo. I riquadri non autorizzati non entrano mai nel catalogo.
               </DialogDescription>
             </div>
           </div>
@@ -136,7 +136,7 @@ export function CommandWidgetCustomizer({
                   </label>
                   <div className="flex shrink-0 items-center gap-1">
                     <button aria-label={`Sposta ${definition.label} su`} className="zw-widget-order-button" disabled={index === 0} onClick={() => onLayoutChange(moveItem(layout, item.id, -1))} type="button"><ArrowUp className="size-3.5" /></button>
-                    <button aria-label={`Sposta ${definition.label} giu`} className="zw-widget-order-button" disabled={index === layout.length - 1} onClick={() => onLayoutChange(moveItem(layout, item.id, 1))} type="button"><ArrowDown className="size-3.5" /></button>
+                    <button aria-label={`Sposta ${definition.label} giù`} className="zw-widget-order-button" disabled={index === layout.length - 1} onClick={() => onLayoutChange(moveItem(layout, item.id, 1))} type="button"><ArrowDown className="size-3.5" /></button>
                   </div>
                 </article>
               );

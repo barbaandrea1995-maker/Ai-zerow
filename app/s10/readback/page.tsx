@@ -40,7 +40,7 @@ function NeonReadbackView({ readback }: { readback: Awaited<ReturnType<typeof ge
           <div>
             <p className="text-[10px] uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / S10</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50">Neon readback</h1>
-            <p className="mt-2 text-xs text-slate-500">Owner-only, read-only runtime evidence · no external writes</p>
+            <p className="mt-2 text-xs text-slate-500">Riservato al titolare, sola lettura · nessuna scrittura esterna</p>
           </div>
           <a className="text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4" href="/externals">Torna agli adapter</a>
         </div>

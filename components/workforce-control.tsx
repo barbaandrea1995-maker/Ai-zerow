@@ -84,7 +84,7 @@ type WorkforcePayload = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Titolare",
   admin: "Amministratore",
   member: "Collaboratore",
   manager: "Manager",

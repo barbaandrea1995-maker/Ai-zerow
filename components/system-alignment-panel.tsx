@@ -73,7 +73,7 @@ function formatTimestamp(value: string | null | undefined) {
 
 function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : "alignment_readback_failed";
-  if (message === "site_root_owner_required") return "Questo registro è visibile solo all’owner della radice Sites.";
+  if (message === "site_root_owner_required") return "Questo registro è visibile solo al Titolare della radice Sites.";
   if (message === "forbidden") return "La membership corrente non possiede tenant.manage.";
   return "Il registro di riallineamento non è disponibile nel runtime corrente.";
 }
@@ -155,7 +155,7 @@ export default function SystemAlignmentPanel() {
               {applied
                 ? verified
                   ? "Il tenant operativo è attivo, la radice legacy è archiviata e ogni collegamento mantiene la provenienza. Questa vista rilegge lo stato reale senza modificarlo."
-                  : "L’esecuzione risulta completata, ma uno o più invarianti della ricevuta richiedono verifica. Nessun dato viene corretto automaticamente da questa superficie."
+                  : "L’esecuzione risulta completata, ma uno o più invarianti della ricevuta richiedono verifica. Nessun dato viene corretto automaticamente da questa sezione."
                 : "Il server confronta tenant, cataloghi e registri operativi e prepara un piano senza spostare, unire o cancellare record."}
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -303,7 +303,7 @@ export default function SystemAlignmentPanel() {
       <section className="carbon-card rounded-2xl p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-lime-300/70">Radice aziendale</p><h2 className="mt-1 text-base font-semibold text-slate-100">{applied ? "Tenant canonico osservato" : "Tenant osservati"}</h2></div>
-          <span className="rounded-full border border-white/10 px-2.5 py-1 text-[9px] font-mono text-slate-600">scope · site owner</span>
+          <span className="rounded-full border border-white/10 px-2.5 py-1 text-[9px] font-mono text-slate-600">perimetro · titolare Sites</span>
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-2">
           {report.tenants.map((tenant) => {

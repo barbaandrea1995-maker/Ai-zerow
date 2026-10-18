@@ -34,7 +34,7 @@ export async function POST() {
 
   const checkedAt = new Date().toISOString();
   const outcome = await askCompanyAiWithOpenAi({
-    prompt: "Verifica tecnica runtime: rispondi con una breve conferma che la richiesta e stata ricevuta.",
+    prompt: "Verifica tecnica del servizio: rispondi con una breve conferma che la richiesta è stata ricevuta.",
     actionType: "release_check",
     approvalRequired: false,
     operationalContext: [],

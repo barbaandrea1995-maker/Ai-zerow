@@ -16,7 +16,7 @@ export const COMMAND_WIDGET_CATALOG = [
   {
     id: "kpi-assets",
     label: "Asset operativi",
-    description: "Disponibilita e stato del parco asset.",
+    description: "Disponibilità e stato del parco asset.",
     requiredCapabilities: ["asset.read"],
     allowedSizes: ["compact", "standard"],
     defaultSize: "compact",
@@ -89,7 +89,7 @@ export const COMMAND_WIDGET_CATALOG = [
   },
   {
     id: "activity-stream",
-    label: "Attivita recenti",
+    label: "Attività recenti",
     description: "Timeline dei record operativi consentiti.",
     requiredCapabilities: ["command.read"],
     allowedSizes: ["standard", "wide"],

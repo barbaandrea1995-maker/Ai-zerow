@@ -77,10 +77,10 @@ type DirectoryPayload = {
 function lifecycleError(error: string | undefined) {
   if (error === "membership_already_exists") return "Esiste già una membership per questa email.";
   if (error === "pending_invitation_exists") return "Esiste già un invito attivo per questa email.";
-  if (error === "only_owner_can_assign_owner") return "Solo un Owner può assegnare il ruolo Owner.";
-  if (error === "last_active_owner_required") return "Il tenant deve conservare almeno un Owner attivo.";
+  if (error === "only_owner_can_assign_owner") return "Solo un Titolare può assegnare la mansione Titolare.";
+  if (error === "last_active_owner_required") return "L’azienda deve conservare almeno un Titolare attivo.";
   if (error === "self_suspend_not_allowed" || error === "self_remove_not_allowed") return "Non puoi sospendere o rimuovere la sessione con cui sei collegato.";
-  if (error === "self_role_change_not_allowed") return "L’Owner resta obbligatorio sul tuo profilo; le altre mansioni vanno assegnate da Authority.";
+  if (error === "self_role_change_not_allowed") return "La mansione Titolare resta obbligatoria sul tuo profilo; le altre mansioni vanno assegnate da Authority.";
   if (error === "version_conflict") return "La membership è cambiata: rileggi i dati e riprova.";
   if (error === "invitation_not_pending") return "L’invito non è più attivo.";
   return "Operazione Authority non completata.";
@@ -224,7 +224,7 @@ export default function AuthorityMembershipControl({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <span className="grid size-10 place-items-center rounded-2xl border border-lime-300/25 bg-lime-300/10 text-lime-200"><Users className="size-4" /></span>
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1. Il ruolo Autista abilita la risorsa missione dopo l’accettazione.</p>{currentActorIsOwner ? <p className="mt-2 text-[10px] text-lime-200/75">Puoi aggiungere Operatore e Autista al tuo profilo: Owner resta sempre attivo.</p> : null}</div>
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-300/70">ONBOARDING / MEMBERSHIP LIFECYCLE</p><h2 className="mt-1 text-[16px] font-semibold text-slate-100" id="membership-control-title">Persone, inviti e accessi reali</h2><p className="mt-1 text-[11px] leading-5 text-slate-500">Token monouso, email Neon vincolata, optimistic version, sospensione immediata e audit D1. Il ruolo Autista abilita la risorsa missione dopo l’accettazione.</p>{currentActorIsOwner ? <p className="mt-2 text-[10px] text-lime-200/75">Puoi aggiungere Operatore e Autista al tuo profilo: Titolare resta sempre attivo.</p> : null}</div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button className="h-9 border border-white/10 bg-black/25 text-xs text-slate-300 hover:border-lime-300/30 hover:bg-lime-300/[0.06]" onClick={() => void onRefresh()} type="button" variant="outline"><RefreshCw className="size-3.5" />Rileggi</Button>

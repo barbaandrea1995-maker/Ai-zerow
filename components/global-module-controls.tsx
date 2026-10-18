@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { authorityRoleLabel } from "@/lib/authority-catalog";
 import { ZerowWorkspaceSidebar } from "@/components/zerow-workspace-sidebar";
 
 const HIDDEN_PATHS = ["/login", "/auth-ab", "/access-denied", "/invite", "/offline"];
@@ -106,7 +107,7 @@ export function GlobalModuleControls({ initialAuthority }: { initialAuthority: G
           allowedNavigation={allowedNavigation}
           capabilities={initialAuthority.capabilities}
           collapsed={collapsed}
-          footerDetail={`RUOLO / ${initialAuthority.role.toUpperCase()}`}
+          footerDetail={`RUOLO / ${authorityRoleLabel(initialAuthority.role).toUpperCase()}`}
           footerMetric="WORKSPACE OPERATIVO"
           global
           mobileOpen={mobileOpen && !mobileFocusedRole}

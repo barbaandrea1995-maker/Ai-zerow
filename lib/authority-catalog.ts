@@ -154,13 +154,13 @@ export const ROLE_CAPABILITIES = {
 } as const;
 
 export const ROLE_METADATA = {
-  owner: { label: "Owner", purpose: "Controllo tenant, sicurezza e configurazione completa." },
-  admin: { label: "Amministratore", purpose: "Amministrazione operativa senza trasferimento della proprieta tenant." },
-  member: { label: "Collaboratore", purpose: "Operativita trasversale di base nel proprio perimetro." },
+  owner: { label: "Titolare", purpose: "Controllo dell’azienda, sicurezza e configurazione completa." },
+  admin: { label: "Amministratore", purpose: "Amministrazione operativa senza trasferimento della proprietà dell’azienda." },
+  member: { label: "Collaboratore", purpose: "Operatività trasversale di base nel proprio perimetro." },
   manager: { label: "Manager", purpose: "Coordinamento operativo, economico e approvativo." },
   office: { label: "Ufficio", purpose: "Commesse, documenti, pianificazione e amministrazione." },
   technical: { label: "Tecnico", purpose: "Lavorazioni, pianificazione tecnica, asset e documenti." },
-  field_supervisor: { label: "Caposquadra", purpose: "Coordinamento field e visibilita del team assegnato." },
+  field_supervisor: { label: "Caposquadra", purpose: "Coordinamento sul campo e visibilità della squadra assegnata." },
   worker: { label: "Operatore", purpose: "Esecuzione sul campo nel solo perimetro assegnato." },
   warehouse_manager: { label: "Responsabile magazzino", purpose: "Anagrafica materiali, scorte, movimenti, missioni e controllo deposito." },
   warehouse_operator: { label: "Magazziniere", purpose: "Movimenti, prelievi, carichi e operatività autorizzata senza creare anagrafiche materiali." },
@@ -176,6 +176,10 @@ export const AUTHORITY_ROLES = Object.keys(ROLE_CAPABILITIES) as AuthorityRole[]
 
 export function isAuthorityRole(value: string): value is AuthorityRole {
   return Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, value);
+}
+
+export function authorityRoleLabel(value: string) {
+  return isAuthorityRole(value) ? ROLE_METADATA[value].label : value;
 }
 
 /**

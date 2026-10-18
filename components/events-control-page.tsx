@@ -138,17 +138,17 @@ type NavItem = { id: CommandNavigationId; label: string; path: string; capabilit
 
 const navItems: NavItem[] = [
   { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
-  { id: "operations", label: "OPERATIONS", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
-  { id: "workforce", label: "WORKFORCE", path: "/workforce", capability: "workforce.read", icon: Users },
+  { id: "operations", label: "COMMESSE", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
+  { id: "workforce", label: "PERSONE", path: "/workforce", capability: "workforce.read", icon: Users },
   { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: Clock3 },
   { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: Clock3 },
   { id: "assets", label: "ASSET", path: "/assets", capability: "asset.read", icon: Layers3 },
   { id: "warehouse", label: "MAGAZZINO", path: "/warehouse", capability: "warehouse.read", icon: Layers3 },
   { id: "mission", label: "MISSIONI", path: "/mission", capability: "mission.read", icon: Truck },
   { id: "documents", label: "DOCUMENTI", path: "/documents", capability: "documents.read", icon: FileText },
-  { id: "finance", label: "FINANCE", path: "/finance", capability: "finance.read", icon: FileCheck2 },
-  { id: "procurement", label: "PROCUREMENT", path: "/procurement", capability: "procurement.read", icon: ShoppingCart },
-  { id: "authority", label: "AUTHORITY", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
+  { id: "finance", label: "FINANZA", path: "/finance", capability: "finance.read", icon: FileCheck2 },
+  { id: "procurement", label: "ACQUISTI", path: "/procurement", capability: "procurement.read", icon: ShoppingCart },
+  { id: "authority", label: "AUTORITÀ", path: "/onboarding", capability: "authority.read", icon: ShieldCheck },
   { id: "governance", label: "GOVERNANCE", path: "/governance", capability: "governance.read", icon: ShieldCheck },
   { id: "communications", label: "COMUNICAZIONI", path: "/communications", capability: "communication.read", icon: Bell },
   { id: "events", label: "EVENTI", path: "/events", capability: "events.read", icon: Activity },
@@ -157,7 +157,7 @@ const navItems: NavItem[] = [
 ];
 
 const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  owner: "Titolare",
   admin: "Amministratore",
   manager: "Manager",
   office: "Ufficio",
@@ -463,7 +463,7 @@ export default function EventsControlPage() {
 </span>AI-ZEROW / W11 / EVENT AUTHORITY<span className="size-1 rounded-full bg-lime-300" />{loading ? "READING" : "READBACK VERIFIED"}</div>
 <h1 className="mt-5 max-w-3xl text-[clamp(2.2rem,5.1vw,5rem)] font-bold leading-[.9] tracking-[-.07em] text-slate-50">EVENTS <span className="text-lime-300 drop-shadow-[0_0_22px_rgba(200,255,34,.28)]">UNDER CONTROL.</span>
 </h1>
-<p className="mt-5 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">Ledger append-only, delivery boundary e read model Company Twin in un’unica superficie. Ogni fatto resta rileggibile; nessun consumer esterno viene dato per eseguito.</p>
+<p className="mt-5 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">Ledger append-only, delivery boundary e read model Company Twin in un’unica sezione. Ogni fatto resta rileggibile; nessun consumer esterno viene dato per eseguito.</p>
 <div className="mt-6 flex flex-wrap gap-2">
 <Button className="h-10 bg-lime-300 px-4 text-xs font-semibold text-[#050705] shadow-[0_0_24px_rgba(200,255,34,.18)] hover:bg-lime-200" disabled={!canWrite} onClick={() => setComposerOpen(true)}>
 <Plus className="size-3.5" />Nuova nota di audit</Button>
