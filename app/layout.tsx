@@ -2,6 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { GlobalModuleControls, type GlobalAuthority } from "@/components/global-module-controls";
 import { PwaRegister } from "@/components/pwa-register";
 import { getAuthorityContext } from "@/lib/authority-context";
+import {
+  mobileNavigationForAuthority,
+  type MobileNavigationContract,
+} from "@/lib/mobile-navigation";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,16 +37,21 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   let authority: GlobalAuthority | null = null;
+  let mobileNavigation: MobileNavigationContract | null = null;
   try {
     const context = await getAuthorityContext();
-    if (context) authority = { role: context.role, roles: context.roles, capabilities: context.capabilities };
+    if (context) {
+      authority = { role: context.role, roles: context.roles, capabilities: context.capabilities };
+      mobileNavigation = mobileNavigationForAuthority(context);
+    }
   } catch {
     authority = null;
+    mobileNavigation = null;
   }
 
   return (
     <html lang="it">
-      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls initialAuthority={authority} /></body>
+      <body className="antialiased"><PwaRegister />{children}<GlobalModuleControls initialAuthority={authority} mobileNavigation={mobileNavigation} /></body>
     </html>
   );
 }

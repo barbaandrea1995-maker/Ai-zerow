@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const registry = JSON.parse(await fs.readFile(path.join(root, "config/commercial-modules.json"), "utf8"));
 const navigationSource = await fs.readFile(path.join(root, "lib/command-dashboard.ts"), "utf8");
+const mobileNavigationSource = await fs.readFile(path.join(root, "lib/mobile-navigation.ts"), "utf8");
+const mobileNavigationComponent = await fs.readFile(path.join(root, "components/command-mobile-nav.tsx"), "utf8");
+const globalControlsSource = await fs.readFile(path.join(root, "components/global-module-controls.tsx"), "utf8");
+const rootLayoutSource = await fs.readFile(path.join(root, "app/layout.tsx"), "utf8");
 
 async function exists(relative) {
   return fs.access(path.join(root, relative)).then(() => true).catch(() => false);
@@ -35,7 +39,6 @@ for (const entry of registry) {
   const hasCarbonSurface = /carbon-card|zw-command-ultra|authority-page|login-surface/.test(combined);
   const hasRefresh = /RefreshCw|Aggiorna|window\.location\.reload/.test(combined);
   const hasBack = /ArrowLeft|Torna indietro|router\.back\(\)|history\.back/.test(combined);
-  const hasMobileContract = combined.includes("CommandMobileNav") || combined.includes("zw-mobile-nav");
   const shellMode = combined.includes("zw-app-shell") ? "CANONICAL" : "LEGACY_CSS_BRIDGED";
 
   modules.push({
@@ -48,7 +51,7 @@ for (const entry of registry) {
     carbonSurface: hasCarbonSurface ? "PASS" : "FAIL",
     refresh: hasRefresh ? "LOCAL" : "GLOBAL_FALLBACK",
     back: hasBack ? "LOCAL" : "GLOBAL_FALLBACK",
-    mobile: hasMobileContract ? "OPERATIONAL_NAV" : "DESKTOP_OR_GLOBAL_SHELL",
+    mobile: "GLOBAL_ROLE_NAV",
     shell: shellMode,
   });
 }
@@ -58,15 +61,29 @@ assert(modules.every((item) => item.pageExists), "Every commercial module must h
 assert(modules.filter((item) => registry.find((entry) => entry.id === item.id)?.navigation !== false).every((item) => item.navigation === "PASS"), "Every primary module must be represented in canonical navigation");
 assert(modules.every((item) => item.officialMark === "PASS"), "Every commercial module must use the official ZEROW mark");
 assert(modules.every((item) => item.carbonSurface === "PASS"), "Every commercial module must use the shared carbon surface vocabulary");
+assert(modules.every((item) => item.shell === "CANONICAL"), "Every commercial module must use the canonical application shell");
+assert(rootLayoutSource.includes("mobileNavigationForAuthority(context)"), "Root layout must resolve mobile navigation from server authority");
+assert(rootLayoutSource.includes("mobileNavigation={mobileNavigation}"), "Root layout must pass the server navigation contract to global controls");
+assert(globalControlsSource.includes("<CommandMobileNav contract={mobileNavigation} global"), "Global controls must own the only rendered mobile navigation");
+assert(mobileNavigationComponent.includes("if (!global || !contract?.items.length) return null"), "Module-local mobile navigation calls must fail closed");
+assert(mobileNavigationComponent.includes('data-navigation-source={contract.source}'), "Rendered navigation must expose its authority source for runtime verification");
+assert(mobileNavigationSource.includes('source: "authority-server"'), "Mobile navigation contract must declare a server-side authority source");
 
 const localRefresh = modules.filter((item) => item.refresh === "LOCAL").length;
 const localBack = modules.filter((item) => item.back === "LOCAL").length;
-const operationalNav = modules.filter((item) => item.mobile === "OPERATIONAL_NAV").length;
+const operationalNav = modules.filter((item) => item.mobile === "GLOBAL_ROLE_NAV").length;
 
 console.log(JSON.stringify({
   status: "PASS_WITH_RUNTIME_GATES",
   registry: { modules: modules.length, canonicalRoutes: [...seenRoutes] },
-  alignment: { localRefresh, localBack, globalFallbackContract: true, operationalNav },
+  alignment: {
+    localRefresh,
+    localBack,
+    globalFallbackContract: true,
+    operationalNav,
+    mobileNavigationOwner: "ROOT_SERVER_SHELL",
+    mobileNavigationSource: "authority-server",
+  },
   modules,
   gates: {
     authenticatedBrowser: "NOT_RUN",

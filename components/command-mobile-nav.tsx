@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "@/components/app-link";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   BriefcaseBusiness,
   ClipboardCheck,
@@ -11,120 +12,118 @@ import {
   Package,
   Settings2,
   Sparkles,
-  Truck,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
+import Link from "@/components/app-link";
 import type { CommandNavigationId } from "@/lib/command-dashboard";
+import type {
+  MobileNavigationContract,
+  MobileNavigationItemId,
+} from "@/lib/mobile-navigation";
 
-type MobileNavItem =
-  | "home"
-  | "map"
-  | "ai"
-  | "operations"
+type LegacyActive =
+  | MobileNavigationItemId
   | "mission"
-  | "attendance"
-  | "warehouse"
-  | "communications"
-  | "settings"
-  | "company-ai"
-  | "more";
+  | "company-ai";
 
-const OPERATIONAL_ROLES = new Set([
-  "field_supervisor",
-  "worker",
-  "warehouse_manager",
-  "warehouse_operator",
-  "driver",
-  "delivery_driver",
-  "maintenance",
-]);
-
-const SUPERVISORY_ROLES = new Set(["owner", "admin", "manager", "office", "technical", "field_supervisor", "auditor"]);
-
-export function CommandMobileNav({
-  active,
-  allowedNavigation,
-  role,
-  roles,
-}: {
-  active: MobileNavItem;
+type CommandMobileNavProps = {
+  /** Server-derived contract. Only the root shell is allowed to render it. */
+  contract?: MobileNavigationContract | null;
+  global?: boolean;
+  /** Retained temporarily so older surfaces compile while the global shell owns rendering. */
+  active?: LegacyActive;
   allowedNavigation?: CommandNavigationId[];
   role?: string;
   roles?: string[];
+};
+
+const iconByItem: Record<MobileNavigationItemId, LucideIcon> = {
+  home: House,
+  map: Map,
+  ai: Sparkles,
+  operations: BriefcaseBusiness,
+  communications: MessageCircle,
+  attendance: ClipboardCheck,
+  warehouse: Package,
+  assets: Wrench,
+  settings: Settings2,
+  more: Grid2X2,
+};
+
+function activeNavigation(pathname: string, hash: string): string {
+  if (pathname === "/" || pathname === "/command") {
+    if (hash === "#operational-map") return "map";
+    if (hash === "#company-ai") return "ai";
+    return "home";
+  }
+  if (pathname.startsWith("/operations")) return "operations";
+  if (pathname.startsWith("/communications")) return "communications";
+  if (pathname.startsWith("/presenze")) return "attendance";
+  if (pathname.startsWith("/warehouse")) return "warehouse";
+  if (pathname.startsWith("/assets")) return "assets";
+  if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/ai")) return "ai";
+  if (pathname.startsWith("/mission")) return "mission";
+  return "more";
+}
+
+/**
+ * The application renders one global mobile navigator. Legacy embedded calls
+ * intentionally return null so a module can never create a second bar or
+ * derive destinations from client-side role guesses.
+ */
+export function CommandMobileNav({ active, contract, global = false }: CommandMobileNavProps) {
+  if (!global || !contract?.items.length) return null;
+  return <GlobalMobileNavigation active={active} contract={contract} />;
+}
+
+function GlobalMobileNavigation({
+  active,
+  contract,
+}: {
+  active?: LegacyActive;
+  contract: MobileNavigationContract;
 }) {
-  // Keep the client boundary tolerant of legacy/partial authority payloads.
-  // The server remains the source of truth; this only prevents a malformed
-  // optional roles field from taking down the whole PWA shell.
-  const effectiveRoles = new Set([role, ...(Array.isArray(roles) ? roles : [])].filter((value): value is string => Boolean(value)));
-  const hasOperationalNavigation = allowedNavigation?.some((id) =>
-    ["operations", "mission", "attendance", "warehouse"].includes(id),
-  ) ?? false;
-  if (![...effectiveRoles].some((value) => OPERATIONAL_ROLES.has(value)) && !hasOperationalNavigation) return null;
+  const pathname = usePathname();
+  const [hash, setHash] = useState("");
 
-  const can = (id: CommandNavigationId) => !allowedNavigation || allowedNavigation.includes(id);
-  const canOpenCommand = can("command");
-  const canOpenAi = can("company-ai");
-  const canSettings = can("settings");
-  const canCommunications = can("communications");
-  const scoped = ![...effectiveRoles].some((value) => SUPERVISORY_ROLES.has(value));
-  const isDriver = effectiveRoles.has("driver") || effectiveRoles.has("delivery_driver");
-  const isWarehouse = effectiveRoles.has("warehouse_operator") || effectiveRoles.has("warehouse_manager");
-  const isWorker = effectiveRoles.has("worker") || effectiveRoles.has("maintenance");
+  useEffect(() => {
+    const readHash = () => setHash(window.location.hash);
+    readHash();
+    window.addEventListener("hashchange", readHash);
+    return () => window.removeEventListener("hashchange", readHash);
+  }, [pathname]);
 
-  if (scoped && (isDriver || isWorker || isWarehouse)) {
-    const focused: Array<{ id: MobileNavItem; label: string; href: string; icon: typeof House; primary?: boolean }> = [];
-    if (isWarehouse && !isDriver && !isWorker) {
-      if (can("warehouse")) focused.push({ id: "home", label: "Bacheca", href: "/warehouse", icon: House });
-    } else if (isDriver && can("mission")) {
-      focused.push({ id: "home", label: "Bacheca", href: "/mission", icon: House });
-    } else if (can("operations")) {
-      focused.push({ id: "home", label: "Bacheca", href: "/operations", icon: House });
-    }
-    if (canCommunications) focused.push({ id: "communications", label: "Comunicazioni", href: "/communications", icon: MessageCircle });
-    if (canOpenAi) focused.push({ id: "ai", label: "AI Centrale", href: "/ai", icon: Sparkles, primary: true });
-    if (can("attendance")) focused.push({ id: "attendance", label: "Presenze", href: "/presenze", icon: ClipboardCheck });
-    if (canSettings) focused.push({ id: "settings", label: "Impostazioni", href: "/settings", icon: Settings2 });
+  const current = active ?? activeNavigation(pathname, hash);
 
-    return <nav aria-label="Navigazione operativa mobile" className="zw-mobile-nav">
-      {focused.slice(0, 5).map((item) => {
-        const Icon = item.icon;
-        const selected = item.id === active || (item.id === "home" && ["operations", "mission"].includes(active));
-        return <Link aria-current={selected ? "page" : undefined} aria-label={item.label} className={item.primary ? "zw-mobile-nav__item zw-mobile-nav__item--ai" : "zw-mobile-nav__item"} href={item.href} key={item.id}>
-          <span className="zw-mobile-nav__icon"><Icon aria-hidden="true" className="size-[18px]" /></span>
-          <span>{item.label}</span>
-        </Link>;
+  return (
+    <nav
+      aria-label="Navigazione operativa mobile"
+      className="zw-mobile-nav zw-mobile-nav--global"
+      data-navigation-profile={contract.profile}
+      data-navigation-role={contract.role}
+      data-navigation-source={contract.source}
+      data-navigation-version={contract.version}
+    >
+      {contract.items.map((item) => {
+        const Icon = iconByItem[item.id];
+        const selected = item.activeNavigation.includes(current);
+        return (
+          <Link
+            aria-current={selected ? "page" : undefined}
+            aria-label={item.label}
+            className={item.primary ? "zw-mobile-nav__item zw-mobile-nav__item--ai" : "zw-mobile-nav__item"}
+            href={item.href}
+            key={item.id}
+          >
+            <span className="zw-mobile-nav__icon">
+              <Icon aria-hidden="true" className="size-[18px]" />
+            </span>
+            <span className="zw-mobile-nav__label">{item.label}</span>
+          </Link>
+        );
       })}
-    </nav>;
-  }
-
-  const moreHref = can("authority") ? "/onboarding" : canSettings ? "/settings" : "/command";
-  const items: Array<{ id: MobileNavItem; label: string; href: string; icon: typeof House; primary?: boolean }> = [];
-  if (canOpenCommand) {
-    items.push(
-      { id: "home", label: "Home", href: "/command", icon: House },
-      { id: "map", label: "Mappa", href: "/command#operational-map", icon: Map },
-      { id: "ai", label: "AI", href: "/command#company-ai", icon: Sparkles, primary: true },
-    );
-  }
-  if (can("operations")) items.push({ id: "operations", label: "Commesse", href: "/operations", icon: BriefcaseBusiness });
-  if (can("mission")) items.push({ id: "mission", label: "Missioni", href: "/mission", icon: Truck });
-  if (can("attendance")) items.push({ id: "attendance", label: "Presenze", href: "/presenze", icon: ClipboardCheck });
-  if (can("warehouse")) items.push({ id: "warehouse", label: "Magazzino", href: "/warehouse", icon: Package });
-  items.push({ id: "more", label: "Altro", href: moreHref, icon: Grid2X2 });
-  const moreItem = items.find((item) => item.id === "more");
-  const baseItems = items.filter((item) => item.id !== "more");
-  const firstFour = baseItems.slice(0, 4);
-  const activeItem = baseItems.find((item) => item.id === active);
-  if (activeItem && !firstFour.some((item) => item.id === activeItem.id)) firstFour.splice(Math.max(0, firstFour.length - 1), 1, activeItem);
-  const visibleItems = items.length > 5 && moreItem ? [...firstFour, moreItem] : items;
-
-  return <nav aria-label="Navigazione mobile" className="zw-mobile-nav">
-    {visibleItems.map((item) => {
-      const Icon = item.icon;
-      const selected = item.id === active;
-      return <Link aria-current={selected ? "page" : undefined} aria-label={item.label} className={item.primary ? "zw-mobile-nav__item zw-mobile-nav__item--ai" : "zw-mobile-nav__item"} href={item.href} key={item.id}>
-        <span className="zw-mobile-nav__icon"><Icon aria-hidden="true" className="size-[18px]" /></span>
-        <span>{item.label}</span>
-      </Link>;
-    })}
-  </nav>;
+    </nav>
+  );
 }

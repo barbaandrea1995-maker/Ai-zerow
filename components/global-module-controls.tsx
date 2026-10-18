@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import { authorityRoleLabel } from "@/lib/authority-catalog";
+import {
+  isFocusedMobileProfile,
+  type MobileNavigationContract,
+} from "@/lib/mobile-navigation";
 import { ZerowWorkspaceSidebar } from "@/components/zerow-workspace-sidebar";
 
 const HIDDEN_PATHS = ["/login", "/auth-ab", "/access-denied", "/invite", "/offline"];
-const MOBILE_FOCUSED_ROLES = new Set(["worker", "driver", "delivery_driver", "maintenance", "warehouse_manager", "warehouse_operator"]);
-const SUPERVISORY_ROLES = new Set(["owner", "admin", "manager", "office", "technical", "field_supervisor", "auditor"]);
 
 export type GlobalAuthority = {
   role: string;
@@ -42,18 +45,20 @@ function activeNavigation(pathname: string): CommandNavigationId {
   return "command";
 }
 
-export function GlobalModuleControls({ initialAuthority }: { initialAuthority: GlobalAuthority | null }) {
+export function GlobalModuleControls({
+  initialAuthority,
+  mobileNavigation,
+}: {
+  initialAuthority: GlobalAuthority | null;
+  mobileNavigation: MobileNavigationContract | null;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const hidden = isHiddenPath(pathname);
   const canShowSidebar = Boolean(initialAuthority) && !hidden;
-  const effectiveRoles = useMemo(
-    () => new Set([initialAuthority?.role, ...(initialAuthority?.roles ?? [])].filter((role): role is string => Boolean(role))),
-    [initialAuthority?.role, initialAuthority?.roles],
-  );
-  const mobileFocusedRole = [...effectiveRoles].some((role) => MOBILE_FOCUSED_ROLES.has(role))
-    && ![...effectiveRoles].some((role) => SUPERVISORY_ROLES.has(role));
+  const mobileFocusedRole = Boolean(mobileNavigation && isFocusedMobileProfile(mobileNavigation.profile));
+  const canShowMobileNavigation = canShowSidebar && Boolean(mobileNavigation?.items.length);
   const allowedNavigation = useMemo(
     () => getAllowedCommandNavigation(initialAuthority?.capabilities ?? []).map((item) => item.id),
     [initialAuthority?.capabilities],
@@ -62,11 +67,19 @@ export function GlobalModuleControls({ initialAuthority }: { initialAuthority: G
   useEffect(() => {
     document.body.classList.toggle("has-zerow-workspace-sidebar", canShowSidebar);
     document.body.classList.toggle("zw-mobile-focused-role", canShowSidebar && mobileFocusedRole);
+    document.body.classList.toggle("zw-commercial-shell", canShowSidebar);
+    document.body.classList.toggle("has-zerow-mobile-nav", canShowMobileNavigation);
+    document.body.dataset.zerowModule = activeNavigation(pathname);
+    document.body.dataset.navigationProfile = mobileNavigation?.profile ?? "";
     return () => {
       document.body.classList.remove("has-zerow-workspace-sidebar");
       document.body.classList.remove("zw-mobile-focused-role");
+      document.body.classList.remove("zw-commercial-shell");
+      document.body.classList.remove("has-zerow-mobile-nav");
+      delete document.body.dataset.zerowModule;
+      delete document.body.dataset.navigationProfile;
     };
-  }, [canShowSidebar, mobileFocusedRole]);
+  }, [canShowMobileNavigation, canShowSidebar, mobileFocusedRole, mobileNavigation?.profile, pathname]);
 
   useEffect(() => {
     if (!canShowSidebar) return;
@@ -116,6 +129,7 @@ export function GlobalModuleControls({ initialAuthority }: { initialAuthority: G
           role={initialAuthority.role}
         />
       ) : null}
+      {canShowMobileNavigation && !mobileOpen ? <CommandMobileNav contract={mobileNavigation} global /> : null}
     </>
   );
 }

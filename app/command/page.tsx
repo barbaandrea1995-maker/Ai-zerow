@@ -13,7 +13,7 @@ export default async function CommandPage() {
 
   return (
     <CommandSurface
-      access={commandSurfaceAccess(authority.role, authority.capabilities)}
+      access={commandSurfaceAccess(authority.role, authority.capabilities, authority.roles)}
       actor={{ email: authority.actorEmail, name: authority.actorName }}
     />
   );

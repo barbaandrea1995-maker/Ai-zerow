@@ -2034,7 +2034,7 @@ main > div > aside:not(.zw-workspace-sidebar) {
   z-index: 110 !important;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   body.zw-mobile-focused-role .zw-global-workspace-sidebar,
   body.zw-mobile-focused-role button[aria-label="Apri menu"],
   body.zw-mobile-focused-role button[aria-label="Apri navigazione"] {
@@ -2633,5 +2633,200 @@ main > div > aside:not(.zw-workspace-sidebar) {
 
   .zw-mobile-nav__item {
     font-size: .65rem;
+  }
+}
+
+/* Commercial shell v3 — one visual contract and one server-authorized mobile rail. */
+body.zw-commercial-shell {
+  --zw-shell-gutter: clamp(1rem, 2.4vw, 1.75rem);
+  --zw-shell-content: 1680px;
+  min-width: 320px;
+}
+
+body.zw-commercial-shell .zw-app-shell {
+  min-width: 0;
+  isolation: isolate;
+  background-color: transparent;
+}
+
+body.zw-commercial-shell .zw-command-topbar {
+  z-index: 70;
+  width: 100%;
+  border-bottom-color: rgba(200, 255, 34, .13);
+  background:
+    linear-gradient(90deg, rgba(200, 255, 34, .025), transparent 24%),
+    linear-gradient(180deg, rgba(7, 12, 8, .94), rgba(3, 6, 4, .86));
+}
+
+body.zw-commercial-shell :is(.carbon-card, .carbon-card-neon, .carbon-inset) {
+  overflow-wrap: anywhere;
+}
+
+body.zw-commercial-shell :is(button, a, input, select, textarea) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.zw-commercial-shell :is(button, a)[aria-disabled="true"],
+body.zw-commercial-shell button:disabled {
+  cursor: not-allowed;
+}
+
+body.zw-commercial-shell [data-slot="dialog-content"] {
+  max-height: min(92dvh, 980px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.zw-operational-home__hero {
+  position: relative;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(200, 255, 34, .17), transparent 28%),
+    linear-gradient(112deg, rgba(200, 255, 34, .075), transparent 42%),
+    repeating-linear-gradient(126deg, rgba(255, 255, 255, .014) 0 1px, transparent 1px 8px),
+    linear-gradient(152deg, rgba(14, 23, 15, .98), rgba(3, 6, 4, .99)) !important;
+}
+
+.zw-operational-home__hero::after {
+  position: absolute;
+  top: -140px;
+  right: -100px;
+  width: 360px;
+  height: 360px;
+  border: 1px solid rgba(200, 255, 34, .12);
+  border-radius: 50%;
+  box-shadow: 0 0 0 42px rgba(200, 255, 34, .018), 0 0 0 92px rgba(200, 255, 34, .012);
+  content: "";
+  pointer-events: none;
+}
+
+.zw-operational-home__destination {
+  box-shadow: inset 0 1px rgba(255, 255, 255, .025);
+}
+
+.zw-mobile-nav--global {
+  contain: layout paint;
+}
+
+@media (min-width: 768px) {
+  .zw-mobile-nav--global {
+    display: none !important;
+  }
+}
+
+@media (max-width: 767px) {
+  body.has-zerow-mobile-nav > main,
+  body.has-zerow-mobile-nav .zw-app-shell {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+
+  body.zw-commercial-shell .zw-command-topbar {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  body.zw-commercial-shell .zw-command-topbar__wordmark {
+    max-width: min(37vw, 150px);
+  }
+
+  body.zw-commercial-shell .zw-command-topbar__wordmark span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.zw-commercial-shell :is(.carbon-card, .carbon-card-neon) {
+    border-radius: 22px;
+  }
+
+  body.zw-commercial-shell [data-slot="dialog-content"] {
+    max-height: calc(100dvh - 16px);
+    margin: 8px;
+    border-radius: 22px;
+  }
+
+  .zw-operational-home__hero::after {
+    top: -170px;
+    right: -190px;
+    opacity: .72;
+  }
+
+  .zw-mobile-nav.zw-mobile-nav--global {
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: 10px;
+    z-index: 120;
+    min-height: 70px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: end;
+    gap: 1px;
+    border-color: rgba(200, 255, 34, .24);
+    border-radius: 22px;
+    padding: 8px 4px 7px;
+    background:
+      linear-gradient(110deg, rgba(200, 255, 34, .045), transparent 38%),
+      linear-gradient(180deg, rgba(18, 28, 20, .95), rgba(3, 6, 4, .985));
+    box-shadow:
+      0 24px 68px rgba(0, 0, 0, .78),
+      inset 0 1px 0 rgba(255, 255, 255, .075),
+      0 0 32px rgba(200, 255, 34, .09);
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__item {
+    min-height: 54px;
+    gap: 2px;
+    padding: 2px 1px;
+    border: 1px solid transparent;
+    font-size: clamp(.49rem, 2.15vw, .6rem);
+    letter-spacing: -.015em;
+    line-height: 1.1;
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__item[aria-current="page"] {
+    border-color: rgba(200, 255, 34, .11);
+    background: linear-gradient(180deg, rgba(200, 255, 34, .11), rgba(200, 255, 34, .035));
+    box-shadow: inset 0 1px rgba(229, 255, 88, .08);
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__item--ai {
+    transform: translateY(-11px);
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__item--ai .zw-mobile-nav__icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  body.has-zerow-mobile-nav :is([data-sonner-toaster], .fixed.bottom-5) {
+    bottom: calc(102px + env(safe-area-inset-bottom)) !important;
+  }
+
+  body:has([role="dialog"]) .zw-mobile-nav--global {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(110%);
+  }
+}
+
+@media (max-width: 359px) {
+  .zw-mobile-nav--global .zw-mobile-nav__item {
+    font-size: .47rem;
+  }
+
+  .zw-mobile-nav--global .zw-mobile-nav__icon {
+    transform: scale(.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zw-operational-home__destination,
+  .zw-mobile-nav--global {
+    transition: none !important;
   }
 }

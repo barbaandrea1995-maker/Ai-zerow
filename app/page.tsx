@@ -1,10 +1,7 @@
-import { redirect } from "next/navigation";
 import CommandSurface from "@/components/command-surface";
-import { hasCapability } from "@/lib/authority-context";
-import {
-  commandSurfaceAccess,
-  firstAuthorizedPath,
-} from "@/lib/command-dashboard";
+import OperationalHome from "@/components/operational-home";
+import { commandSurfaceAccess } from "@/lib/command-dashboard";
+import { mobileNavigationForAuthority } from "@/lib/mobile-navigation";
 import { requirePageContext } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
@@ -15,14 +12,14 @@ export const dynamic = "force-dynamic";
  */
 export default async function HomePage() {
   const authority = await requirePageContext();
-  if (!hasCapability(authority, "command.read")) {
-    redirect(firstAuthorizedPath(authority.capabilities));
-  }
+  const mobileNavigation = mobileNavigationForAuthority(authority);
 
-  return (
+  if (mobileNavigation?.profile === "control" && authority.capabilities.includes("command.read")) return (
     <CommandSurface
-      access={commandSurfaceAccess(authority.role, authority.capabilities)}
+      access={commandSurfaceAccess(authority.role, authority.capabilities, authority.roles)}
       actor={{ email: authority.actorEmail, name: authority.actorName }}
     />
   );
+
+  return <OperationalHome authority={authority} navigation={mobileNavigation} />;
 }

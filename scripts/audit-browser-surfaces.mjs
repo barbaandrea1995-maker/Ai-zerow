@@ -1,25 +1,27 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const baseUrl = (process.env.ZEROW_RUNTIME_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const chromiumPath = process.env.CHROMIUM_PATH || "/usr/bin/chromium";
 const outputPath = process.env.ZEROW_BROWSER_AUDIT_OUTPUT || "";
+const screenshotDirectory = process.env.ZEROW_BROWSER_SCREENSHOT_DIR || "";
 const requestedProfiles = new Set((process.env.ZEROW_BROWSER_PROFILES || "").split(",").map((value) => value.trim()).filter(Boolean));
 const requestedRoutes = new Set((process.env.ZEROW_BROWSER_ROUTES || "").split(",").map((value) => value.trim()).filter(Boolean));
+const includeWarehouseProfile = process.env.ZEROW_INCLUDE_WAREHOUSE_PROFILE === "1";
 
 const ownerRoutes = [
-  "/command", "/onboarding", "/operations", "/workforce", "/planning", "/presenze",
+  "/", "/command", "/onboarding", "/operations", "/workforce", "/planning", "/presenze",
   "/assets", "/warehouse", "/mission", "/documents", "/finance", "/procurement",
   "/events", "/governance", "/communications", "/ai", "/externals", "/pwa/diagnostics",
   "/governance/security", "/release", "/settings", "/qr", "/tenants",
 ];
 
 const operationalRoutes = [
-  "/operations", "/workforce", "/presenze", "/warehouse", "/mission", "/documents",
+  "/", "/operations", "/workforce", "/presenze", "/warehouse", "/mission", "/documents",
   "/communications", "/ai", "/pwa/diagnostics", "/settings", "/qr",
 ];
 
@@ -56,6 +58,14 @@ const profiles = [
     viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     routes: operationalRoutes,
   },
+  ...(includeWarehouseProfile ? [{
+    id: "warehouse-mobile",
+    actorId: process.env.ZEROW_WAREHOUSE_ACTOR_ID || "e2e-reviewer",
+    email: process.env.ZEROW_WAREHOUSE_ACTOR_EMAIL || "e2e-reviewer@example.invalid",
+    name: process.env.ZEROW_WAREHOUSE_ACTOR_NAME || "Magazziniere E2E",
+    viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
+    routes: operationalRoutes,
+  }] : []),
 ].filter((profile) => requestedProfiles.size === 0 || requestedProfiles.has(profile.id));
 
 const terminologyRules = [
@@ -66,6 +76,14 @@ const terminologyRules = [
   { id: "internal-owner-role", pattern: /(?:RUOLO|PERIMETRO|POLICY)\s*\/\s*OWNER|contesto\s+owner|(?:^|[\s·])owner\s*·\s*(?:tenant|Sites|contesto)|Owner verificato|L[’']Owner|all[’']owner|owner\s+only/i },
   { id: "legacy-surface-label", pattern: /\bsuperficie\b/i },
 ];
+
+const expectedNavigation = {
+  "owner-desktop": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: false },
+  "owner-mobile": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: true },
+  "worker-mobile": { profile: "field", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true },
+  "delivery-driver-mobile": { profile: "driver", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true },
+  "warehouse-mobile": { profile: "warehouse", labels: ["Home", "Comunicazioni", "AI", "Magazzino", "Impostazioni"], visible: true },
+};
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -139,6 +157,7 @@ class CdpConnection {
 }
 
 const userDataDirectory = await mkdtemp(path.join(os.tmpdir(), "zerow-browser-audit-"));
+if (screenshotDirectory) await mkdir(screenshotDirectory, { recursive: true });
 const chromium = spawn(chromiumPath, [
   "--headless=new",
   "--no-sandbox",
@@ -252,6 +271,29 @@ try {
               || (document.body?.innerText || "").includes("Questa superficie non è disponibile"),
             accessDenied: (document.body?.innerText || "").includes("Accesso non autorizzato")
               || (document.body?.innerText || "").includes("ACCESSO NEGATO"),
+            commercialShell: document.body?.classList.contains("zw-commercial-shell") || false,
+            navigation: (() => {
+              const rails = [...document.querySelectorAll(".zw-mobile-nav--global")];
+              const rail = rails[0];
+              return {
+                count: rails.length,
+                profile: rail?.getAttribute("data-navigation-profile") || "",
+                source: rail?.getAttribute("data-navigation-source") || "",
+                visible: rail ? getComputedStyle(rail).display !== "none" && rail.getBoundingClientRect().height > 0 : false,
+                labels: rail ? [...rail.querySelectorAll(".zw-mobile-nav__label")].map((element) => (element.textContent || "").trim()) : [],
+                hrefs: rail ? [...rail.querySelectorAll("a")].map((element) => element.getAttribute("href") || "") : [],
+                active: rail ? [...rail.querySelectorAll('[aria-current="page"]')].map((element) => element.getAttribute("aria-label") || "") : [],
+              };
+            })(),
+            visualContract: (() => {
+              const topbar = document.querySelector(".zw-command-topbar");
+              const card = document.querySelector(".carbon-card, .carbon-card-neon");
+              return {
+                topbarHeight: topbar ? Math.round(topbar.getBoundingClientRect().height) : null,
+                cardRadius: card ? getComputedStyle(card).borderRadius : null,
+                background: getComputedStyle(document.body).backgroundColor,
+              };
+            })(),
             overflowElements: [...document.querySelectorAll("body *")].flatMap((element) => {
               const rect = element.getBoundingClientRect();
               const viewportWidth = document.documentElement.clientWidth;
@@ -289,6 +331,29 @@ try {
             || (document.body?.innerText || "").includes("Questa superficie non è disponibile"),
           accessDenied: (document.body?.innerText || "").includes("Accesso non autorizzato")
             || (document.body?.innerText || "").includes("ACCESSO NEGATO"),
+          commercialShell: document.body?.classList.contains("zw-commercial-shell") || false,
+          navigation: (() => {
+            const rails = [...document.querySelectorAll(".zw-mobile-nav--global")];
+            const rail = rails[0];
+            return {
+              count: rails.length,
+              profile: rail?.getAttribute("data-navigation-profile") || "",
+              source: rail?.getAttribute("data-navigation-source") || "",
+              visible: rail ? getComputedStyle(rail).display !== "none" && rail.getBoundingClientRect().height > 0 : false,
+              labels: rail ? [...rail.querySelectorAll(".zw-mobile-nav__label")].map((element) => (element.textContent || "").trim()) : [],
+              hrefs: rail ? [...rail.querySelectorAll("a")].map((element) => element.getAttribute("href") || "") : [],
+              active: rail ? [...rail.querySelectorAll('[aria-current="page"]')].map((element) => element.getAttribute("aria-label") || "") : [],
+            };
+          })(),
+          visualContract: (() => {
+            const topbar = document.querySelector(".zw-command-topbar");
+            const card = document.querySelector(".carbon-card, .carbon-card-neon");
+            return {
+              topbarHeight: topbar ? Math.round(topbar.getBoundingClientRect().height) : null,
+              cardRadius: card ? getComputedStyle(card).borderRadius : null,
+              background: getComputedStyle(document.body).backgroundColor,
+            };
+          })(),
           overflowElements: [...document.querySelectorAll("body *")].flatMap((element) => {
             const rect = element.getBoundingClientRect();
             const viewportWidth = document.documentElement.clientWidth;
@@ -310,10 +375,18 @@ try {
         returnByValue: true,
       }, sessionId);
       snapshot = finalEvaluation.result?.value || snapshot;
+      let screenshot = null;
+      if (screenshotDirectory) {
+        const routeLabel = route === "/" ? "home" : route.replace(/^\//, "").replaceAll(/[^a-z0-9]+/gi, "-").replace(/-$/, "");
+        screenshot = path.join(screenshotDirectory, `${profile.id}-${routeLabel || "root"}.png`);
+        const capture = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
+        await writeFile(screenshot, Buffer.from(capture.data, "base64"));
+      }
       results.push({
         profile: profile.id,
         route,
         ...snapshot,
+        screenshot,
         horizontalOverflow: Math.max(0, (snapshot?.scrollWidth || 0) - (snapshot?.clientWidth || 0)),
         errors: errors.slice(errorStart),
       });
@@ -341,14 +414,27 @@ try {
       }];
     });
   });
+  const navigationIssues = results.flatMap((item) => {
+    const expected = expectedNavigation[item.profile];
+    if (!expected) return [];
+    const issues = [];
+    if (!item.commercialShell) issues.push("commercial-shell-missing");
+    if (item.navigation?.count !== 1) issues.push(`global-navigation-count:${item.navigation?.count ?? 0}`);
+    if (item.navigation?.profile !== expected.profile) issues.push(`profile:${item.navigation?.profile || "missing"}`);
+    if (item.navigation?.source !== "authority-server") issues.push(`source:${item.navigation?.source || "missing"}`);
+    if (item.navigation?.visible !== expected.visible) issues.push(`visibility:${String(item.navigation?.visible)}`);
+    if (JSON.stringify(item.navigation?.labels ?? []) !== JSON.stringify(expected.labels)) issues.push(`labels:${JSON.stringify(item.navigation?.labels ?? [])}`);
+    return issues.length ? [{ profile: item.profile, route: item.route, issues }] : [];
+  });
 
-  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues }, null, 2));
+  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues }, null, 2));
 
   assert.deepEqual(routeFailures.map(({ profile, route }) => ({ profile, route })), [], "Every authorized browser surface must render");
   assert.deepEqual(overflows.map(({ profile, route, horizontalOverflow }) => ({ profile, route, horizontalOverflow })), [], "Browser surfaces must not overflow horizontally");
   assert.deepEqual(browserErrors, [], "Browser surfaces must not emit runtime errors");
   assert.deepEqual(unexpectedNetworkIssues, [], "Browser surfaces must not emit unexpected HTTP or network failures");
   assert.deepEqual(terminologyIssues, [], "Browser surfaces must use the canonical product terminology");
+  assert.deepEqual(navigationIssues, [], "Every browser surface must use one canonical server-derived role navigation");
 
   console.log(JSON.stringify({
     status: "PASS",
@@ -362,7 +448,9 @@ try {
     expectedDegradations: expectedDegradations.length,
     horizontalOverflows: overflows.length,
     terminologyIssues: terminologyIssues.length,
+    navigationIssues: navigationIssues.length,
     outputPath: outputPath || null,
+    screenshotDirectory: screenshotDirectory || null,
   }, null, 2));
 } finally {
   cdp?.close();

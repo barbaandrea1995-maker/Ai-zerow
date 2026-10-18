@@ -432,7 +432,7 @@ export default function CompanyAiGovernance() {
     </aside>
 
     <section className="min-w-0 flex-1">
-      <header className="sticky top-0 z-30 flex h-[72px] items-center gap-3 border-b border-white/[.08] bg-[#050706]/88 px-4 backdrop-blur-xl sm:px-7">
+      <header className="zw-command-topbar sticky top-0 z-30 flex h-[72px] items-center gap-3 border-b border-white/[.08] bg-[#050706]/88 px-4 backdrop-blur-xl sm:px-7">
         <button className="grid size-9 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-400 transition hover:border-lime-300/30 hover:text-lime-200 lg:hidden" onClick={() => setMobileNavOpen((open) => !open)} type="button" aria-label="Apri navigazione"><Menu className="size-4" /></button>
         <button className="hidden size-9 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200 sm:grid lg:hidden" onClick={() => nav("/command")} type="button" aria-label="Torna a Command"><ArrowLeft className="size-4" /></button>
         <div className="hidden min-w-0 sm:block"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-lime-300/70">AI-ZEROW / W12 / GOVERNANCE</p><h1 className="mt-1 truncate text-base font-semibold tracking-[-.03em] text-slate-50 sm:text-lg">Company AI control plane</h1></div>

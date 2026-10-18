@@ -293,11 +293,13 @@ const jobWorkspace = await readFile(join(root, "components", "operations-job-wor
 assert(jobWorkspace.includes("canWriteOperations"), "Job workspace mutation controls must be capability-aware");
 
 const mobileNavigation = await readFile(join(root, "components", "command-mobile-nav.tsx"), "utf8");
-assert(mobileNavigation.includes("canOpenCommand"), "Mobile navigation must hide Command-only destinations from field roles");
-const communicationsMobileSurface = await readFile(join(root, "components", "communications-control.tsx"), "utf8");
-assert(communicationsMobileSurface.includes('CommandMobileNav active="communications"') && communicationsMobileSurface.includes("getAllowedCommandNavigation(capabilities)"), "Communications must retain capability-filtered operational mobile navigation");
-const settingsMobileSurface = await readFile(join(root, "app", "settings", "settings-client.tsx"), "utf8");
-assert(settingsMobileSurface.includes('CommandMobileNav active="settings"'), "Settings must retain operational mobile navigation");
+const mobileNavigationContract = await readFile(join(root, "lib", "mobile-navigation.ts"), "utf8");
+const globalModuleControls = await readFile(join(root, "components", "global-module-controls.tsx"), "utf8");
+const rootLayout = await readFile(join(root, "app", "layout.tsx"), "utf8");
+assert(mobileNavigation.includes("if (!global || !contract?.items.length) return null"), "Module-local mobile navigation must fail closed");
+assert(mobileNavigationContract.includes("mobileNavigationForAuthority") && mobileNavigationContract.includes('source: "authority-server"'), "Mobile destinations must come from the server authority contract");
+assert(globalModuleControls.includes("<CommandMobileNav contract={mobileNavigation} global"), "Only the global shell may render the role navigation");
+assert(rootLayout.includes("mobileNavigationForAuthority(context)"), "The root server layout must derive navigation from D1 authority");
 
 const preferencesRoute = await readFile(join(root, "app", "api", "command", "preferences", "route.ts"), "utf8");
 assert(preferencesRoute.includes("context.tenantId"), "Preference writes must derive tenant from authority context");
