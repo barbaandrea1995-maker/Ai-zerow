@@ -176,6 +176,20 @@
       "when": 1792430343390,
       "tag": "0024_volatile_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792436200860,
+      "tag": "0025_red_thunderbolts",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1792436259007,
+      "tag": "0026_salty_black_tarantula",
+      "breakpoints": true
     }
   ]
 }

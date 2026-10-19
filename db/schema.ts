@@ -556,6 +556,35 @@ export const financeDocuments = sqliteTable("finance_documents", {
 }));
 
 /**
+ * Immutable-source AI extraction attempts for Finance documents. The original
+ * document is never rewritten; each row records the provider-backed proposal
+ * tied to its source hash, with any later human review stored separately.
+ */
+export const financeDocumentExtractions = sqliteTable("finance_document_extractions", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  documentId: text("document_id").notNull(),
+  sourceSha256: text("source_sha256").notNull(),
+  sourceDocumentVersion: integer("source_document_version").notNull(),
+  status: text("status").notNull().default("PROCESSING"),
+  extractionJson: text("extraction_json"),
+  providerMetadataJson: text("provider_metadata_json").notNull().default("{}"),
+  failureCode: text("failure_code"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("finance_document_extractions_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantDocumentCreatedIdx: index("finance_document_extractions_tenant_document_created_idx").on(table.tenantId, table.documentId, table.createdAt),
+  tenantStatusCreatedIdx: index("finance_document_extractions_tenant_status_created_idx").on(table.tenantId, table.status, table.createdAt),
+  activeSourceUnique: uniqueIndex("finance_document_extractions_active_source_uq")
+    .on(table.tenantId, table.documentId, table.sourceSha256)
+    .where(sql`${table.status} IN ('PROCESSING', 'PROPOSED', 'REVIEW_REQUIRED')`),
+}));
+
+/**
  * Location Intelligence compatibility boundary.
  *
  * D1 keeps the Sites read/write contract until the authorized PostGIS

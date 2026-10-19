@@ -1,7 +1,7 @@
 # Commessa e Finanza — contratto d’implementazione
 
 **Data:** 19 ottobre 2026
-**Stato:** valore commessa → Finanza e archivio documenti Finance implementati in Sites/D1 + R2; scansione malware, estrazione Company AI e registri contabili non ancora collegati.
+**Stato:** valore commessa e intake Finance implementati in Sites/D1 + R2; Nutrient OCR/parsing e proposta Company AI collegati con consenso esplicito, evidenze per campo e audit. Scansione antimalware e registri contabili documentali restano flussi separati.
 
 ## Modello della commessa
 
@@ -41,16 +41,20 @@ Company AI deve produrre una **proposta di estrazione**, con tipo documento, con
 - Poiché Sites pubblica il Worker separatamente dalle migrazioni D1, il server installa in modo idempotente la sola tabella e gli indici Finance mancanti prima del primo accesso; non modifica righe aziendali.
 - `POST /api/finance/documents` richiede `finance.write`; `GET` richiede `finance.read`. Firma, MIME, dimensione massima 20 MB, SHA-256, deduplica per tenant, idempotenza e chiave R2 tenant-scoped sono verificati lato server.
 - R2 viene riletto con `head`; D1 registra documento, evento S06, outbox e reconciliation nello stesso batch. Un errore prima del commit rimuove l’oggetto caricato; dopo il commit conserva oggetto e metadati per consentire il readback.
-- Ogni upload resta `scanStatus=NOT_RUN`, `status=QUARANTINED`; non è scaricabile e Company AI non lo riceve. La firma del file non viene presentata come malware scan.
+- Ogni upload resta `scanStatus=NOT_RUN`, `status=QUARANTINED`; non è scaricabile. La firma del file non viene presentata come malware scan.
 - Il catalogo Documenti aggiunge i file Finance solo con `finance.read`; il download e la superficie di sicurezza applicano la capability Finance anche quando il documento compare nel catalogo condiviso. I documenti generali non richiedono una commessa.
 - Il modulo Finanza mostra caricamento, commessa facoltativa, tipo documento, hash/readback e stato di quarantena. Il caricamento non crea costi, ricavi, incassi o movimenti contabili.
-- Il provider malware non è configurato in questo blocco: nessun file è stato marcato pulito e l’estrazione Company AI resta `NOT_RUN`.
+- Il provider antimalware non è collegato: nessun file viene marcato pulito e il download resta bloccato. L’analisi documentale è un’azione esplicita distinta: dopo consenso, il server invia il file a Nutrient per parsing/OCR e il testo estratto a Company AI/OpenAI. Questo non cambia lo stato antimalware.
+- `finance_document_extractions` registra ogni tentativo con tenant, hash sorgente, versione documento, autore, chiave idempotente, provider, stato, proposta, errore tecnico codificato e versione. S06 registra richiesta, proposta o fallimento con outbox e reconciliation.
+- Company AI restituisce una proposta, non scritture: ogni dato non vuoto deve citare elementi Nutrient realmente ricevuti; l’app lega citazioni a pagina e confidenza, verifica codici commessa contro il catalogo del tenant, segnala categoria/importi mancanti o incongruenti e conserva solo le citazioni usate, non l’intero OCR.
+- Il consenso dell’utente è richiesto prima dell’invio. Nutrient riceve il file originale; OpenAI riceve solo il testo spaziale normalizzato e il contesto minimo delle commesse candidate. Crediti e conservazione provider dipendono dal piano e dalle relative impostazioni.
+- La proposta resta `PROPOSED` o `REVIEW_REQUIRED`, richiede ancora una revisione umana e non crea costi, ricavi, incassi, pagamenti o collegamenti a commesse. Download e stato antimalware restano governati dal registro security separato.
 
 ### Flusso previsto
 
 1. **Implementato:** upload con `finance.write`, validazione server-side di dimensione, MIME e firma; hash SHA-256, chiave tenant-scoped, idempotenza, readback e quarantena. La scansione è ancora `NOT_RUN` perché manca il provider.
-2. Dopo esito `CLEAN`, Company AI analizza il documento senza impartire azioni ai sistemi. Salva estrazione grezza e proposta strutturata, mantenendo il documento originale immutato.
-3. L’utente autorizzato corregge e conferma i campi; il server verifica tenant, riferimenti alla commessa, quadratura degli importi, duplicati e capability.
+2. **Implementato:** dopo consenso esplicito, Nutrient esegue parsing/OCR; Company AI propone campi con riferimenti a fonti e il server registra l’estrazione versionata e auditata. L’originale resta invariato e in quarantena; l’analisi non equivale a malware scan.
+3. **Prossimo blocco:** l’utente autorizzato corregge e conferma o respinge i campi; il server verifica tenant, riferimenti alla commessa, quadratura degli importi, duplicati e capability.
 4. La conferma genera record Finance versionati e un evento auditabile. Fattura fornitore e fattura cliente generano costo documentato e ricavo fatturato; pagamento/incasso e DDT restano eventi distinti.
 5. Finanza mostra separatamente valore preventivato/accordato, costi approvati, ricavi fatturati e flussi di cassa. Un margine può apparire solo come indicatore con formula e stato di completezza espliciti; mai come saldo contabile certificato.
 
@@ -72,10 +76,10 @@ Company AI deve produrre una **proposta di estrazione**, con tipo documento, con
 
 1. **Completato in questo blocco:** classificazione per lavorazione, tipo operativo, conferma Company AI, importo commessa versionato, lettura in Finanza e KPI Centrale per commessa.
 2. **Completato in questo blocco:** archivio Finance indipendente dalla commessa, upload sicuro, collegamento facoltativo a un job, visibilità Finance nel catalogo Documenti, quarantena, deduplica, eventi e readback.
-3. **Prossimo blocco:** collegare un provider di scansione con prova verificabile e poi abilitare estrazione Company AI con provenienza per campo e revisione umana.
-4. **Dopo la revisione:** registri distinti per costo, ricavo fatturato e cassa; riconciliazione a fatture, acquisti, magazzino e missioni.
+3. **Completato in questo blocco:** proposta Company AI con evidenze per campo e controlli automatici espliciti; la proposta richiede revisione umana e non scrive nel ledger.
+4. **Prossimo blocco:** revisione, correzione e conferma con capability distinta; poi registri separati per costo, ricavo fatturato e cassa e riconciliazione a fatture, acquisti, magazzino e missioni.
 5. **Gate commerciale separato:** test su tenant isolato, ruoli/capability, duplicati, importi italiani, documenti non puliti, rielaborazione e readback runtime; collegamento a un provider contabile solo se configurato.
 
 ## Limite dichiarato
 
-Il collegamento oggi disponibile non è un sistema contabile e non gestisce ancora upload Finance, estrazione fatture, incassi o riconciliazione bancaria. La superficie Finanza distingue esplicitamente il valore commerciale da costi e cassa per non presentarli come già implementati.
+Il collegamento oggi disponibile non è un sistema contabile e non gestisce ancora registrazioni documentali di costo, ricavo, incasso o riconciliazione bancaria. La proposta estratta non è un dato contabile approvato. La scansione antimalware resta separata; Nutrient OCR non certifica che un file sia sicuro.

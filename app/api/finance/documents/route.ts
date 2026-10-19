@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { financeDocuments, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import { financeDocumentExtractions, financeDocuments, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { isOpenAiFinanceExtractionConfigured } from "@/lib/company-ai-finance-document.server";
 import { documentCanDownload } from "@/lib/document-security";
 import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
+import { isNutrientFinanceExtractionConfigured } from "@/lib/nutrient-finance-document.server";
 import {
   matchesOperationalDocumentSignature,
   operationalDocumentMime,
@@ -47,6 +49,7 @@ function jobResponse(row: typeof s04Records.$inferSelect) {
 function documentResponse(
   row: typeof financeDocuments.$inferSelect,
   jobsById: Map<string, ReturnType<typeof jobResponse>>,
+  latestExtraction: typeof financeDocumentExtractions.$inferSelect | null,
 ) {
   return {
     id: row.id,
@@ -68,12 +71,21 @@ function documentResponse(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     downloadUrl: `/api/documents/${encodeURIComponent(row.id)}`,
+    latestExtraction: latestExtraction ? {
+      id: latestExtraction.id,
+      status: latestExtraction.status,
+      proposal: latestExtraction.extractionJson ? parseObject(latestExtraction.extractionJson) : null,
+      providers: parseObject(latestExtraction.providerMetadataJson),
+      failureCode: latestExtraction.failureCode,
+      version: latestExtraction.version,
+      createdAt: latestExtraction.createdAt,
+    } : null,
   };
 }
 
 async function readCatalog(tenantId: string) {
   const db = getDb();
-  const [documents, jobRows] = await Promise.all([
+  const [documents, jobRows, extractionRows] = await Promise.all([
     db.select().from(financeDocuments)
       .where(eq(financeDocuments.tenantId, tenantId))
       .orderBy(desc(financeDocuments.createdAt))
@@ -83,10 +95,16 @@ async function readCatalog(tenantId: string) {
       eq(s04Records.module, "operations"),
       eq(s04Records.recordType, "job"),
     )).orderBy(desc(s04Records.updatedAt)).limit(500),
+    db.select().from(financeDocumentExtractions)
+      .where(eq(financeDocumentExtractions.tenantId, tenantId))
+      .orderBy(desc(financeDocumentExtractions.createdAt))
+      .limit(1_500),
   ]);
   const jobs = jobRows.map(jobResponse);
   const jobsById = new Map(jobs.map((job) => [job.id, job]));
-  return { documents: documents.map((row) => documentResponse(row, jobsById)), jobs };
+  const latestByDocument = new Map<string, typeof financeDocumentExtractions.$inferSelect>();
+  for (const row of extractionRows) if (!latestByDocument.has(row.documentId)) latestByDocument.set(row.documentId, row);
+  return { documents: documents.map((row) => documentResponse(row, jobsById, latestByDocument.get(row.id) ?? null)), jobs };
 }
 
 export async function GET() {
@@ -114,7 +132,13 @@ export async function GET() {
         authority: "server-context",
         maxBytes: MAX_FINANCE_DOCUMENT_BYTES,
         scan: "NOT_RUN_UNTIL_PROVIDER_READBACK",
-        aiExtraction: "NOT_RUN",
+        aiExtraction: {
+          status: isNutrientFinanceExtractionConfigured() && isOpenAiFinanceExtractionConfigured() ? "READY" : "PROVIDER_NOT_CONFIGURED",
+          providers: { nutrient: isNutrientFinanceExtractionConfigured(), companyAiOpenAi: isOpenAiFinanceExtractionConfigured() },
+          explicitUserConsentRequired: true,
+          createsFinanceEntries: false,
+          doesNotChangeMalwareScanStatus: true,
+        },
       },
       readback: { status: "SITES_READBACK_VERIFIED", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });
@@ -205,7 +229,7 @@ export async function POST(request: Request) {
       }
       const catalog = await readCatalog(context.tenantId);
       const jobsById = new Map(catalog.jobs.map((row) => [row.id, row]));
-      return Response.json({ document: documentResponse(existing, jobsById), idempotent: true, eventId: existingEvent.eventId, readback: { status: "verified", scope: "tenant", version: existing.version } }, {
+      return Response.json({ document: documentResponse(existing, jobsById, null), idempotent: true, eventId: existingEvent.eventId, readback: { status: "verified", scope: "tenant", version: existing.version } }, {
         headers: { "cache-control": "private, no-store" },
       });
     }
@@ -217,7 +241,7 @@ export async function POST(request: Request) {
     if (duplicate) {
       const catalog = await readCatalog(context.tenantId);
       const jobsById = new Map(catalog.jobs.map((row) => [row.id, row]));
-      return Response.json({ document: documentResponse(duplicate, jobsById), duplicate: true, readback: { status: "verified", scope: "tenant", version: duplicate.version } }, {
+      return Response.json({ document: documentResponse(duplicate, jobsById, null), duplicate: true, readback: { status: "verified", scope: "tenant", version: duplicate.version } }, {
         headers: { "cache-control": "private, no-store" },
       });
     }
@@ -314,7 +338,7 @@ export async function POST(request: Request) {
     const catalog = await readCatalog(context.tenantId);
     const jobsById = new Map(catalog.jobs.map((row) => [row.id, row]));
     return Response.json({
-      document: documentResponse(created, jobsById),
+      document: documentResponse(created, jobsById, null),
       idempotent: false,
       eventId,
       readback: { status: "verified", scope: "tenant", version: created.version },
