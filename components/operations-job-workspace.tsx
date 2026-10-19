@@ -752,6 +752,13 @@ export default function OperationsJobWorkspace({
   const submitAction = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (actionOpen === "details") {
+      const currentScopeV2 = payload?.job.payload?.scopeV2 && typeof payload.job.payload.scopeV2 === "object" && !Array.isArray(payload.job.payload.scopeV2)
+        ? payload.job.payload.scopeV2 as Record<string, unknown>
+        : null;
+      if (currentScopeV2?.status === "CONFERMATO" && typeof currentScopeV2.descriptionOriginal === "string" && description !== currentScopeV2.descriptionOriginal) {
+        notify("Lo scope è confermato: per cambiare la descrizione serve una revisione con confronto e nuova approvazione.");
+        return;
+      }
       const savedLocation = typeof payload?.job.payload?.location === "string" ? payload.job.payload.location.trim() : payload?.job.detail.trim() ?? "";
       const locationChanged = location.trim() !== savedLocation;
       const selectedScopeParts = [commercialDetails.scopeSectionId, commercialDetails.scopeGroupId, commercialDetails.scopeSubgroupId].filter(Boolean).length;
@@ -1156,13 +1163,18 @@ export default function OperationsJobWorkspace({
       : "Inserimento manuale";
   const quoteSummary = sourceMode === "Da preventivo" ? quoteSummaryFromDescription(jobDescription) : null;
   const priority = payloadText("priority", "STANDARD");
+  const macroScopeV2 = jobData.scopeV2 && typeof jobData.scopeV2 === "object" && !Array.isArray(jobData.scopeV2)
+    ? jobData.scopeV2 as Record<string, unknown>
+    : null;
+  const macroScopeConfirmed = macroScopeV2?.status === "CONFERMATO";
   const rawScope = jobData.scope;
   const jobScope =
     rawScope && typeof rawScope === "object" && !Array.isArray(rawScope)
       ? (rawScope as Record<string, unknown>)
       : null;
-  const scopeLabel =
-    jobScope &&
+  const scopeLabel = macroScopeConfirmed
+    ? `Company AI Macro Scope V2 · ${payloadText("category", "Ambiti confermati")}`
+    : jobScope &&
     typeof jobScope.sectionTitle === "string" &&
     typeof jobScope.groupTitle === "string" &&
     typeof jobScope.subgroupTitle === "string"
@@ -1297,10 +1309,20 @@ export default function OperationsJobWorkspace({
                 {quoteSummary.summary && <p className="mt-2 text-[10px] leading-5 text-slate-400">{quoteSummary.summary}</p>}
               </div> : hasRealDescription ? <p className="mt-3 max-w-4xl whitespace-pre-wrap text-[11px] leading-5 text-slate-400">{jobSummary}</p> : <p className="mt-3 rounded-xl border border-dashed border-white/[.08] px-3 py-3 text-[10px] text-slate-500">La descrizione dei lavori non è stata registrata.</p>}
 
+              {macroScopeConfirmed && <div className="mt-4 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[9px] font-semibold uppercase tracking-[.15em] text-lime-100/70">Scope confermato · Macro Scope V2</p><span className="rounded-full border border-lime-300/20 bg-lime-300/[.05] px-2 py-1 text-[8px] font-semibold uppercase text-lime-100/80">Conferma umana registrata</span></div>
+                <p className="mt-2 text-[11px] font-medium leading-5 text-lime-100">{payloadText("category", "Ambito da classificare")}</p>
+                <p className="mt-1 text-[9px] leading-4 text-slate-500">Versione catalogo {valueOr(macroScopeV2?.catalogVersion, "2.0.0")} · confermato il {formatCommercialDate(macroScopeV2?.confirmedAt)}. Le attività confermate non sono pianificazioni.</p>
+                {Array.isArray(macroScopeV2?.reportedProblems) && macroScopeV2.reportedProblems.length > 0 && <div className="mt-3 rounded-lg border border-amber-300/12 bg-amber-300/[.025] p-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-amber-100/70">Problemi segnalati · non convertiti in lavorazioni</p>{macroScopeV2.reportedProblems.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item, index) => <p className="mt-1 text-[10px] leading-4 text-slate-300" key={`${String(item.source ?? "problem")}-${index}`}>{valueOr(item.text, "Segnalazione")}</p>)}</div>}
+                {Array.isArray(macroScopeV2?.completedWork) && macroScopeV2.completedWork.length > 0 && <div className="mt-3 rounded-lg border border-cyan-300/12 bg-cyan-300/[.025] p-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/70">Lavori indicati come già eseguiti</p>{macroScopeV2.completedWork.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item, index) => <p className="mt-1 text-[10px] leading-4 text-slate-300" key={`${String(item.source ?? "completed")}-${index}`}>{valueOr(item.text, "Lavoro già eseguito")}</p>)}</div>}
+                {Array.isArray(macroScopeV2?.activitiesConfirmed) && macroScopeV2.activitiesConfirmed.some((item) => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).status === "ESCLUSA") && <div className="mt-3 rounded-lg border border-white/[.07] bg-black/10 p-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-500">Proposte escluse in fase di conferma</p>{macroScopeV2.activitiesConfirmed.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).status === "ESCLUSA")).map((item, index) => <p className="mt-1 text-[10px] leading-4 text-slate-500" key={`${String(item.id ?? "excluded")}-${index}`}>{valueOr(item.text, "Lavorazione esclusa")}</p>)}</div>}
+                {macroScopeV2.changes && typeof macroScopeV2.changes === "object" && !Array.isArray(macroScopeV2.changes) ? <p className="mt-3 border-t border-white/[.06] pt-2.5 text-[9px] leading-4 text-slate-600">Modifiche prima della conferma: {Array.isArray((macroScopeV2.changes as Record<string, unknown>).groupsAdded) ? ((macroScopeV2.changes as Record<string, unknown>).groupsAdded as unknown[]).length : 0} ambiti aggiunti, {Array.isArray((macroScopeV2.changes as Record<string, unknown>).groupsRemoved) ? ((macroScopeV2.changes as Record<string, unknown>).groupsRemoved as unknown[]).length : 0} rimossi, {Array.isArray((macroScopeV2.changes as Record<string, unknown>).activitiesEdited) ? ((macroScopeV2.changes as Record<string, unknown>).activitiesEdited as unknown[]).length : 0} lavorazioni modificate.</p> : null}
+              </div>}
+
               {workItems.length > 0 ? <div className="mt-4 divide-y divide-white/[.06] rounded-xl border border-white/[.06] bg-black/15 px-3">
                 {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 py-3" key={typeof item.id === "string" ? item.id : `work-${index}`}>
                   <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
-                  <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{workScopeLabel(item.scope) && <p className="mt-1.5 text-[8px] font-medium uppercase tracking-[.08em] text-cyan-100/70">{workScopeLabel(item.scope)}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Da {item.source}{typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
+                  <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{Array.isArray(item.macroGroupLabels) && item.macroGroupLabels.length > 0 && <p className="mt-1.5 text-[8px] font-medium uppercase tracking-[.08em] text-cyan-100/70">{item.macroGroupLabels.filter((label): label is string => typeof label === "string").join(" · ")}</p>}{workScopeLabel(item.scope) && <p className="mt-1.5 text-[8px] font-medium uppercase tracking-[.08em] text-cyan-100/70">{workScopeLabel(item.scope)}</p>}{typeof item.evidence === "string" && item.evidence && <p className="mt-1 text-[8px] text-slate-600">Fonte: “{item.evidence}”</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Da {item.source}{typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
                   {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                 </div>)}
                 {workItems.length > 3 && <details className="border-t border-white/[.06] py-3"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-3 divide-y divide-white/[.06]">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[9px] text-slate-600">{item.detail}</p>}</div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}
@@ -1444,10 +1466,12 @@ export default function OperationsJobWorkspace({
                   <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
                     Descrizione
                     <Textarea
-                      className="mt-2 min-h-[90px] border-white/10 bg-black/30 text-slate-100"
+                      className={`mt-2 min-h-[90px] border-white/10 bg-black/30 text-slate-100 ${macroScopeConfirmed ? "opacity-65" : ""}`}
+                      disabled={macroScopeConfirmed}
                       onChange={(event) => setDescription(event.target.value)}
                       value={description}
                     />
+                    {macroScopeConfirmed && <span className="block text-[9px] leading-4 text-amber-100/65">Descrizione originale bloccata insieme allo scope. Una revisione dovrà mostrare le differenze e richiedere una nuova conferma.</span>}
                   </label>
                   <label className="space-y-2 text-xs text-slate-400">
                     Cliente
@@ -1514,27 +1538,33 @@ export default function OperationsJobWorkspace({
                     CUP
                     <Input className="mt-2 border-white/10 bg-black/30 text-slate-100" maxLength={80} onChange={(event) => setCommercialDetails((current) => ({ ...current, cup: event.target.value }))} value={commercialDetails.cup} />
                   </label>
-                  <label className="space-y-2 text-xs text-slate-400">
-                    Ambito
-                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSectionId: event.target.value, scopeGroupId: "", scopeSubgroupId: "" }))} value={commercialDetails.scopeSectionId}>
-                      <option className="bg-[#080c09]" value="">Seleziona settore</option>
-                      {(commercialCatalog?.scopeSections ?? []).map((section) => <option className="bg-[#080c09]" key={section.id} value={section.id}>{section.title}</option>)}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-xs text-slate-400">
-                    Categoria
-                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeSection} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeGroupId: event.target.value, scopeSubgroupId: "" }))} value={commercialDetails.scopeGroupId}>
-                      <option className="bg-[#080c09]" value="">Seleziona categoria</option>
-                      {(selectedScopeSection?.groups ?? []).map((group) => <option className="bg-[#080c09]" key={group.id} value={group.id}>{group.title}</option>)}
-                    </select>
-                  </label>
-                  <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
-                    Sottocategoria operativa
-                    <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeGroup} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSubgroupId: event.target.value }))} value={commercialDetails.scopeSubgroupId}>
-                      <option className="bg-[#080c09]" value="">Seleziona sottocategoria</option>
-                      {(selectedScopeGroup?.subgroups ?? []).map((subgroup) => <option className="bg-[#080c09]" key={subgroup.id} value={subgroup.id}>{subgroup.title}</option>)}
-                    </select>
-                  </label>
+                  {macroScopeConfirmed ? <div className="rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3 sm:col-span-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-[.14em] text-lime-100/70">Ambiti confermati · Macro Scope V2</p>
+                    <p className="mt-1.5 text-[11px] leading-5 text-slate-200">{payloadText("category", "Ambito da classificare")}</p>
+                    <p className="mt-1 text-[9px] leading-4 text-slate-600">Per modificare questo scope servirà una revisione con confronto delle differenze e nuova approvazione.</p>
+                  </div> : <>
+                    <label className="space-y-2 text-xs text-slate-400">
+                      Ambito
+                      <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSectionId: event.target.value, scopeGroupId: "", scopeSubgroupId: "" }))} value={commercialDetails.scopeSectionId}>
+                        <option className="bg-[#080c09]" value="">Seleziona settore</option>
+                        {(commercialCatalog?.scopeSections ?? []).map((section) => <option className="bg-[#080c09]" key={section.id} value={section.id}>{section.title}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-2 text-xs text-slate-400">
+                      Categoria
+                      <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeSection} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeGroupId: event.target.value, scopeSubgroupId: "" }))} value={commercialDetails.scopeGroupId}>
+                        <option className="bg-[#080c09]" value="">Seleziona categoria</option>
+                        {(selectedScopeSection?.groups ?? []).map((group) => <option className="bg-[#080c09]" key={group.id} value={group.id}>{group.title}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
+                      Sottocategoria operativa
+                      <select className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100" disabled={!selectedScopeGroup} onChange={(event) => setCommercialDetails((current) => ({ ...current, scopeSubgroupId: event.target.value }))} value={commercialDetails.scopeSubgroupId}>
+                        <option className="bg-[#080c09]" value="">Seleziona sottocategoria</option>
+                        {(selectedScopeGroup?.subgroups ?? []).map((subgroup) => <option className="bg-[#080c09]" key={subgroup.id} value={subgroup.id}>{subgroup.title}</option>)}
+                      </select>
+                    </label>
+                  </>}
                   <label className="space-y-2 text-xs text-slate-400 sm:col-span-2">
                     Note accesso e vincoli
                     <Textarea className="mt-2 min-h-[72px] border-white/10 bg-black/30 text-slate-100" maxLength={2000} onChange={(event) => setCommercialDetails((current) => ({ ...current, accessNotes: event.target.value }))} value={commercialDetails.accessNotes} />

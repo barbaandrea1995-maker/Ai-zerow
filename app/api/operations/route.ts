@@ -22,6 +22,7 @@ import {
 } from "@/lib/operations-contract";
 import { getCompanyAiKnowledgePackSummary, searchCompanyAiKnowledge, searchCompanyAiKnowledgeForScope } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import { confirmCompanyAiMacroScopeProposal, getCompanyAiMacroScopeCatalog, type CompanyAiMacroScopeConfirmation } from "@/lib/company-ai-macro-scope";
 import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -201,7 +202,15 @@ export async function POST(request: Request) {
   }
 
   const title = boundedText(input.title, 120);
-  const description = boundedText(input.description ?? input.detail, 2_000);
+  const hasMacroScopeInput = input.scopeV2 !== undefined;
+  if (hasMacroScopeInput && !isRecord(input.scopeV2)) {
+    return Response.json({ error: "company_ai_scope_confirmation_invalid" }, { status: 400 });
+  }
+  const macroScopeInput = hasMacroScopeInput ? input.scopeV2 as Record<string, unknown> : null;
+  const macroScopePreviewId = boundedText(macroScopeInput?.previewId, 120);
+  const rawDescription = typeof (input.description ?? input.detail) === "string" ? String(input.description ?? input.detail) : "";
+  if (hasMacroScopeInput && rawDescription.length > 2_000) return Response.json({ error: "field_length_exceeded" }, { status: 400 });
+  const description = hasMacroScopeInput ? rawDescription : boundedText(input.description ?? input.detail, 2_000);
   const client = boundedText(input.client, 160);
   const location = boundedText(input.location ?? input.worksite ?? input.detail, 240, "Ubicazione da definire");
   const requestedCategory = boundedText(input.category, 80, "Operations");
@@ -233,13 +242,13 @@ export async function POST(request: Request) {
   if (hasInvalidWorkItemScope) {
     return Response.json({ error: "work_item_scope_invalid", message: "La classificazione di una lavorazione non corrisponde al catalogo tecnico aziendale." }, { status: 400 });
   }
-  const workItems = normalizeWorkItems(input.workItems);
+  let workItems = normalizeWorkItems(input.workItems);
   const workItemScopeIds = new Set(workItems.map((item) => item.scope?.subgroupId).filter(Boolean));
   const firstWorkItemScope = workItems[0]?.scope;
   const commonWorkItemScope = firstWorkItemScope && workItems.length > 0 && workItems.every((item) => item.scope?.subgroupId === firstWorkItemScope.subgroupId)
     ? firstWorkItemScope
     : null;
-  const category = scopeSelection?.sectionTitle ?? commonWorkItemScope?.sectionTitle ?? (workItemScopeIds.size > 1 ? "Lavorazioni miste" : requestedCategory);
+  let category = scopeSelection?.sectionTitle ?? commonWorkItemScope?.sectionTitle ?? (workItemScopeIds.size > 1 ? "Lavorazioni miste" : requestedCategory);
   const jobType = boundedText(input.jobType, 120, scopeSelection?.groupTitle ?? commonWorkItemScope?.groupTitle ?? "");
   const specialization = boundedText(input.specialization, 120, scopeSelection?.subgroupTitle ?? commonWorkItemScope?.subgroupTitle ?? "");
   const sourceMode = input.sourceMode === "COMPANY_AI" ? "COMPANY_AI" : "MANUAL";
@@ -285,8 +294,11 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
-  const idempotencyKey = requestedIdempotencyKey || `operations:create:${crypto.randomUUID()}`;
+  const idempotencyKey = hasMacroScopeInput
+    ? `operations:create:macro-scope:${macroScopePreviewId}`.slice(0, 160)
+    : requestedIdempotencyKey || `operations:create:${crypto.randomUUID()}`;
   const correlationId = boundedText(input.correlationId, 120) || crypto.randomUUID();
+  let scopeV2Confirmation: CompanyAiMacroScopeConfirmation | null = null;
 
   try {
     const db = getDb();
@@ -327,6 +339,52 @@ export async function POST(request: Request) {
       return Response.json({ ...operationEnvelope(context, rows.map(recordForResponse)), created: recordForResponse(existingRecord), idempotent: true, eventId: existing[0].eventId }, {
         headers: { "cache-control": "no-store" },
       });
+    }
+
+    let scopePreviewRow: typeof s07AiLedger.$inferSelect | null = null;
+    if (hasMacroScopeInput) {
+      if (!macroScopePreviewId || macroScopeInput?.confirmed !== true) {
+        return Response.json({ error: "company_ai_scope_confirmation_required" }, { status: 409 });
+      }
+      const [preview] = await db.select().from(s07AiLedger).where(and(
+        eq(s07AiLedger.tenantId, context.tenantId),
+        eq(s07AiLedger.id, macroScopePreviewId),
+      )).limit(1);
+      if (!preview
+        || preview.entryType !== "commessa_intake_preview"
+        || preview.actionType !== "operations.commessa_macro_scope_v2"
+        || preview.status !== "PREVIEW_ONLY"
+        || preview.requestedBy !== context.actorId
+        || preview.relatedActionId) {
+        return Response.json({ error: "company_ai_scope_preview_unavailable_or_consumed" }, { status: 409 });
+      }
+      const previewPayload = parseJsonRecord(preview.payloadJson);
+      const proposal = previewPayload.scopeV2;
+      if (!isRecord(proposal)
+        || proposal.schemaVersion !== 2
+        || typeof proposal.descriptionOriginal !== "string"
+        || proposal.descriptionOriginal !== description) {
+        return Response.json({ error: "company_ai_scope_description_mismatch" }, { status: 409 });
+      }
+      const catalog = getCompanyAiMacroScopeCatalog(context.tenantId);
+      const confirmation = confirmCompanyAiMacroScopeProposal({
+        proposal: proposal as unknown as Parameters<typeof confirmCompanyAiMacroScopeProposal>[0]["proposal"],
+        submitted: macroScopeInput,
+        catalog,
+        actorId: context.actorId,
+        confirmedAt: now,
+      });
+      if (!confirmation) {
+        return Response.json({ error: "company_ai_scope_confirmation_invalid", message: "La proposta è cambiata o contiene ambiti e citazioni non validi. Analizzala di nuovo e conferma la versione aggiornata." }, { status: 409 });
+      }
+      scopePreviewRow = preview;
+      scopeV2Confirmation = confirmation.confirmation;
+      workItems = confirmation.workItems;
+      const labels = catalog.enabledGroups
+        .filter((group) => confirmation.confirmation.groupsConfirmed.includes(group.id))
+        .map((group) => group.label);
+      if (confirmation.confirmation.groupsConfirmed.includes(catalog.fallback.id)) labels.push(catalog.fallback.label);
+      category = labels.join(" · ").slice(0, 80) || catalog.fallback.label;
     }
 
     const geocode = await geocodeAddress(worksite);
@@ -420,7 +478,7 @@ export async function POST(request: Request) {
       statusCode,
       workItems,
       sourceMode,
-      aiPreviewId: aiPreviewId || null,
+      aiPreviewId: macroScopePreviewId || aiPreviewId || null,
       scopeLevel: scopeSelection?.level ?? null,
       scopeSectionId: scopeSelection?.sectionId ?? "",
       scopeGroupId: scopeSelection?.groupId ?? "",
@@ -429,6 +487,7 @@ export async function POST(request: Request) {
         ...scopeSelection,
         source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored",
       } : null,
+      ...(scopeV2Confirmation ? { scopeV2: scopeV2Confirmation } : {}),
       commercialValue,
       version: 1,
       activities: [],
@@ -447,6 +506,14 @@ export async function POST(request: Request) {
       statusCode,
       sourceMode,
       scope: scopeSelection ? { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId } : null,
+      macroScopeV2: scopeV2Confirmation ? {
+        catalogVersion: scopeV2Confirmation.catalogVersion,
+        previewId: macroScopePreviewId,
+        status: scopeV2Confirmation.status,
+        groupsConfirmed: scopeV2Confirmation.groupsConfirmed,
+        activityCount: scopeV2Confirmation.activitiesConfirmed.filter((activity) => activity.status === "CONFERMATA").length,
+        changes: scopeV2Confirmation.changes,
+      } : null,
       commercialValue,
       worksiteLocation: {
         status: "SERVER_VERIFIED",
@@ -567,6 +634,19 @@ export async function POST(request: Request) {
         updatedAt: now,
       }),
     ];
+    if (scopePreviewRow && scopeV2Confirmation) {
+      writeStatements.push(db.update(s07AiLedger).set({
+        status: "APPROVED",
+        approvalRequired: 0,
+        relatedActionId: id,
+        approvedBy: context.actorId,
+        readbackJson: JSON.stringify({ status: "COMMESSA_CREATA", aggregateId: naming.canonicalCode, checkedAt: now }),
+      }).where(and(
+        eq(s07AiLedger.tenantId, context.tenantId),
+        eq(s07AiLedger.id, scopePreviewRow.id),
+        eq(s07AiLedger.status, "PREVIEW_ONLY"),
+      )));
+    }
     if (scopeSelection) {
       writeStatements.push(
         db.insert(companyAiJobScopes).values({
@@ -670,6 +750,19 @@ export async function POST(request: Request) {
       }));
     }
     await db.batch(writeStatements);
+
+    if (scopePreviewRow && scopeV2Confirmation) {
+      const [approvedPreviewReadback] = await db.select().from(s07AiLedger).where(and(
+        eq(s07AiLedger.tenantId, context.tenantId),
+        eq(s07AiLedger.id, scopePreviewRow.id),
+      )).limit(1);
+      if (!approvedPreviewReadback
+        || approvedPreviewReadback.status !== "APPROVED"
+        || approvedPreviewReadback.relatedActionId !== id
+        || approvedPreviewReadback.approvedBy !== context.actorId) {
+        return Response.json({ error: "company_ai_scope_confirmation_readback_unavailable" }, { status: 503 });
+      }
+    }
 
     const rows = await db.select().from(s04Records)
       .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))

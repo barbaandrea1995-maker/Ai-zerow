@@ -33,7 +33,13 @@ import {
   type IntakeDraft,
   type IntakePreview,
 } from "@/lib/operations-intake";
-import { COMPANY_AI_SCOPE_TAXONOMY, resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
+import {
+  type CompanyAiMacroScopeActivity,
+  type CompanyAiMacroScopeCatalog,
+  type CompanyAiMacroScopeId,
+  type CompanyAiMacroScopeProposal,
+} from "@/lib/company-ai-macro-scope";
+import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
 export type IntakeAdapterRecord = {
@@ -62,16 +68,16 @@ type Props = {
 
 const MAX_SOURCE_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_SOURCE_TEXT_CHARS = 60_000;
-const WORK_ITEM_SCOPE_OPTIONS = COMPANY_AI_SCOPE_TAXONOMY.map((section) => ({
-  ...section,
-  groups: section.groups.map((group) => ({
-    ...group,
-    subgroups: group.subgroups.map((subgroup) => ({
-      ...subgroup,
-      selection: resolveCompanyAiScopeSelection({ sectionId: section.id, groupId: group.id, subgroupId: subgroup.id }),
-    })),
-  })),
-}));
+
+type MacroScopeSession = {
+  previewId: string;
+  proposal: CompanyAiMacroScopeProposal;
+  catalog: CompanyAiMacroScopeCatalog;
+  aiRuntime: { status: "used" | "not_configured" | "unavailable"; model: string };
+  groupsConfirmed: CompanyAiMacroScopeId[];
+  activities: Array<CompanyAiMacroScopeActivity & { included: boolean }>;
+  confirmed: boolean;
+};
 
 function workItemsForDraft(draft: IntakeDraft) {
   const previous = new Map<string, IntakeDraft["workItems"][number]>();
@@ -228,46 +234,6 @@ const inputClass = "h-12 rounded-xl border-white/[0.12] bg-black/25 text-[16px] 
 const selectClass = "h-12 w-full rounded-xl border border-white/[0.12] bg-[linear-gradient(180deg,rgba(18,27,27,0.96),rgba(7,12,13,0.94))] px-3 text-[16px] text-slate-100 outline-none transition hover:border-lime-300/25 focus:border-lime-300/60 focus:ring-2 focus:ring-lime-300/15 disabled:cursor-not-allowed disabled:opacity-45 sm:text-sm";
 const textareaClass = "resize-y rounded-xl border-white/[0.12] bg-black/25 text-[16px] text-slate-100 placeholder:text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition hover:border-lime-300/25 focus-visible:border-lime-300/60 focus-visible:ring-2 focus-visible:ring-lime-300/15 focus-visible:shadow-[0_0_22px_rgba(190,255,60,0.07)] sm:text-sm";
 
-function ScopeSelectFields({
-  draft,
-  onChange,
-  proposed,
-}: {
-  draft: IntakeDraft;
-  onChange: (key: keyof IntakeDraft, value: string) => void;
-  proposed: (key: keyof IntakeDraft) => boolean;
-}) {
-  const section = COMPANY_AI_SCOPE_TAXONOMY.find((item) => item.id === draft.scopeSectionId);
-  const group = section?.groups.find((item) => item.id === draft.scopeGroupId);
-  return <>
-    <Field label="Sezione tecnica (facoltativa)" proposed={proposed("scopeSectionId")}>
-      <select className={selectClass} onChange={(event) => {
-        onChange("scopeSectionId", event.target.value);
-        onChange("scopeGroupId", "");
-        onChange("scopeSubgroupId", "");
-      }} value={draft.scopeSectionId}>
-        <option value="">Seleziona sezione</option>
-        {COMPANY_AI_SCOPE_TAXONOMY.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-      </select>
-    </Field>
-    <Field label="Raggruppamento (facoltativo)" proposed={proposed("scopeGroupId")}>
-      <select className={selectClass} disabled={!section} onChange={(event) => {
-        onChange("scopeGroupId", event.target.value);
-        onChange("scopeSubgroupId", "");
-      }} value={draft.scopeGroupId}>
-        <option value="">Seleziona raggruppamento</option>
-        {section?.groups.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-      </select>
-    </Field>
-    <Field className="md:col-span-3" label="Sottogruppo (facoltativo)" proposed={proposed("scopeSubgroupId")}>
-      <select className={selectClass} disabled={!group} onChange={(event) => onChange("scopeSubgroupId", event.target.value)} value={draft.scopeSubgroupId}>
-        <option value="">Seleziona sottogruppo</option>
-        {group?.subgroups.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-      </select>
-    </Field>
-  </>;
-}
-
 function WorksiteLocationField({
   value,
   selected,
@@ -352,7 +318,6 @@ export function IntakeFields({
   draft,
   onChange,
   proposedKeys,
-  statusReadOnly = false,
   worksiteLocation,
   worksiteCandidates,
   worksiteGeocodeBusy,
@@ -360,7 +325,11 @@ export function IntakeFields({
   onVerifyWorksite,
   onSelectWorksite,
   onAnalyzeWork,
-  onWorkItemScopeChange,
+  macroScope,
+  onMacroGroupToggle,
+  onMacroActivityChange,
+  onMacroActivityToggle,
+  onConfirmMacroScope,
   analyzingWork,
   analysisNotice,
 }: {
@@ -368,7 +337,6 @@ export function IntakeFields({
   draft: IntakeDraft;
   onChange: (key: keyof IntakeDraft, value: string) => void;
   proposedKeys: Set<keyof IntakeDraft>;
-  statusReadOnly?: boolean;
   worksiteLocation: GeocodeCandidate | null;
   worksiteCandidates: GeocodeCandidate[];
   worksiteGeocodeBusy: boolean;
@@ -376,58 +344,23 @@ export function IntakeFields({
   onVerifyWorksite: () => void;
   onSelectWorksite: (candidate: GeocodeCandidate) => void;
   onAnalyzeWork: () => void;
-  onWorkItemScopeChange: (workItemId: string, subgroupId: string) => void;
+  macroScope: MacroScopeSession | null;
+  onMacroGroupToggle: (groupId: CompanyAiMacroScopeId, checked: boolean) => void;
+  onMacroActivityChange: (activityId: string, value: string) => void;
+  onMacroActivityToggle: (activityId: string, included: boolean) => void;
+  onConfirmMacroScope: () => void;
   analyzingWork: boolean;
   analysisNotice: string;
 }) {
   const proposed = (key: keyof IntakeDraft) => proposedKeys.has(key);
-  const manualWorkItems = mode === "manual" ? workItemsForDraft(draft) : [];
 
   return (
     <div className="space-y-4">
       <FormSection
-        badge={<span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.07] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-200">Bozza iniziale</span>}
-        description="Il riferimento della commessa viene assegnato al salvataggio e resta tracciato nella scheda."
-        eyebrow="01 / identità"
-        icon={FolderKanban}
-        title="Dati principali"
-      >
-        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_190px]">
-          <Field label={INTAKE_FIELD_LABELS.title} required proposed={proposed("title")}>
-            <Input className={inputClass} onChange={(event) => onChange("title", event.target.value)} placeholder="Es. Riqualificazione sede Milano" value={draft.title} />
-          </Field>
-          <Field label={INTAKE_FIELD_LABELS.statusCode}>
-            <select aria-label="Stato commessa" className={`${selectClass} ${statusReadOnly ? "opacity-70" : ""}`} disabled={statusReadOnly} onChange={(event) => onChange("statusCode", event.target.value)} value={draft.statusCode}>
-              <option value="DRAFT">Bozza</option>
-              <option value="PROPOSED">Proposta</option>
-              <option value="APPROVED">Approvata</option>
-              <option value="PLANNED">Pianificata</option>
-              <option value="ACTIVE">In corso</option>
-              <option value="BLOCKED">Bloccata</option>
-              <option value="COMPLETED">Completata</option>
-              <option value="CLOSED">Chiusa</option>
-              <option value="CANCELLED">Annullata</option>
-            </select>
-          </Field>
-        </div>
-        <div className="mt-4 grid gap-4 rounded-2xl border border-lime-300/15 bg-lime-300/[0.035] p-3.5 sm:grid-cols-[minmax(0,1fr)_220px]">
-          <Field label="Valore economico della commessa" proposed={proposed("commercialValueAmount")}>
-            <Input className={inputClass} inputMode="decimal" onChange={(event) => onChange("commercialValueAmount", event.target.value)} placeholder="Es. 14.000,00" value={draft.commercialValueAmount} />
-            <span className="mt-1.5 block text-[10px] leading-4 text-slate-600">Valore previsto o accordato, collegato a Finanza come ricavo atteso. Non è un incasso.</span>
-          </Field>
-          <Field label="Stato del valore" proposed={proposed("commercialValueBasis")}>
-            <select className={selectClass} onChange={(event) => onChange("commercialValueBasis", event.target.value)} value={draft.commercialValueBasis}>
-              <option value="ESTIMATE">Preventivato</option><option value="CONTRACTED">Accordato / contrattualizzato</option>
-            </select>
-          </Field>
-        </div>
-      </FormSection>
-
-      <FormSection
-        description="Indica la natura dell’intervento e separa le lavorazioni. In una commessa possono convivere attività di categorie diverse."
-        eyebrow="02 / natura e lavorazioni"
+        description="Il tipo descrive come viene aperta e gestita la commessa. L’ambito tecnico viene proposto separatamente da Company AI."
+        eyebrow="01 / apertura"
         icon={Flag}
-        title="Tipo di intervento"
+        title="Tipo commessa"
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={INTAKE_FIELD_LABELS.openingType} required proposed={proposed("openingType")}>
@@ -441,45 +374,67 @@ export function IntakeFields({
             </select>
           </Field>
         </div>
-        <Field className="mt-4" label="Lavorazioni previste" proposed={proposed("workItemsText")}>
-          <Textarea className={`${textareaClass} min-h-[110px]`} onChange={(event) => onChange("workItemsText", event.target.value)} placeholder="Una lavorazione per riga: impermeabilizzazione terrazzo\nRipristino perdita bagno\nSostituzione vetro rotto" value={draft.workItemsText} />
-          <span className="mt-1.5 block text-[10px] leading-4 text-slate-600">Company AI può separare le voci e proporre una categoria tecnica per ciascuna.</span>
-        </Field>
-        <details className="mt-4 rounded-2xl border border-white/[0.08] bg-black/20 p-3.5">
-          <summary className="cursor-pointer text-[11px] font-medium text-slate-300">Classificazione tecnica complessiva <span className="text-slate-600">· facoltativa</span></summary>
-          <p className="mb-3 mt-2 text-[10px] leading-4 text-slate-600">Compilala solo se tutte le lavorazioni condividono lo stesso ambito. Per attività miste, usa le proposte sui singoli elementi.</p>
-          <div className="grid gap-3 md:grid-cols-3"><ScopeSelectFields draft={draft} onChange={onChange} proposed={proposed} /></div>
-        </details>
       </FormSection>
 
       <FormSection
-        description="Racconta il lavoro con parole tue. Company AI usa il catalogo aziendale per separarlo e proporre classificazioni verificabili."
-        eyebrow="03 / contesto"
+        description="Descrivi il lavoro con parole tue. Company AI usa il catalogo attivo lato server per proporre ambiti e lavorazioni testuali verificabili."
+        eyebrow="02 / contesto"
         icon={ClipboardCheck}
         title="Descrizione della commessa"
       >
         <Field label={INTAKE_FIELD_LABELS.description} proposed={proposed("description")}>
-          <Textarea className={`${textareaClass} min-h-[118px]`} onChange={(event) => onChange("description", event.target.value)} placeholder="Obiettivo, perimetro e informazioni operative essenziali" value={draft.description} />
+          <Textarea className={`${textareaClass} min-h-[118px]`} maxLength={2_000} onChange={(event) => onChange("description", event.target.value)} placeholder="Es. Manutenzione della palazzina; descrivi solo ciò che sai del lavoro" value={draft.description} />
         </Field>
         {mode === "manual" && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.045] p-3.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[0.08] text-cyan-100"><Sparkles className="size-4" /></span>
-          <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold text-cyan-50">Company AI · assistenza allo scope</p><p className="mt-1 text-[10px] leading-4 text-slate-500">Propone lavorazioni e categorie dal catalogo. Nessun dato viene salvato senza il tuo controllo.</p></div>
-          <Button className="h-10 rounded-xl border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs text-cyan-50 hover:bg-cyan-300/[0.14]" disabled={analyzingWork} onClick={onAnalyzeWork} type="button" variant="outline">{analyzingWork ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{analyzingWork ? "Analisi…" : "Chiedi a Company AI"}</Button>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold text-cyan-50">Company AI · proposta di scope</p><p className="mt-1 text-[10px] leading-4 text-slate-500">La descrizione originale resta invariata. Ambiti e attività sono modificabili e richiedono conferma umana.</p></div>
+          <Button className="h-10 rounded-xl border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs text-cyan-50 hover:bg-cyan-300/[0.14]" disabled={analyzingWork || draft.description.trim().length < 8} onClick={onAnalyzeWork} type="button" variant="outline">{analyzingWork ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}{analyzingWork ? "Analisi…" : "Analizza con Company AI"}</Button>
         </div>}
         {mode === "manual" && analysisNotice && <p className="mt-2 rounded-xl border border-cyan-300/10 bg-cyan-300/[0.025] px-3 py-2 text-[10px] leading-4 text-cyan-100/70">{analysisNotice}</p>}
-        {manualWorkItems.length > 0 && <div className="mt-3 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.025] p-3.5">
-          <div className="mb-3"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-cyan-100/75">Classificazione per lavorazione · facoltativa</p><p className="mt-1 text-[10px] leading-4 text-slate-600">Controlla la proposta di Company AI o assegna una categoria a ogni voce. La scelta resta modificabile fino al salvataggio.</p></div>
-          <div className="space-y-2">
-            {manualWorkItems.map((item, index) => <label className="block rounded-xl border border-white/[.07] bg-black/20 p-3" key={item.id}>
-              <span className="mb-2 flex items-start justify-between gap-2"><span className="text-[10px] font-medium leading-4 text-slate-300">{String(index + 1).padStart(2, "0")} · {item.label}</span>{item.scope && <span className="shrink-0 rounded-full border border-cyan-300/15 bg-cyan-300/[.05] px-2 py-0.5 text-[8px] uppercase tracking-wide text-cyan-100/70">{item.scope.source === "human-authored" ? "Confermata" : "Proposta AI"}</span>}</span>
-              <select aria-label={`Categoria tecnica per ${item.label}`} className={`${selectClass} h-10 text-xs`} onChange={(event) => onWorkItemScopeChange(item.id, event.target.value)} value={item.scope?.subgroupId ?? ""}>
-                <option value="">Da classificare</option>
-                {WORK_ITEM_SCOPE_OPTIONS.map((section) => <optgroup key={section.id} label={section.title}>{section.groups.flatMap((group) => group.subgroups.map((subgroup) => <option key={subgroup.id} value={subgroup.id}>{group.title} · {subgroup.title}</option>))}</optgroup>)}
-              </select>
-              {item.scope && <span className="mt-1.5 block text-[9px] leading-4 text-slate-600">{item.scope.sectionTitle} / {item.scope.groupTitle} / {item.scope.subgroupTitle}</span>}
+        {mode === "manual" && macroScope && <div className="mt-4 space-y-4 rounded-2xl border border-lime-300/20 bg-[linear-gradient(150deg,rgba(190,255,60,.055),rgba(0,0,0,.18))] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.15em] text-lime-200/80">Proposta Company AI · catalogo {macroScope.catalog.version}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">La proposta non è ancora uno scope confermato. Non crea attività di pianificazione.</p></div><span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide ${macroScope.confirmed ? "border-lime-300/25 bg-lime-300/[.08] text-lime-100" : "border-amber-300/20 bg-amber-300/[.05] text-amber-100"}`}>{macroScope.confirmed ? "Confermata da te" : "Da confermare"}</span></div>
+
+          <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">Ambiti proposti</p><div className="grid gap-2 sm:grid-cols-2">
+            {[...macroScope.catalog.enabledGroups, macroScope.catalog.fallback].map((group) => <label className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition ${macroScope.groupsConfirmed.includes(group.id) ? "border-lime-300/30 bg-lime-300/[.07]" : "border-white/[.08] bg-black/20"}`} key={group.id}>
+              <input checked={macroScope.groupsConfirmed.includes(group.id)} className="size-4 accent-lime-300" onChange={(event) => onMacroGroupToggle(group.id, event.target.checked)} type="checkbox" />
+              <span className="min-w-0"><span className="block text-[11px] font-medium text-slate-200">{group.label}</span><span className="mt-0.5 block text-[9px] leading-4 text-slate-600">{group.about}</span></span>
             </label>)}
-          </div>
+          </div></div>
+
+          {macroScope.activities.length > 0 ? <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">Lavorazioni descritte</p><div className="space-y-2">{macroScope.activities.map((activity, index) => <div className="rounded-xl border border-white/[.08] bg-black/20 p-3" key={activity.id}>
+            <label className="flex items-center gap-2 text-[10px] text-slate-300"><input checked={activity.included} className="size-4 accent-lime-300" onChange={(event) => onMacroActivityToggle(activity.id, event.target.checked)} type="checkbox" />Includi nello scope confermato</label>
+            <Input aria-label={`Modifica lavorazione ${index + 1}`} className={`${inputClass} mt-2 h-10`} maxLength={180} onChange={(event) => onMacroActivityChange(activity.id, event.target.value)} value={activity.text} />
+            <p className="mt-1.5 text-[9px] leading-4 text-slate-600">Nel testo originale: “{activity.source}”</p>
+            {activity.groupIds.length > 0 && <p className="mt-1 text-[8px] font-semibold uppercase tracking-[.08em] text-cyan-100/65">{activity.groupIds.map((id) => macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label ?? id).join(" · ")}</p>}
+          </div>)}</div></div> : <p className="rounded-xl border border-dashed border-white/[.09] px-3 py-3 text-[10px] leading-4 text-slate-500">Nessuna attività specifica rilevata. La descrizione originale resta il perimetro della commessa.</p>}
+
+          {macroScope.proposal.reportedProblems.length > 0 && <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.12em] text-amber-100/75">Problemi segnalati · non sono lavorazioni confermate</p>{macroScope.proposal.reportedProblems.map((item, index) => <p className="mt-1.5 text-[10px] leading-4 text-slate-300" key={`${item.source}-${index}`}>{item.text}</p>)}</div>}
+          {macroScope.proposal.completedWork.length > 0 && <div className="rounded-xl border border-cyan-300/15 bg-cyan-300/[.035] p-3"><p className="text-[9px] font-semibold uppercase tracking-[.12em] text-cyan-100/75">Lavori indicati come già eseguiti</p>{macroScope.proposal.completedWork.map((item, index) => <p className="mt-1.5 text-[10px] leading-4 text-slate-300" key={`${item.source}-${index}`}>{item.text}</p>)}</div>}
+          {macroScope.proposal.clarifications.length > 0 && <ul className="list-disc space-y-1 pl-4 text-[10px] leading-4 text-amber-100/75">{macroScope.proposal.clarifications.map((item) => <li key={item}>{item}</li>)}</ul>}
+          <div className="flex flex-col gap-2 border-t border-white/[.07] pt-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-[9px] leading-4 text-slate-600">Provider: {macroScope.aiRuntime.status === "used" ? `OpenAI · ${macroScope.aiRuntime.model}` : "classificazione locale di ripiego"}. Ogni gruppo e attività viene ricontrollato dal server.</p><Button className="h-10 shrink-0 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-4 text-xs font-semibold text-[#060806]" disabled={!macroScope.groupsConfirmed.length} onClick={onConfirmMacroScope} type="button"><Check className="size-3.5" />{macroScope.confirmed ? "Conferma aggiornata" : "Conferma ambiti e lavori"}</Button></div>
         </div>}
+      </FormSection>
+
+      <FormSection
+        description="Dai un nome riconoscibile alla commessa e, se già noto, indica il valore commerciale. Il valore viene registrato per il successivo controllo economico in Finanza."
+        eyebrow="03 / dati commerciali"
+        icon={BookOpen}
+        title="Identità e valore"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.title} required proposed={proposed("title")}>
+            <Input className={inputClass} maxLength={120} onChange={(event) => onChange("title", event.target.value)} placeholder="Es. Ristrutturazione interna · Via Roma" required value={draft.title} />
+          </Field>
+          <Field label={INTAKE_FIELD_LABELS.commercialValueAmount} proposed={proposed("commercialValueAmount")}>
+            <Input className={inputClass} inputMode="decimal" maxLength={18} onChange={(event) => onChange("commercialValueAmount", event.target.value)} placeholder="Es. 14000,00" type="text" value={draft.commercialValueAmount} />
+          </Field>
+          <Field label={INTAKE_FIELD_LABELS.commercialValueBasis} proposed={proposed("commercialValueBasis")}>
+            <select className={selectClass} onChange={(event) => onChange("commercialValueBasis", event.target.value)} value={draft.commercialValueBasis}>
+              <option value="ESTIMATE">Preventivato</option>
+              <option value="CONTRACTED">Accordato / contrattualizzato</option>
+            </select>
+          </Field>
+        </div>
       </FormSection>
 
       <FormSection
@@ -642,19 +597,20 @@ function CheckRow({ label, detail, complete }: { label: string; detail: string; 
   );
 }
 
-function SummaryRail({ draft, mode, preview, worksiteLocation }: { draft: IntakeDraft; mode: IntakeMode; preview: IntakePreview | null; worksiteLocation: GeocodeCandidate | null }) {
-  const selectedSection = COMPANY_AI_SCOPE_TAXONOMY.find((item) => item.id === draft.scopeSectionId);
-  const selectedGroup = selectedSection?.groups.find((item) => item.id === draft.scopeGroupId);
-  const selectedSubgroup = selectedGroup?.subgroups.find((item) => item.id === draft.scopeSubgroupId);
+function SummaryRail({ draft, mode, preview, macroScope, worksiteLocation }: { draft: IntakeDraft; mode: IntakeMode; preview: IntakePreview | null; macroScope: MacroScopeSession | null; worksiteLocation: GeocodeCandidate | null }) {
   const packageScopes = [...new Set(draft.workItems.flatMap((item) => item.scope ? [`${item.scope.sectionTitle} / ${item.scope.groupTitle} / ${item.scope.subgroupTitle}`] : []))];
-  const scopeSummary = selectedSubgroup
-    ? `${selectedSection?.title} / ${selectedGroup?.title} / ${selectedSubgroup.title}`
+  const macroScopeLabels = macroScope ? macroScope.groupsConfirmed.map((id) =>
+    macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label
+      ?? (id === macroScope.catalog.fallback.id ? macroScope.catalog.fallback.label : id),
+  ) : [];
+  const scopeSummary = macroScopeLabels.length
+    ? `${macroScopeLabels.length} ${macroScope?.confirmed ? "ambiti confermati" : "ambiti proposti"}`
     : packageScopes.length === 1 ? packageScopes[0] : packageScopes.length > 1 ? `${packageScopes.length} ambiti tecnici` : "Da proporre o confermare";
   const keyFields = [
     { label: "Nome commessa", value: draft.title.trim(), fallback: "Da inserire" },
     { label: "Tipo commessa", value: draft.openingType, fallback: "Da scegliere" },
     { label: "Ambito tecnico", value: scopeSummary, fallback: "Da proporre o confermare", optional: true },
-    { label: "Lavorazioni", value: draft.workItemsText.trim() ? `${draft.workItemsText.split(/\r?\n/).filter((line) => line.trim()).length} voci` : "", fallback: "Da descrivere" },
+    { label: "Lavorazioni", value: macroScope ? `${macroScope.activities.filter((item) => item.included).length} voci confermate` : draft.workItemsText.trim() ? `${draft.workItemsText.split(/\r?\n/).filter((line) => line.trim()).length} voci` : "", fallback: "Da descrivere" },
     { label: "Cliente", value: draft.clientName.trim(), fallback: "Non ancora indicato" },
     { label: "Luogo intervento", value: worksiteLocation?.formattedAddress || draft.worksite.trim(), fallback: "Da riconoscere" },
     { label: "Scadenza", value: draft.dueDate.trim(), fallback: "Da pianificare" },
@@ -694,6 +650,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const [sourceFileName, setSourceFileName] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<IntakePreview | null>(null);
+  const [macroScope, setMacroScope] = useState<MacroScopeSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -701,6 +658,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   const [worksiteCandidates, setWorksiteCandidates] = useState<GeocodeCandidate[]>([]);
   const [worksiteGeocodeBusy, setWorksiteGeocodeBusy] = useState(false);
   const [worksiteGeocodeNotice, setWorksiteGeocodeNotice] = useState("");
+  const [visualViewport, setVisualViewport] = useState<{ height: number; offsetTop: number } | null>(null);
 
   const reset = useCallback(() => {
     setMode("chooser");
@@ -709,6 +667,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setSourceFileName("");
     setSourceFile(null);
     setPreview(null);
+    setMacroScope(null);
     setBusy(false);
     setError("");
     setNotice("");
@@ -739,8 +698,30 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     };
   }, [open, handleOpenChange]);
 
+  useEffect(() => {
+    if (!open || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    const syncViewport = () => setVisualViewport({
+      height: Math.round(viewport.height),
+      offsetTop: Math.round(viewport.offsetTop),
+    });
+    syncViewport();
+    viewport.addEventListener("resize", syncViewport);
+    viewport.addEventListener("scroll", syncViewport);
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      viewport.removeEventListener("resize", syncViewport);
+      viewport.removeEventListener("scroll", syncViewport);
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, [open]);
+
   const updateField = (key: keyof IntakeDraft, value: string) => {
     setDraft((current) => ({ ...current, [key]: value } as IntakeDraft));
+    if (key === "description") {
+      setMacroScope(null);
+      setNotice("La descrizione è cambiata. Analizza e conferma di nuovo lo scope.");
+    }
     if (key === "worksite") {
       setWorksiteLocation(null);
       setWorksiteCandidates([]);
@@ -749,22 +730,39 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setError("");
   };
 
-  const updateWorkItemScope = (workItemId: string, subgroupId: string) => {
-    const selection = subgroupId
-      ? WORK_ITEM_SCOPE_OPTIONS.flatMap((section) => section.groups.flatMap((group) => group.subgroups)).find((item) => item.id === subgroupId)?.selection
-      : null;
-    setDraft((current) => ({
+  const toggleMacroGroup = (groupId: CompanyAiMacroScopeId, checked: boolean) => {
+    setMacroScope((current) => {
+      if (!current) return current;
+      const isFallback = groupId === current.catalog.fallback.id;
+      const groupsConfirmed = checked
+        ? isFallback ? [groupId] : [...current.groupsConfirmed.filter((id) => id !== current.catalog.fallback.id), groupId]
+        : current.groupsConfirmed.filter((id) => id !== groupId);
+      return { ...current, groupsConfirmed, confirmed: false };
+    });
+    setError("");
+  };
+
+  const editMacroActivity = (activityId: string, value: string) => {
+    setMacroScope((current) => current ? {
       ...current,
-      workItems: workItemsForDraft(current).map((item) => {
-        if (item.id !== workItemId) return item;
-        if (!selection) {
-          const unclassified = { ...item };
-          delete unclassified.scope;
-          return unclassified;
-        }
-        return { ...item, scope: { ...selection, source: "human-authored" as const } };
-      }),
-    }));
+      confirmed: false,
+      activities: current.activities.map((item) => item.id === activityId ? { ...item, text: value } : item),
+    } : current);
+    setError("");
+  };
+
+  const toggleMacroActivity = (activityId: string, included: boolean) => {
+    setMacroScope((current) => current ? {
+      ...current,
+      confirmed: false,
+      activities: current.activities.map((item) => item.id === activityId ? { ...item, included } : item),
+    } : current);
+    setError("");
+  };
+
+  const confirmMacroScope = () => {
+    setMacroScope((current) => current ? { ...current, confirmed: true } : current);
+    setNotice("Ambiti e lavorazioni confermati. La descrizione originale non è stata modificata.");
     setError("");
   };
 
@@ -817,6 +815,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     if (!file) return;
     setError("");
     setPreview(null);
+    setMacroScope(null);
     setSourceFile(null);
     if (file.size > MAX_SOURCE_FILE_BYTES) {
       setSourceFileName("");
@@ -872,6 +871,7 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     }
     setBusy(true);
     setError("");
+    setMacroScope(null);
     setNotice("Company AI sta leggendo il preventivo e preparando una proposta controllabile…");
     try {
       const idempotencyKey = `company-ai-intake-${crypto.randomUUID()}`;
@@ -902,47 +902,48 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   };
 
   const analyzeManualScope = async () => {
-    const workLines = draft.workItemsText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    if (draft.description.trim().length < 8 && !workLines.length) {
-      setError("Descrivi il lavoro o inserisci almeno una lavorazione prima di chiedere a Company AI.");
+    if (draft.description.trim().length < 8) {
+      setError("Descrivi il lavoro con almeno 8 caratteri prima di chiedere a Company AI.");
       return;
     }
-    const sourceText = [
-      draft.title.trim() ? `Titolo: ${draft.title.trim()}` : "",
-      `Tipo intervento scelto: ${INTAKE_OPENING_TYPES.find((item) => item.value === draft.openingType)?.label ?? draft.openingType}`,
-      draft.description.trim() ? `Descrizione lavori: ${draft.description.trim()}` : "",
-      workLines.length ? `Lavorazioni previste:\n${workLines.map((line) => `- ${line}`).join("\n")}` : "",
-      draft.clientName.trim() ? `Cliente: ${draft.clientName.trim()}` : "",
-      draft.worksite.trim() ? `Cantiere: ${draft.worksite.trim()}` : "",
-    ].filter(Boolean).join("\n\n");
+    const descriptionOriginal = draft.description;
     setBusy(true);
     setError("");
-    setNotice("Company AI sta scomponendo il lavoro e consultando il catalogo tecnico…");
+    setMacroScope(null);
+    setNotice("Company AI sta analizzando la descrizione rispetto al catalogo lato server…");
     try {
-      const response = await fetch("/api/operations/intake", {
+      const response = await fetch("/api/operations/intake/macro-scope", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceText, sourceName: "Scope commessa manuale", idempotencyKey: `company-ai-scope-${crypto.randomUUID()}` }),
+        body: JSON.stringify({ description: descriptionOriginal, idempotencyKey: `company-ai-macro-scope-${crypto.randomUUID()}` }),
       });
-      const data = await response.json() as IntakePreview & { error?: string };
+      const data = await response.json() as {
+        previewId?: string;
+        scopeV2?: CompanyAiMacroScopeProposal;
+        catalog?: CompanyAiMacroScopeCatalog;
+        aiRuntime?: { status?: "used" | "not_configured" | "unavailable"; model?: string };
+        error?: string;
+      };
       if (!response.ok) throw new Error(data.error || "company_ai_scope_preview_failed");
-      const proposedItems = data.draft.workItems ?? data.workItems ?? [];
-      const proposedScopeIds = new Set(proposedItems.map((item) => item.scope?.subgroupId).filter(Boolean));
-      const mixedWorkPackages = proposedScopeIds.size > 1;
-      setPreview(data);
-      setDraft((current) => ({
-        ...current,
-        title: current.title.trim() ? current.title : data.draft.title ?? current.title,
-        scopeSectionId: mixedWorkPackages ? "" : data.draft.scopeSectionId || current.scopeSectionId,
-        scopeGroupId: mixedWorkPackages ? "" : data.draft.scopeGroupId || current.scopeGroupId,
-        scopeSubgroupId: mixedWorkPackages ? "" : data.draft.scopeSubgroupId || current.scopeSubgroupId,
-        workItems: proposedItems.length ? proposedItems : workItemsForDraft(current),
-        workItemsText: proposedItems.length ? proposedItems.map((item) => item.label).join("\n") : current.workItemsText,
-        commercialValueAmount: current.commercialValueAmount || data.draft.commercialValueAmount || "",
-        commercialValueBasis: current.commercialValueAmount ? current.commercialValueBasis : data.draft.commercialValueBasis ?? current.commercialValueBasis,
-      }));
-      const providerLabel = data.aiRuntime?.status === "used" ? "OpenAI" : "analisi locale di supporto";
-      setNotice(`${providerLabel}: proposta ${proposedItems.length} lavorazioni e ${proposedItems.filter((item) => item.scope).length} classificazioni tecniche. Controlla e modifica prima del salvataggio.`);
+      if (!data.previewId || !data.scopeV2 || !data.catalog || data.scopeV2.descriptionOriginal !== descriptionOriginal) {
+        throw new Error("La preview non corrisponde alla descrizione attuale. Ripeti l’analisi.");
+      }
+      setMacroScope({
+        previewId: data.previewId,
+        proposal: data.scopeV2,
+        catalog: data.catalog,
+        aiRuntime: {
+          status: data.aiRuntime?.status ?? "unavailable",
+          model: data.aiRuntime?.model ?? "gpt-4.1-mini",
+        },
+        groupsConfirmed: data.scopeV2.groupsProposed,
+        activities: data.scopeV2.activitiesProposed.map((activity) => ({ ...activity, included: true })),
+        confirmed: false,
+      });
+      const groupCount = data.scopeV2.groupsProposed.length;
+      const activityCount = data.scopeV2.activitiesProposed.length;
+      const providerLabel = data.aiRuntime?.status === "used" ? `OpenAI · ${data.aiRuntime.model ?? ""}` : "classificazione locale di ripiego";
+      setNotice(`${providerLabel}: proposta ${groupCount} ambiti e ${activityCount} lavorazioni. Problemi e lavori già eseguiti restano separati. Controlla e conferma prima di salvare.`);
     } catch (caught) {
       setNotice("");
       setError(caught instanceof Error && caught.message !== "Failed to fetch" ? caught.message : "Company AI non è raggiungibile in questo momento. Riprova tra poco.");
@@ -965,22 +966,26 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       setError("Verifica e seleziona l’indirizzo del cantiere prima di salvare la commessa.");
       return;
     }
+    if (mode === "manual" && (!macroScope || !macroScope.confirmed || macroScope.proposal.descriptionOriginal !== draft.description)) {
+      setError("Analizza la descrizione con Company AI e conferma ambiti e lavorazioni prima di salvare la bozza.");
+      return;
+    }
     const requestedWorkItemCount = draft.workItemsText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length;
     if (requestedWorkItemCount > 24) {
       setError("Puoi inserire al massimo 24 lavorazioni per commessa.");
       return;
     }
-    const scopeSelection = resolveCompanyAiScopeSelection({
+    const scopeSelection = mode === "company-ai" ? resolveCompanyAiScopeSelection({
       sectionId: draft.scopeSectionId,
       groupId: draft.scopeGroupId,
       subgroupId: draft.scopeSubgroupId,
-    });
+    }) : null;
     const scopeParts = [draft.scopeSectionId, draft.scopeGroupId, draft.scopeSubgroupId].filter(Boolean).length;
     if (scopeParts > 0 && !scopeSelection) {
       setError("Per la classificazione complessiva completa tutti e tre i livelli, oppure lascia vuoto il campo.");
       return;
     }
-    const workItems = workItemsForDraft(draft);
+    const workItems = mode === "manual" ? [] : workItemsForDraft(draft);
     if (draft.description.trim().length < 8 && workItems.length === 0) {
       setError("Descrivi il lavoro oppure inserisci almeno una lavorazione.");
       return;
@@ -988,13 +993,16 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, workItems, commercialValue: { amount: draft.commercialValueAmount, basis: draft.commercialValueBasis }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: scopeSelection?.sectionTitle ?? (new Set(workItems.map((item) => item.scope?.subgroupId).filter(Boolean)).size > 1 ? "Lavorazioni miste" : "Attività da classificare"), jobType: scopeSelection?.groupTitle ?? "", specialization: scopeSelection?.subgroupTitle ?? "", ...(scopeSelection ? { scope: scopeSelection } : {}), sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: preview?.previewId, idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
+      const macroGroupLabels = macroScope?.groupsConfirmed.map((id) => macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label ?? (id === macroScope.catalog.fallback.id ? macroScope.catalog.fallback.label : id)) ?? [];
+      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, workItems, commercialValue: { amount: draft.commercialValueAmount, basis: draft.commercialValueBasis }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: macroGroupLabels.join(" · ") || "Attività da classificare", jobType: "", specialization: "", sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: macroScope?.previewId ?? preview?.previewId, ...(macroScope ? { scopeV2: { previewId: macroScope.previewId, confirmed: macroScope.confirmed, descriptionOriginal: macroScope.proposal.descriptionOriginal, groupsConfirmed: macroScope.groupsConfirmed, activities: macroScope.activities.map(({ included, ...activity }) => ({ ...activity, included })) } } : {}), idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
       const data = await response.json() as IntakeCreateResponse & { error?: string; message?: string };
       if (!response.ok) {
         const message = data.error === "worksite_location_confirmation_required"
           ? "Conferma l’indirizzo del cantiere prima di salvare."
           : data.error === "worksite_location_candidate_mismatch"
             ? "L’indirizzo è cambiato: esegui di nuovo la verifica e seleziona un risultato."
+            : data.error === "company_ai_scope_confirmation_required" || data.error === "company_ai_scope_confirmation_invalid" || data.error === "company_ai_scope_preview_unavailable_or_consumed" || data.error === "company_ai_scope_description_mismatch"
+              ? data.message ?? "La proposta di scope non è più valida. Analizza di nuovo la descrizione e conferma la proposta attuale."
             : data.error === "work_description_required" || data.error === "work_items_invalid" || data.error === "work_item_scope_invalid"
               ? data.message ?? "Controlla descrizione e classificazione delle lavorazioni."
             : data.error === "worksite_geocoder_unavailable" || data.error === "worksite_geocoder_not_configured"
@@ -1017,9 +1025,9 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] isolate flex items-center justify-center p-2 touch-manipulation sm:p-4" data-slot="commessa-intake-overlay">
+    <div className="fixed inset-0 z-[100] isolate flex items-center justify-center p-2 touch-manipulation sm:p-4" data-slot="commessa-intake-overlay" style={visualViewport ? { top: `${visualViewport.offsetTop}px`, bottom: "auto", height: `${visualViewport.height}px` } : undefined}>
       <div aria-hidden="true" className="absolute inset-0 bg-black/80 backdrop-blur-md" onMouseDown={() => handleOpenChange(false)} />
-      <section aria-describedby="new-commessa-description" aria-labelledby="new-commessa-title" aria-modal="true" className="relative z-[101] flex h-[min(94dvh,980px)] max-h-[calc(100dvh-1rem)] w-full max-w-[1320px] flex-col overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)]" role="dialog">
+      <section aria-describedby="new-commessa-description" aria-labelledby="new-commessa-title" aria-modal="true" className="relative z-[101] flex h-[min(94%,980px)] max-h-[calc(100%-1rem)] w-full max-w-[1320px] flex-col overflow-hidden rounded-[28px] border border-lime-300/15 bg-[#070b0c] p-0 text-slate-100 shadow-[0_35px_120px_rgba(0,0,0,0.72),0_0_70px_rgba(190,255,60,0.06)]" role="dialog">
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[28px]"><div className="absolute -right-36 -top-40 size-[31rem] rounded-full bg-lime-300/[0.055] blur-3xl" /><div className="absolute -bottom-48 left-1/3 size-[28rem] rounded-full bg-cyan-300/[0.035] blur-3xl" /><div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(255,255,255,0.025),transparent_22%,transparent_76%,rgba(190,255,60,0.025))]" /><div className="absolute inset-0 opacity-[0.12] [background-image:linear-gradient(rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:42px_42px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]" /></div>
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-[2px] bg-gradient-to-r from-lime-300 via-lime-200 to-cyan-300 shadow-[0_0_22px_rgba(190,255,60,0.55)]" />
         <div className="flex h-full max-h-full min-h-0 flex-col">
@@ -1036,8 +1044,8 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
                 <div>
                   <div className="mb-5 flex items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-lime-300/80">Scegli il percorso</p><p className="mt-2 text-sm text-slate-300">La destinazione è la stessa. Scegli come vuoi costruire la scheda.</p></div><span className="hidden rounded-full border border-white/10 bg-black/20 px-3 py-1.5 font-mono text-[10px] text-slate-600 sm:block">01 / 03</span></div>
                   <div className="space-y-3">
-                    <button className="group relative w-full overflow-hidden rounded-[24px] border border-lime-300/35 bg-[linear-gradient(135deg,rgba(190,255,60,0.16),rgba(10,24,18,0.82)_48%,rgba(34,211,238,0.055))] p-5 text-left shadow-[0_22px_60px_rgba(190,255,60,0.08)] transition hover:-translate-y-0.5 hover:border-lime-200/75 hover:shadow-[0_24px_70px_rgba(190,255,60,0.14)] sm:p-6" onClick={() => { setMode("company-ai"); setError(""); }} type="button"><div className="pointer-events-none absolute -right-12 -top-16 size-48 rounded-full bg-lime-300/[0.12] blur-3xl transition group-hover:bg-lime-300/[0.2]" /><div className="relative flex items-start gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-lime-300 text-[#060806] shadow-[0_0_28px_rgba(190,255,60,0.26)]"><Sparkles className="size-5" /></span><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-200">Percorso consigliato</span><span className="rounded-full border border-lime-300/25 bg-lime-300/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-100">Company AI</span></span><span className="mt-2 block text-xl font-semibold tracking-[-0.03em] text-lime-100">Crea da preventivo</span><span className="mt-2 block max-w-xl text-xs leading-5 text-slate-300">Carica l’originale, lascia che Company AI proponga i dati e mantieni il controllo su ogni campo.</span></span><span className="grid size-8 shrink-0 place-items-center rounded-full border border-lime-300/30 bg-lime-300/10 text-lime-100"><Check className="size-4" /></span></div><span className="relative mt-5 grid gap-2 border-t border-lime-300/15 pt-4 text-[10px] text-slate-400 sm:grid-cols-3"><span><strong className="block font-semibold text-lime-200">01</strong>Incolla il fascicolo</span><span><strong className="block font-semibold text-lime-200">02</strong>Controlla le proposte</span><span><strong className="block font-semibold text-lime-200">03</strong>Conferma la bozza</span></span></button>
-                    <button className="group relative w-full overflow-hidden rounded-[24px] border border-white/[0.1] bg-[linear-gradient(135deg,rgba(255,255,255,0.045),rgba(0,0,0,0.18))] p-5 text-left transition hover:-translate-y-0.5 hover:border-lime-300/40 hover:bg-lime-300/[0.045] sm:p-6" onClick={() => { setMode("manual"); setError(""); }} type="button"><div className="relative flex items-start gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-white/15 bg-black/30 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"><PenLine className="size-5" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Inserimento diretto</span><span className="mt-2 block text-xl font-semibold tracking-[-0.03em] text-lime-100/90">Compila manualmente</span><span className="mt-2 block max-w-xl text-xs leading-5 text-slate-500">Inserisci anagrafica, classificazione e contesto senza allegare un documento.</span></span><span className="grid size-8 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.03] text-slate-500"><PenLine className="size-3.5" /></span></div></button>
+                    <button className="group relative w-full overflow-hidden rounded-[24px] border border-lime-300/35 bg-[linear-gradient(135deg,rgba(190,255,60,0.16),rgba(10,24,18,0.82)_48%,rgba(34,211,238,0.055))] p-5 text-left shadow-[0_22px_60px_rgba(190,255,60,0.08)] transition hover:-translate-y-0.5 hover:border-lime-200/75 hover:shadow-[0_24px_70px_rgba(190,255,60,0.14)] sm:p-6" onClick={() => { setMode("company-ai"); setMacroScope(null); setError(""); }} type="button"><div className="pointer-events-none absolute -right-12 -top-16 size-48 rounded-full bg-lime-300/[0.12] blur-3xl transition group-hover:bg-lime-300/[0.2]" /><div className="relative flex items-start gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-lime-300 text-[#060806] shadow-[0_0_28px_rgba(190,255,60,0.26)]"><Sparkles className="size-5" /></span><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-lime-200">Percorso consigliato</span><span className="rounded-full border border-lime-300/25 bg-lime-300/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-lime-100">Company AI</span></span><span className="mt-2 block text-xl font-semibold tracking-[-0.03em] text-lime-100">Crea da preventivo</span><span className="mt-2 block max-w-xl text-xs leading-5 text-slate-300">Carica l’originale, lascia che Company AI proponga i dati e mantieni il controllo su ogni campo.</span></span><span className="grid size-8 shrink-0 place-items-center rounded-full border border-lime-300/30 bg-lime-300/10 text-lime-100"><Check className="size-4" /></span></div><span className="relative mt-5 grid gap-2 border-t border-lime-300/15 pt-4 text-[10px] text-slate-400 sm:grid-cols-3"><span><strong className="block font-semibold text-lime-200">01</strong>Incolla il fascicolo</span><span><strong className="block font-semibold text-lime-200">02</strong>Controlla le proposte</span><span><strong className="block font-semibold text-lime-200">03</strong>Conferma la bozza</span></span></button>
+                    <button className="group relative w-full overflow-hidden rounded-[24px] border border-white/[0.1] bg-[linear-gradient(135deg,rgba(255,255,255,0.045),rgba(0,0,0,0.18))] p-5 text-left transition hover:-translate-y-0.5 hover:border-lime-300/40 hover:bg-lime-300/[0.045] sm:p-6" onClick={() => { setMode("manual"); setMacroScope(null); setError(""); }} type="button"><div className="relative flex items-start gap-4"><span className="grid size-12 shrink-0 place-items-center rounded-2xl border border-white/15 bg-black/30 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"><PenLine className="size-5" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Inserimento diretto</span><span className="mt-2 block text-xl font-semibold tracking-[-0.03em] text-lime-100/90">Compila manualmente</span><span className="mt-2 block max-w-xl text-xs leading-5 text-slate-500">Inserisci i dati e descrivi il lavoro: Company AI propone gli ambiti e le lavorazioni.</span></span><span className="grid size-8 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.03] text-slate-500"><PenLine className="size-3.5" /></span></div></button>
                   </div>
                   <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-300/20 bg-[linear-gradient(135deg,rgba(251,191,36,0.08),rgba(251,191,36,0.02))] p-4 text-[11px] leading-5 text-amber-100/80"><LockKeyhole className="mt-0.5 size-4 shrink-0 text-amber-200" /><span><strong className="font-semibold text-amber-100">Regola di conferma.</strong> La commessa nasce solo dopo la tua conferma finale. Company AI prepara una proposta controllabile, non una scrittura automatica.</span></div>
                 </div>
@@ -1046,13 +1054,18 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
               </div>
             </div>
           ) : (
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={createJob}>
+            <form className="flex min-h-0 flex-1 flex-col" onFocusCapture={(event) => {
+              const target = event.target;
+              if (target instanceof HTMLElement && target.matches("input, textarea, select")) {
+                requestAnimationFrame(() => target.scrollIntoView({ block: "nearest", inline: "nearest" }));
+              }
+            }} onSubmit={createJob}>
               <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {mode === "company-ai" && <CompanyAiPanel busy={busy} hasSourceFile={Boolean(sourceFile)} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceFile(null); setSourceFileName(""); setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
-                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields analysisNotice={mode === "manual" ? notice : ""} analyzingWork={busy} draft={draft} mode={mode} onAnalyzeWork={() => void analyzeManualScope()} onWorkItemScopeChange={updateWorkItemScope} onChange={updateField} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
+                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields analysisNotice={mode === "manual" ? notice : ""} analyzingWork={busy} draft={draft} macroScope={macroScope} mode={mode} onAnalyzeWork={() => void analyzeManualScope()} onChange={updateField} onConfirmMacroScope={confirmMacroScope} onMacroActivityChange={editMacroActivity} onMacroActivityToggle={toggleMacroActivity} onMacroGroupToggle={toggleMacroGroup} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} macroScope={macroScope} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
                 {error && <div className="relative z-10 mx-4 mb-5 flex items-start gap-3 rounded-2xl border border-rose-300/25 bg-[linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.035))] px-4 py-3.5 text-xs leading-5 text-rose-100 shadow-[0_14px_30px_rgba(0,0,0,0.16)] sm:mx-7"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.8)]" />{error}</div>}
               </div>
-              <div className="relative z-10 flex shrink-0 flex-col gap-4 border-t border-lime-300/10 bg-[linear-gradient(180deg,rgba(16,27,24,0.94),rgba(6,11,12,0.98))] px-4 py-4 shadow-[0_-18px_45px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.08] text-lime-200 shadow-[0_0_18px_rgba(190,255,60,0.07)]"><ShieldCheck className="size-3.5" /></span><div><p className="text-[11px] font-semibold text-lime-100/90">Conferma controllata</p><p className="mt-0.5 text-[10px] text-slate-600">{mode === "company-ai" ? "Proposte verificabili · conferma umana richiesta" : "Inserimento manuale · conferma umana richiesta"}</p></div></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="h-11 rounded-xl border-white/10 bg-transparent px-4 text-slate-400 hover:border-lime-300/25 hover:bg-lime-300/[0.06] hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button" variant="outline">Annulla</Button><Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-5 font-semibold text-[#060806] shadow-[0_0_26px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_34px_rgba(190,255,60,0.28)]" disabled={busy} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : mode === "company-ai" ? <Check className="size-3.5" /> : <Save className="size-3.5" />}{mode === "company-ai" ? "Conferma dati e crea commessa" : "Salva commessa in bozza"}</Button></div></div>
+              <div className="relative z-10 flex shrink-0 flex-col gap-4 border-t border-lime-300/10 bg-[linear-gradient(180deg,rgba(16,27,24,0.94),rgba(6,11,12,0.98))] px-4 py-4 shadow-[0_-18px_45px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.08] text-lime-200 shadow-[0_0_18px_rgba(190,255,60,0.07)]"><ShieldCheck className="size-3.5" /></span><div><p className="text-[11px] font-semibold text-lime-100/90">Conferma controllata</p><p className="mt-0.5 text-[10px] text-slate-600">{mode === "company-ai" ? "Proposte verificabili · conferma umana richiesta" : macroScope?.confirmed ? "Scope confermato · salva la commessa in bozza" : "Analizza e conferma gli ambiti prima del salvataggio"}</p></div></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="h-11 rounded-xl border-white/10 bg-transparent px-4 text-slate-400 hover:border-lime-300/25 hover:bg-lime-300/[0.06] hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button" variant="outline">Annulla</Button><Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-5 font-semibold text-[#060806] shadow-[0_0_26px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_34px_rgba(190,255,60,0.28)]" disabled={busy || (mode === "manual" && !macroScope?.confirmed)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : mode === "company-ai" ? <Check className="size-3.5" /> : <Save className="size-3.5" />}{mode === "company-ai" ? "Conferma dati e crea commessa" : "Salva commessa in bozza"}</Button></div></div>
             </form>
           )}
         </div>

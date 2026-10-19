@@ -1,3 +1,5 @@
+import type { CompanyAiMacroScopeConfirmation, CompanyAiMacroScopeId } from "@/lib/company-ai-macro-scope";
+
 export const JOB_STATUS_CODES = [
   "DRAFT",
   "PROPOSED",
@@ -45,6 +47,11 @@ export type JobWorkItem = {
   unit: string;
   confidence: number;
   source: string;
+  /** V2 scope provenance; these items never become planned JobActivity rows. */
+  macroGroupIds?: CompanyAiMacroScopeId[];
+  macroGroupLabels?: string[];
+  evidence?: string;
+  proposalStatus?: "CONFERMATA";
   scope?: {
     sectionId: string;
     sectionTitle: string;
@@ -79,6 +86,7 @@ export type JobPayload = {
   statusCode: JobStatusCode;
   version: number;
   workItems: JobWorkItem[];
+  scopeV2?: CompanyAiMacroScopeConfirmation;
   progress?: number;
   activities: JobActivity[];
   evidence: JobEvidence[];
@@ -231,6 +239,12 @@ function workItemFromUnknown(value: unknown, index: number): JobWorkItem | null 
       source: scopeValue.source === "company-ai-proposal-confirmed" ? "company-ai-proposal-confirmed" as const : "human-authored" as const,
     }
     : undefined;
+  const macroGroupIds = Array.isArray(value.macroGroupIds)
+    ? [...new Set(value.macroGroupIds.filter((id): id is string => typeof id === "string").map((id) => id.slice(0, 80)))]
+    : [];
+  const macroGroupLabels = Array.isArray(value.macroGroupLabels)
+    ? [...new Set(value.macroGroupLabels.filter((label): label is string => typeof label === "string").map((label) => label.slice(0, 120)))]
+    : [];
   return {
     id: text(value.id, `work-${index + 1}`).slice(0, 80),
     label: label.slice(0, 180),
@@ -239,6 +253,10 @@ function workItemFromUnknown(value: unknown, index: number): JobWorkItem | null 
     unit: text(value.unit).slice(0, 24),
     confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0.7,
     source: text(value.source, "commessa-intake").slice(0, 120),
+    ...(macroGroupIds.length ? { macroGroupIds: macroGroupIds as CompanyAiMacroScopeId[] } : {}),
+    ...(macroGroupLabels.length ? { macroGroupLabels } : {}),
+    ...(typeof value.evidence === "string" && value.evidence.trim() ? { evidence: value.evidence.trim().slice(0, 240) } : {}),
+    ...(value.proposalStatus === "CONFERMATA" ? { proposalStatus: "CONFERMATA" as const } : {}),
     ...(scope ? { scope } : {}),
   };
 }
@@ -532,6 +550,7 @@ export function parseJobPayload(payloadJson: string): JobPayload {
       };
     })
     : [];
+  const scopeV2 = isRecord(parsed.scopeV2) ? parsed.scopeV2 as unknown as CompanyAiMacroScopeConfirmation : undefined;
   const rawAssignment = isRecord(parsed.assignment) ? parsed.assignment : null;
   const assignment = rawAssignment && (text(rawAssignment.responsible) || text(rawAssignment.team))
     ? {
@@ -550,7 +569,7 @@ export function parseJobPayload(payloadJson: string): JobPayload {
   return {
     ...parsed,
     title: text(parsed.title),
-    description: text(parsed.description),
+    description: typeof scopeV2?.descriptionOriginal === "string" ? scopeV2.descriptionOriginal : text(parsed.description),
     client: text(parsed.client),
     location: text(parsed.location),
     category: text(parsed.category, "Operations"),
@@ -559,6 +578,7 @@ export function parseJobPayload(payloadJson: string): JobPayload {
     statusCode: normalizeJobStatus(parsed.statusCode ?? parsed.status),
     version: Math.max(1, Math.floor(Number(parsed.version) || 1)),
     workItems,
+    ...(scopeV2 ? { scopeV2 } : {}),
     activities,
     evidence,
     assignment,

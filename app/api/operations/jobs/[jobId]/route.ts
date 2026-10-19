@@ -1377,12 +1377,23 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
       };
     } else if (action === "update_job") {
       const fields = isRecord(input.fields) ? input.fields : input;
+      const currentScopeV2 = isRecord(current.scopeV2) ? current.scopeV2 : null;
+      const scopeV2Locked = currentScopeV2?.status === "CONFERMATO";
+      const requestsLegacyScopeEdit = isRecord(fields.scope)
+        || ["scopeSectionId", "scopeGroupId", "scopeSubgroupId"].some((key) => key in fields);
+      const requestsMacroCategoryEdit = typeof fields.category === "string" && boundedText(fields.category, 80) !== current.category;
+      if (scopeV2Locked && (requestsLegacyScopeEdit || requestsMacroCategoryEdit)) {
+        return Response.json({ error: "macro_scope_revision_requires_approval", message: "Lo scope V2 è confermato. Una revisione deve mostrare le differenze e richiedere una nuova approvazione." }, { status: 409 });
+      }
+      if (scopeV2Locked && typeof fields.description === "string" && fields.description !== currentScopeV2?.descriptionOriginal) {
+        return Response.json({ error: "macro_scope_revision_requires_approval", message: "La descrizione originale è vincolata allo scope confermato. Avvia una revisione con confronto e nuova approvazione." }, { status: 409 });
+      }
       if (typeof fields.title === "string") {
         const title = boundedText(fields.title, 120);
         if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
         next.title = title;
       }
-      if (typeof fields.description === "string") next.description = boundedText(fields.description, 2_000);
+      if (typeof fields.description === "string" && !scopeV2Locked) next.description = boundedText(fields.description, 2_000);
       if (typeof fields.client === "string") next.client = boundedText(fields.client, 160);
       if (typeof fields.clientName === "string") next.clientName = boundedText(fields.clientName, 160);
       if (typeof fields.clientTaxId === "string") next.clientTaxId = boundedText(fields.clientTaxId, 80);

@@ -21,6 +21,7 @@
     "audit:release": "pnpm run typecheck && pnpm run audit:language && node scripts/audit-release-surface.mjs && pnpm run audit:integrity && pnpm run audit:alignment",
     "audit:e2e": "node scripts/audit-e2e-contract.mjs",
     "verify:commercial": "node --experimental-strip-types scripts/verify-commercial-v1.mjs",
+    "verify:company-ai-macro-scope-v2": "node --experimental-strip-types scripts/verify-company-ai-macro-scope-v2.mjs",
     "verify:company-ai-assets": "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs",
     "verify:creation-flows": "node scripts/verify-creation-flows.mjs",
     "verify:operations-intake": "node scripts/verify-operations-intake.mjs",
