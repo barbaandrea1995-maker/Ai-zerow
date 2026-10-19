@@ -51,6 +51,7 @@ import {
 } from "@/app/page-client";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
+import { CommandFinanceJobKpi } from "@/components/command-finance-job-kpi";
 import { OperationalMapBoard } from "@/components/operational-map-board";
 import {
   CommandPersonalizationBar,
@@ -993,6 +994,7 @@ export default function CommandSurface({
     if (item.id in commandKpis) {
       return <KpiCard {...commandKpis[item.id as keyof typeof commandKpis]} />;
     }
+    if (item.id === "finance-job-kpi") return <CommandFinanceJobKpi />;
 
     if (item.id === "operational-map") {
       return <div className="h-full" id="operational-map"><OperationalMapBoard live mapFilter={mapFilter} markers={[]} onFilterChange={setMapFilter} onOpenEntity={openMapEntity} onSelectMarker={setSelectedMarker} selectedMarker={selectedMarker} /></div>;

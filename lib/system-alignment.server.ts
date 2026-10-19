@@ -1,8 +1,10 @@
 import { asc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
+import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import {
   assetCustodyLocations,
   companyAiJobScopes,
+  financeDocuments,
   geoLocations,
   geofences,
   inventoryItems,
@@ -54,6 +56,7 @@ function arrayLength(value: unknown) {
 }
 
 export async function getSystemAlignmentReport() {
+  await ensureFinanceDocumentSchema();
   const db = getDb();
   const [tenantRows, alignmentRunRows, alignmentLinkRows, alignmentTenantRows, expectedManifestHash] = await Promise.all([
     db.select({
@@ -149,6 +152,7 @@ export async function getSystemAlignmentReport() {
     reconciliations,
     aiLedger,
     documents,
+    financeDocRows,
     workflows,
     tracking,
     scopes,
@@ -193,13 +197,14 @@ export async function getSystemAlignmentReport() {
       .from(s06Reconciliations).where(inArray(s06Reconciliations.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: s07AiLedger.tenantId }).from(s07AiLedger).where(inArray(s07AiLedger.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: operationalDocuments.tenantId }).from(operationalDocuments).where(inArray(operationalDocuments.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
+    db.select({ tenantId: financeDocuments.tenantId }).from(financeDocuments).where(inArray(financeDocuments.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: w10Workflows.tenantId }).from(w10Workflows).where(inArray(w10Workflows.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: trackingSessions.tenantId }).from(trackingSessions).where(inArray(trackingSessions.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: companyAiJobScopes.tenantId }).from(companyAiJobScopes).where(inArray(companyAiJobScopes.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
     db.select({ tenantId: s05Records.tenantId }).from(s05Records).where(inArray(s05Records.tenantId, tenantIds)).limit(AUDIT_ROW_LIMIT),
   ]);
 
-  const boundedCollections = [memberships, warehouses, records, journeys, inventory, movements, qrs, locations, custody, fences, plans, stops, events, outbox, reconciliations, aiLedger, documents, workflows, tracking, scopes, s05];
+  const boundedCollections = [memberships, warehouses, records, journeys, inventory, movements, qrs, locations, custody, fences, plans, stops, events, outbox, reconciliations, aiLedger, documents, financeDocRows, workflows, tracking, scopes, s05];
   const snapshot: AlignmentSnapshot = {
     tenants: tenantRows,
     memberships,
@@ -218,7 +223,7 @@ export async function getSystemAlignmentReport() {
     outbox,
     reconciliations,
     aiLedger,
-    documents,
+    documents: [...documents, ...financeDocRows],
     domainRecords: s05,
     workflows,
     trackingSessions: tracking,

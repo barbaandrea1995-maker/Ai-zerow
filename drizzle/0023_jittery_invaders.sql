@@ -1,0 +1,1 @@
+CREATE INDEX `w10_workflows_tenant_module_job_updated_idx` ON `w10_workflows` (`tenant_id`,`module`,`job_id`,`updated_at`);

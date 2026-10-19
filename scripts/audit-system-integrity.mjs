@@ -176,7 +176,7 @@ const schemaSource = await fs.readFile(path.join(root, "db/schema.ts"), "utf8");
 const tenantScopedRegistries = [
   "accessProfiles", "commandDashboardPreferences", "companyAiJobScopes", "deliveryEvents", "geoLocations", "geofences",
   "inventoryItems", "inventoryMovements", "jobJourneyRecords", "locationAccessAudit", "locationEvents", "locationSamples",
-  "operationalDocuments", "qrCodes", "routePlans", "routeStops", "s04Records", "s05Records", "s06Events", "s06Outbox",
+  "financeDocuments", "operationalDocuments", "qrCodes", "routePlans", "routeStops", "s04Records", "s05Records", "s06Events", "s06Outbox",
   "s06Reconciliations", "s07AiLedger", "tenantInvitations", "tenantMemberships", "tenantWarehouses", "trackingDevices",
   "trackingProviders", "trackingSessions", "vehicleDeviceBindings", "w10Workflows",
 ];

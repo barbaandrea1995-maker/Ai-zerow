@@ -230,6 +230,7 @@ export const w10Workflows = sqliteTable("w10_workflows", {
 }, (table) => ({
   tenantIdempotencyUnique: uniqueIndex("w10_workflows_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
   tenantModuleUpdatedIdx: index("w10_workflows_tenant_module_updated_idx").on(table.tenantId, table.module, table.updatedAt),
+  tenantModuleJobUpdatedIdx: index("w10_workflows_tenant_module_job_updated_idx").on(table.tenantId, table.module, table.jobId, table.updatedAt),
   tenantModuleStatusIdx: index("w10_workflows_tenant_module_status_idx").on(table.tenantId, table.module, table.status, table.updatedAt),
 }));
 
@@ -521,6 +522,37 @@ export const operationalDocuments = sqliteTable("operational_documents", {
   tenantJobHashUnique: uniqueIndex("operational_documents_tenant_job_hash_uq").on(table.tenantId, table.jobId, table.sha256),
   tenantIdempotencyUnique: uniqueIndex("operational_documents_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
   tenantJobCreatedIdx: index("operational_documents_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
+}));
+
+/**
+ * Finance intake archive. A document may be company-wide or linked to one
+ * tenant job; finance visibility is intentionally independent from job access.
+ * Original files remain quarantined until a provider-backed scan is recorded.
+ */
+export const financeDocuments = sqliteTable("finance_documents", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id"),
+  category: text("category").notNull(),
+  fileName: text("file_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  objectKey: text("object_key").notNull(),
+  storageStatus: text("storage_status").notNull().default("STORED"),
+  scanStatus: text("scan_status").notNull().default("NOT_RUN"),
+  provenance: text("provenance").notNull(),
+  status: text("status").notNull().default("QUARANTINED"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantHashUnique: uniqueIndex("finance_documents_tenant_hash_uq").on(table.tenantId, table.sha256),
+  tenantIdempotencyUnique: uniqueIndex("finance_documents_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantCreatedIdx: index("finance_documents_tenant_created_idx").on(table.tenantId, table.createdAt),
+  tenantJobCreatedIdx: index("finance_documents_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
 }));
 
 /**

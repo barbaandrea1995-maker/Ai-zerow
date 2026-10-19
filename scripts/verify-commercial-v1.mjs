@@ -253,6 +253,11 @@ assert(w10Migration.includes("CREATE TABLE `w10_workflows`"), "W10 must persist 
 assert(w10Migration.includes("w10_workflows_tenant_idempotency_uq"), "W10 workflow creation must be idempotent per tenant");
 assert(w10Migration.includes("w10_workflows_tenant_module_status_idx"), "W10 workflow status readback must be indexed");
 
+const financeDocumentMigration = await readFile(join(root, "drizzle", "0024_volatile_skullbuster.sql"), "utf8");
+const financeDocumentSchema = await readFile(join(root, "lib", "finance-document-schema.server.ts"), "utf8");
+assert(financeDocumentMigration.includes("CREATE TABLE `finance_documents`"), "Finance intake must have a D1 document registry");
+assert(financeDocumentSchema.includes("CREATE TABLE IF NOT EXISTS finance_documents") && financeDocumentSchema.includes("finance_documents_tenant_hash_uq"), "Finance document reads must bootstrap their additive schema and tenant-unique hash index");
+
 const rateLimitAdapter = await readFile(join(root, "lib", "ai-rate-limit.ts"), "utf8");
 assert(rateLimitAdapter.includes("requestCount} + 1"), "AI quota increments must be atomic");
 assert(rateLimitAdapter.includes(".returning({ requestCount"), "AI quota enforcement must use the atomic returned count");

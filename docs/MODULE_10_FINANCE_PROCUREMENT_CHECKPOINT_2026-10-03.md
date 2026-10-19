@@ -58,6 +58,15 @@ Il perimetro chiuso è Sites/D1: proposta, approval, versioning, idempotenza, ev
 
 `W10 SITES TECHNICAL PASS` nel perimetro owner-only privato. Finance e Procurement sono pronti per il prossimo gate di integrazione, ma non sono certificati come ERP, contabilità o procurement provider-backed e la roadmap commerciale resta `NO_GO` finché i gate sopra non sono chiusi.
 
+## Collegamento valore commessa — 19 ottobre 2026
+
+- La creazione commessa ammette lavorazioni miste con classificazione Company AI per singola voce; la classificazione complessiva è facoltativa. Tipologia (cantiere, pronto intervento, manutenzione) e classificazione tecnica sono campi distinti.
+- Un eventuale valore preventivato o accordato viene scritto come record Finance versionato `JOB_COMMERCIAL_VALUE` nello stesso batch della commessa e letto da `/api/finance/portfolio` con tenant scope.
+- La superficie Finanza presenta questi importi come valore atteso/accordato, senza aggregarli a fatture, costi, incassi o saldo.
+- Centrale aggiunge `finance-job-kpi`, riservato a `finance.read`: il catalogo S04 delle commesse e il riepilogo sono riletti da `/api/finance/job-summary`; le voci W10 sono separate per stato e valuta. L’indice per tenant/modulo/commessa è nella migrazione `0023_jittery_invaders.sql`.
+- Il contratto per fatture, bolle e documenti di cassa è in `docs/COMMESSA_FINANCE_IMPLEMENTATION_CONTRACT_2026-10-19.md`. Archivio e upload Finance sono stati aggiunti nel blocco successivo; scansione provider, estrazione Company AI e registri contabili restano gate futuri.
+- Verifica eseguita in questo blocco: TypeScript PASS. Smoke runtime, test browser e deploy non eseguiti.
+
 ## Hardening follow-up — 10 ottobre 2026
 
 - La richiesta di acquisto ora accetta più righe materiale (fino a 80), con quantità positive e precisione massima di tre decimali. Il server rifiuta righe incomplete, descrizioni/unità oltre il limite e quantità non rappresentabili invece di trasformarle in zero.
@@ -66,3 +75,12 @@ Il perimetro chiuso è Sites/D1: proposta, approval, versioning, idempotenza, ev
 - La capability `approvals.review` è separata dalla lettura Governance: Auditor può consultare evidenze e voci W10 ma non approvarle. L’approvazione resta disponibile a Owner, Amministratore, Manager e Ufficio.
 - La risposta UI usa il campo API canonico `recordType`.
 - Build Vinext: PASS dopo le modifiche W10 e Authority. Lint e prove runtime non sono state eseguite in questo follow-up.
+
+## Archivio documenti Finance — 19 ottobre 2026
+
+- Aggiunto `finance_documents`, separato dal registro operativo e con `jobId` facoltativo. Il server risolve ogni commessa collegata nel tenant corrente.
+- `POST/GET /api/finance/documents` usa `finance.write/read`; upload verificato per MIME, firma, dimensione, SHA-256, idempotenza, deduplica e readback R2, con evento, outbox e reconciliation S06.
+- I file sono archiviati in quarantena (`NOT_RUN` / `QUARANTINED`); download e Company AI restano bloccati fino a una scansione provider verificata.
+- Il catalogo Documenti include le righe Finance solo con `finance.read`; il download e le transizioni di sicurezza distinguono il perimetro finanziario da `documents.read/write`.
+- Finanza mostra l’intake con commessa facoltativa, classi documentali, riepilogo e stato. L’upload non crea scritture di costo, ricavo o cassa.
+- Migrazione D1: `0024_volatile_skullbuster.sql`. TypeScript e `git diff --check`: PASS; smoke runtime, test browser e deploy non eseguiti.

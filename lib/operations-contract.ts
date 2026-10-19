@@ -45,6 +45,15 @@ export type JobWorkItem = {
   unit: string;
   confidence: number;
   source: string;
+  scope?: {
+    sectionId: string;
+    sectionTitle: string;
+    groupId: string;
+    groupTitle: string;
+    subgroupId: string;
+    subgroupTitle: string;
+    source: "human-authored" | "company-ai-proposal-confirmed";
+  };
 };
 
 export type JobAssignment = {
@@ -210,6 +219,18 @@ function workItemFromUnknown(value: unknown, index: number): JobWorkItem | null 
   const label = text(value.label, text(value.detail));
   if (!label) return null;
   const confidenceValue = typeof value.confidence === "number" ? value.confidence : Number(value.confidence);
+  const scopeValue = isRecord(value.scope) ? value.scope : null;
+  const scope = scopeValue && ["sectionId", "sectionTitle", "groupId", "groupTitle", "subgroupId", "subgroupTitle"].every((key) => text(scopeValue[key]).length > 0)
+    ? {
+      sectionId: text(scopeValue.sectionId).slice(0, 80),
+      sectionTitle: text(scopeValue.sectionTitle).slice(0, 120),
+      groupId: text(scopeValue.groupId).slice(0, 120),
+      groupTitle: text(scopeValue.groupTitle).slice(0, 160),
+      subgroupId: text(scopeValue.subgroupId).slice(0, 160),
+      subgroupTitle: text(scopeValue.subgroupTitle).slice(0, 180),
+      source: scopeValue.source === "company-ai-proposal-confirmed" ? "company-ai-proposal-confirmed" as const : "human-authored" as const,
+    }
+    : undefined;
   return {
     id: text(value.id, `work-${index + 1}`).slice(0, 80),
     label: label.slice(0, 180),
@@ -218,6 +239,7 @@ function workItemFromUnknown(value: unknown, index: number): JobWorkItem | null 
     unit: text(value.unit).slice(0, 24),
     confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0.7,
     source: text(value.source, "commessa-intake").slice(0, 120),
+    ...(scope ? { scope } : {}),
   };
 }
 
@@ -468,12 +490,10 @@ export function jobCompletionRequirements(payload: JobPayload, reportDate = acti
   const activitiesComplete = payload.activities.length > 0 && payload.activities.every((activity) => activity.state === "done");
   const assignmentComplete = Boolean(payload.assignment && (text(payload.assignment.responsible) || text(payload.assignment.team)));
   const location = text(payload.location);
-  const scope = isRecord(payload.scope) ? payload.scope : null;
-  const scopeSubgroup = text(payload.scopeSubgroupId, text(scope?.subgroupId));
-  const scopeComplete = scopeSubgroup.length >= 2 || (text(payload.jobType).length >= 2 && text(payload.specialization).length >= 2);
+  const workPackages = Array.isArray(payload.workItems) ? payload.workItems : [];
   return [
     { key: "title", label: "Nome commessa", complete: text(payload.title).length >= 2, detail: "Identità della commessa" },
-    { key: "classification", label: "Scope operativo", complete: text(payload.openingType).length >= 2 && scopeComplete, detail: "Tipo commessa, sezione, raggruppamento e sottogruppo" },
+    { key: "classification", label: "Profilo del lavoro", complete: text(payload.openingType).length >= 2 && (workPackages.length > 0 || text(payload.description).length >= 2), detail: "Tipologia e lavorazioni descritte; la classificazione tecnica può essere proposta da Company AI" },
     { key: "description", label: "Contesto operativo", complete: text(payload.description).length >= 2, detail: "Obiettivo e perimetro dell’intervento" },
     { key: "worksite", label: "Luogo di intervento", complete: location.length >= 2 && location.toLowerCase() !== "ubicazione da definire", detail: "Cantiere o sede dell’intervento" },
     { key: "assignment", label: "Assegnazione", complete: assignmentComplete, detail: "Responsabile o squadra operativa" },

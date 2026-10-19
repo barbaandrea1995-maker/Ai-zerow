@@ -38,6 +38,14 @@ export const COMMAND_WIDGET_CATALOG = [
     defaultSize: "compact",
   },
   {
+    id: "finance-job-kpi",
+    label: "Finanza per commessa",
+    description: "Valore commerciale e stato delle spese Finance per una commessa selezionata dal catalogo aziendale.",
+    requiredCapabilities: ["finance.read"],
+    allowedSizes: ["wide", "full"],
+    defaultSize: "wide",
+  },
+  {
     id: "planning-overview",
     label: "Pianificazione",
     description: "Piani, attività e conflitti del perimetro autorizzato.",

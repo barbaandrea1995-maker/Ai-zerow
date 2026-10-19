@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { companyAiJobScopes, geofences, geoLocations, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { companyAiJobScopes, geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   assertTenantScope,
   getAuthorityContext,
@@ -47,6 +48,15 @@ function boundedText(value: unknown, max: number, fallback = "") {
   return safeText(value, fallback).slice(0, max);
 }
 
+function parseJsonRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function requestedGeocodeCandidate(value: unknown) {
   if (!isRecord(value)) return null;
   const coordinates = isRecord(value.coordinates) ? value.coordinates : value;
@@ -66,6 +76,12 @@ function normalizeWorkItems(value: unknown): JobWorkItem[] {
     const label = boundedText(item.label ?? item.detail, 180);
     if (label.length < 2) return [];
     const confidenceValue = typeof item.confidence === "number" ? item.confidence : Number(item.confidence);
+    const scopeInput = isRecord(item.scope) ? item.scope : {};
+    const scope = resolveCompanyAiScopeSelection({
+      sectionId: boundedText(scopeInput.sectionId, 80),
+      groupId: boundedText(scopeInput.groupId, 120),
+      subgroupId: boundedText(scopeInput.subgroupId, 160),
+    });
     return [{
       id: boundedText(item.id, 80, `work-${index + 1}`),
       label,
@@ -74,8 +90,35 @@ function normalizeWorkItems(value: unknown): JobWorkItem[] {
       unit: boundedText(item.unit, 24),
       confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : 0.7,
       source: boundedText(item.source, 120, "commessa-intake"),
+      ...(scope ? { scope: { ...scope, source: scopeInput.source === "company-ai-proposal-confirmed" ? "company-ai-proposal-confirmed" as const : "human-authored" as const } } : {}),
     } satisfies JobWorkItem];
   }).slice(0, 24);
+}
+
+function parseEuroMinor(value: unknown): number | null {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0 || value > 1_000_000_000) return null;
+    return Math.round(value * 100);
+  }
+  if (typeof value !== "string" || !value.trim()) return null;
+  let normalized = value.replace(/[€\s]/g, "").trim();
+  if (!/^[\d.,]+$/.test(normalized)) return null;
+  const comma = normalized.lastIndexOf(",");
+  const dot = normalized.lastIndexOf(".");
+  if (comma >= 0 && dot >= 0) {
+    const decimalMark = comma > dot ? "," : ".";
+    const groupingMark = decimalMark === "," ? "." : ",";
+    normalized = normalized.split(groupingMark).join("").replace(decimalMark, ".");
+  } else if (comma >= 0) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else if (dot >= 0 && /^\d{1,3}(?:\.\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, "");
+  }
+  if (!/^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 1_000_000_000) return null;
+  const minor = Math.round(amount * 100);
+  return Number.isSafeInteger(minor) ? minor : null;
 }
 
 function knowledgeContextForScope(scopeSelection: NonNullable<ReturnType<typeof resolveCompanyAiScopeSelection>>, workItems: JobWorkItem[]) {
@@ -172,9 +215,33 @@ export async function POST(request: Request) {
     groupId: boundedText(scopeInput.scopeGroupId ?? scopeInput.groupId, 120),
     subgroupId: boundedText(scopeInput.scopeSubgroupId ?? scopeInput.subgroupId, 160),
   });
-  const category = scopeSelection?.sectionTitle ?? requestedCategory;
-  const jobType = boundedText(input.jobType, 120, scopeSelection?.groupTitle ?? "");
-  const specialization = boundedText(input.specialization, 120, scopeSelection?.subgroupTitle ?? "");
+  const scopePartCount = [scopeInput.scopeSectionId ?? scopeInput.sectionId, scopeInput.scopeGroupId ?? scopeInput.groupId, scopeInput.scopeSubgroupId ?? scopeInput.subgroupId].filter((value) => boundedText(value, 160)).length;
+  const rawWorkItems = Array.isArray(input.workItems) ? input.workItems : [];
+  if (rawWorkItems.length > 24 || rawWorkItems.some((item) => !isRecord(item) || boundedText(item.label ?? item.detail, 180).length < 2)) {
+    return Response.json({ error: "work_items_invalid", message: "Inserisci al massimo 24 lavorazioni, ciascuna con una descrizione valida." }, { status: 400 });
+  }
+  const hasInvalidWorkItemScope = rawWorkItems.some((item) => {
+    if (!isRecord(item) || !isRecord(item.scope)) return false;
+    const scope = item.scope;
+    const fields = {
+      sectionId: boundedText(scope.sectionId, 80),
+      groupId: boundedText(scope.groupId, 120),
+      subgroupId: boundedText(scope.subgroupId, 160),
+    };
+    return Object.values(fields).some(Boolean) && !resolveCompanyAiScopeSelection(fields);
+  });
+  if (hasInvalidWorkItemScope) {
+    return Response.json({ error: "work_item_scope_invalid", message: "La classificazione di una lavorazione non corrisponde al catalogo tecnico aziendale." }, { status: 400 });
+  }
+  const workItems = normalizeWorkItems(input.workItems);
+  const workItemScopeIds = new Set(workItems.map((item) => item.scope?.subgroupId).filter(Boolean));
+  const firstWorkItemScope = workItems[0]?.scope;
+  const commonWorkItemScope = firstWorkItemScope && workItems.length > 0 && workItems.every((item) => item.scope?.subgroupId === firstWorkItemScope.subgroupId)
+    ? firstWorkItemScope
+    : null;
+  const category = scopeSelection?.sectionTitle ?? commonWorkItemScope?.sectionTitle ?? (workItemScopeIds.size > 1 ? "Lavorazioni miste" : requestedCategory);
+  const jobType = boundedText(input.jobType, 120, scopeSelection?.groupTitle ?? commonWorkItemScope?.groupTitle ?? "");
+  const specialization = boundedText(input.specialization, 120, scopeSelection?.subgroupTitle ?? commonWorkItemScope?.subgroupTitle ?? "");
   const sourceMode = input.sourceMode === "COMPANY_AI" ? "COMPANY_AI" : "MANUAL";
   const aiPreviewId = boundedText(input.aiPreviewId, 120);
   const clientName = boundedText(input.clientName ?? input.client, 160, client);
@@ -191,11 +258,20 @@ export async function POST(request: Request) {
   const cup = boundedText(input.cup, 80);
   const tone = validTone(input.tone);
   const requestedIdempotencyKey = boundedText(input.idempotencyKey, 160);
-  const workItems = normalizeWorkItems(input.workItems);
+  const commercialValueInput = isRecord(input.commercialValue) ? input.commercialValue : {};
+  const rawCommercialAmount = commercialValueInput.amount ?? input.commercialValueAmount;
+  const rawCommercialBasis = commercialValueInput.basis ?? input.commercialValueBasis;
+  const commercialAmountMinor = parseEuroMinor(rawCommercialAmount);
+  const commercialValueBasis = rawCommercialBasis === "CONTRACTED" ? "CONTRACTED" : "ESTIMATE";
 
   if (title.length < 2) return Response.json({ error: "title_must_be_2_to_120_characters" }, { status: 400 });
   if (!COMMESSA_TYPES.some((option) => option.value === openingType)) return Response.json({ error: "invalid_commessa_type", allowed: COMMESSA_TYPES.map((option) => option.value) }, { status: 400 });
-  if (!scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup", message: "Seleziona una sezione, un raggruppamento e un sottogruppo." }, { status: 400 });
+  if (scopePartCount > 0 && !scopeSelection) return Response.json({ error: "scope_must_end_at_subgroup", message: "Completa la classificazione tecnica facoltativa fino al sottogruppo." }, { status: 400 });
+  if (description.trim().length < 8 && workItems.length === 0) return Response.json({ error: "work_description_required", message: "Descrivi il lavoro o inserisci almeno una lavorazione." }, { status: 400 });
+  if (rawCommercialBasis !== undefined && rawCommercialBasis !== null && rawCommercialBasis !== "" && rawCommercialBasis !== "ESTIMATE" && rawCommercialBasis !== "CONTRACTED") {
+    return Response.json({ error: "commercial_value_basis_invalid", allowed: ["ESTIMATE", "CONTRACTED"] }, { status: 400 });
+  }
+  if (rawCommercialAmount !== undefined && rawCommercialAmount !== null && String(rawCommercialAmount).trim() && commercialAmountMinor === null) return Response.json({ error: "commercial_value_invalid", message: "Inserisci un importo valido in euro." }, { status: 400 });
   if (statusCode === "COMPLETED" || statusCode === "CLOSED") {
     return Response.json({ error: "new_job_must_start_before_completion" }, { status: 400 });
   }
@@ -231,6 +307,20 @@ export async function POST(request: Request) {
         ))
         .limit(1);
       if (!existingRecord) return Response.json({ error: "operations_idempotency_readback_unavailable" }, { status: 503 });
+      const existingPayload = parseJsonRecord(existingRecord.payloadJson);
+      if (isRecord(existingPayload.commercialValue)) {
+        const [valueReadback] = await db.select({ id: jobJourneyRecords.id }).from(jobJourneyRecords)
+          .where(and(
+            eq(jobJourneyRecords.tenantId, context.tenantId),
+            eq(jobJourneyRecords.jobId, existingRecord.id),
+            eq(jobJourneyRecords.domain, "finance"),
+            eq(jobJourneyRecords.recordType, "JOB_COMMERCIAL_VALUE"),
+            eq(jobJourneyRecords.status, "ACTIVE"),
+          ))
+          .orderBy(desc(jobJourneyRecords.version), desc(jobJourneyRecords.updatedAt))
+          .limit(1);
+        if (!valueReadback) return Response.json({ error: "finance_job_value_readback_unavailable" }, { status: 503 });
+      }
       const rows = await db.select().from(s04Records)
         .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
         .orderBy(desc(s04Records.updatedAt));
@@ -263,12 +353,21 @@ export async function POST(request: Request) {
     const eventId = crypto.randomUUID();
     const scopeId = `COMPANY-AI-SCOPE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const scopeEventId = crypto.randomUUID();
+    const commercialValueId = commercialAmountMinor !== null ? `JOB-COMMERCIAL-VALUE-${crypto.randomUUID().slice(0, 10).toUpperCase()}` : null;
     const geoLocationId = `GEO-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
     const geofenceId = `GEOFENCE-CANTIERE-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
     const geofenceRadius = defaultGeofenceRadius("CANTIERE");
     const scopeIdempotencyKey = `company-ai-scope:create:${idempotencyKey}`.slice(0, 160);
     const knowledgePack = getCompanyAiKnowledgePackSummary();
-    const knowledgeContext = knowledgeContextForScope(scopeSelection, workItems);
+    const knowledgeContext = scopeSelection ? knowledgeContextForScope(scopeSelection, workItems) : [];
+    const commercialValue = commercialAmountMinor !== null ? {
+      amountMinor: commercialAmountMinor,
+      currency: "EUR",
+      basis: commercialValueBasis,
+      version: 1,
+      effectiveAt: now,
+      source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored",
+    } : null;
     const persistedWorksiteLocation = {
       provider: serverWorksiteLocation.provider,
       providerPlaceId: serverWorksiteLocation.providerPlaceId,
@@ -322,14 +421,15 @@ export async function POST(request: Request) {
       workItems,
       sourceMode,
       aiPreviewId: aiPreviewId || null,
-      scopeLevel: scopeSelection.level,
-      scopeSectionId: scopeSelection.sectionId,
-      scopeGroupId: scopeSelection.groupId,
-      scopeSubgroupId: scopeSelection.subgroupId,
-      scope: {
+      scopeLevel: scopeSelection?.level ?? null,
+      scopeSectionId: scopeSelection?.sectionId ?? "",
+      scopeGroupId: scopeSelection?.groupId ?? "",
+      scopeSubgroupId: scopeSelection?.subgroupId ?? "",
+      scope: scopeSelection ? {
         ...scopeSelection,
         source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "human-authored",
-      },
+      } : null,
+      commercialValue,
       version: 1,
       activities: [],
       evidence: [],
@@ -346,7 +446,8 @@ export async function POST(request: Request) {
       title,
       statusCode,
       sourceMode,
-      scope: { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId },
+      scope: scopeSelection ? { level: scopeSelection.level, sectionId: scopeSelection.sectionId, groupId: scopeSelection.groupId, subgroupId: scopeSelection.subgroupId } : null,
+      commercialValue,
       worksiteLocation: {
         status: "SERVER_VERIFIED",
         provider: serverWorksiteLocation.provider,
@@ -356,11 +457,12 @@ export async function POST(request: Request) {
         geofenceRadiusMeters: geofenceRadius,
       },
       workItemCount: workItems.length,
+      workPackageScopes: workItems.flatMap((item) => item.scope ? [{ workItemId: item.id, sectionId: item.scope.sectionId, groupId: item.scope.groupId, subgroupId: item.scope.subgroupId }] : []),
       version: 1,
       source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
     });
 
-    await db.batch([
+    const writeStatements: [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] = [
       db.insert(s04Records).values({
         id,
         tenantId: context.tenantId,
@@ -464,7 +566,10 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
-      db.insert(companyAiJobScopes).values({
+    ];
+    if (scopeSelection) {
+      writeStatements.push(
+        db.insert(companyAiJobScopes).values({
         id: scopeId,
         tenantId: context.tenantId,
         jobId: id,
@@ -487,7 +592,7 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
-      db.insert(s06Events).values({
+        db.insert(s06Events).values({
         eventId: scopeEventId,
         tenantId: context.tenantId,
         eventType: "company_ai.scope.linked",
@@ -507,7 +612,7 @@ export async function POST(request: Request) {
         status: "COMMITTED_SITES_READBACK",
         createdAt: now,
       }),
-      db.insert(s06Outbox).values({
+        db.insert(s06Outbox).values({
         id: crypto.randomUUID(),
         tenantId: context.tenantId,
         eventId: scopeEventId,
@@ -517,7 +622,7 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
-      db.insert(s06Reconciliations).values({
+        db.insert(s06Reconciliations).values({
         id: crypto.randomUUID(),
         tenantId: context.tenantId,
         aggregateType: "company_ai_scope",
@@ -529,7 +634,7 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
-      db.insert(s07AiLedger).values({
+        db.insert(s07AiLedger).values({
         id: crypto.randomUUID(),
         tenantId: context.tenantId,
         entryType: "knowledge_scope_link",
@@ -543,8 +648,28 @@ export async function POST(request: Request) {
         approvedBy: null,
         readbackJson: JSON.stringify({ status: "SITES_LEDGER_VERIFIED", checkedAt: now }),
         createdAt: now,
-      }),
-    ]);
+        }),
+      );
+    }
+    if (commercialValue && commercialValueId) {
+      writeStatements.push(db.insert(jobJourneyRecords).values({
+        id: commercialValueId,
+        tenantId: context.tenantId,
+        jobId: id,
+        domain: "finance",
+        recordType: "JOB_COMMERCIAL_VALUE",
+        title: "Valore della commessa",
+        status: "ACTIVE",
+        version: 1,
+        payloadJson: JSON.stringify(commercialValue),
+        idempotencyKey: `finance:job-commercial-value:${id}:v1`.slice(0, 160),
+        createdBy: context.actorId,
+        updatedBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }));
+    }
+    await db.batch(writeStatements);
 
     const rows = await db.select().from(s04Records)
       .where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "operations")))
@@ -557,11 +682,28 @@ export async function POST(request: Request) {
     const [geofenceReadback] = await db.select().from(geofences)
       .where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.id, geofenceId)))
       .limit(1);
+    let commercialValueReadback: { status: "verified"; recordId: string; version: number } | null = null;
+    if (commercialValue && commercialValueId) {
+      const [valueRow] = await db.select().from(jobJourneyRecords).where(and(
+        eq(jobJourneyRecords.tenantId, context.tenantId),
+        eq(jobJourneyRecords.jobId, id),
+        eq(jobJourneyRecords.id, commercialValueId),
+        eq(jobJourneyRecords.domain, "finance"),
+        eq(jobJourneyRecords.recordType, "JOB_COMMERCIAL_VALUE"),
+        eq(jobJourneyRecords.status, "ACTIVE"),
+      )).limit(1);
+      const valuePayload = valueRow ? parseJsonRecord(valueRow.payloadJson) : {};
+      if (!valueRow || valuePayload.amountMinor !== commercialValue.amountMinor || valuePayload.currency !== "EUR" || valuePayload.basis !== commercialValue.basis) {
+        return Response.json({ error: "finance_job_value_readback_unavailable" }, { status: 503, headers: { "cache-control": "private, no-store" } });
+      }
+      commercialValueReadback = { status: "verified", recordId: valueRow.id, version: valueRow.version };
+    }
     return Response.json({
       ...operationEnvelope(context, rows.map(recordForResponse)),
       created: recordForResponse(created),
       location: locationReadback ? locationForResponse(locationReadback) : null,
       geofence: geofenceReadback ? geofenceForResponse(geofenceReadback) : null,
+      financeValueReadback: commercialValueReadback,
       event: { eventId, aggregateId: naming.canonicalCode, aggregateVersion: 1, readback: "verified" },
       idempotent: false,
     }, { status: 201, headers: { "cache-control": "no-store" } });

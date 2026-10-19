@@ -28,6 +28,9 @@ export type IntakeDraft = {
   cup: string;
   dueDate: string;
   priority: "HIGH" | "STANDARD" | "LOW";
+  workItemsText: string;
+  commercialValueAmount: string;
+  commercialValueBasis: "ESTIMATE" | "CONTRACTED";
 };
 
 export type IntakeSuggestion = {
@@ -96,6 +99,9 @@ export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
   cup: "",
   dueDate: "",
   priority: "STANDARD",
+  workItemsText: "",
+  commercialValueAmount: "",
+  commercialValueBasis: "ESTIMATE",
 };
 
 export const INTAKE_OPENING_TYPES = COMMESSA_TYPES;
@@ -122,4 +128,7 @@ export const INTAKE_FIELD_LABELS: Record<keyof IntakeDraft, string> = {
   cup: "CUP",
   dueDate: "Scadenza operativa",
   priority: "Priorità",
+  workItemsText: "Lavorazioni",
+  commercialValueAmount: "Valore commessa",
+  commercialValueBasis: "Base del valore",
 };

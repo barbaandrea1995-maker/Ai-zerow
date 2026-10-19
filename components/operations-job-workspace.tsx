@@ -391,6 +391,13 @@ function valueOr(value: unknown, fallback = "—") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function workScopeLabel(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const scope = value as Record<string, unknown>;
+  const parts = [scope.sectionTitle, scope.groupTitle, scope.subgroupTitle].filter((part): part is string => typeof part === "string" && part.trim().length > 0);
+  return parts.length === 3 ? parts.join(" / ") : "";
+}
+
 function formatCommercialDate(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return "Da pianificare";
   const raw = value.trim();
@@ -1142,7 +1149,7 @@ export default function OperationsJobWorkspace({
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
-      : "Nuova commessa";
+      : payloadText("openingType") === "MANUTENZIONE" ? "Manutenzione programmata" : "Cantiere / nuova commessa";
   const sourceMode =
     payloadText("sourceMode") === "COMPANY_AI"
       ? "Da preventivo"
@@ -1160,7 +1167,16 @@ export default function OperationsJobWorkspace({
     typeof jobScope.groupTitle === "string" &&
     typeof jobScope.subgroupTitle === "string"
       ? `${jobScope.sectionTitle} / ${jobScope.groupTitle} / ${jobScope.subgroupTitle}`
-      : "Categoria da completare";
+      : Array.isArray(jobData.workItems) && jobData.workItems.some((item) => item && typeof item === "object" && "scope" in item)
+        ? "Classificazioni collegate alle singole lavorazioni"
+        : "Da classificare con Company AI";
+  const rawCommercialValue = jobData.commercialValue && typeof jobData.commercialValue === "object" && !Array.isArray(jobData.commercialValue)
+    ? jobData.commercialValue as Record<string, unknown>
+    : null;
+  const commercialAmountMinor = typeof rawCommercialValue?.amountMinor === "number" && Number.isSafeInteger(rawCommercialValue.amountMinor) ? rawCommercialValue.amountMinor : null;
+  const commercialValueLabel = commercialAmountMinor === null
+    ? "Valore non indicato"
+    : new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(commercialAmountMinor / 100);
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
   const jobCode = valueOr(job.canonicalCode, jobId);
   const clientRows = [
@@ -1274,6 +1290,7 @@ export default function OperationsJobWorkspace({
                 <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">PERIMETRO DEL LAVORO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">{quoteSummary ? "Lavori dal preventivo" : "Descrizione e lavorazioni"}</h2></div>
                 {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} lavorazioni</span>}
               </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3.5 py-3"><div><p className="text-[8px] font-semibold uppercase tracking-[.15em] text-lime-100/60">Valore commerciale della commessa</p><p className="mt-1 text-lg font-semibold text-lime-100">{commercialValueLabel}</p></div><span className="rounded-full border border-lime-300/15 bg-black/20 px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.08em] text-lime-100/70">{commercialAmountMinor === null ? "Da definire" : rawCommercialValue?.basis === "CONTRACTED" ? "Accordato" : "Preventivato"}</span></div>
               {quoteSummary ? <div className="mt-4 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3.5">
                 <p className="text-[8px] font-semibold uppercase tracking-[.14em] text-cyan-100/60">Oggetto del preventivo</p>
                 <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-100">{quoteSummary.object}</p>
@@ -1283,7 +1300,7 @@ export default function OperationsJobWorkspace({
               {workItems.length > 0 ? <div className="mt-4 divide-y divide-white/[.06] rounded-xl border border-white/[.06] bg-black/15 px-3">
                 {workItems.slice(0, 3).map((item, index) => <div className="flex items-start gap-3 py-3" key={typeof item.id === "string" ? item.id : `work-${index}`}>
                   <span className="grid size-6 shrink-0 place-items-center rounded-lg border border-lime-300/20 bg-lime-300/[.05] font-mono text-[8px] text-lime-100">{String(index + 1).padStart(2, "0")}</span>
-                  <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Da {item.source}{typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
+                  <div className="min-w-0 flex-1"><p className="text-[11px] font-medium leading-4 text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[10px] leading-4 text-slate-500">{item.detail}</p>}{workScopeLabel(item.scope) && <p className="mt-1.5 text-[8px] font-medium uppercase tracking-[.08em] text-cyan-100/70">{workScopeLabel(item.scope)}</p>}{sourceMode === "Da preventivo" && typeof item.source === "string" && item.source && <p className="mt-1 text-[8px] text-cyan-100/55">Da {item.source}{typeof item.confidence === "number" ? ` · ${Math.round(item.confidence * 100)}%` : ""}</p>}</div>
                   {(item.quantity !== undefined || (typeof item.unit === "string" && item.unit.length > 0)) && <span className="shrink-0 text-right text-[9px] text-slate-400">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span>}
                 </div>)}
                 {workItems.length > 3 && <details className="border-t border-white/[.06] py-3"><summary className="cursor-pointer list-none text-[9px] font-medium text-cyan-100/80">Mostra altre {workItems.length - 3} lavorazioni</summary><div className="mt-3 divide-y divide-white/[.06]">{workItems.slice(3).map((item, index) => <div className="flex items-start justify-between gap-3 py-2.5" key={typeof item.id === "string" ? item.id : `work-more-${index}`}><div><p className="text-[10px] text-slate-200">{valueOr(item.label ?? item.detail, "Lavorazione")}</p>{typeof item.detail === "string" && item.detail && item.detail !== item.label && <p className="mt-1 text-[9px] text-slate-600">{item.detail}</p>}</div><span className="shrink-0 text-[9px] text-slate-500">{valueOr(item.quantity, "—")}{typeof item.unit === "string" && item.unit ? ` ${item.unit}` : ""}</span></div>)}</div></details>}

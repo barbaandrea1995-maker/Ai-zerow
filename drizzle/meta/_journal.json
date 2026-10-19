@@ -162,6 +162,20 @@
       "when": 1792098636914,
       "tag": "0022_easy_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792429607390,
+      "tag": "0023_jittery_invaders",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792430343390,
+      "tag": "0024_volatile_skullbuster",
+      "breakpoints": true
     }
   ]
 }

@@ -26,7 +26,7 @@ import {
   type IntakeSuggestion,
   type IntakeWorkItem,
 } from "@/lib/operations-intake";
-import { inferCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiScopeSuggestion } from "@/lib/company-ai-scope";
+import { inferCompanyAiScopeSelection, resolveCompanyAiScopeSelection, scopeSelectionToFields, type CompanyAiScopeSuggestion } from "@/lib/company-ai-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +81,7 @@ function labeledValue(source: string, labels: string[]) {
 const INTAKE_LABELS = [
   "Titolo", "Oggetto", "Commessa", "Lavori", "Descrizione", "Descrizione lavori", "Oggetto lavori",
   "Lavorazioni", "Prestazioni", "Intervento", "Perimetro", "Note operative", "Cliente", "Committente",
+  "Lavorazioni previste", "Tipo intervento scelto", "Valore commessa", "Importo totale", "Totale offerta", "Totale preventivo", "Totale lavori",
   "Ragione sociale", "P. IVA", "PIVA", "Partita IVA", "Codice fiscale", "Referente", "Referente cliente",
   "Contatto", "Telefono", "Tel.", "Tel. cliente", "E-mail", "Email", "Mail", "Preventivo", "Riferimento",
   "Riferimento cliente", "Indirizzo cliente", "Sede cliente", "Indirizzo", "Cantiere", "Luogo di intervento",
@@ -340,13 +341,17 @@ function mergeWorkItems(base: IntakeWorkItem[], proposed: IntakeWorkItem[]) {
   if (!base.length) return proposed.slice(0, 24);
   if (!proposed.length) return base.slice(0, 24);
   const result = base.slice(0, 24);
-  const seen = new Set(result.map((item) => item.detail.toLocaleLowerCase("it-IT")));
+  const seen = new Map(result.map((item, index) => [item.detail.toLocaleLowerCase("it-IT"), index]));
   for (const item of proposed) {
     if (result.length >= 24) break;
     const key = item.detail.toLocaleLowerCase("it-IT");
-    if (seen.has(key)) continue;
+    const existingIndex = seen.get(key);
+    if (existingIndex !== undefined) {
+      if (!result[existingIndex].scope && item.scope) result[existingIndex] = { ...result[existingIndex], scope: item.scope };
+      continue;
+    }
     result.push({ ...item, id: `work-${result.length + 1}` });
-    seen.add(key);
+    seen.set(key, result.length - 1);
   }
   return result;
 }
@@ -384,6 +389,7 @@ function mergeOpenAiExtraction({
     ["cig", extraction.cig],
     ["cup", extraction.cup],
     ["dueDate", extraction.dueDate],
+    ["commercialValueAmount", extraction.commercialValueAmount],
   ];
   for (const [key, value] of fields) {
     if (!value) continue;
@@ -399,25 +405,38 @@ function mergeOpenAiExtraction({
     setDraftField(draft, "priority", extraction.priority);
     upsertSuggestion(suggestions, "priority", extraction.priority, confidence, source);
   }
+  if (extraction.commercialValueBasis) {
+    setDraftField(draft, "commercialValueBasis", extraction.commercialValueBasis);
+    upsertSuggestion(suggestions, "commercialValueBasis", extraction.commercialValueBasis, confidence, source);
+  }
 
-  const aiWorkItems = extraction.workItems.map((item, index) => ({
-    id: `work-${index + 1}`,
-    label: item.label,
-    detail: item.detail || item.label,
-    quantity: item.quantity,
-    unit: item.unit,
-    confidence,
-    source,
-  }));
+  const aiWorkItems = extraction.workItems.map((item, index) => {
+    const explicitScope = resolveCompanyAiScopeSelection({ sectionId: item.scopeSectionId, groupId: item.scopeGroupId, subgroupId: item.scopeSubgroupId });
+    const inferredScope = inferCompanyAiScopeSelection(item.detail)?.selection;
+    const itemScope = explicitScope ?? inferredScope;
+    return {
+      id: `work-${index + 1}`,
+      label: item.label,
+      detail: item.detail || item.label,
+      quantity: item.quantity,
+      unit: item.unit,
+      confidence,
+      source,
+      ...(itemScope ? { scope: { ...itemScope, source: "company-ai-proposal-confirmed" as const } } : {}),
+    };
+  });
   const resolvedWorkItems = mergeWorkItems(baseDraft.workItems ?? [], aiWorkItems);
   if (resolvedWorkItems.length) {
     draft.workItems = resolvedWorkItems;
+    draft.workItemsText = resolvedWorkItems.map((item) => item.label).join("\n");
     upsertSuggestion(suggestions, "workItems", `${resolvedWorkItems.length} lavorazioni separate`, confidence, source);
   }
 
   const aiSelection = resolveOpenAiScope(extraction);
   const deterministicSelection = baseScopeSuggestion.selection;
-  const selectedScope = deterministicSelection && baseScopeSuggestion.score >= 0.82
+  const packageScopeIds = new Set(resolvedWorkItems.map((item) => item.scope?.subgroupId).filter(Boolean));
+  const mixedWorkPackages = packageScopeIds.size > 1;
+  const selectedScope = mixedWorkPackages ? null : deterministicSelection && baseScopeSuggestion.score >= 0.82
     ? deterministicSelection
     : aiSelection ?? deterministicSelection;
   let scopeSuggestion = baseScopeSuggestion;
@@ -443,6 +462,12 @@ function mergeOpenAiExtraction({
     upsertSuggestion(suggestions, "scopeSectionId", selectedScope.sectionTitle, scopeScore, source);
     upsertSuggestion(suggestions, "scopeGroupId", selectedScope.groupTitle, scopeScore, source);
     upsertSuggestion(suggestions, "scopeSubgroupId", selectedScope.subgroupTitle, scopeScore, source);
+  } else if (mixedWorkPackages) {
+    draft.scopeSectionId = "";
+    draft.scopeGroupId = "";
+    draft.scopeSubgroupId = "";
+    scopeSuggestion = { selection: null, score: confidence, source: "company-ai", knowledgeHints: [], matchedSignals: extraction.evidence.slice(0, 8) };
+    upsertSuggestion(suggestions, "scopeSubgroupId", "Classificazione separata per lavorazione", confidence, source);
   }
   return { draft, suggestions, scopeSuggestion, knowledgeHints };
 }
@@ -465,14 +490,22 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const rawCig = labeledValue(source, ["CIG"]);
   const rawCup = labeledValue(source, ["CUP"]);
   const rawDueDate = labeledValue(source, ["Scadenza", "Consegna", "Fine lavori"]);
+  const rawCommercialText = labeledValue(source, ["Valore commessa", "Importo totale", "Totale offerta", "Totale preventivo", "Totale lavori"]);
+  const rawCommercialValue = rawCommercialText.match(/\d[\d.,]*/)?.[0] ?? "";
 
   const title = rawTitle || (firstLine && !firstLine.includes(":" ) ? firstLine : "");
-  const workItems = extractWorkItems(source, [title, rawDescription, rawClient, rawWorksite]);
+  const workItems = extractWorkItems(source, [title, rawDescription, rawClient, rawWorksite]).map((item) => {
+    const selection = inferCompanyAiScopeSelection(item.detail)?.selection;
+    return { ...item, ...(selection ? { scope: { ...selection, source: "company-ai-proposal-confirmed" as const } } : {}) };
+  });
   const structuredDescription = buildStructuredDescription({ title, rawDescription, workItems, client: rawClient, worksite: rawWorksite, source });
   const description = structuredDescription.value;
   const lowerSource = source.toLocaleLowerCase("it-IT");
-  const openingType = /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
-  const inferredScope = inferCompanyAiScopeSelection(source);
+  const openingType = /manutenzione (?:programmata|periodica|ordinaria)|contratto di manutenzione/.test(lowerSource)
+    ? "MANUTENZIONE"
+    : /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
+  const packageScopeIds = new Set(workItems.map((item) => item.scope?.subgroupId).filter(Boolean));
+  const inferredScope = packageScopeIds.size > 1 ? null : inferCompanyAiScopeSelection(source);
   const scopeFields = scopeSelectionToFields(inferredScope?.selection ?? null);
   const scopeSuggestion: CompanyAiScopeSuggestion = {
     selection: inferredScope?.selection ?? null,
@@ -503,6 +536,7 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   addSuggestion(suggestions, "cig", rawCig, 0.98, "Preventivo · CIG");
   addSuggestion(suggestions, "cup", rawCup, 0.98, "Preventivo · CUP");
   addSuggestion(suggestions, "dueDate", rawDueDate, 0.88, "Preventivo · scadenza");
+  addSuggestion(suggestions, "commercialValueAmount", rawCommercialValue, rawCommercialValue ? 0.78 : 0, "Preventivo · importo esplicito");
 
   const draft: Partial<IntakeDraft> = {
     ...DEFAULT_INTAKE_DRAFT,
@@ -512,6 +546,9 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     ...scopeFields,
     description: description.slice(0, 2_000),
     workItems,
+    workItemsText: workItems.map((item) => item.label).join("\n"),
+    commercialValueAmount: rawCommercialValue.slice(0, 40),
+    commercialValueBasis: /(?:ordine\s+confermato|contratto\s+firmato|offerta\s+accettata|preventivo\s+accettato)/i.test(source) ? "CONTRACTED" : "ESTIMATE",
     clientName: rawClient.slice(0, 160),
     clientTaxId: rawTaxId.slice(0, 80),
     clientContact: rawContact.slice(0, 120),
