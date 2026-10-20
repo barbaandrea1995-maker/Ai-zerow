@@ -585,6 +585,176 @@ export const financeDocumentExtractions = sqliteTable("finance_document_extracti
 }));
 
 /**
+ * Immutable human decisions over one extraction snapshot. Extraction output
+ * remains a proposal; a review records the corrected fields and the intended
+ * economic treatment without rewriting either the original or the proposal.
+ */
+export const financeDocumentReviews = sqliteTable("finance_document_reviews", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  documentId: text("document_id").notNull(),
+  extractionId: text("extraction_id").notNull(),
+  sourceSha256: text("source_sha256").notNull(),
+  sourceDocumentVersion: integer("source_document_version").notNull(),
+  extractionVersion: integer("extraction_version").notNull(),
+  classification: text("classification").notNull(),
+  reviewedFieldsJson: text("reviewed_fields_json").notNull(),
+  economicTreatment: text("economic_treatment").notNull().default("DOCUMENT_ONLY"),
+  status: text("status").notNull(),
+  reviewNote: text("review_note").notNull().default(""),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  reviewedBy: text("reviewed_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("finance_document_reviews_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantDocumentCreatedIdx: index("finance_document_reviews_tenant_document_created_idx").on(table.tenantId, table.documentId, table.createdAt),
+  tenantExtractionCreatedIdx: index("finance_document_reviews_tenant_extraction_created_idx").on(table.tenantId, table.extractionId, table.createdAt),
+}));
+
+/**
+ * Canonical links keep the original document single-copy while allowing a
+ * verified association with multiple jobs and future domain entities.
+ */
+export const financeDocumentLinks = sqliteTable("finance_document_links", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  documentId: text("document_id").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id").notNull(),
+  status: text("status").notNull().default("CONFIRMED"),
+  source: text("source").notNull().default("HUMAN_REVIEW"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  confirmedBy: text("confirmed_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantEntityUnique: uniqueIndex("finance_document_links_tenant_document_entity_uq").on(table.tenantId, table.documentId, table.entityType, table.entityId),
+  tenantIdempotencyUnique: uniqueIndex("finance_document_links_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantDocumentStatusIdx: index("finance_document_links_tenant_document_status_idx").on(table.tenantId, table.documentId, table.status, table.updatedAt),
+  tenantEntityStatusIdx: index("finance_document_links_tenant_entity_status_idx").on(table.tenantId, table.entityType, table.entityId, table.status, table.updatedAt),
+}));
+
+/**
+ * Confirmable management-accounting facts. Monetary amounts use integer
+ * minor units; a row never mixes currencies and proposals are excluded from
+ * projections until a distinct actor confirms them.
+ */
+export const financeEntries = sqliteTable("finance_entries", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  entryType: text("entry_type").notNull(),
+  documentRole: text("document_role"),
+  category: text("category").notNull().default("OTHER"),
+  description: text("description").notNull(),
+  amountMinor: integer("amount_minor").notNull(),
+  effectSign: integer("effect_sign").notNull().default(1),
+  netAmountMinor: integer("net_amount_minor"),
+  taxAmountMinor: integer("tax_amount_minor"),
+  grossAmountMinor: integer("gross_amount_minor"),
+  currency: text("currency").notNull(),
+  valuationBasis: text("valuation_basis").notNull().default("EXPLICIT"),
+  economicDate: text("economic_date"),
+  dueDate: text("due_date"),
+  counterpartyName: text("counterparty_name").notNull().default(""),
+  counterpartyTaxId: text("counterparty_tax_id").notNull().default(""),
+  counterpartyVerification: text("counterparty_verification").notNull().default("UNVERIFIED"),
+  documentNumber: text("document_number").notNull().default(""),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  sourceDocumentId: text("source_document_id"),
+  status: text("status").notNull().default("PENDING_APPROVAL"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  preparedBy: text("prepared_by").notNull(),
+  confirmedBy: text("confirmed_by"),
+  confirmedAt: text("confirmed_at"),
+  reversedBy: text("reversed_by"),
+  reversedAt: text("reversed_at"),
+  reversalReason: text("reversal_reason").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("finance_entries_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantSourceTypeUnique: uniqueIndex("finance_entries_tenant_source_type_uq").on(table.tenantId, table.sourceType, table.sourceId, table.entryType),
+  tenantStatusDateIdx: index("finance_entries_tenant_status_date_idx").on(table.tenantId, table.status, table.economicDate, table.updatedAt),
+  tenantDocumentIdx: index("finance_entries_tenant_document_idx").on(table.tenantId, table.sourceDocumentId, table.updatedAt),
+}));
+
+/** Explicit job allocation. The service verifies that all active shares use
+ * the entry currency and sum exactly to the economically allocatable amount. */
+export const financeEntryAllocations = sqliteTable("finance_entry_allocations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  entryId: text("entry_id").notNull(),
+  jobId: text("job_id").notNull(),
+  amountMinor: integer("amount_minor").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull().default("ACTIVE"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantEntryJobUnique: uniqueIndex("finance_entry_allocations_tenant_entry_job_uq").on(table.tenantId, table.entryId, table.jobId),
+  tenantIdempotencyUnique: uniqueIndex("finance_entry_allocations_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantJobStatusIdx: index("finance_entry_allocations_tenant_job_status_idx").on(table.tenantId, table.jobId, table.status, table.updatedAt),
+  tenantEntryStatusIdx: index("finance_entry_allocations_tenant_entry_status_idx").on(table.tenantId, table.entryId, table.status),
+}));
+
+/** Relations document reconciliation without mutating either side. */
+export const financeEntryRelations = sqliteTable("finance_entry_relations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  entryId: text("entry_id").notNull(),
+  relationType: text("relation_type").notNull(),
+  relatedEntityType: text("related_entity_type").notNull(),
+  relatedEntityId: text("related_entity_id").notNull(),
+  amountMinor: integer("amount_minor"),
+  currency: text("currency"),
+  status: text("status").notNull().default("CONFIRMED"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantRelationUnique: uniqueIndex("finance_entry_relations_tenant_relation_uq").on(table.tenantId, table.entryId, table.relationType, table.relatedEntityType, table.relatedEntityId),
+  tenantIdempotencyUnique: uniqueIndex("finance_entry_relations_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantRelatedIdx: index("finance_entry_relations_tenant_related_idx").on(table.tenantId, table.relatedEntityType, table.relatedEntityId, table.status),
+  tenantEntryIdx: index("finance_entry_relations_tenant_entry_idx").on(table.tenantId, table.entryId, table.status),
+}));
+
+/** Business reconciliation findings are reviewable signals, never silent
+ * merges, deletions or accounting adjustments. */
+export const financeReconciliationIssues = sqliteTable("finance_reconciliation_issues", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  issueCode: text("issue_code").notNull(),
+  severity: text("severity").notNull().default("WARNING"),
+  subjectType: text("subject_type").notNull(),
+  subjectId: text("subject_id").notNull(),
+  relatedEntityType: text("related_entity_type"),
+  relatedEntityId: text("related_entity_id"),
+  status: text("status").notNull().default("OPEN"),
+  detailJson: text("detail_json").notNull().default("{}"),
+  version: integer("version").notNull().default(1),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy: text("created_by").notNull(),
+  resolvedBy: text("resolved_by"),
+  resolvedAt: text("resolved_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("finance_reconciliation_issues_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantSubjectStatusIdx: index("finance_reconciliation_issues_tenant_subject_status_idx").on(table.tenantId, table.subjectType, table.subjectId, table.status, table.updatedAt),
+  tenantStatusSeverityIdx: index("finance_reconciliation_issues_tenant_status_severity_idx").on(table.tenantId, table.status, table.severity, table.updatedAt),
+}));
+
+/**
  * Location Intelligence compatibility boundary.
  *
  * D1 keeps the Sites read/write contract until the authorized PostGIS

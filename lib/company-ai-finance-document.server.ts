@@ -124,7 +124,8 @@ export async function proposeFinanceDocumentExtraction({
     "Estrai solo valori supportati dal testo. Per ogni valore non vuoto indica almeno un evidenceId tra quelli ricevuti; non inventare ID o pagine.",
     "Lascia value vuoto quando il dato non è leggibile o non compare. Non calcolare importi mancanti e non trasformare una fattura in prova di pagamento.",
     "Normalizza le date come YYYY-MM-DD, la valuta come codice ISO 4217 di tre lettere e gli importi come decimali con punto, senza simbolo di valuta.",
-    "Classifica DDT, fatture, ricevute di pagamento, preventivi/contratti in base a ciò che il documento dimostra; la categoria selezionata dall'utente è un indizio, non una prova.",
+    "Classifica DDT, fatture, note di credito, ordini, ricevute di pagamento, preventivi/contratti, rapportini e documenti tecnici in base a ciò che il documento dimostra; la categoria selezionata dall'utente è un indizio, non una prova.",
+    "Distingui sempre una nota di credito da una fattura e un ordine da una fattura. Un DDT prova una consegna nei limiti del testo, non un costo, un pagamento o un consumo di magazzino.",
     "Proponi possibiliJobIds solo se il codice o il titolo della commessa è citato esplicitamente nel testo OCR. Non associare mai una commessa per somiglianza generica.",
     "Questa è soltanto una bozza da verificare. Non affermare di aver registrato costi, ricavi, incassi o pagamenti.",
   ].join("\n");

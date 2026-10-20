@@ -1,7 +1,17 @@
 import { env } from "cloudflare:workers";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { financeDocumentExtractions, financeDocuments, s04Records, s06Events, s06Outbox, s06Reconciliations } from "@/db/schema";
+import {
+  financeDocumentExtractions,
+  financeDocumentLinks,
+  financeDocumentReviews,
+  financeDocuments,
+  financeEntries,
+  s04Records,
+  s06Events,
+  s06Outbox,
+  s06Reconciliations,
+} from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { isOpenAiFinanceExtractionConfigured } from "@/lib/company-ai-finance-document.server";
 import { documentCanDownload } from "@/lib/document-security";
@@ -50,12 +60,20 @@ function documentResponse(
   row: typeof financeDocuments.$inferSelect,
   jobsById: Map<string, ReturnType<typeof jobResponse>>,
   latestExtraction: typeof financeDocumentExtractions.$inferSelect | null,
+  latestReview: typeof financeDocumentReviews.$inferSelect | null = null,
+  links: Array<typeof financeDocumentLinks.$inferSelect> = [],
+  entry: typeof financeEntries.$inferSelect | null = null,
 ) {
+  const linkedJobIds = [...new Set([
+    ...links.filter((link) => link.status === "CONFIRMED" && link.entityType === "JOB").map((link) => link.entityId),
+    ...(row.jobId ? [row.jobId] : []),
+  ])];
   return {
     id: row.id,
     domain: "finance" as const,
     jobId: row.jobId,
     job: row.jobId ? jobsById.get(row.jobId) ?? null : null,
+    jobs: linkedJobIds.map((jobId) => jobsById.get(jobId)).filter(Boolean),
     category: row.category,
     fileName: row.fileName,
     mimeType: row.mimeType,
@@ -80,12 +98,36 @@ function documentResponse(
       version: latestExtraction.version,
       createdAt: latestExtraction.createdAt,
     } : null,
+    latestReview: latestReview ? {
+      id: latestReview.id,
+      extractionId: latestReview.extractionId,
+      classification: latestReview.classification,
+      fields: parseObject(latestReview.reviewedFieldsJson),
+      economicTreatment: latestReview.economicTreatment,
+      status: latestReview.status,
+      reviewNote: latestReview.reviewNote,
+      version: latestReview.version,
+      reviewedBy: latestReview.reviewedBy,
+      createdAt: latestReview.createdAt,
+    } : null,
+    economicEntry: entry ? {
+      id: entry.id,
+      entryType: entry.entryType,
+      documentRole: entry.documentRole,
+      amountMinor: entry.amountMinor,
+      currency: entry.currency,
+      status: entry.status,
+      version: entry.version,
+      preparedBy: entry.preparedBy,
+      confirmedBy: entry.confirmedBy,
+      confirmedAt: entry.confirmedAt,
+    } : null,
   };
 }
 
-async function readCatalog(tenantId: string) {
+async function readCatalog(tenantId: string, jobId = "") {
   const db = getDb();
-  const [documents, jobRows, extractionRows] = await Promise.all([
+  const [documents, jobRows, extractionRows, reviewRows, linkRows, entryRows] = await Promise.all([
     db.select().from(financeDocuments)
       .where(eq(financeDocuments.tenantId, tenantId))
       .orderBy(desc(financeDocuments.createdAt))
@@ -99,15 +141,44 @@ async function readCatalog(tenantId: string) {
       .where(eq(financeDocumentExtractions.tenantId, tenantId))
       .orderBy(desc(financeDocumentExtractions.createdAt))
       .limit(1_500),
+    db.select().from(financeDocumentReviews)
+      .where(eq(financeDocumentReviews.tenantId, tenantId))
+      .orderBy(desc(financeDocumentReviews.createdAt))
+      .limit(1_500),
+    db.select().from(financeDocumentLinks)
+      .where(eq(financeDocumentLinks.tenantId, tenantId))
+      .orderBy(desc(financeDocumentLinks.updatedAt))
+      .limit(3_000),
+    db.select().from(financeEntries)
+      .where(eq(financeEntries.tenantId, tenantId))
+      .orderBy(desc(financeEntries.updatedAt))
+      .limit(1_500),
   ]);
   const jobs = jobRows.map(jobResponse);
   const jobsById = new Map(jobs.map((job) => [job.id, job]));
   const latestByDocument = new Map<string, typeof financeDocumentExtractions.$inferSelect>();
   for (const row of extractionRows) if (!latestByDocument.has(row.documentId)) latestByDocument.set(row.documentId, row);
-  return { documents: documents.map((row) => documentResponse(row, jobsById, latestByDocument.get(row.id) ?? null)), jobs };
+  const latestReviewByDocument = new Map<string, typeof financeDocumentReviews.$inferSelect>();
+  for (const row of reviewRows) if (!latestReviewByDocument.has(row.documentId)) latestReviewByDocument.set(row.documentId, row);
+  const linksByDocument = new Map<string, Array<typeof financeDocumentLinks.$inferSelect>>();
+  for (const row of linkRows) linksByDocument.set(row.documentId, [...(linksByDocument.get(row.documentId) ?? []), row]);
+  const entryByDocument = new Map<string, typeof financeEntries.$inferSelect>();
+  for (const row of entryRows) if (row.sourceDocumentId && !entryByDocument.has(row.sourceDocumentId)) entryByDocument.set(row.sourceDocumentId, row);
+  const mappedDocuments = documents.map((row) => documentResponse(
+      row,
+      jobsById,
+      latestByDocument.get(row.id) ?? null,
+      latestReviewByDocument.get(row.id) ?? null,
+      linksByDocument.get(row.id) ?? [],
+      entryByDocument.get(row.id) ?? null,
+    ));
+  return {
+    documents: jobId ? mappedDocuments.filter((document) => document.jobs.some((job) => job?.id === jobId)) : mappedDocuments,
+    jobs,
+  };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
   if (!hasCapability(context, "finance.read")) {
@@ -116,10 +187,14 @@ export async function GET() {
 
   try {
     await ensureFinanceDocumentSchema();
-    const catalog = await readCatalog(context.tenantId);
+    const jobId = new URL(request.url).searchParams.get("jobId")?.trim() ?? "";
+    if (jobId.length > 160) return Response.json({ error: "invalid_job_id" }, { status: 400 });
+    const catalog = await readCatalog(context.tenantId, jobId);
+    if (jobId && !catalog.jobs.some((job) => job.id === jobId)) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
     return Response.json({
       context: publicAuthorityContext(context),
       ...catalog,
+      selectedJob: jobId ? catalog.jobs.find((job) => job.id === jobId) ?? null : null,
       summary: {
         total: catalog.documents.length,
         quarantined: catalog.documents.filter((document) => !document.downloadable).length,
@@ -150,8 +225,8 @@ export async function GET() {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "finance.write")) {
-    return Response.json({ error: "forbidden", capability: "finance.write" }, { status: 403 });
+  if (!hasCapability(context, "finance.documents.intake")) {
+    return Response.json({ error: "forbidden", capability: "finance.documents.intake" }, { status: 403 });
   }
   if (!env.BUCKET) return Response.json({ error: "object_storage_not_configured" }, { status: 503 });
 
@@ -285,6 +360,21 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
+      ...(job ? [db.insert(financeDocumentLinks).values({
+        id: `FIN-LNK-${crypto.randomUUID()}`,
+        tenantId: context.tenantId,
+        documentId,
+        entityType: "JOB",
+        entityId: job.id,
+        status: "CONFIRMED",
+        source: "UPLOAD_CONTEXT",
+        version: 1,
+        idempotencyKey: `${idempotencyKey}:job`,
+        createdBy: context.actorId,
+        confirmedBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      })] : []),
       db.insert(s06Events).values({
         eventId,
         tenantId: context.tenantId,
@@ -327,7 +417,7 @@ export async function POST(request: Request) {
         createdAt: now,
         updatedAt: now,
       }),
-    ]);
+    ] as unknown as Parameters<typeof db.batch>[0]);
     metadataCommitted = true;
 
     const [created] = await db.select().from(financeDocuments).where(and(

@@ -10,6 +10,7 @@ const migrationFiles = [
   "0024_volatile_skullbuster.sql",
   "0025_red_thunderbolts.sql",
   "0026_salty_black_tarantula.sql",
+  "0027_lowly_quicksilver.sql",
 ];
 
 const migrations = await Promise.all(
@@ -46,6 +47,12 @@ try {
     "finance_documents",
     "finance_document_extractions",
     "finance_document_extractions_active_source_uq",
+    "finance_document_reviews",
+    "finance_document_links",
+    "finance_entries",
+    "finance_entry_allocations",
+    "finance_entry_relations",
+    "finance_reconciliation_issues",
   ];
   const existing = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')").all().map((row) => row.name),

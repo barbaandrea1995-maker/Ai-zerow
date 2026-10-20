@@ -153,8 +153,8 @@ async function jobCatalog(tenantId: string) {
 export async function POST(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "finance.write")) {
-    return Response.json({ error: "forbidden", capability: "finance.write" }, { status: 403 });
+  if (!hasCapability(context, "finance.documents.intake")) {
+    return Response.json({ error: "forbidden", capability: "finance.documents.intake" }, { status: 403 });
   }
 
   let documentId = "";

@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records, w10Workflows } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { buildFinanceProjection, readFinanceLedger } from "@/lib/finance-ledger.server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ function safeAmount(value: unknown, max: number) {
 export async function GET(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "command.read") || !hasCapability(context, "finance.read")) {
+  if (!hasCapability(context, "finance.read")) {
     return Response.json({ error: "forbidden", capability: "finance.read" }, { status: 403 });
   }
 
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
     const selectedJob = jobOptions.find((job) => job.id === requestedJobId);
     if (!selectedJob) return Response.json({ error: "finance_job_not_found" }, { status: 404, headers: { "cache-control": "private, no-store" } });
 
-    const [valueRows, expenseRows] = await Promise.all([
+    const [valueRows, workflowRows, ledger] = await Promise.all([
       db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.jobId, selectedJob.id),
@@ -81,6 +82,7 @@ export async function GET(request: Request) {
           eq(w10Workflows.module, "finance"),
           eq(w10Workflows.jobId, selectedJob.id),
         )),
+      readFinanceLedger(context.tenantId, selectedJob.id),
     ]);
 
     const latestValue = valueRows[0];
@@ -96,7 +98,7 @@ export async function GET(request: Request) {
 
     const financeStatuses: FinanceStatus[] = ["PROPOSED", "REVIEW", "APPROVED", "RECONCILED"];
     const byCurrency = new Map<string, { currency: string; count: number; amountMilli: number; statuses: Record<FinanceStatus, { count: number; amountMilli: number }> }>();
-    for (const row of expenseRows) {
+    for (const row of workflowRows) {
       const currency = /^[A-Z]{3}$/.test(row.currency) ? row.currency : "EUR";
       const status = financeStatuses.includes(row.status as FinanceStatus) ? row.status as FinanceStatus : null;
       const amountMilli = safeAmount(row.amountMilli, 9_000_000_000_000);
@@ -117,15 +119,19 @@ export async function GET(request: Request) {
       byCurrency.set(currency, current);
     }
 
+    const economics = buildFinanceProjection({ rows: ledger.rows, allocations: ledger.allocations, relations: ledger.relations, jobId: selectedJob.id });
     return Response.json({
       context: publicAuthorityContext(context),
       jobs: jobOptions,
       selectedJob,
       summary: {
         commercialValue,
+        economics,
+        workflowProposals: [...byCurrency.values()].sort((left, right) => left.currency.localeCompare(right.currency)),
+        /** @deprecated W10 rows are workflow proposals, not confirmed expenses. */
         expenses: [...byCurrency.values()].sort((left, right) => left.currency.localeCompare(right.currency)),
-        source: { expenses: "w10_workflows", commercialValue: "job_journey_records" },
-        unavailableLedgers: ["Fatture", "Incassi e pagamenti", "Saldo contabile"],
+        source: { economics: "finance_entries+finance_entry_allocations+finance_entry_relations", workflowProposals: "w10_workflows", commercialValue: "job_journey_records" },
+        unavailableLedgers: economics.status === "NOT_AVAILABLE" ? ["Costi e ricavi confermati"] : [],
       },
       readback: { status: "SITES_READBACK_VERIFIED", checkedAt: new Date().toISOString() },
     }, { headers: { "cache-control": "private, no-store" } });

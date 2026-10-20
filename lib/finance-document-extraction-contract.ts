@@ -1,9 +1,14 @@
 export const FINANCE_EXTRACTED_DOCUMENT_TYPES = [
   "SUPPLIER_INVOICE",
   "CUSTOMER_INVOICE",
+  "SUPPLIER_CREDIT_NOTE",
+  "CUSTOMER_CREDIT_NOTE",
   "DELIVERY_NOTE",
+  "PURCHASE_ORDER",
   "PAYMENT_EVIDENCE",
   "QUOTE_CONTRACT",
+  "WORK_REPORT",
+  "TECHNICAL_DOCUMENT",
   "OTHER",
 ] as const;
 
@@ -277,13 +282,13 @@ export function buildFinanceDocumentProposal({
   const categoryMatches = uploadedCategory === "OTHER" || uploadedCategory === documentType;
   if (!categoryMatches) proposal.checks.flags.push("DOCUMENT_TYPE_DIFFERS_FROM_SELECTED_CATEGORY");
   if (sourceWasTruncated) proposal.checks.flags.push("SOURCE_TEXT_TRUNCATED_REVIEW_ALL_PAGES");
-  if (["SUPPLIER_INVOICE", "CUSTOMER_INVOICE"].includes(documentType)) {
+  if (["SUPPLIER_INVOICE", "CUSTOMER_INVOICE", "SUPPLIER_CREDIT_NOTE", "CUSTOMER_CREDIT_NOTE"].includes(documentType)) {
     if (!proposal.counterpartyName.value) proposal.checks.flags.push("COUNTERPARTY_MISSING");
     if (!proposal.documentNumber.value) proposal.checks.flags.push("DOCUMENT_NUMBER_MISSING");
     if (!proposal.documentDate.value) proposal.checks.flags.push("DOCUMENT_DATE_MISSING");
     if (!proposal.currencyCode.value) proposal.checks.flags.push("CURRENCY_MISSING");
     if (!proposal.grossAmount.value) proposal.checks.flags.push("GROSS_AMOUNT_MISSING");
-  } else if (documentType === "PAYMENT_EVIDENCE" || documentType === "QUOTE_CONTRACT") {
+  } else if (["PAYMENT_EVIDENCE", "QUOTE_CONTRACT", "PURCHASE_ORDER"].includes(documentType)) {
     if (!proposal.counterpartyName.value) proposal.checks.flags.push("COUNTERPARTY_MISSING");
     if (!proposal.documentDate.value) proposal.checks.flags.push("DOCUMENT_DATE_MISSING");
     if (!proposal.grossAmount.value) proposal.checks.flags.push("GROSS_AMOUNT_MISSING");

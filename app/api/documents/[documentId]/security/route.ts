@@ -152,7 +152,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     const current = await findDocument(action === "provider_result" ? null : context?.tenantId ?? null, id);
     if (!current) return Response.json({ error: "document_not_found" }, { status: 404 });
     if (action !== "provider_result" && context) {
-      const writeCapability = current.domain === "finance" ? "finance.write" : "documents.write";
+      const writeCapability = current.domain === "finance" ? "finance.documents.security" : "documents.write";
       if (!hasCapability(context, writeCapability)) return Response.json({ error: "forbidden", capability: writeCapability }, { status: 403 });
       if (current.domain === "operations" && !(await canAccessDocument(context, current.row))) return Response.json({ error: "document_not_found" }, { status: 404 });
     }

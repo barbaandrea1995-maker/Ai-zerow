@@ -36,7 +36,30 @@ const PLANNING_WRITE = ["planning.read", "planning.write"];
 const ASSET_READ = ["asset.read"];
 const ASSET_WRITE = ["asset.read", "asset.write"];
 const FINANCE_READ = ["finance.read"];
-const FINANCE_WRITE = ["finance.read", "finance.write"];
+// Finance capabilities are deliberately split by responsibility. The legacy
+// finance.write capability remains during the W10 compatibility window, but
+// canonical document and ledger routes use the granular capabilities below.
+const FINANCE_INTAKE = ["finance.read", "finance.documents.intake"];
+const FINANCE_DOCUMENT_REVIEW = ["finance.read", "finance.documents.review"];
+const FINANCE_DOCUMENT_SECURITY = ["finance.read", "finance.documents.security"];
+const FINANCE_ENTRY_PREPARE = ["finance.read", "finance.entries.prepare"];
+const FINANCE_ENTRY_CONFIRM = ["finance.read", "finance.entries.confirm", "finance.approve"];
+const FINANCE_COMMITMENTS = ["finance.read", "finance.commitments.manage"];
+const FINANCE_PAYMENTS = ["finance.read", "finance.payments.record"];
+const FINANCE_RECONCILE = ["finance.read", "finance.reconcile"];
+const FINANCE_POLICY = ["finance.read", "finance.policy.manage"];
+const FINANCE_WRITE = capabilitySet(
+  ["finance.write"],
+  FINANCE_INTAKE,
+  FINANCE_DOCUMENT_REVIEW,
+  FINANCE_DOCUMENT_SECURITY,
+  FINANCE_ENTRY_PREPARE,
+  FINANCE_COMMITMENTS,
+  FINANCE_PAYMENTS,
+  FINANCE_RECONCILE,
+);
+const FINANCE_APPROVE = capabilitySet(FINANCE_WRITE, FINANCE_ENTRY_CONFIRM);
+const FINANCE_ADMIN = capabilitySet(FINANCE_APPROVE, FINANCE_POLICY);
 const PROCUREMENT_READ = ["procurement.read"];
 const PROCUREMENT_WRITE = ["procurement.read", "procurement.write"];
 const COMMUNICATION = ["communication.read", "communication.send"];
@@ -78,13 +101,13 @@ export const ROLE_CAPABILITIES = {
   owner: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, OPERATIONS_REPORT_WRITE, OPERATIONS_REPORT_REVIEW, MISSION_REPORT_REVIEW, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
     FIELD, WAREHOUSE_REGISTER, WAREHOUSE_REVIEW, MISSION_MANAGE, DOCUMENTS_WRITE, PLANNING_WRITE,
-    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    ASSET_WRITE, FINANCE_ADMIN, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, LOCATION_ADMIN, ["tenant.manage", "telephony.manage"],
   ),
   admin: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_MANAGE, OPERATIONS_WRITE, OPERATIONS_REPORT_WRITE, OPERATIONS_REPORT_REVIEW, MISSION_REPORT_REVIEW, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
     FIELD, WAREHOUSE_REGISTER, WAREHOUSE_REVIEW, MISSION_MANAGE, DOCUMENTS_WRITE, PLANNING_WRITE,
-    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    ASSET_WRITE, FINANCE_ADMIN, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, LOCATION_ADMIN, ["telephony.manage"],
   ),
   member: capabilitySet(
@@ -94,7 +117,7 @@ export const ROLE_CAPABILITIES = {
   manager: capabilitySet(
     PLATFORM, COMMAND, AUTHORITY_VIEW, OPERATIONS_WRITE, OPERATIONS_REPORT_WRITE, OPERATIONS_REPORT_REVIEW, MISSION_REPORT_REVIEW, WORKFORCE_MANAGE, ATTENDANCE_MANAGE,
     FIELD, WAREHOUSE_REGISTER, WAREHOUSE_REVIEW, MISSION_MANAGE, DOCUMENTS_WRITE, PLANNING_WRITE,
-    ASSET_WRITE, FINANCE_WRITE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
+    ASSET_WRITE, FINANCE_APPROVE, PROCUREMENT_WRITE, COMMUNICATION_CRITICAL,
     QR_WRITE, GOVERNANCE, EXTERNALS, EVENTS_WRITE, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY,
     LOCATION_FLEET, LOCATION_DRIVER_TIMELINE, LOCATION_GEOFENCE_MANAGE,
   ),

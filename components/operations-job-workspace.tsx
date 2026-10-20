@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   CircleGauge,
+  CircleDollarSign,
   FileText,
   Flag,
   HardHat,
@@ -30,6 +31,7 @@ import {
   Users,
 } from "lucide-react";
 import Image from "next/image";
+import Link from "@/components/app-link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -508,15 +510,66 @@ function CompletionGate({
   );
 }
 
+type JobFinanceProjection = {
+  status: "NOT_AVAILABLE" | "PARTIAL" | "AVAILABLE";
+  currencies: Array<{
+    currency: string;
+    expenseMinor: number;
+    revenueMinor: number;
+    marginMinor: number;
+    openCommitmentMinor: number | null;
+    payableOutstandingMinor: number | null;
+    receivableOutstandingMinor: number | null;
+    status: "PARTIAL" | "AVAILABLE";
+  }>;
+  pendingCount: number;
+};
+
+function JobFinancePanel({ jobId }: { jobId: string }) {
+  const [projection, setProjection] = useState<JobFinanceProjection | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/finance/entries?jobId=${encodeURIComponent(jobId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("finance_unavailable");
+        const body = await response.json() as { projection: JobFinanceProjection };
+        if (active) { setProjection(body.projection); setState("ready"); }
+      })
+      .catch(() => { if (active) setState("error"); });
+    return () => { active = false; };
+  }, [jobId]);
+  const format = (value: number | null, currency: string) => {
+    if (value === null) return "Non disponibile";
+    try { return new Intl.NumberFormat("it-IT", { style: "currency", currency }).format(value / 100); } catch { return `${(value / 100).toFixed(2)} ${currency}`; }
+  };
+  return <section className="carbon-card rounded-[22px] p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">FINANZA DI COMMESSA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Conto economico gestionale</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Proiezione server-side del registro Finance. Documenti, proposte e fatti confermati restano separati.</p></div><Link className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-lime-300/20 bg-lime-300/[.05] px-3 text-[9px] font-semibold text-lime-100" href={`/finance?jobId=${encodeURIComponent(jobId)}`}><CircleDollarSign className="size-3.5" />Apri Finance</Link></div>
+    {state === "loading" && <p className="mt-5 flex items-center gap-2 text-[10px] text-slate-500"><LoaderCircle className="size-3.5 animate-spin" />Lettura del ledger…</p>}
+    {state === "error" && <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[.03] p-3 text-[10px] text-amber-100/75">La proiezione Finance non è disponibile. Nessun importo viene sostituito con zero.</p>}
+    {state === "ready" && projection?.status === "NOT_AVAILABLE" && <p className="mt-4 rounded-xl border border-dashed border-white/[.08] p-5 text-center text-[10px] text-slate-600">Non risultano fatti economici confermati per questa commessa.</p>}
+    {state === "ready" && projection && projection.currencies.map((row) => <div className="mt-4 rounded-xl border border-white/[.07] bg-black/20 p-3.5" key={row.currency}><div className="flex items-center justify-between gap-2"><p className="font-mono text-[10px] text-cyan-100">{row.currency}</p><span className={`rounded-full border px-2 py-1 text-[7px] font-semibold ${row.status === "AVAILABLE" ? "border-lime-300/20 text-lime-100" : "border-amber-300/20 text-amber-100"}`}>{row.status === "AVAILABLE" ? "DISPONIBILE" : "PARZIALE"}</span></div><div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-3">{[
+      ["Ricavi", format(row.revenueMinor, row.currency)],
+      ["Costi", format(row.expenseMinor, row.currency)],
+      ["Margine", format(row.marginMinor, row.currency)],
+      ["Impegni aperti", format(row.openCommitmentMinor, row.currency)],
+      ["Da incassare", format(row.receivableOutstandingMinor, row.currency)],
+      ["Da pagare", format(row.payableOutstandingMinor, row.currency)],
+    ].map(([label, value]) => <div className="rounded-lg border border-white/[.06] bg-black/20 p-2.5" key={label}><p className="text-[7px] font-semibold uppercase tracking-[.12em] text-slate-600">{label}</p><p className={`mt-1 font-mono text-[10px] ${value === "Non disponibile" ? "text-slate-600" : "text-slate-200"}`}>{value}</p></div>)}</div></div>)}
+    {state === "ready" && projection && projection.pendingCount > 0 && <p className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[.03] p-2.5 text-[9px] text-amber-100/75">{projection.pendingCount} registrazioni attendono approvazione e non sono incluse nei totali.</p>}
+  </section>;
+}
+
 export default function OperationsJobWorkspace({
   canWriteOperations,
   canWriteReport,
   canReviewReport,
+  canReadFinance,
   jobId,
 }: {
   canWriteOperations: boolean;
   canWriteReport: boolean;
   canReviewReport: boolean;
+  canReadFinance: boolean;
   jobId: string;
 }) {
   const router = useRouter();
@@ -559,7 +612,9 @@ export default function OperationsJobWorkspace({
   const [reportReviewNotes, setReportReviewNotes] = useState<Record<string, string>>({});
   const [reportRevisionAnswers, setReportRevisionAnswers] = useState<Record<string, [string, string, string]>>({});
   const [progress, setProgress] = useState(0);
-  const [activeSection, setActiveSection] = useState<"overview" | "operations" | "reports">("overview");
+  const [activeSection, setActiveSection] = useState<"overview" | "operations" | "reports" | "finance">(
+    searchParams.get("tab") === "finance" && canReadFinance ? "finance" : "overview",
+  );
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -1289,11 +1344,12 @@ export default function OperationsJobWorkspace({
           </div>
         </section>
 
-        <Tabs className="mt-4" onValueChange={(value) => setActiveSection(value as "overview" | "operations" | "reports")} value={activeSection}>
-          <TabsList className={`grid h-12 w-full ${canWriteReport || canReviewReport ? "grid-cols-3" : "grid-cols-2"} rounded-2xl border border-white/[.08] bg-black/25 p-1`}>
+        <Tabs className="mt-4" onValueChange={(value) => setActiveSection(value as "overview" | "operations" | "reports" | "finance")} value={activeSection}>
+          <TabsList className={`grid h-12 w-full ${(canWriteReport || canReviewReport) && canReadFinance ? "grid-cols-4" : (canWriteReport || canReviewReport) || canReadFinance ? "grid-cols-3" : "grid-cols-2"} rounded-2xl border border-white/[.08] bg-black/25 p-1`}>
             <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="overview"><BriefcaseBusiness className="size-3.5" />Riepilogo</TabsTrigger>
             <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="operations"><Layers3 className="size-3.5" />Operatività</TabsTrigger>
             {(canWriteReport || canReviewReport) && <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-cyan-300/20 data-[state=active]:bg-cyan-300/[.08] data-[state=active]:text-cyan-100" value="reports"><Sparkles className="size-3.5" />Rapportini</TabsTrigger>}
+            {canReadFinance && <TabsTrigger className="rounded-xl text-[10px] data-[state=active]:border-lime-300/20 data-[state=active]:bg-lime-300/[.08] data-[state=active]:text-lime-100" value="finance"><CircleDollarSign className="size-3.5" />Finanza</TabsTrigger>}
           </TabsList>
 
           <TabsContent className="mt-4 space-y-4" value="overview">
@@ -1425,6 +1481,7 @@ export default function OperationsJobWorkspace({
               </details>)}</div>
             </details>}
           </TabsContent>}
+          {canReadFinance && <TabsContent className="mt-4 space-y-4" value="finance"><JobFinancePanel jobId={jobId} /></TabsContent>}
         </Tabs>
       </div>
 
