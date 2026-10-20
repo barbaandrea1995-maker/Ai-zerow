@@ -5,7 +5,6 @@ import { financeDocumentExtractions, financeDocuments, s04Records, s06Events, s0
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { isOpenAiFinanceExtractionConfigured } from "@/lib/company-ai-finance-document.server";
 import { documentCanDownload } from "@/lib/document-security";
-import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { isNutrientFinanceExtractionConfigured } from "@/lib/nutrient-finance-document.server";
 import {
   matchesOperationalDocumentSignature,
@@ -115,7 +114,6 @@ export async function GET() {
   }
 
   try {
-    await ensureFinanceDocumentSchema();
     const catalog = await readCatalog(context.tenantId);
     return Response.json({
       context: publicAuthorityContext(context),
@@ -191,7 +189,6 @@ export async function POST(request: Request) {
   let objectKey = "";
   let metadataCommitted = false;
   try {
-    await ensureFinanceDocumentSchema();
     const db = getDb();
     let job: typeof s04Records.$inferSelect | null = null;
     if (jobReference) {

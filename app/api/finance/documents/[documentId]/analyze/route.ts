@@ -12,7 +12,6 @@ import {
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { CompanyAiFinanceExtractionError, isOpenAiFinanceExtractionConfigured, proposeFinanceDocumentExtraction } from "@/lib/company-ai-finance-document.server";
 import { buildFinanceDocumentProposal } from "@/lib/finance-document-extraction-contract";
-import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { safeDocumentFileName, sha256Hex } from "@/lib/document-contract";
 import { documentCanDownload } from "@/lib/document-security";
 import { isNutrientFinanceExtractionConfigured, NutrientFinanceExtractionError, parseFinanceDocumentWithNutrient } from "@/lib/nutrient-finance-document.server";
@@ -185,7 +184,6 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (!isOpenAiFinanceExtractionConfigured()) return Response.json({ error: "openai_not_configured" }, { status: 503 });
 
   try {
-    await ensureFinanceDocumentSchema();
     const db = getDb();
     const [document] = await db.select().from(financeDocuments).where(and(
       eq(financeDocuments.tenantId, context.tenantId),

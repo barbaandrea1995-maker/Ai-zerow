@@ -1,6 +1,5 @@
 import { asc, eq, inArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import {
   assetCustodyLocations,
   companyAiJobScopes,
@@ -56,7 +55,6 @@ function arrayLength(value: unknown) {
 }
 
 export async function getSystemAlignmentReport() {
-  await ensureFinanceDocumentSchema();
   const db = getDb();
   const [tenantRows, alignmentRunRows, alignmentLinkRows, alignmentTenantRows, expectedManifestHash] = await Promise.all([
     db.select({

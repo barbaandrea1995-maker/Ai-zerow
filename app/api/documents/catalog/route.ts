@@ -4,7 +4,6 @@ import { financeDocuments, jobJourneyRecords, operationalDocuments, s04Records }
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { recordForResponse } from "@/lib/s04-adapter";
 import { documentCanDownload } from "@/lib/document-security";
-import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { ALLOWED_OPERATIONAL_DOCUMENT_MIMES, MAX_OPERATIONAL_DOCUMENT_BYTES } from "@/lib/document-contract";
 import { FINANCE_DOCUMENT_CATEGORIES, MAX_FINANCE_DOCUMENT_BYTES } from "@/lib/finance-document-contract";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
@@ -86,7 +85,6 @@ export async function GET() {
   try {
     const db = getDb();
     const canReadFinance = hasCapability(context, "finance.read");
-    if (canReadFinance) await ensureFinanceDocumentSchema();
     const [documentRows, jobRows, workforceRows, missionRows, financeRows] = await Promise.all([
       db.select().from(operationalDocuments)
         .where(eq(operationalDocuments.tenantId, context.tenantId))
