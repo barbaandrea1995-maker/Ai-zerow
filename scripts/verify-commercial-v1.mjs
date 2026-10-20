@@ -254,8 +254,14 @@ assert(w10Migration.includes("w10_workflows_tenant_idempotency_uq"), "W10 workfl
 assert(w10Migration.includes("w10_workflows_tenant_module_status_idx"), "W10 workflow status readback must be indexed");
 
 const financeDocumentMigration = await readFile(join(root, "drizzle", "0024_volatile_skullbuster.sql"), "utf8");
+const financeExtractionMigration = await readFile(join(root, "drizzle", "0025_red_thunderbolts.sql"), "utf8");
+const financeActiveSourceMigration = await readFile(join(root, "drizzle", "0026_salty_black_tarantula.sql"), "utf8");
 const financeDocumentSchema = await readFile(join(root, "lib", "finance-document-schema.server.ts"), "utf8");
-assert(financeDocumentMigration.includes("CREATE TABLE `finance_documents`"), "Finance intake must have a D1 document registry");
+assert(financeDocumentMigration.includes("CREATE TABLE IF NOT EXISTS `finance_documents`"), "Finance intake migration must tolerate its runtime-bootstrapped D1 registry");
+assert(financeDocumentMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `finance_documents_tenant_hash_uq`"), "Finance document hash index migration must be idempotent");
+assert(financeExtractionMigration.includes("CREATE TABLE IF NOT EXISTS `finance_document_extractions`"), "Finance extraction migration must tolerate its runtime-bootstrapped D1 registry");
+assert(financeExtractionMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `finance_document_extractions_tenant_idempotency_uq`"), "Finance extraction idempotency index migration must be idempotent");
+assert(financeActiveSourceMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `finance_document_extractions_active_source_uq`"), "Finance active-source index migration must be idempotent");
 assert(financeDocumentSchema.includes("CREATE TABLE IF NOT EXISTS finance_documents") && financeDocumentSchema.includes("finance_documents_tenant_hash_uq"), "Finance document reads must bootstrap their additive schema and tenant-unique hash index");
 
 const rateLimitAdapter = await readFile(join(root, "lib", "ai-rate-limit.ts"), "utf8");

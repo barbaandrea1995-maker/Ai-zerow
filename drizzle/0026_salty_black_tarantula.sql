@@ -1,1 +1,1 @@
-CREATE UNIQUE INDEX `finance_document_extractions_active_source_uq` ON `finance_document_extractions` (`tenant_id`,`document_id`,`source_sha256`) WHERE "finance_document_extractions"."status" IN ('PROCESSING', 'PROPOSED', 'REVIEW_REQUIRED');
+CREATE UNIQUE INDEX IF NOT EXISTS `finance_document_extractions_active_source_uq` ON `finance_document_extractions` (`tenant_id`,`document_id`,`source_sha256`) WHERE "finance_document_extractions"."status" IN ('PROCESSING', 'PROPOSED', 'REVIEW_REQUIRED');

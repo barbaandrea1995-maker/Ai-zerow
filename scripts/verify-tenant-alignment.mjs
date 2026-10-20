@@ -35,7 +35,20 @@ assert.equal(isExactTenantAlignmentApproval({ ...approval, manifestHash: "0".rep
 
 const migration = await fs.readFile(path.join(root, "drizzle", "0022_easy_dragon_lord.sql"), "utf8");
 for (const table of ["asset_custody_locations", "qr_code_aliases", "tenant_alignment_runs", "tenant_alignment_links"]) {
-  assert(migration.includes(`CREATE TABLE \`${table}\``), `migration missing ${table}`);
+  assert(migration.includes(`CREATE TABLE IF NOT EXISTS \`${table}\``), `migration must idempotently create ${table}`);
+}
+for (const index of [
+  "asset_custody_locations_tenant_asset_uq",
+  "asset_custody_locations_tenant_warehouse_status_idx",
+  "qr_code_aliases_tenant_alias_uq",
+  "qr_code_aliases_tenant_canonical_idx",
+  "tenant_alignment_links_source_uq",
+  "tenant_alignment_links_run_idx",
+  "tenant_alignment_links_target_idx",
+  "tenant_alignment_runs_source_target_contract_uq",
+  "tenant_alignment_runs_target_status_idx",
+]) {
+  assert(migration.includes(`IF NOT EXISTS \`${index}\``), `migration must idempotently create ${index}`);
 }
 assert(!/^\s*(INSERT|UPDATE|DELETE)\b/im.test(migration), "migration must remain schema-only");
 
