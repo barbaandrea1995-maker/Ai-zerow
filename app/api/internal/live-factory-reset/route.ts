@@ -6,6 +6,7 @@ const PROJECT_ID = "appgprj_6abaaf2bb58081919b265a8a6ad76dbb";
 const RESET_PREFIX = "tenants/";
 const RESET_CONFIRMATION = "ERASE_ALL_LIVE_APPLICATION_DATA";
 const MAX_OBJECTS = 10_000;
+const TECHNICAL_TABLES = new Set(["_cf_KV", "__drizzle_migrations", "d1_migrations"]);
 
 const RESET_TABLES = [
   "access_profiles",
@@ -157,7 +158,7 @@ async function assertExpectedSchema(db: D1Database) {
   const result = await db.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'd1_migrations' ORDER BY name",
   ).all<{ name: string }>();
-  const actual = result.results.map((row) => row.name).sort();
+  const actual = result.results.map((row) => row.name).filter((name) => !TECHNICAL_TABLES.has(name)).sort();
   const expected = [...RESET_TABLES].sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error("live_schema_does_not_match_reset_manifest");
