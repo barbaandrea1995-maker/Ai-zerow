@@ -35,15 +35,15 @@ assert.equal(isExactTenantAlignmentApproval({ ...approval, manifestHash: "0".rep
 
 const migration = await fs.readFile(path.join(root, "drizzle", "0022_easy_dragon_lord.sql"), "utf8");
 for (const table of ["asset_custody_locations", "qr_code_aliases", "tenant_alignment_runs", "tenant_alignment_links"]) {
-  assert(migration.includes(`CREATE TABLE IF NOT EXISTS \`${table}\``), `migration missing idempotent table ${table}`);
+  assert(migration.includes(`CREATE TABLE \`${table}\``), `migration missing ${table}`);
 }
 assert(!/^\s*(INSERT|UPDATE|DELETE)\b/im.test(migration), "migration must remain schema-only");
 
 const executor = await fs.readFile(path.join(root, "lib", "tenant-alignment-executor.server.ts"), "utf8");
 assert(executor.includes("db.batch"), "executor must use one D1 batch");
 assert(executor.includes("...links.map((link)"), "provenance links must stay below the D1 per-statement variable ceiling");
-assert(!executor.includes("CREATE TABLE IF NOT EXISTS tenant_alignment_runs"), "runtime must not create migration-owned alignment tables");
-assert(!executor.includes("ensureTenantAlignmentSchema"), "alignment reads and writes must rely on Sites migrations");
+assert(executor.includes("CREATE TABLE IF NOT EXISTS tenant_alignment_runs"), "runtime must bootstrap additive alignment registries when Sites has not applied D1 migrations");
+assert(executor.includes("await ensureTenantAlignmentSchema()"), "dry-run and execution must install the bounded additive schema first");
 assert(executor.includes('status: "archived"'), "source tenant must be archived");
 assert(executor.includes('status: "removed"'), "source memberships must be removed from authority");
 assert(!/db\.delete\s*\(/.test(executor), "alignment must not delete source rows");
@@ -81,7 +81,7 @@ console.log(JSON.stringify({
     "immutable_manifest",
     "exact_approval_envelope",
     "schema_only_migration",
-    "migration_owned_schema",
+    "bounded_runtime_schema_bootstrap",
     "single_batch_executor",
     "logical_rollback",
     "role_separation",

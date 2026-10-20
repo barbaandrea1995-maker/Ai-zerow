@@ -12,6 +12,7 @@ import {
   type DocumentSecurityAction,
 } from "@/lib/document-security";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   const id = await documentId(routeContext);
   if (!id) return Response.json({ error: "invalid_document_id" }, { status: 400 });
   try {
+    await ensureFinanceDocumentSchema();
     const document = await findDocument(context.tenantId, id);
     if (!document) return Response.json({ error: "document_not_found" }, { status: 404 });
     const readCapability = document.domain === "finance" ? "finance.read" : "documents.read";
@@ -145,6 +147,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   }
 
   try {
+    await ensureFinanceDocumentSchema();
     const db = getDb();
     const current = await findDocument(action === "provider_result" ? null : context?.tenantId ?? null, id);
     if (!current) return Response.json({ error: "document_not_found" }, { status: 404 });

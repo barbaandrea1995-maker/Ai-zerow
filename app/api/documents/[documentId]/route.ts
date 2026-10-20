@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { financeDocuments, operationalDocuments, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { documentCanDownload } from "@/lib/document-security";
+import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   if (!documentId || documentId.length > 120) return Response.json({ error: "invalid_document_id" }, { status: 400 });
 
   try {
+    await ensureFinanceDocumentSchema();
     const [financeDocument] = await getDb().select().from(financeDocuments).where(and(
       eq(financeDocuments.tenantId, context.tenantId),
       eq(financeDocuments.id, documentId),
