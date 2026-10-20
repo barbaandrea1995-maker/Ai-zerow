@@ -161,7 +161,11 @@ async function assertExpectedSchema(db: D1Database) {
   const actual = result.results.map((row) => row.name).filter((name) => !TECHNICAL_TABLES.has(name)).sort();
   const expected = [...RESET_TABLES].sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error("live_schema_does_not_match_reset_manifest");
+    const expectedSet = new Set<string>(expected);
+    const actualSet = new Set<string>(actual);
+    const missing = expected.filter((name) => !actualSet.has(name));
+    const unexpected = actual.filter((name) => !expectedSet.has(name));
+    throw new Error(`live_schema_does_not_match_reset_manifest:${JSON.stringify({ missing, unexpected })}`);
   }
 }
 
