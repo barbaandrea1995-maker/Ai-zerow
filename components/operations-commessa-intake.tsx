@@ -29,7 +29,7 @@ import { unzipSync } from "fflate";
 import {
   DEFAULT_INTAKE_DRAFT,
   INTAKE_FIELD_LABELS,
-  INTAKE_OPENING_TYPES,
+  type IntakeCommercialCatalog,
   type IntakeDraft,
   type IntakePreview,
 } from "@/lib/operations-intake";
@@ -41,6 +41,7 @@ import {
 } from "@/lib/company-ai-macro-scope";
 import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
+import { commercialModelLabel } from "@/lib/job-commercial-terms";
 
 export type IntakeAdapterRecord = {
   id: string;
@@ -62,6 +63,7 @@ type IntakeMode = "chooser" | "manual" | "company-ai";
 
 type Props = {
   open: boolean;
+  catalog: IntakeCommercialCatalog | null;
   onOpenChange: (open: boolean) => void;
   onCreated: (payload: IntakeCreateResponse) => void;
 };
@@ -314,6 +316,7 @@ function WorksiteLocationField({
 }
 
 export function IntakeFields({
+  catalog,
   mode,
   draft,
   onChange,
@@ -333,6 +336,7 @@ export function IntakeFields({
   analyzingWork,
   analysisNotice,
 }: {
+  catalog: IntakeCommercialCatalog | null;
   mode: IntakeMode;
   draft: IntakeDraft;
   onChange: (key: keyof IntakeDraft, value: string) => void;
@@ -364,8 +368,9 @@ export function IntakeFields({
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={INTAKE_FIELD_LABELS.openingType} required proposed={proposed("openingType")}>
-            <select className={selectClass} onChange={(event) => onChange("openingType", event.target.value)} required value={draft.openingType}>
-              {INTAKE_OPENING_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            <select className={selectClass} disabled={!catalog} onChange={(event) => onChange("openingType", event.target.value)} required value={draft.openingType}>
+              {!catalog && <option value={draft.openingType}>Catalogo in caricamento…</option>}
+              {(catalog?.openingTypes ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
           <Field label="Priorità">
@@ -416,24 +421,36 @@ export function IntakeFields({
       </FormSection>
 
       <FormSection
-        description="Dai un nome riconoscibile alla commessa e, se già noto, indica il valore commerciale. Il valore viene registrato per il successivo controllo economico in Finanza."
+        description="Scegli come nasce il valore economico. La modalità è indipendente dal tipo di commessa e viene validata dal catalogo server-side."
         eyebrow="03 / dati commerciali"
         icon={BookOpen}
-        title="Identità e valore"
+        title="Identità e modello economico"
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.title} required proposed={proposed("title")}>
             <Input className={inputClass} maxLength={120} onChange={(event) => onChange("title", event.target.value)} placeholder="Es. Ristrutturazione interna · Via Roma" required value={draft.title} />
           </Field>
-          <Field label={INTAKE_FIELD_LABELS.commercialValueAmount} proposed={proposed("commercialValueAmount")}>
-            <Input className={inputClass} inputMode="decimal" maxLength={18} onChange={(event) => onChange("commercialValueAmount", event.target.value)} placeholder="Es. 14000,00" type="text" value={draft.commercialValueAmount} />
-          </Field>
-          <Field label={INTAKE_FIELD_LABELS.commercialValueBasis} proposed={proposed("commercialValueBasis")}>
-            <select className={selectClass} onChange={(event) => onChange("commercialValueBasis", event.target.value)} value={draft.commercialValueBasis}>
-              <option value="ESTIMATE">Preventivato</option>
-              <option value="CONTRACTED">Accordato / contrattualizzato</option>
+          <Field className="md:col-span-2" label={INTAKE_FIELD_LABELS.commercialModel} proposed={proposed("commercialModel")} required>
+            <select className={selectClass} disabled={!catalog} onChange={(event) => onChange("commercialModel", event.target.value)} required value={draft.commercialModel}>
+              {!catalog && <option value={draft.commercialModel}>Catalogo economico in caricamento…</option>}
+              {(catalog?.pricingModels ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+            <span className="mt-2 block rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] px-3 py-2 text-[10px] leading-4 text-slate-500">
+              {catalog?.pricingModels.find((option) => option.value === draft.commercialModel)?.description ?? "La modalità viene letta dal server prima del salvataggio."}
+            </span>
           </Field>
+          {(draft.commercialModel === "FIXED_TOTAL" || draft.commercialModel === "MIXED") && <>
+            <Field label={draft.commercialModel === "MIXED" ? "Canone / importo base" : "Valore complessivo"} proposed={proposed("commercialValueAmount")} required={draft.commercialModel === "FIXED_TOTAL"}>
+              <Input className={inputClass} inputMode="decimal" maxLength={18} onChange={(event) => onChange("commercialValueAmount", event.target.value)} placeholder="Es. 14000,00" type="text" value={draft.commercialValueAmount} />
+            </Field>
+            <Field label={INTAKE_FIELD_LABELS.commercialValueBasis} proposed={proposed("commercialValueBasis")}>
+              <select className={selectClass} disabled={!catalog} onChange={(event) => onChange("commercialValueBasis", event.target.value)} value={draft.commercialValueBasis}>
+                {(catalog?.valueBases ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </Field>
+          </>}
+          {draft.commercialModel === "PER_WORK_ORDER" && <div className="md:col-span-2 rounded-2xl border border-lime-300/18 bg-lime-300/[.04] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[.13em] text-lime-100/80">Nessun totale generale obbligatorio</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Dopo la creazione, ogni intervento autorizzato avrà valore e stato propri. Il riepilogo sommerà solo le lavorazioni registrate, distinguendo bozze, approvate e completate.</p></div>}
+          {draft.commercialModel === "TIME_AND_MATERIAL" && <div className="md:col-span-2 rounded-2xl border border-cyan-300/18 bg-cyan-300/[.04] p-3.5"><p className="text-[10px] font-semibold uppercase tracking-[.13em] text-cyan-100/80">Valore a consuntivo</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Non viene inserito un totale fittizio. Ore, materiali, mezzi e documenti produrranno fatti economici distinti soltanto dopo verifica.</p></div>}
         </div>
       </FormSection>
 
@@ -614,7 +631,14 @@ function SummaryRail({ draft, mode, preview, macroScope, worksiteLocation }: { d
     { label: "Cliente", value: draft.clientName.trim(), fallback: "Non ancora indicato" },
     { label: "Luogo intervento", value: worksiteLocation?.formattedAddress || draft.worksite.trim(), fallback: "Da riconoscere" },
     { label: "Scadenza", value: draft.dueDate.trim(), fallback: "Da pianificare" },
-    { label: "Valore commessa", value: draft.commercialValueAmount.trim() ? `${draft.commercialValueAmount.trim()} € · ${draft.commercialValueBasis === "CONTRACTED" ? "accordato" : "preventivato"}` : "", fallback: "Facoltativo", optional: true },
+    {
+      label: "Regola economica",
+      value: draft.commercialModel === "FIXED_TOTAL" || draft.commercialModel === "MIXED"
+        ? `${commercialModelLabel(draft.commercialModel)}${draft.commercialValueAmount.trim() ? ` · ${draft.commercialValueAmount.trim()} €` : ""}`
+        : commercialModelLabel(draft.commercialModel),
+      fallback: "Da definire",
+      optional: true,
+    },
   ];
   const requiredFields = keyFields.filter((field) => !field.optional);
   const filledCount = requiredFields.filter((field) => Boolean(field.value)).length;
@@ -643,7 +667,7 @@ function modeHeading(mode: IntakeMode) {
   return { title: "Come vuoi iniziare?", description: "Scegli il punto di partenza. Ogni percorso produce la stessa scheda operativa con lavorazioni separate." };
 }
 
-export default function OperationsCommessaIntake({ open, onOpenChange, onCreated }: Props) {
+export default function OperationsCommessaIntake({ open, catalog, onOpenChange, onCreated }: Props) {
   const [mode, setMode] = useState<IntakeMode>("chooser");
   const [draft, setDraft] = useState<IntakeDraft>(DEFAULT_INTAKE_DRAFT);
   const [sourceText, setSourceText] = useState("");
@@ -718,6 +742,9 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
 
   const updateField = (key: keyof IntakeDraft, value: string) => {
     setDraft((current) => ({ ...current, [key]: value } as IntakeDraft));
+    if (key === "commercialModel" && !["FIXED_TOTAL", "MIXED"].includes(value)) {
+      setDraft((current) => ({ ...current, commercialValueAmount: "" }));
+    }
     if (key === "description") {
       setMacroScope(null);
       setNotice("La descrizione è cambiata. Analizza e conferma di nuovo lo scope.");
@@ -888,7 +915,15 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
       setPreview(data);
       const workItems = data.draft.workItems ?? data.workItems ?? draft.workItems;
-      setDraft((current) => ({ ...current, ...data.draft, workItems, workItemsText: workItems.map((item) => item.label).join("\n"), statusCode: "DRAFT" } as IntakeDraft));
+      const nextCommercialModel = data.draft.commercialModel ?? draft.commercialModel;
+      setDraft((current) => ({
+        ...current,
+        ...data.draft,
+        workItems,
+        workItemsText: workItems.map((item) => item.label).join("\n"),
+        commercialValueAmount: nextCommercialModel === "FIXED_TOTAL" || nextCommercialModel === "MIXED" ? data.draft.commercialValueAmount ?? current.commercialValueAmount : "",
+        statusCode: "DRAFT",
+      } as IntakeDraft));
       setWorksiteLocation(null);
       setWorksiteCandidates([]);
       setWorksiteGeocodeNotice("");
@@ -954,6 +989,10 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
 
   const createJob = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!catalog) {
+      setError("Il catalogo economico server-side non è disponibile. Aggiorna la pagina e riprova.");
+      return;
+    }
     if (draft.title.trim().length < 2) {
       setError("Inserisci il nome della commessa.");
       return;
@@ -990,11 +1029,15 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
       setError("Descrivi il lavoro oppure inserisci almeno una lavorazione.");
       return;
     }
+    if (draft.commercialModel === "FIXED_TOTAL" && !draft.commercialValueAmount.trim()) {
+      setError("Inserisci il valore complessivo oppure scegli una diversa modalità economica.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const macroGroupLabels = macroScope?.groupsConfirmed.map((id) => macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label ?? (id === macroScope.catalog.fallback.id ? macroScope.catalog.fallback.label : id)) ?? [];
-      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, workItems, commercialValue: { amount: draft.commercialValueAmount, basis: draft.commercialValueBasis }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: macroGroupLabels.join(" · ") || "Attività da classificare", jobType: "", specialization: "", sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: macroScope?.previewId ?? preview?.previewId, ...(macroScope ? { scopeV2: { previewId: macroScope.previewId, confirmed: macroScope.confirmed, descriptionOriginal: macroScope.proposal.descriptionOriginal, groupsConfirmed: macroScope.groupsConfirmed, activities: macroScope.activities.map(({ included, ...activity }) => ({ ...activity, included })) } } : {}), idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
+      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, workItems, commercialTerms: { model: draft.commercialModel, amount: draft.commercialValueAmount, basis: draft.commercialValueBasis, currency: "EUR" }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: macroGroupLabels.join(" · ") || "Attività da classificare", jobType: "", specialization: "", sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: macroScope?.previewId ?? preview?.previewId, ...(macroScope ? { scopeV2: { previewId: macroScope.previewId, confirmed: macroScope.confirmed, descriptionOriginal: macroScope.proposal.descriptionOriginal, groupsConfirmed: macroScope.groupsConfirmed, activities: macroScope.activities.map(({ included, ...activity }) => ({ ...activity, included })) } } : {}), idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
       const data = await response.json() as IntakeCreateResponse & { error?: string; message?: string };
       if (!response.ok) {
         const message = data.error === "worksite_location_confirmation_required"
@@ -1005,6 +1048,8 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
               ? data.message ?? "La proposta di scope non è più valida. Analizza di nuovo la descrizione e conferma la proposta attuale."
             : data.error === "work_description_required" || data.error === "work_items_invalid" || data.error === "work_item_scope_invalid"
               ? data.message ?? "Controlla descrizione e classificazione delle lavorazioni."
+            : data.error === "commercial_value_required_for_fixed_total" || data.error === "commercial_value_invalid" || data.error === "commercial_value_must_be_positive" || data.error === "commercial_value_not_allowed_for_model" || data.error === "commercial_model_invalid"
+              ? "Controlla la modalità economica e l’importo indicato."
             : data.error === "worksite_geocoder_unavailable" || data.error === "worksite_geocoder_not_configured"
               ? "Non riusciamo a verificare l’indirizzo in questo momento."
               : "La commessa non è stata salvata.";
@@ -1062,10 +1107,10 @@ export default function OperationsCommessaIntake({ open, onOpenChange, onCreated
             }} onSubmit={createJob}>
               <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {mode === "company-ai" && <CompanyAiPanel busy={busy} hasSourceFile={Boolean(sourceFile)} notice={notice} onAnalyze={() => void analyzeWithCompanyAi()} onFile={(event) => void handleFile(event)} onSourceTextChange={(value) => { setSourceFile(null); setSourceFileName(""); setSourceText(value); setError(""); }} preview={preview} sourceFileName={sourceFileName} sourceText={sourceText} />}
-                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields analysisNotice={mode === "manual" ? notice : ""} analyzingWork={busy} draft={draft} macroScope={macroScope} mode={mode} onAnalyzeWork={() => void analyzeManualScope()} onChange={updateField} onConfirmMacroScope={confirmMacroScope} onMacroActivityChange={editMacroActivity} onMacroActivityToggle={toggleMacroActivity} onMacroGroupToggle={toggleMacroGroup} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} macroScope={macroScope} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
+                <div className="relative z-10 grid gap-6 p-4 sm:p-7 lg:grid-cols-[minmax(0,1fr)_310px]"><div className="min-w-0"><IntakeFields analysisNotice={mode === "manual" ? notice : ""} analyzingWork={busy} catalog={catalog} draft={draft} macroScope={macroScope} mode={mode} onAnalyzeWork={() => void analyzeManualScope()} onChange={updateField} onConfirmMacroScope={confirmMacroScope} onMacroActivityChange={editMacroActivity} onMacroActivityToggle={toggleMacroActivity} onMacroGroupToggle={toggleMacroGroup} onSelectWorksite={selectWorksite} onVerifyWorksite={verifyWorksite} proposedKeys={proposedKeys} worksiteCandidates={worksiteCandidates} worksiteGeocodeBusy={worksiteGeocodeBusy} worksiteGeocodeNotice={worksiteGeocodeNotice} worksiteLocation={worksiteLocation} /></div><SummaryRail draft={draft} macroScope={macroScope} mode={mode} preview={preview} worksiteLocation={worksiteLocation} /></div>
                 {error && <div className="relative z-10 mx-4 mb-5 flex items-start gap-3 rounded-2xl border border-rose-300/25 bg-[linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.035))] px-4 py-3.5 text-xs leading-5 text-rose-100 shadow-[0_14px_30px_rgba(0,0,0,0.16)] sm:mx-7"><span className="mt-1 size-1.5 shrink-0 rounded-full bg-rose-300 shadow-[0_0_8px_rgba(251,113,133,0.8)]" />{error}</div>}
               </div>
-              <div className="relative z-10 flex shrink-0 flex-col gap-4 border-t border-lime-300/10 bg-[linear-gradient(180deg,rgba(16,27,24,0.94),rgba(6,11,12,0.98))] px-4 py-4 shadow-[0_-18px_45px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.08] text-lime-200 shadow-[0_0_18px_rgba(190,255,60,0.07)]"><ShieldCheck className="size-3.5" /></span><div><p className="text-[11px] font-semibold text-lime-100/90">Conferma controllata</p><p className="mt-0.5 text-[10px] text-slate-600">{mode === "company-ai" ? "Proposte verificabili · conferma umana richiesta" : macroScope?.confirmed ? "Scope confermato · salva la commessa in bozza" : "Analizza e conferma gli ambiti prima del salvataggio"}</p></div></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="h-11 rounded-xl border-white/10 bg-transparent px-4 text-slate-400 hover:border-lime-300/25 hover:bg-lime-300/[0.06] hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button" variant="outline">Annulla</Button><Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-5 font-semibold text-[#060806] shadow-[0_0_26px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_34px_rgba(190,255,60,0.28)]" disabled={busy || (mode === "manual" && !macroScope?.confirmed)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : mode === "company-ai" ? <Check className="size-3.5" /> : <Save className="size-3.5" />}{mode === "company-ai" ? "Conferma dati e crea commessa" : "Salva commessa in bozza"}</Button></div></div>
+              <div className="relative z-10 flex shrink-0 flex-col gap-4 border-t border-lime-300/10 bg-[linear-gradient(180deg,rgba(16,27,24,0.94),rgba(6,11,12,0.98))] px-4 py-4 shadow-[0_-18px_45px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between sm:px-8"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl border border-lime-300/25 bg-lime-300/[0.08] text-lime-200 shadow-[0_0_18px_rgba(190,255,60,0.07)]"><ShieldCheck className="size-3.5" /></span><div><p className="text-[11px] font-semibold text-lime-100/90">Conferma controllata</p><p className="mt-0.5 text-[10px] text-slate-600">{!catalog ? "Catalogo server-side in caricamento" : mode === "company-ai" ? "Proposte verificabili · conferma umana richiesta" : macroScope?.confirmed ? "Scope confermato · salva la commessa in bozza" : "Analizza e conferma gli ambiti prima del salvataggio"}</p></div></div><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="h-11 rounded-xl border-white/10 bg-transparent px-4 text-slate-400 hover:border-lime-300/25 hover:bg-lime-300/[0.06] hover:text-lime-100" onClick={() => handleOpenChange(false)} type="button" variant="outline">Annulla</Button><Button className="h-11 rounded-xl bg-[linear-gradient(135deg,#bfff3c,#8bdc48)] px-5 font-semibold text-[#060806] shadow-[0_0_26px_rgba(190,255,60,0.17)] transition hover:-translate-y-0.5 hover:bg-[linear-gradient(135deg,#d3ff6d,#a4ec57)] hover:shadow-[0_0_34px_rgba(190,255,60,0.28)]" disabled={busy || !catalog || (mode === "manual" && !macroScope?.confirmed)} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : mode === "company-ai" ? <Check className="size-3.5" /> : <Save className="size-3.5" />}{mode === "company-ai" ? "Conferma dati e crea commessa" : "Salva commessa in bozza"}</Button></div></div>
             </form>
           )}
         </div>

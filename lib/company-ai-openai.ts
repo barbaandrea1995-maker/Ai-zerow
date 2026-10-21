@@ -13,6 +13,7 @@ import {
   normalizeCompanyAiMacroScopeProposal,
   type CompanyAiMacroScopeProposal,
 } from "@/lib/company-ai-macro-scope";
+import type { JobCommercialModel } from "@/lib/job-commercial-terms";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
@@ -78,6 +79,7 @@ export type CompanyAiOpenAiExtraction = {
   cup: string;
   dueDate: string;
   priority: "" | "HIGH" | "STANDARD" | "LOW";
+  commercialModel: "" | JobCommercialModel;
   commercialValueAmount: string;
   commercialValueBasis: "" | "ESTIMATE" | "CONTRACTED";
   workItems: Array<{
@@ -225,6 +227,7 @@ function extractionSchema() {
       cup: textField,
       dueDate: textField,
       priority: emptyOr(["HIGH", "STANDARD", "LOW"]),
+      commercialModel: emptyOr(["UNDEFINED", "FIXED_TOTAL", "PER_WORK_ORDER", "TIME_AND_MATERIAL", "MIXED"]),
       commercialValueAmount: textField,
       commercialValueBasis: emptyOr(["ESTIMATE", "CONTRACTED"]),
       workItems: {
@@ -253,7 +256,7 @@ function extractionSchema() {
     required: [
       "title", "description", "openingType", "scopeSectionId", "scopeGroupId", "scopeSubgroupId",
       "clientName", "clientTaxId", "clientContact", "clientPhone", "clientEmail", "clientReference",
-      "clientAddress", "worksite", "accessNotes", "cig", "cup", "dueDate", "priority", "commercialValueAmount", "commercialValueBasis", "confidence",
+      "clientAddress", "worksite", "accessNotes", "cig", "cup", "dueDate", "priority", "commercialModel", "commercialValueAmount", "commercialValueBasis", "confidence",
       "workItems", "evidence", "missingFields",
     ],
   };
@@ -346,6 +349,7 @@ function parseJson(text: string): JsonRecord | null {
 function normalizeExtraction(value: JsonRecord): CompanyAiOpenAiExtraction {
   const openingType = stringValue(value.openingType, 32);
   const priority = stringValue(value.priority, 16);
+  const commercialModel = stringValue(value.commercialModel, 32);
   return {
     title: stringValue(value.title, 120),
     description: stringValue(value.description, 2_000),
@@ -366,6 +370,7 @@ function normalizeExtraction(value: JsonRecord): CompanyAiOpenAiExtraction {
     cup: stringValue(value.cup, 80),
     dueDate: stringValue(value.dueDate, 40),
     priority: priority === "HIGH" || priority === "STANDARD" || priority === "LOW" ? priority : "",
+    commercialModel: commercialModel === "UNDEFINED" || commercialModel === "FIXED_TOTAL" || commercialModel === "PER_WORK_ORDER" || commercialModel === "TIME_AND_MATERIAL" || commercialModel === "MIXED" ? commercialModel : "",
     commercialValueAmount: stringValue(value.commercialValueAmount, 40),
     commercialValueBasis: value.commercialValueBasis === "CONTRACTED" ? "CONTRACTED" : value.commercialValueBasis === "ESTIMATE" ? "ESTIMATE" : "",
     workItems: workItemList(value.workItems),
@@ -383,7 +388,8 @@ function promptForSource(sourceName: string, knowledgePack: unknown, knowledgeHi
     "Estrai e sintetizza i campi; non incollare il preventivo nella descrizione e non inventare dati mancanti.",
     "Scomponi tutte le lavorazioni in workItems distinti. Per ogni lavorazione assegna una sezione, un raggruppamento e un sottogruppo del catalogo se supportati dal testo; altrimenti lascia vuoti i tre ID. Non forzare tutte le lavorazioni nello stesso ambito.",
     "Lo scope generale va compilato solo se rappresenta davvero tutte le lavorazioni; per commesse miste lascia vuoti gli ID generali e usa le classificazioni dei singoli workItems.",
-    "Mantieni quantità e unità solo se esplicite. Non inventare importi: estrai il valore totale solo se il documento lo dichiara, come numero senza simbolo o testo aggiuntivo. Un preventivo non accettato è ESTIMATE; usa CONTRACTED solo con evidenza esplicita di accettazione/ordine.",
+    "Mantieni quantità e unità solo se esplicite. Non inventare importi: estrai un valore solo se il documento lo dichiara, come numero senza simbolo o testo aggiuntivo. Un preventivo non accettato è ESTIMATE; usa CONTRACTED solo con evidenza esplicita di accettazione/ordine.",
+    "La modalità economica è separata dal tipo commessa: FIXED_TOTAL solo con totale esplicito; PER_WORK_ORDER solo se è esplicito il prezzo per intervento/lavorazione/a chiamata; TIME_AND_MATERIAL solo se è esplicito il consuntivo di ore/materiali/mezzi; MIXED solo con base o canone più extra. In assenza di evidenza usa UNDEFINED.",
     "Classifica come PRONTO_INTERVENTO solo quando il documento indica urgenza o guasto; come MANUTENZIONE solo per un intervento ricorrente o programmato; altrimenti NUOVA_COMMESSA.",
     `Nome documento: ${sourceName || "non indicato"}`,
     `Knowledge pack reference-only: ${JSON.stringify(knowledgePack)}`,

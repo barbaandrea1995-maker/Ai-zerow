@@ -372,8 +372,12 @@ function mergeOpenAiExtraction({
   const extraction = result!.extraction;
   const confidence = Math.min(0.98, Math.max(0.56, extraction.confidence || 0.7));
   const source = `OpenAI · ${result!.model}`;
+  const extractedCommercialModel = extraction.commercialModel
+    || (extraction.commercialValueAmount ? "FIXED_TOTAL" : "UNDEFINED");
+  const acceptsBaseAmount = extractedCommercialModel === "FIXED_TOTAL" || extractedCommercialModel === "MIXED";
   const draft: Partial<IntakeDraft> = { ...baseDraft };
-  const suggestions = [...baseSuggestions];
+  if (!acceptsBaseAmount) draft.commercialValueAmount = "";
+  const suggestions = baseSuggestions.filter((suggestion) => acceptsBaseAmount || suggestion.key !== "commercialValueAmount");
   const fields: Array<[keyof IntakeDraft, string]> = [
     ["title", extraction.title],
     ["description", extraction.description],
@@ -389,7 +393,7 @@ function mergeOpenAiExtraction({
     ["cig", extraction.cig],
     ["cup", extraction.cup],
     ["dueDate", extraction.dueDate],
-    ["commercialValueAmount", extraction.commercialValueAmount],
+    ...(acceptsBaseAmount ? [["commercialValueAmount", extraction.commercialValueAmount] as [keyof IntakeDraft, string]] : []),
   ];
   for (const [key, value] of fields) {
     if (!value) continue;
@@ -409,6 +413,8 @@ function mergeOpenAiExtraction({
     setDraftField(draft, "commercialValueBasis", extraction.commercialValueBasis);
     upsertSuggestion(suggestions, "commercialValueBasis", extraction.commercialValueBasis, confidence, source);
   }
+  setDraftField(draft, "commercialModel", extractedCommercialModel);
+  upsertSuggestion(suggestions, "commercialModel", extractedCommercialModel, confidence, source);
 
   const aiWorkItems = extraction.workItems.map((item, index) => {
     const explicitScope = resolveCompanyAiScopeSelection({ sectionId: item.scopeSectionId, groupId: item.scopeGroupId, subgroupId: item.scopeSubgroupId });
@@ -504,6 +510,13 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   const openingType = /manutenzione (?:programmata|periodica|ordinaria)|contratto di manutenzione/.test(lowerSource)
     ? "MANUTENZIONE"
     : /pronto intervento|urgenza|urgente|guasto|riparazione urgente|intervento immediato/.test(lowerSource) ? "PRONTO_INTERVENTO" : "NUOVA_COMMESSA";
+  const commercialModel = /(?:canone|quota\s+fissa).{0,80}(?:extra|interventi?\s+extra)|(?:extra|interventi?\s+extra).{0,80}(?:canone|quota\s+fissa)/i.test(source)
+    ? "MIXED"
+    : /(?:per|a)\s+(?:ogni\s+)?(?:singol[ao]\s+)?(?:lavorazione|intervento|chiamata)|prezzo\s+(?:unitario|per\s+intervento)/i.test(source)
+      ? "PER_WORK_ORDER"
+      : /a\s+consuntivo|ore\s+e\s+materiali|tempo\s+e\s+materiali/i.test(source)
+        ? "TIME_AND_MATERIAL"
+        : rawCommercialValue ? "FIXED_TOTAL" : "UNDEFINED";
   const packageScopeIds = new Set(workItems.map((item) => item.scope?.subgroupId).filter(Boolean));
   const inferredScope = packageScopeIds.size > 1 ? null : inferCompanyAiScopeSelection(source);
   const scopeFields = scopeSelectionToFields(inferredScope?.selection ?? null);
@@ -536,7 +549,10 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
   addSuggestion(suggestions, "cig", rawCig, 0.98, "Preventivo · CIG");
   addSuggestion(suggestions, "cup", rawCup, 0.98, "Preventivo · CUP");
   addSuggestion(suggestions, "dueDate", rawDueDate, 0.88, "Preventivo · scadenza");
-  addSuggestion(suggestions, "commercialValueAmount", rawCommercialValue, rawCommercialValue ? 0.78 : 0, "Preventivo · importo esplicito");
+  if (commercialModel === "FIXED_TOTAL" || commercialModel === "MIXED") {
+    addSuggestion(suggestions, "commercialValueAmount", rawCommercialValue, rawCommercialValue ? 0.78 : 0, "Preventivo · importo complessivo esplicito");
+  }
+  addSuggestion(suggestions, "commercialModel", commercialModel, commercialModel === "UNDEFINED" ? 0.55 : 0.82, "Condizioni economiche esplicite");
 
   const draft: Partial<IntakeDraft> = {
     ...DEFAULT_INTAKE_DRAFT,
@@ -547,7 +563,8 @@ function extractDraft(sourceText: string): { draft: Partial<IntakeDraft>; sugges
     description: description.slice(0, 2_000),
     workItems,
     workItemsText: workItems.map((item) => item.label).join("\n"),
-    commercialValueAmount: rawCommercialValue.slice(0, 40),
+    commercialModel,
+    commercialValueAmount: commercialModel === "FIXED_TOTAL" || commercialModel === "MIXED" ? rawCommercialValue.slice(0, 40) : "",
     commercialValueBasis: /(?:ordine\s+confermato|contratto\s+firmato|offerta\s+accettata|preventivo\s+accettato)/i.test(source) ? "CONTRACTED" : "ESTIMATE",
     clientName: rawClient.slice(0, 160),
     clientTaxId: rawTaxId.slice(0, 80),

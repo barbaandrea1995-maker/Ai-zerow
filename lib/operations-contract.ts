@@ -1,4 +1,5 @@
 import type { CompanyAiMacroScopeConfirmation, CompanyAiMacroScopeId } from "@/lib/company-ai-macro-scope";
+import type { JobCommercialTerms } from "@/lib/job-commercial-terms";
 
 export const JOB_STATUS_CODES = [
   "DRAFT",
@@ -86,6 +87,7 @@ export type JobPayload = {
   statusCode: JobStatusCode;
   version: number;
   workItems: JobWorkItem[];
+  commercialTerms?: JobCommercialTerms;
   scopeV2?: CompanyAiMacroScopeConfirmation;
   progress?: number;
   activities: JobActivity[];

@@ -101,6 +101,25 @@ const invalidValueBasis = await post({
 assert.equal(invalidValueBasis.status, 400);
 assert.equal(invalidValueBasis.payload.error, "commercial_value_basis_invalid");
 
+const perWorkWithFakeTotal = await post({
+  ...common,
+  description: "Manutenzione valorizzata per singolo intervento",
+  commercialTerms: { model: "PER_WORK_ORDER", amount: "14.000,00", basis: "ESTIMATE", currency: "EUR" },
+  workItems: [{ label: "Ripristino perdita bagno" }],
+});
+assert.equal(perWorkWithFakeTotal.status, 400);
+assert.equal(perWorkWithFakeTotal.payload.error, "commercial_value_not_allowed_for_model");
+
+const perWorkIntake = await postJson("/api/operations/intake", {
+  sourceText: "Contratto di manutenzione della palazzina. Prezzo di 500,00 euro per ogni singolo intervento autorizzato.",
+  sourceName: "accordo-manutenzione.txt",
+  idempotencyKey: `verify-per-work-intake-${runId}`,
+});
+assert.equal(perWorkIntake.status, 201, `per-work intake must be classified: ${JSON.stringify(perWorkIntake.payload).slice(0, 500)}`);
+assert.equal(perWorkIntake.payload.draft?.commercialModel, "PER_WORK_ORDER");
+assert.equal(perWorkIntake.payload.draft?.commercialValueAmount, "", "a per-intervention price must not become the job total");
+assert.equal(perWorkIntake.payload.suggestions?.some((item) => item.key === "commercialValueAmount"), false);
+
 const geocode = await postJson("/api/location/geocode", { address: "Via Catullo 93, Pomezia" });
 assert.equal(geocode.status, 200, "the isolated runtime must expose its deterministic Geoapify fixture");
 const locationCandidate = geocode.payload.candidates?.[0];
@@ -136,6 +155,8 @@ assert.equal(created.payload.created?.payload?.category, "Lavorazioni miste", "m
 assert.equal(created.payload.created?.payload?.scope, null, "mixed work packages must leave the aggregate scope empty");
 assert.equal(created.payload.created?.payload?.workItems?.length, 2);
 assert.equal(created.payload.created?.payload?.commercialValue?.amountMinor, 1_400_000);
+assert.equal(created.payload.created?.payload?.commercialTerms?.model, "FIXED_TOTAL");
+assert.equal(created.payload.commercialTermsReadback?.status, "verified");
 
 const summaryResponse = await fetch(`${baseUrl}/api/finance/job-summary?jobId=${encodeURIComponent(created.payload.created.id)}`, {
   headers: {
@@ -148,6 +169,95 @@ assert.equal(summaryResponse.status, 200, "Finance must resolve the created comm
 assert.equal(summary.selectedJob?.id, created.payload.created.id);
 assert.equal(summary.summary?.commercialValue?.amountMinor, 1_400_000);
 assert.equal(summary.summary?.commercialValue?.basis, "ESTIMATE");
+assert.equal(summary.summary?.commercialTerms?.model, "FIXED_TOTAL");
+
+const perWorkJob = await post({
+  title: `Manutenzione per intervento ${runId}`,
+  openingType: "MANUTENZIONE",
+  description: "Accordo continuativo: ogni lavorazione viene preventivata e approvata separatamente.",
+  client: "Cliente manutenzione per intervento",
+  worksite: "Via Catullo 93, Pomezia",
+  worksiteLocation: locationCandidate,
+  commercialTerms: { model: "PER_WORK_ORDER", amount: "", basis: "ESTIMATE", currency: "EUR" },
+  workItems: [{ id: "work-1", label: "Interventi richiesti dal cliente", detail: "Interventi richiesti dal cliente" }],
+  idempotencyKey: `verify-operations-per-work-${runId}`,
+});
+assert.equal(perWorkJob.status, 201, `per-work maintenance must be created without a fake total: ${JSON.stringify(perWorkJob.payload).slice(0, 500)}`);
+assert.equal(perWorkJob.payload.created?.payload?.commercialTerms?.model, "PER_WORK_ORDER");
+assert.equal(perWorkJob.payload.created?.payload?.commercialValue, null);
+assert.equal(perWorkJob.payload.commercialTermsReadback?.status, "verified");
+
+const workOrderKey = `verify-work-order-${runId}`;
+const workOrder = await postJson(`/api/operations/jobs/${encodeURIComponent(perWorkJob.payload.created.id)}/commercial`, {
+  action: "create_work_order",
+  title: "Riparazione perdita bagno scala B",
+  description: "Ricerca perdita e ripristino concordati con il cliente.",
+  amount: "850,00",
+  basis: "ESTIMATE",
+  idempotencyKey: workOrderKey,
+});
+assert.equal(workOrder.status, 201, `work order must be persisted: ${JSON.stringify(workOrder.payload).slice(0, 500)}`);
+assert.equal(workOrder.payload.workOrderEconomics?.proposedMinor, 85_000);
+assert.equal(workOrder.payload.workOrderEconomics?.approvedMinor, null);
+assert.equal(workOrder.payload.workOrderEconomics?.counts?.draft, 1);
+const createdWorkOrder = workOrder.payload.workOrderEconomics?.workOrders?.[0];
+assert(createdWorkOrder?.id, "work order readback must expose the canonical id");
+
+const fractionalWorkOrder = await postJson(`/api/operations/jobs/${encodeURIComponent(perWorkJob.payload.created.id)}/commercial`, {
+  action: "create_work_order",
+  title: "Importo con frazione di centesimo",
+  amount: 8.501,
+  basis: "ESTIMATE",
+  idempotencyKey: `verify-work-order-fractional-${runId}`,
+});
+assert.equal(fractionalWorkOrder.status, 400);
+assert.equal(fractionalWorkOrder.payload.error, "work_order_value_invalid");
+
+const workOrderReplay = await postJson(`/api/operations/jobs/${encodeURIComponent(perWorkJob.payload.created.id)}/commercial`, {
+  action: "create_work_order",
+  title: "Riparazione perdita bagno scala B",
+  description: "Ricerca perdita e ripristino concordati con il cliente.",
+  amount: "850,00",
+  basis: "ESTIMATE",
+  idempotencyKey: workOrderKey,
+});
+assert.equal(workOrderReplay.status, 200);
+assert.equal(workOrderReplay.payload.mutation?.idempotent, true);
+assert.equal(workOrderReplay.payload.workOrderEconomics?.counts?.total, 1, "idempotent retry must not duplicate the work order");
+
+const workOrderConflict = await postJson(`/api/operations/jobs/${encodeURIComponent(perWorkJob.payload.created.id)}/commercial`, {
+  action: "create_work_order",
+  title: "Richiesta diversa con la stessa chiave",
+  amount: "900,00",
+  basis: "ESTIMATE",
+  idempotencyKey: workOrderKey,
+});
+assert.equal(workOrderConflict.status, 409);
+assert.equal(workOrderConflict.payload.error, "commercial_idempotency_key_conflict");
+
+const approvedWorkOrder = await postJson(`/api/operations/jobs/${encodeURIComponent(perWorkJob.payload.created.id)}/commercial`, {
+  action: "set_work_order_status",
+  workOrderId: createdWorkOrder.id,
+  expectedVersion: createdWorkOrder.version,
+  status: "APPROVED",
+  idempotencyKey: `verify-work-order-approve-${runId}`,
+});
+assert.equal(approvedWorkOrder.status, 200);
+assert.equal(approvedWorkOrder.payload.workOrderEconomics?.approvedMinor, 85_000);
+assert.equal(approvedWorkOrder.payload.workOrderEconomics?.counts?.approved, 1);
+
+const perWorkSummaryResponse = await fetch(`${baseUrl}/api/finance/job-summary?jobId=${encodeURIComponent(perWorkJob.payload.created.id)}`, {
+  headers: {
+    "oai-authenticated-user-id": "e2e-owner",
+    "oai-authenticated-user-email": "e2e-owner@example.invalid",
+  },
+});
+const perWorkSummary = await perWorkSummaryResponse.json();
+assert.equal(perWorkSummaryResponse.status, 200);
+assert.equal(perWorkSummary.summary?.commercialTerms?.model, "PER_WORK_ORDER");
+assert.equal(perWorkSummary.summary?.commercialValue, null, "per-work maintenance must not expose an overall fixed value");
+assert.equal(perWorkSummary.summary?.workOrderEconomics?.approvedMinor, 85_000);
+assert.equal(perWorkSummary.summary?.economics?.status, "NOT_AVAILABLE", "approving a work value must not invent a confirmed Finance revenue");
 
 console.log("PASS operations-intake server contract");
-console.log("Work description, optional and per-work scope, Italian euro parsing, verified location, commessa creation and Finance readback passed.");
+console.log("Work description, technical scope, fixed and per-work economics, idempotency, approval, verified location and Finance separation passed.");

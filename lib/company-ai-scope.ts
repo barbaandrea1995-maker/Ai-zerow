@@ -3,7 +3,7 @@ import type { CompanyAiKnowledgeHint } from "@/lib/company-ai-knowledge";
 export const COMMESSA_TYPES = [
   { value: "NUOVA_COMMESSA", label: "Cantiere / nuova commessa" },
   { value: "PRONTO_INTERVENTO", label: "Pronto intervento" },
-  { value: "MANUTENZIONE", label: "Manutenzione programmata" },
+  { value: "MANUTENZIONE", label: "Manutenzione / accordo continuativo" },
 ] as const;
 
 export type CommessaType = (typeof COMMESSA_TYPES)[number]["value"];

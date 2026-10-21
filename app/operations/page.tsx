@@ -51,6 +51,7 @@ import { invalidateReadback, readback } from "@/lib/client-readback";
 import { ROLE_METADATA } from "@/lib/authority-catalog";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 import { TenantSwitcher } from "@/components/tenant-switcher";
+import type { IntakeCommercialCatalog } from "@/lib/operations-intake";
 
 const OperationsCommessaIntake = dynamic(
   () => import("@/components/operations-commessa-intake"),
@@ -102,7 +103,9 @@ type OperationsJob = {
 };
 
 type OperationsAdapterRecord = IntakeAdapterRecord;
-type OperationsAdapterResponse = IntakeCreateResponse;
+type OperationsAdapterResponse = IntakeCreateResponse & {
+  options?: { commercial?: IntakeCommercialCatalog };
+};
 type PlanningOptionsResponse = {
   options?: {
     workforce?: Array<{ id: string; label: string; kind: string; assignable: boolean; availableForWindow?: boolean; availabilityConflict?: { title: string } }>;
@@ -453,6 +456,7 @@ export default function OperationsPage() {
   const [newJobOpen, setNewJobOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [adapterJobs, setAdapterJobs] = useState<OperationsJob[] | null>(null);
+  const [intakeCatalog, setIntakeCatalog] = useState<IntakeCommercialCatalog | null>(null);
   const [adapterStatus, setAdapterStatus] = useState<
     "loading" | "online" | "empty" | "error"
   >("loading");
@@ -469,6 +473,7 @@ export default function OperationsPage() {
         { force: true },
       );
       const records = Array.isArray(payload.records) ? payload.records : [];
+      setIntakeCatalog(payload.options?.commercial ?? null);
       const nextJobs = records.length ? jobsFromAdapter(records) : [];
       setAdapterJobs(nextJobs);
       setSelectedId((current) => current || nextJobs[0]?.id || "");
@@ -476,6 +481,7 @@ export default function OperationsPage() {
       setLastReadbackAt(new Date().toISOString());
     } catch {
       setAdapterJobs([]);
+      setIntakeCatalog(null);
       setAdapterStatus("error");
       setLastReadbackAt(new Date().toISOString());
     }
@@ -1288,6 +1294,7 @@ export default function OperationsPage() {
       />
       {canWriteOperations && newJobOpen && (
         <OperationsCommessaIntake
+          catalog={intakeCatalog}
           open={newJobOpen}
           onOpenChange={setNewJobOpen}
           onCreated={handleIntakeCreated}

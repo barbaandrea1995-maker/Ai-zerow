@@ -47,6 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import JobCommercialJourney from "@/components/job-commercial-journey";
+import JobCommercialTermsPanel from "@/components/job-commercial-terms-panel";
 import { composeRapportinoNarrative, normalizeRapportinoAnswers } from "@/lib/operations-contract";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
@@ -1211,7 +1212,7 @@ export default function OperationsJobWorkspace({
   const openingType =
     payloadText("openingType") === "PRONTO_INTERVENTO"
       ? "Pronto intervento"
-      : payloadText("openingType") === "MANUTENZIONE" ? "Manutenzione programmata" : "Cantiere / nuova commessa";
+      : payloadText("openingType") === "MANUTENZIONE" ? "Manutenzione / accordo continuativo" : "Cantiere / nuova commessa";
   const sourceMode =
     payloadText("sourceMode") === "COMPANY_AI"
       ? "Da preventivo"
@@ -1237,13 +1238,6 @@ export default function OperationsJobWorkspace({
       : Array.isArray(jobData.workItems) && jobData.workItems.some((item) => item && typeof item === "object" && "scope" in item)
         ? "Classificazioni collegate alle singole lavorazioni"
         : "Da classificare con Company AI";
-  const rawCommercialValue = jobData.commercialValue && typeof jobData.commercialValue === "object" && !Array.isArray(jobData.commercialValue)
-    ? jobData.commercialValue as Record<string, unknown>
-    : null;
-  const commercialAmountMinor = typeof rawCommercialValue?.amountMinor === "number" && Number.isSafeInteger(rawCommercialValue.amountMinor) ? rawCommercialValue.amountMinor : null;
-  const commercialValueLabel = commercialAmountMinor === null
-    ? "Valore non indicato"
-    : new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(commercialAmountMinor / 100);
   const dueDateLabel = formatCommercialDate(jobData.dueDate ?? job.meta);
   const jobCode = valueOr(job.canonicalCode, jobId);
   const clientRows = [
@@ -1358,7 +1352,7 @@ export default function OperationsJobWorkspace({
                 <div><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">PERIMETRO DEL LAVORO</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">{quoteSummary ? "Lavori dal preventivo" : "Descrizione e lavorazioni"}</h2></div>
                 {workItems.length > 0 && <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1 text-[9px] text-lime-100/80">{workItems.length} lavorazioni</span>}
               </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] px-3.5 py-3"><div><p className="text-[8px] font-semibold uppercase tracking-[.15em] text-lime-100/60">Valore commerciale della commessa</p><p className="mt-1 text-lg font-semibold text-lime-100">{commercialValueLabel}</p></div><span className="rounded-full border border-lime-300/15 bg-black/20 px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.08em] text-lime-100/70">{commercialAmountMinor === null ? "Da definire" : rawCommercialValue?.basis === "CONTRACTED" ? "Accordato" : "Preventivato"}</span></div>
+              <JobCommercialTermsPanel jobId={jobId} />
               {quoteSummary ? <div className="mt-4 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3.5">
                 <p className="text-[8px] font-semibold uppercase tracking-[.14em] text-cyan-100/60">Oggetto del preventivo</p>
                 <p className="mt-1.5 text-[12px] font-medium leading-5 text-slate-100">{quoteSummary.object}</p>

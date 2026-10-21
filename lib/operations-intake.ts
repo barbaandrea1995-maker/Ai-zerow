@@ -1,10 +1,19 @@
 import type { JobStatusCode, JobWorkItem } from "@/lib/operations-contract";
+import type { JobCommercialModel } from "@/lib/job-commercial-terms";
 import type { CompanyAiKnowledgeHint, CompanyAiKnowledgePackSummary } from "@/lib/company-ai-knowledge";
 import { COMMESSA_TYPES, type CompanyAiScopeSuggestion, type CommessaType } from "@/lib/company-ai-scope";
 
 export type IntakeMode = "MANUAL" | "COMPANY_AI";
 
 export type IntakeWorkItem = JobWorkItem;
+
+export type IntakeCommercialCatalog = {
+  openingTypes: Array<{ value: CommessaType; label: string }>;
+  pricingModels: Array<{ value: JobCommercialModel; label: string; description: string }>;
+  valueBases: Array<{ value: "ESTIMATE" | "CONTRACTED"; label: string }>;
+  currency: "EUR";
+  authority: "SERVER_CONTRACT";
+};
 
 export type IntakeDraft = {
   title: string;
@@ -29,6 +38,7 @@ export type IntakeDraft = {
   dueDate: string;
   priority: "HIGH" | "STANDARD" | "LOW";
   workItemsText: string;
+  commercialModel: JobCommercialModel;
   commercialValueAmount: string;
   commercialValueBasis: "ESTIMATE" | "CONTRACTED";
 };
@@ -100,6 +110,7 @@ export const DEFAULT_INTAKE_DRAFT: IntakeDraft = {
   dueDate: "",
   priority: "STANDARD",
   workItemsText: "",
+  commercialModel: "UNDEFINED",
   commercialValueAmount: "",
   commercialValueBasis: "ESTIMATE",
 };
@@ -129,6 +140,7 @@ export const INTAKE_FIELD_LABELS: Record<keyof IntakeDraft, string> = {
   dueDate: "Scadenza operativa",
   priority: "Priorità",
   workItemsText: "Lavorazioni",
-  commercialValueAmount: "Valore commessa",
+  commercialModel: "Modalità economica",
+  commercialValueAmount: "Importo commerciale",
   commercialValueBasis: "Base del valore",
 };

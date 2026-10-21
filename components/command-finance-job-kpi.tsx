@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BriefcaseBusiness, CircleDollarSign, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { commercialModelLabel, commercialValueLabel, type JobCommercialTerms, type JobWorkOrderEconomics } from "@/lib/job-commercial-terms";
 
 type FinanceStatus = "PROPOSED" | "REVIEW" | "APPROVED" | "RECONCILED";
 type FinanceJob = { id: string; code: string | null; title: string; client: string; status: string };
@@ -15,6 +16,8 @@ type CurrencyExpense = {
 };
 type JobFinanceSummary = {
   commercialValue: null | { amountMinor: number; currency: string; basis: "ESTIMATE" | "CONTRACTED"; version: number; updatedAt: string };
+  commercialTerms?: JobCommercialTerms;
+  workOrderEconomics?: JobWorkOrderEconomics;
   economics?: {
     status: "NOT_AVAILABLE" | "PARTIAL" | "AVAILABLE";
     pendingCount: number;
@@ -74,11 +77,18 @@ export function CommandFinanceJobKpi() {
   const selectedProposal = proposals.find((row) => row.currency === "EUR") ?? null;
   const economics = payload?.summary?.economics;
   const commercialValue = payload?.summary?.commercialValue;
-  const selectedEconomics = economics?.currencies.find((row) => row.currency === commercialValue?.currency)
+  const commercialTerms = payload?.summary?.commercialTerms;
+  const workOrderEconomics = payload?.summary?.workOrderEconomics;
+  const selectedEconomics = economics?.currencies.find((row) => row.currency === (commercialValue?.currency ?? commercialTerms?.currency))
     ?? economics?.currencies[0]
     ?? null;
-  const valueLabel = commercialValue ? money(commercialValue.amountMinor, commercialValue.currency, 100) : "—";
-  const valueDetail = state === "loading" ? "Lettura server-side…" : commercialValue ? commercialValue.basis === "CONTRACTED" ? "Valore accordato" : "Valore preventivato" : "Nessun valore registrato";
+  const valueLabel = commercialTerms?.model === "PER_WORK_ORDER"
+    ? workOrderEconomics?.approvedMinor === null || workOrderEconomics?.approvedMinor === undefined ? "—" : money(workOrderEconomics.approvedMinor, workOrderEconomics.currency, 100)
+    : commercialValue ? money(commercialValue.amountMinor, commercialValue.currency, 100) : "—";
+  const valueDetail = state === "loading"
+    ? "Lettura server-side…"
+    : commercialTerms ? `${commercialModelLabel(commercialTerms.model)}${commercialTerms.model === "PER_WORK_ORDER" ? ` · ${workOrderEconomics?.counts.approved ?? 0} approvate` : ""}`
+      : commercialValue ? commercialValue.basis === "CONTRACTED" ? "Valore accordato" : "Valore preventivato" : "Nessun valore registrato";
   const otherCurrencies = economics?.currencies.filter((row) => row.currency !== selectedEconomics?.currency) ?? [];
   const totalProposalCount = selectedProposal?.count ?? 0;
   const missingLedgers = payload?.summary?.unavailableLedgers ?? ["Costi e ricavi confermati"];
@@ -100,7 +110,7 @@ export function CommandFinanceJobKpi() {
       : !jobId && state === "ready" ? <div className="carbon-inset mt-3 rounded-xl border border-dashed border-white/[.08] p-4 text-center text-[10px] text-slate-600">{payload?.jobs?.length ? "Scegli una commessa per leggere valore e spese." : "Nessuna commessa disponibile nel catalogo Finance."}</div>
       : <>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Metric label="Valore commessa" value={state === "loading" ? "…" : valueLabel} detail={valueDetail} />
+          <Metric label={commercialTerms ? commercialValueLabel(commercialTerms.model) : "Valore commessa"} value={state === "loading" ? "…" : valueLabel} detail={valueDetail} />
           <Metric label="Ricavi confermati" value={state === "loading" ? "…" : selectedEconomics ? money(selectedEconomics.revenueMinor, selectedEconomics.currency, 100) : "—"} detail={selectedEconomics ? `Ledger · ${selectedEconomics.currency}` : "Non disponibili"} tone="text-cyan-100" />
           <Metric label="Costi confermati" value={state === "loading" ? "…" : selectedEconomics ? money(selectedEconomics.expenseMinor, selectedEconomics.currency, 100) : "—"} detail={selectedEconomics ? "Esclude proposte e impegni" : "Non disponibili"} tone="text-amber-100" />
           <Metric label="Margine gestionale" value={state === "loading" ? "…" : selectedEconomics ? money(selectedEconomics.marginMinor, selectedEconomics.currency, 100) : "—"} detail={selectedEconomics ? "Ricavi meno costi" : "Non disponibile"} />

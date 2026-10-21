@@ -71,7 +71,11 @@ type CommercialPortfolioRow = {
   status: string;
   amountMinor: number;
   currency: string;
-  basis: "ESTIMATE" | "CONTRACTED";
+  basis: "ESTIMATE" | "CONTRACTED" | "MIXED";
+  estimateAmountMinor?: number;
+  contractedAmountMinor?: number;
+  model?: "UNDEFINED" | "FIXED_TOTAL" | "PER_WORK_ORDER" | "TIME_AND_MATERIAL" | "MIXED";
+  workOrderCount?: number;
   version: number;
   updatedAt: string;
 };
@@ -234,7 +238,7 @@ function CommercialPortfolioSection({ portfolio, state }: { portfolio: Commercia
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-cyan-100/70">COMMESSE / VALORE COMMERCIALE</p><h2 className="mt-1 text-base font-semibold text-slate-100">Preventivi e accordi registrati</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Importi letti dal registro versionato delle commesse. Indicano ricavi attesi o accordati, non fatture emesse, incassi o saldo di cassa.</p></div><span className="rounded-full border border-cyan-300/15 bg-cyan-300/[.04] px-2.5 py-1.5 font-mono text-[9px] text-cyan-100/75">{state === "loading" ? "LETTURA D1…" : `${portfolio?.totals.recordedCount ?? 0} COMMESSE`}</span></div>
     {state === "error" ? <div className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3 text-[10px] leading-5 text-amber-100/75">Registro valori non disponibile. Gli altri dati di Finanza restano consultabili.</div> : <>
       <div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-white/[.07] bg-black/20 p-3.5"><p className="text-[9px] font-semibold uppercase tracking-[.13em] text-slate-500">Preventivato</p><p className="mt-2 font-mono text-xl font-semibold text-cyan-100">{formatMinorAmount(portfolio?.totals.estimateMinor ?? 0)}</p></div><div className="rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3.5"><p className="text-[9px] font-semibold uppercase tracking-[.13em] text-lime-100/60">Accordato / contrattualizzato</p><p className="mt-2 font-mono text-xl font-semibold text-lime-100">{formatMinorAmount(portfolio?.totals.contractedMinor ?? 0)}</p></div></div>
-      {portfolio?.rows.length ? <div className="mt-4 space-y-2">{portfolio.rows.slice(0, 8).map((row) => <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[.06] bg-black/15 px-3.5 py-3" key={row.id}><div className="min-w-0"><p className="truncate text-[11px] font-medium text-slate-200">{row.jobCode ? `${row.jobCode} · ` : ""}{row.jobTitle}</p><p className="mt-1 truncate text-[9px] text-slate-600">{row.client || "Cliente non indicato"} · v{row.version} · {row.basis === "CONTRACTED" ? "Accordato" : "Preventivato"}</p></div><span className="shrink-0 font-mono text-sm text-lime-100">{formatMinorAmount(row.amountMinor, row.currency)}</span></article>)}</div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.08] px-3.5 py-5 text-center text-[10px] text-slate-600">Nessun valore commerciale registrato sulle commesse.</div>}
+      {portfolio?.rows.length ? <div className="mt-4 space-y-2">{portfolio.rows.slice(0, 8).map((row) => <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[.06] bg-black/15 px-3.5 py-3" key={row.id}><div className="min-w-0"><p className="truncate text-[11px] font-medium text-slate-200">{row.jobCode ? `${row.jobCode} · ` : ""}{row.jobTitle}</p><p className="mt-1 truncate text-[9px] text-slate-600">{row.client || "Cliente non indicato"} · v{row.version} · {row.basis === "MIXED" ? "Preventivato + accordato" : row.basis === "CONTRACTED" ? "Accordato" : "Preventivato"}</p></div><span className="shrink-0 font-mono text-sm text-lime-100">{formatMinorAmount(row.amountMinor, row.currency)}</span></article>)}</div> : <div className="mt-4 rounded-xl border border-dashed border-white/[.08] px-3.5 py-5 text-center text-[10px] text-slate-600">Nessun valore commerciale registrato sulle commesse.</div>}
     </>}
   </section>;
 }

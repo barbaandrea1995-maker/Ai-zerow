@@ -262,7 +262,12 @@ assert(financeDocumentMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `fin
 assert(financeExtractionMigration.includes("CREATE TABLE IF NOT EXISTS `finance_document_extractions`"), "Finance extraction migration must tolerate its runtime-bootstrapped D1 registry");
 assert(financeExtractionMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `finance_document_extractions_tenant_idempotency_uq`"), "Finance extraction idempotency index migration must be idempotent");
 assert(financeActiveSourceMigration.includes("CREATE UNIQUE INDEX IF NOT EXISTS `finance_document_extractions_active_source_uq`"), "Finance active-source index migration must be idempotent");
-assert(financeDocumentSchema.includes("CREATE TABLE IF NOT EXISTS finance_documents") && financeDocumentSchema.includes("finance_documents_tenant_hash_uq"), "Finance document reads must bootstrap their additive schema and tenant-unique hash index");
+assert(
+  financeDocumentSchema.includes("migration-owned")
+    && !financeDocumentSchema.includes("CREATE TABLE IF NOT EXISTS finance_documents")
+    && !financeDocumentSchema.includes("CREATE UNIQUE INDEX"),
+  "Finance document reads must not execute request-time DDL; migrations own the schema and missing migrations fail closed",
+);
 
 const rateLimitAdapter = await readFile(join(root, "lib", "ai-rate-limit.ts"), "utf8");
 assert(rateLimitAdapter.includes("requestCount} + 1"), "AI quota increments must be atomic");
@@ -581,10 +586,13 @@ assert(w10Route.includes("s06Outbox") && w10Route.includes("s06Reconciliations")
 const w10Control = await readFile(join(root, "components", "w10-workflow-control.tsx"), "utf8");
 assert(w10Control.includes("/api/${module}/workflow"), "W10 UI must use the governed workflow endpoint");
 assert(w10Control.includes("externalActions"), "W10 UI must visibly hold provider-backed actions");
-for (const page of ["app/finance/page.tsx", "app/procurement/page.tsx"]) {
-  const source = await readFile(join(root, page), "utf8");
-  assert(source.includes("W10WorkflowControl"), `${page} must use the W10 governed surface`);
-}
+const financePage = await readFile(join(root, "app", "finance", "page.tsx"), "utf8");
+assert(
+  financePage.includes("FinanceConsole"),
+  "Finance must use its governed document and job-economics console rather than the legacy generic W10 surface",
+);
+const procurementPage = await readFile(join(root, "app", "procurement", "page.tsx"), "utf8");
+assert(procurementPage.includes("W10WorkflowControl"), "Procurement must use the W10 governed surface");
 
 const hosting = JSON.parse(await readFile(join(root, ".openai", "hosting.json"), "utf8"));
 assert.equal(hosting.r2, "BUCKET", "Commercial documents require the R2 binding");
