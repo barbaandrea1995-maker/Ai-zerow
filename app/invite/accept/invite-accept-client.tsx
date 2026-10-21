@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { ArrowRight, CheckCircle2, KeyRound, LoaderCircle, LockKeyhole, ShieldCheck, UserCheck } from "lucide-react";
+import Link from "@/components/app-link";
 import { Button } from "@/components/ui/button";
 
 type AcceptResult = {
@@ -77,7 +78,7 @@ export default function InviteAcceptClient({ token }: { token: string }) {
           {status === "success" && result?.membership ? (
             <div className="relative mt-7 rounded-2xl border border-lime-300/20 bg-lime-300/[0.055] p-5" role="status">
               <div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 size-5 shrink-0 text-lime-300" /><div><p className="font-semibold text-lime-100">{result.membership.displayName}</p><p className="mt-1 text-sm text-slate-400">{result.membership.actorEmail}</p><p className="mt-3 inline-flex rounded-full border border-lime-300/25 bg-black/25 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-lime-200">{result.membership.roleLabel} · {result.membership.status}</p></div></div>
-              <a className="mt-5 inline-flex h-11 items-center gap-2 rounded-xl bg-lime-300 px-5 text-sm font-semibold text-[#060806] transition hover:bg-lime-200" href="/command">Apri AI-ZEROW COMMAND<ArrowRight className="size-4" /></a>
+              <Link className="mt-5 inline-flex h-11 items-center gap-2 rounded-xl bg-lime-300 px-5 text-sm font-semibold text-[#060806] transition hover:bg-lime-200" href="/">Apri la tua area<ArrowRight className="size-4" /></Link>
             </div>
           ) : (
             <div className="relative mt-7 space-y-4">

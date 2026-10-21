@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { getAuthorityContext, getAuthenticatedIdentity, hasCapability } from "@/lib/authority-context";
-import { firstAuthorizedPath } from "@/lib/command-dashboard";
 import { redirect } from "next/navigation";
 
 export default async function OnboardingLayout({ children }: { children: ReactNode }) {
@@ -17,7 +16,7 @@ export default async function OnboardingLayout({ children }: { children: ReactNo
   if (context.tenantStatus === "onboarding") return children;
 
   if (!hasCapability(context, "authority.read")) {
-    redirect(firstAuthorizedPath(context.capabilities));
+    redirect("/");
   }
 
   return children;

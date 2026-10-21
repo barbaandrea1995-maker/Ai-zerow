@@ -3,7 +3,7 @@
   "name": "AI-ZEROW COMMAND",
   "short_name": "ZEROW",
   "description": "AI-ZEROW operational command center.",
-  "start_url": "/command",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#030504",

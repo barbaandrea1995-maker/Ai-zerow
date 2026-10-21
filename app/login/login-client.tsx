@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { FormEvent, useEffect, useState } from "react";
+import Link from "@/components/app-link";
 
 type LoginState = "ready" | "authenticated" | "not_configured" | "error";
 type AuthMode = "signIn" | "signUp" | "forgotPassword" | "resetPassword";
@@ -79,7 +80,11 @@ export default function LoginClient({
         setMessage(result.error.message ?? "auth_sign_in_failed");
         return;
       }
-      await routeAfterAuth("/command");
+      // The root is the canonical server-side entry gate: it resolves the
+      // active membership and renders either Command or the focused
+      // operational home. Sending every role to /command would correctly
+      // deny field users, but only after showing them an avoidable 403.
+      await routeAfterAuth("/");
     } catch {
       setMessage("auth_sign_in_failed");
     } finally {
@@ -229,7 +234,7 @@ export default function LoginClient({
                 <p className="mt-1 text-xs text-slate-500">{actor.email}</p>
               </div>
               <div className="flex flex-wrap gap-3">
-                <a className="rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200" href="/command">Apri command</a>
+                <Link className="rounded-lg bg-lime-300 px-4 py-2.5 text-sm font-semibold text-[#060806] hover:bg-lime-200" href="/">Apri la tua area</Link>
                 <button className="rounded-lg border border-white/15 px-4 py-2.5 text-sm text-slate-300 hover:border-lime-300/40 hover:text-lime-100 disabled:opacity-50" disabled={busy} onClick={() => void signOut()} type="button">Esci</button>
               </div>
             </div>

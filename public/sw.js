@@ -1,5 +1,5 @@
 const BUILD_ID = "ai-zerow-commercial-v1-rc2-9-local-r2026-10-02";
-const CACHE_REVISION = "role-safe-static-cache-2026-10-18-01";
+const CACHE_REVISION = "role-safe-static-cache-2026-10-21-01";
 const SHELL_CACHE = `zerow-shell-${BUILD_ID}-${CACHE_REVISION}`;
 const OFFLINE_URL = "/offline";
 const PRECACHE = [OFFLINE_URL, "/manifest.webmanifest", "/ai-zerow-icon.jpeg", "/icons/ai-zerow-192.png", "/icons/ai-zerow-512.png"];

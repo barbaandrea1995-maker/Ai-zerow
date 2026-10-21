@@ -1,7 +1,6 @@
 import Link from "@/components/app-link";
 import { ArrowLeft, LockKeyhole, ShieldAlert } from "lucide-react";
 import { getAuthorityContext } from "@/lib/authority-context";
-import { firstAuthorizedPath } from "@/lib/command-dashboard";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +11,10 @@ export default async function AccessDeniedPage({
 }) {
   const params = await searchParams;
   const context = await getAuthorityContext();
-  const destination = context ? firstAuthorizedPath(context.capabilities) : "/login";
+  // The root chooses the correct home from the server-derived role. This
+  // avoids bouncing focused operational roles into another module merely
+  // because they attempted a route reserved for Command.
+  const destination = context ? "/" : "/login";
 
   return (
     <main className="grid min-h-screen place-items-center bg-[#020403] px-5 text-slate-100">

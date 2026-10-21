@@ -571,7 +571,7 @@ const pwaManifest = await readFile(join(root, "public", "manifest.webmanifest"),
 const pwaServiceWorker = await readFile(join(root, "public", "sw.js"), "utf8");
 assert(pwaPage.includes("PwaMobileControl") && pwaSurface.includes("indexedDB") && pwaSurface.includes("/api/events"), "W15 must expose the governed PWA surface, local queue and event replay");
 assert(pwaSurface.includes("beforeinstallprompt") && pwaSurface.includes("NOT RUN") && pwaSurface.includes("navigator.serviceWorker"), "W15 must distinguish observed installability from unrun device certification");
-assert(pwaManifest.includes('"display": "standalone"') && pwaManifest.includes('"start_url": "/command"'), "W15 PWA manifest must remain standalone and start at Command");
+assert(pwaManifest.includes('"display": "standalone"') && pwaManifest.includes('"start_url": "/"'), "W15 PWA manifest must remain standalone and start at the server-side role-aware entry gate");
 assert(pwaServiceWorker.includes("request.method !== \"GET\"") && pwaServiceWorker.includes("/offline"), "W15 service worker must keep API writes out of cache and provide offline fallback");
 assert(journeyRoute.includes('document_security: hasCapability(context, "documents.write")'), "Document security controls must be capability-gated in the journey readback");
 const eventsControl = await readFile(join(root, "components", "events-control-page.tsx"), "utf8");

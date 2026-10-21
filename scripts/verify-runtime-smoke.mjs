@@ -75,7 +75,7 @@ const manifest = await request("/manifest.webmanifest");
 assert.equal(manifest.response.status, 200, "PWA manifest must be served");
 const manifestPayload = JSON.parse(manifest.text);
 assert.equal(manifestPayload.name, "AI-ZEROW COMMAND", "PWA manifest must identify the product");
-assert.equal(manifestPayload.start_url, "/command", "PWA must start at Command");
+assert.equal(manifestPayload.start_url, "/", "PWA must start at the server-side role-aware entry gate");
 assert.equal(manifestPayload.display, "standalone", "PWA must use standalone display mode");
 
 const serviceWorker = await request("/sw.js");
