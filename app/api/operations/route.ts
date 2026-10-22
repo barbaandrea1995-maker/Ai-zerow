@@ -26,6 +26,7 @@ import { confirmCompanyAiMacroScopeProposal, getCompanyAiMacroScopeCatalog, type
 import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intelligence/providers";
 import { defaultGeofenceRadius, geofenceForResponse, locationForResponse } from "@/lib/location-intelligence/repository";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
 import {
   isJobCommercialModel,
   isJobCommercialValueBasis,
@@ -338,6 +339,7 @@ export async function POST(request: Request) {
   let scopeV2Confirmation: CompanyAiMacroScopeConfirmation | null = null;
 
   try {
+    await ensureJobStockSchema();
     const db = getDb();
     const existing = await db
       .select()

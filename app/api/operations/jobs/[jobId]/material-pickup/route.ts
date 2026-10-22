@@ -7,6 +7,7 @@ import { milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
 import { materialFulfillmentLines } from "@/lib/material-fulfillment";
 import { evaluateAttendanceGeofence } from "@/lib/location-intelligence/attendance-policy";
 import { geofenceForEngine } from "@/lib/location-intelligence/repository";
+import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (!location) return Response.json({ error: "location_required_for_material_pickup" }, { status: 400 });
 
   try {
+    await ensureJobStockSchema();
     const db = getDb();
     const [job] = await db.select().from(s04Records).where(and(
       eq(s04Records.tenantId, context.tenantId),

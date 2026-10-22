@@ -34,6 +34,7 @@ import { ACTIVE_GEOCODING_PROVIDER, geocodeAddress } from "@/lib/location-intell
 import { defaultGeofenceRadius } from "@/lib/location-intelligence/repository";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
 import { generateCompanyAiRapportinoQuestion } from "@/lib/company-ai-openai";
 import {
   companyAiRateLimit,
@@ -1024,6 +1025,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.jobId, jobRow.id),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
       if (context.operatingDomains.includes("warehouse")) {
+        await ensureJobStockSchema();
         const [stockRegister] = await db.select().from(jobStockRegisters).where(and(
           eq(jobStockRegisters.tenantId, context.tenantId),
           eq(jobStockRegisters.jobId, jobRow.id),

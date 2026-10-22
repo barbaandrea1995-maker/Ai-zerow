@@ -6,6 +6,7 @@ import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { inventoryUnitForCode, milliToQuantity, quantityToMilli } from "@/lib/inventory-contract";
 import { italyDateKey } from "@/lib/operations-contract";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
   if (!reference) return Response.json({ error: "invalid_job_id" }, { status: 400 });
 
   try {
+    await ensureJobStockSchema();
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
@@ -252,6 +254,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
   }
 
   try {
+    await ensureJobStockSchema();
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });

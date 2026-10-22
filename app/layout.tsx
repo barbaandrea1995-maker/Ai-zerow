@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { GlobalModuleControls, type GlobalAuthority } from "@/components/global-module-controls";
 import { PwaRegister } from "@/components/pwa-register";
 import { getAuthorityContext } from "@/lib/authority-context";
+import { warmJobStockSchema } from "@/lib/job-stock-schema.server";
 import {
   mobileNavigationForAuthority,
   type MobileNavigationContract,
@@ -36,6 +37,8 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await warmJobStockSchema();
+
   let authority: GlobalAuthority | null = null;
   let mobileNavigation: MobileNavigationContract | null = null;
   try {

@@ -35,6 +35,7 @@ import { missionPodEvidenceComplete, normalizeMissionPodEvidence, storedMissionP
 import { isTransportMode, type TransportMode } from "@/lib/tenant-operating-model";
 import { tenantWarehouseAccess, warehouseIdIsAllowed } from "@/lib/warehouse-access";
 import { canReadAllMissions, canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
 
 export const dynamic = "force-dynamic";
 
@@ -1103,6 +1104,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
 
   let processingStage = "resolve_job";
   try {
+    if (action === "mission_unload") await ensureJobStockSchema();
     const db = getDb();
     const job = await findJob(context.tenantId, reference);
     if (!job) return Response.json({ error: "job_not_found" }, { status: 404 });
