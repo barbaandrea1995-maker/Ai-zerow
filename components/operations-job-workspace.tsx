@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  Boxes,
   BriefcaseBusiness,
   CalendarClock,
   Check,
@@ -48,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import JobCommercialJourney from "@/components/job-commercial-journey";
 import JobCommercialTermsPanel from "@/components/job-commercial-terms-panel";
+import { inventoryUnitForCode } from "@/lib/inventory-contract";
 import { composeRapportinoNarrative, normalizeRapportinoAnswers } from "@/lib/operations-contract";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 
@@ -526,6 +528,83 @@ type JobFinanceProjection = {
   pendingCount: number;
 };
 
+type JobStockReadback = {
+  register: { id: string; status: string; version: number; openedAt: string; closedAt: string | null };
+  balances: Array<{ inventoryItemId: string; sku: string; name: string; unit: string; onHand: number; version: number; updatedAt: string }>;
+  movements: Array<{ id: string; movementType: string; quantity: number; sourceType: string; note: string; createdAt: string }>;
+  summary: { itemCount: number; positiveItemCount: number; movementCount: number; hasStock: boolean };
+  reportDate: string;
+  todayReconciliation: StockReconciliation | null;
+  reconciliations: StockReconciliation[];
+  readback: { status: "verified"; scope: "tenant"; registerVersion: number };
+};
+
+type StockReconciliation = {
+  id: string;
+  status: string;
+  version: number;
+  reportDate: string;
+  confirmedAt: string;
+  confirmedBy: string;
+  lines: Array<{
+    inventoryItemId: string;
+    sku: string;
+    name: string;
+    unit: string;
+    before: number;
+    consumed: number;
+    remaining: number;
+  }>;
+  createdAt: string;
+};
+
+function parseStockQuantityInput(value: string) {
+  return Number(value.trim().replace(",", "."));
+}
+
+function formatStockQuantity(value: number) {
+  return value.toLocaleString("it-IT", { maximumFractionDigits: 3 });
+}
+
+function stockQuantityStep(unitCode: string) {
+  const decimals = inventoryUnitForCode(unitCode)?.decimals ?? 3;
+  return String(10 ** -decimals);
+}
+
+function JobStockPanel({ jobId, refreshToken }: { jobId: string; refreshToken: number }) {
+  const [stock, setStock] = useState<JobStockReadback | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const load = useCallback(async () => {
+    setState("loading");
+    try {
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/stock`, { cache: "no-store" });
+      if (!response.ok) throw new Error("job_stock_unavailable");
+      setStock(await response.json() as JobStockReadback);
+      setState("ready");
+    } catch {
+      setState("error");
+    }
+  }, [jobId]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load, refreshToken]);
+
+  return <section className="overflow-hidden rounded-[22px] border border-cyan-300/15 bg-[linear-gradient(145deg,rgba(8,24,24,.76),rgba(6,11,10,.97))] p-4 sm:p-5">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/[.07] text-cyan-100"><Boxes className="size-4" /></span><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-100/70">MAGAZZINO DI COMMESSA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Materiali presenti sul lavoro</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Registro server-side separato dal deposito. Ritiri e consegne accreditano qui le giacenze; consumi e rientri restano movimenti tracciati.</p></div></div>
+      <div className="flex items-center gap-2"><span className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold uppercase tracking-[.1em] ${stock?.register.status === "ACTIVE" ? "border-lime-300/20 bg-lime-300/[.05] text-lime-100" : "border-white/10 text-slate-500"}`}>{stock?.register.status === "ACTIVE" ? "ATTIVO" : "REGISTRO"}</span><button aria-label="Aggiorna magazzino di commessa" className="grid size-9 place-items-center rounded-xl border border-white/10 text-slate-400 hover:border-cyan-300/20 hover:text-cyan-100" disabled={state === "loading"} onClick={() => void load()} type="button"><RefreshCw className={`size-3.5 ${state === "loading" ? "animate-spin" : ""}`} /></button></div>
+    </div>
+    {state === "loading" && <p className="mt-4 flex items-center gap-2 text-[10px] text-slate-500"><LoaderCircle className="size-3.5 animate-spin" />Rilettura delle giacenze…</p>}
+    {state === "error" && <p className="mt-4 rounded-xl border border-amber-300/15 bg-amber-300/[.03] p-3 text-[10px] leading-5 text-amber-100/75">Il registro non è leggibile in questo momento. Nessuna giacenza viene ricostruita o sostituita con dati locali.</p>}
+    {state === "ready" && stock && <>
+      <div className="mt-4 grid grid-cols-3 gap-2"><div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.12em] text-slate-600">Articoli presenti</p><p className="mt-1 font-mono text-sm text-slate-100">{stock.summary.positiveItemCount}</p></div><div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.12em] text-slate-600">Movimenti</p><p className="mt-1 font-mono text-sm text-slate-100">{stock.summary.movementCount}</p></div><div className="rounded-xl border border-white/[.06] bg-black/20 p-3"><p className="text-[8px] uppercase tracking-[.12em] text-slate-600">Readback</p><p className="mt-1 font-mono text-[10px] text-lime-100">VERIFICATO</p></div></div>
+      {stock.summary.hasStock ? <div className="mt-3 divide-y divide-white/[.06] overflow-hidden rounded-xl border border-white/[.07] bg-black/20">{stock.balances.filter((row) => row.onHand !== 0).slice(0, 8).map((row) => <div className="flex items-center justify-between gap-3 px-3 py-2.5" key={row.inventoryItemId}><div className="min-w-0"><p className="truncate text-[10px] font-medium text-slate-200">{row.name}</p><p className="mt-0.5 truncate font-mono text-[8px] text-slate-600">{row.sku} · v{row.version}</p></div><span className={`shrink-0 font-mono text-[11px] ${row.onHand > 0 ? "text-cyan-100" : "text-amber-100"}`}>{row.onHand.toLocaleString("it-IT", { maximumFractionDigits: 3 })} {row.unit}</span></div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-white/[.08] p-5 text-center text-[10px] leading-5 text-slate-600">Registro attivo · nessuna giacenza. Il primo ritiro diretto o la prima consegna confermata comparirà qui.</p>}
+      {stock.movements.length > 0 && <details className="group mt-3 rounded-xl border border-white/[.06] bg-black/15"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 marker:hidden"><span className="text-[9px] font-medium text-slate-400">Ultimi movimenti · {stock.summary.movementCount}</span><span className="text-[8px] text-slate-600 group-open:hidden">Apri</span><span className="hidden text-[8px] text-slate-600 group-open:inline">Chiudi</span></summary><div className="space-y-2 border-t border-white/[.06] p-3">{stock.movements.slice(0, 6).map((movement) => <div className="flex items-start justify-between gap-3 rounded-lg border border-white/[.05] bg-black/20 px-3 py-2" key={movement.id}><div className="min-w-0"><p className="text-[9px] font-medium text-slate-300">{movement.movementType === "TRANSFER_IN" ? "Ingresso in commessa" : movement.movementType}</p><p className="mt-0.5 truncate text-[8px] text-slate-600">{movement.note}</p></div><span className={`shrink-0 font-mono text-[9px] ${movement.quantity >= 0 ? "text-lime-100" : "text-amber-100"}`}>{movement.quantity >= 0 ? "+" : ""}{movement.quantity.toLocaleString("it-IT", { maximumFractionDigits: 3 })}</span></div>)}</div></details>}
+    </>}
+  </section>;
+}
+
 function JobFinancePanel({ jobId }: { jobId: string }) {
   const [projection, setProjection] = useState<JobFinanceProjection | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -565,12 +644,14 @@ export default function OperationsJobWorkspace({
   canWriteReport,
   canReviewReport,
   canReadFinance,
+  canReadWarehouse,
   jobId,
 }: {
   canWriteOperations: boolean;
   canWriteReport: boolean;
   canReviewReport: boolean;
   canReadFinance: boolean;
+  canReadWarehouse: boolean;
   jobId: string;
 }) {
   const router = useRouter();
@@ -612,6 +693,13 @@ export default function OperationsJobWorkspace({
   const [reviewNote, setReviewNote] = useState("");
   const [reportReviewNotes, setReportReviewNotes] = useState<Record<string, string>>({});
   const [reportRevisionAnswers, setReportRevisionAnswers] = useState<Record<string, [string, string, string]>>({});
+  const [reportStock, setReportStock] = useState<JobStockReadback | null>(null);
+  const [reportStockState, setReportStockState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [reportStockConsumption, setReportStockConsumption] = useState<Record<string, string>>({});
+  const [stockReconciling, setStockReconciling] = useState(false);
+  const [stockRefreshToken, setStockRefreshToken] = useState(0);
+  const stockRequestSequence = useRef(0);
+  const stockReconciliationKeys = useRef(new Map<string, string>());
   const [progress, setProgress] = useState(0);
   const [activeSection, setActiveSection] = useState<"overview" | "operations" | "reports" | "finance">(
     searchParams.get("tab") === "finance" && canReadFinance ? "finance" : "overview",
@@ -756,6 +844,10 @@ export default function OperationsJobWorkspace({
             notify(
               `Invio bloccato: ${nextPayload.questions?.[0] ?? "completa i dati mancanti"}`,
             );
+          } else if (nextPayload.error === "job_stock_reconciliation_required") {
+            notify(nextPayload.questions?.[0] ?? "Conferma consumi e giacenze del magazzino di commessa prima dell’invio.");
+          } else if (nextPayload.error === "job_stock_register_not_provisioned") {
+            notify(nextPayload.questions?.[0] ?? "Il magazzino di commessa non è disponibile.");
           } else if (nextPayload.error === "rapportino_locked") {
             notify(nextPayload.message ?? "Il rapportino è già in revisione in ufficio.");
             await refresh();
@@ -998,6 +1090,33 @@ export default function OperationsJobWorkspace({
     }
   }, [jobId]);
 
+  const loadReportStock = useCallback(async () => {
+    if (!canReadWarehouse) {
+      setReportStock(null);
+      setReportStockState("ready");
+      return;
+    }
+    const requestSequence = stockRequestSequence.current + 1;
+    stockRequestSequence.current = requestSequence;
+    setReportStockState("loading");
+    try {
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/stock`, { cache: "no-store" });
+      if (!response.ok) throw new Error("job_stock_unavailable");
+      const nextStock = await response.json() as JobStockReadback;
+      if (nextStock.readback?.status !== "verified" || typeof nextStock.register?.version !== "number") {
+        throw new Error("job_stock_readback_unverified");
+      }
+      if (stockRequestSequence.current !== requestSequence) return;
+      setReportStock(nextStock);
+      setReportStockConsumption(Object.fromEntries(
+        nextStock.balances.filter((row) => row.onHand > 0).map((row) => [row.inventoryItemId, "0"]),
+      ));
+      setReportStockState("ready");
+    } catch {
+      if (stockRequestSequence.current === requestSequence) setReportStockState("error");
+    }
+  }, [canReadWarehouse, jobId]);
+
   const openReport = useCallback(() => {
     if (!payload) return;
     setActiveSection("reports");
@@ -1012,8 +1131,88 @@ export default function OperationsJobWorkspace({
     setReportQuestionStatuses({});
     setReviewNote(payload.workspace.rapportino.review.note);
     setActionOpen("report");
+    void loadReportStock();
     if (nextStep < REPORT_CHAT_STEPS.length) void requestReportQuestion(nextStep, answers);
-  }, [payload, requestReportQuestion]);
+  }, [loadReportStock, payload, requestReportQuestion]);
+
+  const reconcileReportStock = async () => {
+    if (!reportStock || reportStockState !== "ready" || stockReconciling) return;
+    const positiveBalances = reportStock.balances.filter((row) => row.onHand > 0);
+    const lines = positiveBalances.map((row) => {
+      return {
+        inventoryItemId: row.inventoryItemId,
+        expectedVersion: row.version,
+        consumed: parseStockQuantityInput(reportStockConsumption[row.inventoryItemId] ?? "0"),
+      };
+    });
+    const invalidLine = lines.find((line, index) => !Number.isFinite(line.consumed)
+      || line.consumed < 0
+      || line.consumed > positiveBalances[index].onHand);
+    if (invalidLine) {
+      notify("Controlla le quantità consumate: devono essere comprese tra zero e la giacenza disponibile.");
+      return;
+    }
+    const snapshot = JSON.stringify({ reportDate: reportStock.reportDate, registerVersion: reportStock.register.version, lines });
+    const idempotencyKey = stockReconciliationKeys.current.get(snapshot)
+      ?? `job-stock-shift-${crypto.randomUUID()}`;
+    stockReconciliationKeys.current.set(snapshot, idempotencyKey);
+    setStockReconciling(true);
+    try {
+      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/stock`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "reconcile_shift",
+          reportDate: reportStock.reportDate,
+          idempotencyKey,
+          lines,
+        }),
+      });
+      const result = await response.json() as {
+        error?: string;
+        reconciliation?: StockReconciliation;
+        readback?: { status?: string };
+      };
+      if (!response.ok && result.error === "job_stock_shift_already_reconciled") {
+        stockReconciliationKeys.current.delete(snapshot);
+        await loadReportStock();
+        setStockRefreshToken((current) => current + 1);
+        notify("Il consuntivo del turno era già stato confermato.");
+        return;
+      }
+      if (!response.ok) {
+        if (["job_stock_version_conflict", "job_stock_reconciliation_catalog_changed"].includes(result.error ?? "")) {
+          stockReconciliationKeys.current.delete(snapshot);
+          await loadReportStock();
+          notify("Le giacenze sono cambiate: ho riletto il registro. Controlla e conferma di nuovo.");
+        } else if (result.error === "job_stock_quantity_exceeds_balance") {
+          stockReconciliationKeys.current.delete(snapshot);
+          notify("Una quantità consumata supera la giacenza riletta dal server.");
+        } else if (result.error === "job_stock_quantity_precision_invalid") {
+          stockReconciliationKeys.current.delete(snapshot);
+          notify("La quantità non rispetta i decimali ammessi dall’unità di misura del catalogo.");
+        } else if (result.error === "job_stock_reconciliation_line_limit_exceeded") {
+          stockReconciliationKeys.current.delete(snapshot);
+          notify("Il consuntivo contiene troppi articoli per una singola conferma: serve la revisione dell’ufficio.");
+        } else {
+          notify("Il consuntivo materiali non è stato confermato. Nessun consumo è stato registrato.");
+        }
+        return;
+      }
+      if (!result.reconciliation || result.readback?.status !== "verified") {
+        notify("Il server non ha restituito una rilettura verificata del consuntivo materiali.");
+        return;
+      }
+      stockReconciliationKeys.current.delete(snapshot);
+      await loadReportStock();
+      setStockRefreshToken((current) => current + 1);
+      notify("Consumi e giacenze del turno confermati.");
+    } catch {
+      notify("Connessione non disponibile: il consuntivo materiali resta da verificare.");
+    } finally {
+      setStockReconciling(false);
+    }
+  };
 
   const updateReportAnswer = (index: number, value: string) => {
     const next = [...reportAnswers] as [string, string, string];
@@ -1091,6 +1290,16 @@ export default function OperationsJobWorkspace({
         reviewNote,
       });
       return;
+    }
+    if (intent === "SUBMIT" && canReadWarehouse) {
+      if (reportStockState !== "ready" || !reportStock) {
+        notify("Attendi la rilettura del magazzino di commessa prima di inviare il rapportino.");
+        return;
+      }
+      if (reportStock.balances.some((row) => row.onHand > 0) && !reportStock.todayReconciliation) {
+        notify("Conferma prima i consumi e le giacenze rimaste nel magazzino di commessa.");
+        return;
+      }
     }
     void mutate(intent === "SUBMIT" ? "submit_rapportino" : "save_rapportino", { narrative: reportText, answers: reportAnswers });
   };
@@ -1266,7 +1475,15 @@ export default function OperationsJobWorkspace({
   const reportSystemBlockers = reportLocked
     ? []
     : workspace.rapportino.completeness.missing.filter((key) => key !== "narrative");
-  const reportCanSubmit = reportNarrativeReady && reportSystemBlockers.length === 0;
+  const reportStockNeedsReconciliation = canReadWarehouse
+    && reportStockState === "ready"
+    && Boolean(reportStock?.balances.some((row) => row.onHand > 0))
+    && !reportStock?.todayReconciliation;
+  const reportStockReady = !canReadWarehouse || reportStockState === "ready";
+  const reportCanSubmit = reportNarrativeReady
+    && reportSystemBlockers.length === 0
+    && reportStockReady
+    && !reportStockNeedsReconciliation;
   const reportOpenBlockers = reportSystemBlockers
     .map((key) => ({ key, ...REPORT_BLOCKER_DETAILS[key] }))
     .filter((blocker): blocker is { key: string; title: string; detail: string; destination: "details" | "assignment" | "attendance" } => Boolean(blocker.title));
@@ -1275,10 +1492,13 @@ export default function OperationsJobWorkspace({
     : REPORT_CHAT_STEPS.find((_, index) => reportAnswers[index].trim().length < 2)?.prompt
       ?? workspace.rapportino.completeness.questions.find((question) => question.startsWith("Racconta l’esito") || question.startsWith("Quali attività sono state svolte?"))
       ?? "Completa il racconto del turno, le criticità e i prossimi passi.";
-  const reportQuestionCount = reportOpenBlockers.length + Number(Boolean(reportNarrativeQuestion));
+  const reportQuestionCount = reportOpenBlockers.length
+    + Number(Boolean(reportNarrativeQuestion))
+    + Number(canReadWarehouse && (!reportStockReady || reportStockNeedsReconciliation));
   const reportAutoFields = workspace.rapportino.fields.filter((field) =>
     ["activities", "attendance", "resources", "materials", "evidence"].includes(field.key),
   );
+  const reportStockBalances = reportStock?.balances.filter((row) => row.onHand > 0) ?? [];
 
   return (
     <main className="zw-command-ultra min-h-screen overflow-x-hidden text-slate-100 selection:bg-lime-300 selection:text-[#060806]">
@@ -1442,6 +1662,8 @@ export default function OperationsJobWorkspace({
                 })}</div>
               </details>}
             </section>
+
+            {canReadWarehouse && <JobStockPanel jobId={jobId} refreshToken={stockRefreshToken} />}
 
             <JobCommercialJourney jobId={jobId} />
           </TabsContent>
@@ -1773,11 +1995,48 @@ export default function OperationsJobWorkspace({
                             )}
                           </div>
                         ))}
+                        {canReadWarehouse && (!reportStockReady || reportStockNeedsReconciliation) && (
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5">
+                            <div className="flex min-w-0 flex-1 gap-2.5 text-[10px] leading-5 text-amber-100/85">
+                              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-300" />
+                              <span>
+                                <span className="block font-medium">Consuntivo materiali del turno</span>
+                                <span className="text-amber-100/60">{reportStockState === "error" ? "Il registro non è leggibile: l’invio resta bloccato." : reportStockNeedsReconciliation ? "Indica i consumi e conferma le giacenze rimaste qui sotto." : "Attendo la rilettura server-side del magazzino di commessa."}</span>
+                              </span>
+                            </div>
+                            {reportStockState === "error" ? <Button className="min-h-9 shrink-0 border-cyan-300/20 bg-cyan-300/[.05] px-3 text-[9px] text-cyan-100 hover:bg-cyan-300/10" onClick={() => void loadReportStock()} type="button" variant="outline">Riprova lettura</Button> : <span className="shrink-0 text-[9px] text-slate-500">Obbligatorio</span>}
+                          </div>
+                        )}
                         {reportNarrativeQuestion && <div className="flex gap-2.5 rounded-xl border border-amber-300/15 bg-amber-300/[.035] px-3 py-2.5 text-[10px] leading-5 text-amber-100/85"><span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-300" /><span>{reportNarrativeQuestion} Completa la risposta qui sotto.</span></div>}
                       </div>
                     ) : <p className="mt-4 rounded-xl border border-lime-300/15 bg-lime-300/[.04] px-3 py-2.5 text-[10px] text-lime-100/80">Tutti i controlli automatici sono pronti. Rivedi il racconto prima dell’invio.</p>}
                     {payload.workspace.rapportino.review.note && payload.workspace.rapportino.status !== "APPROVED" && <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200/80">RICHIESTA DELL’UFFICIO</p><p className="mt-2 text-[11px] leading-5 text-amber-100/85">{payload.workspace.rapportino.review.note}</p></div>}
                   </section>
+                  {canReadWarehouse && <section aria-label="Consuntivo materiali del turno" aria-live="polite" className="rounded-2xl border border-lime-300/15 bg-[linear-gradient(145deg,rgba(15,29,12,.68),rgba(5,10,8,.92))] p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/[.07] text-lime-100"><Boxes className="size-3.5" /></span>
+                      <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-lime-200/70">MAGAZZINO DI COMMESSA · FINE TURNO</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Conferma consumi e rimanenze</h3><p className="mt-1 text-[10px] leading-5 text-slate-500">Company AI legge ritiri e consegne già registrati. Tu indichi soltanto quanto è stato realmente consumato; il residuo rimane disponibile in commessa.</p></div>
+                    </div>
+                    {(reportStockState === "idle" || reportStockState === "loading") && <p className="mt-4 flex items-center gap-2 rounded-xl border border-white/[.06] bg-black/20 p-3 text-[10px] text-slate-500"><LoaderCircle className="size-3.5 animate-spin" />Rilettura delle giacenze server-side…</p>}
+                    {reportStockState === "error" && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.035] p-3"><p className="text-[10px] leading-5 text-amber-100/75">Registro non disponibile. Il rapportino non può essere inviato senza una rilettura verificata.</p><Button className="min-h-9 border-amber-300/20 bg-amber-300/[.05] px-3 text-[9px] text-amber-100" onClick={() => void loadReportStock()} type="button" variant="outline"><RefreshCw className="size-3" />Riprova</Button></div>}
+                    {reportStockState === "ready" && reportStock?.todayReconciliation && <div className="mt-4 rounded-xl border border-lime-300/20 bg-lime-300/[.045] p-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 text-[10px] font-semibold text-lime-100"><CheckCircle2 className="size-3.5" />Consuntivo verificato</p><span className="font-mono text-[8px] text-lime-200/65">{reportStock.todayReconciliation.reportDate}</span></div>
+                      {reportStock.todayReconciliation.lines.length > 0 ? <div className="mt-3 space-y-1.5">{reportStock.todayReconciliation.lines.map((line) => <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[.06] bg-black/20 px-3 py-2" key={line.inventoryItemId}><div className="min-w-0"><p className="truncate text-[9px] text-slate-200">{line.name}</p><p className="mt-0.5 text-[8px] text-slate-600">Consumati {formatStockQuantity(line.consumed)} {line.unit}</p></div><span className="shrink-0 font-mono text-[9px] text-lime-100">Residuo {formatStockQuantity(line.remaining)} {line.unit}</span></div>)}</div> : <p className="mt-2 text-[9px] text-slate-500">Nessuna giacenza positiva da consuntivare.</p>}
+                    </div>}
+                    {reportStockState === "ready" && reportStock && !reportStock.todayReconciliation && reportStockBalances.length === 0 && <p className="mt-4 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3 text-[10px] leading-5 text-lime-100/75"><Check className="mr-2 inline size-3.5" />Nessun materiale presente: il registro è verificato e non richiede consumi.</p>}
+                    {reportStockState === "ready" && reportStock && !reportStock.todayReconciliation && reportStockBalances.length > 0 && <div className="mt-4 space-y-3">
+                      {reportStockBalances.map((row) => {
+                        const consumed = parseStockQuantityInput(reportStockConsumption[row.inventoryItemId] ?? "0");
+                        const remaining = Number.isFinite(consumed) ? Math.max(0, row.onHand - consumed) : row.onHand;
+                        return <label className="block rounded-xl border border-white/[.07] bg-black/20 p-3" key={row.inventoryItemId}>
+                          <span className="flex flex-wrap items-start justify-between gap-2"><span className="min-w-0"><span className="block truncate text-[10px] font-medium text-slate-200">{row.name}</span><span className="mt-0.5 block font-mono text-[8px] text-slate-600">{row.sku} · disponibile {formatStockQuantity(row.onHand)} {row.unit}</span></span><span className="text-right font-mono text-[9px] text-cyan-100">Rimane {formatStockQuantity(remaining)} {row.unit}</span></span>
+                          <span className="mt-3 block text-[9px] text-slate-500">Quantità consumata nel turno</span>
+                          <Input aria-label={`Quantità consumata di ${row.name}`} className="mt-1.5 border-white/10 bg-black/30 text-slate-100" disabled={!canWriteReport || reportLocked || stockReconciling} inputMode="decimal" max={row.onHand} min={0} onChange={(event) => setReportStockConsumption((current) => ({ ...current, [row.inventoryItemId]: event.target.value }))} step={stockQuantityStep(row.unit)} type="number" value={reportStockConsumption[row.inventoryItemId] ?? "0"} />
+                        </label>;
+                      })}
+                      <Button className="w-full bg-lime-300 text-[#060806] hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canWriteReport || reportLocked || stockReconciling} onClick={() => void reconcileReportStock()} type="button">{stockReconciling ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}{stockReconciling ? "Conferma in corso…" : "Conferma consumi del turno"}</Button>
+                    </div>}
+                  </section>}
                   <section aria-live="polite" className="space-y-3 rounded-2xl border border-cyan-300/15 bg-black/20 p-3.5" aria-label="Intervista guidata per il rapportino">
                     <div className="flex gap-2.5">
                       <span className="grid size-7 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-100"><Sparkles className="size-3" /></span>

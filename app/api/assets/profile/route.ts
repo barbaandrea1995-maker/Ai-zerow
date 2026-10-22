@@ -104,11 +104,15 @@ export async function POST(request: Request) {
   if (!("asset vehicle equipment".split(" ").includes(entityType))) return Response.json({ error: "unknown_asset_entity_type" }, { status: 400 });
   if (!isAssetUsageMode(usageMode)) return Response.json({ error: "unknown_asset_usage_mode" }, { status: 400 });
   if (entityType !== "vehicle" && usageMode !== "OPERATIONAL") return Response.json({ error: "non_vehicle_transport_usage_invalid" }, { status: 400 });
+  if (usageMode !== "OPERATIONAL" && !context.operatingDomains.includes("transport")) {
+    return Response.json({ error: "transport_domain_not_enabled" }, { status: 409 });
+  }
   if (capacityValue !== null && (!Number.isFinite(capacityValue) || capacityValue < 0 || capacityValue > 10_000_000)) return Response.json({ error: "asset_capacity_invalid" }, { status: 400 });
   if (maxPayloadValue !== null && (!Number.isFinite(maxPayloadValue) || maxPayloadValue <= 0 || maxPayloadValue > 100_000)) return Response.json({ error: "asset_payload_capacity_invalid" }, { status: 400 });
   if (weightValue !== null && (!Number.isFinite(weightValue) || weightValue <= 0 || weightValue > 1_000_000)) return Response.json({ error: "asset_weight_invalid" }, { status: 400 });
   if (pairedCargoAssetIds.length > 50) return Response.json({ error: "asset_pair_limit_exceeded" }, { status: 400 });
   if (entityType !== "vehicle" && pairedCargoAssetIds.length) return Response.json({ error: "vehicle_only_asset_pairing" }, { status: 400 });
+  if (usageMode === "OPERATIONAL" && pairedCargoAssetIds.length) return Response.json({ error: "operational_vehicle_pairing_invalid" }, { status: 400 });
 
   const requestedCapabilities = Array.isArray(input.transportCapabilities) ? input.transportCapabilities : [];
   if (requestedCapabilities.some((value) => !isTransportCapability(value))) return Response.json({ error: "unknown_asset_transport_capability" }, { status: 400 });

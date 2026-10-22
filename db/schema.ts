@@ -442,6 +442,75 @@ export const jobJourneyRecords = sqliteTable("job_journey_records", {
 }));
 
 /**
+ * One durable stock register per commessa. It is presented as the temporary
+ * "magazzino di commessa", but it is deliberately not a tenant warehouse:
+ * depot staffing, onboarding and warehouse geofences must remain separate.
+ * Closing a commessa freezes this register; it never deletes its audit trail.
+ */
+export const jobStockRegisters = sqliteTable("job_stock_registers", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  jobId: text("job_id").notNull(),
+  jobCode: text("job_code"),
+  status: text("status").notNull().default("ACTIVE"),
+  version: integer("version").notNull().default(1),
+  openedAt: text("opened_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  closedAt: text("closed_at"),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantJobUnique: uniqueIndex("job_stock_registers_tenant_job_uq").on(table.tenantId, table.jobId),
+  tenantStatusIdx: index("job_stock_registers_tenant_status_idx").on(table.tenantId, table.status, table.updatedAt),
+}));
+
+/** Current site balance, projected from the append-only job stock ledger. */
+export const jobStockBalances = sqliteTable("job_stock_balances", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  registerId: text("register_id").notNull(),
+  jobId: text("job_id").notNull(),
+  inventoryItemId: text("inventory_item_id").notNull(),
+  sku: text("sku").notNull(),
+  name: text("name").notNull(),
+  unit: text("unit").notNull(),
+  onHandMilli: integer("on_hand_milli").notNull().default(0),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantJobItemUnique: uniqueIndex("job_stock_balances_tenant_job_item_uq").on(table.tenantId, table.jobId, table.inventoryItemId),
+  tenantRegisterIdx: index("job_stock_balances_tenant_register_idx").on(table.tenantId, table.registerId, table.updatedAt),
+}));
+
+/**
+ * Append-only movements owned by the commessa stock register. Positive
+ * quantities enter the site; negative quantities consume, return or dispose
+ * stock. sourceId links the originating pickup, mission or reviewed document.
+ */
+export const jobStockMovements = sqliteTable("job_stock_movements", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  registerId: text("register_id").notNull(),
+  jobId: text("job_id").notNull(),
+  inventoryItemId: text("inventory_item_id").notNull(),
+  warehouseId: text("warehouse_id"),
+  missionId: text("mission_id"),
+  movementType: text("movement_type").notNull(),
+  quantityMilli: integer("quantity_milli").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  note: text("note").notNull().default(""),
+  idempotencyKey: text("idempotency_key").notNull(),
+  actorId: text("actor_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => ({
+  tenantIdempotencyUnique: uniqueIndex("job_stock_movements_tenant_idempotency_uq").on(table.tenantId, table.idempotencyKey),
+  tenantJobCreatedIdx: index("job_stock_movements_tenant_job_created_idx").on(table.tenantId, table.jobId, table.createdAt),
+  tenantItemCreatedIdx: index("job_stock_movements_tenant_item_created_idx").on(table.tenantId, table.inventoryItemId, table.createdAt),
+}));
+
+/**
  * Canonical local inventory balance. Quantities are stored as thousandths of
  * the declared unit to avoid floating point drift in reservations/movements.
  */

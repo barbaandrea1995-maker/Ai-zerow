@@ -40,6 +40,7 @@ export const TRANSPORT_MODE_CATALOG: Record<TransportMode, {
 
 export const OPERATING_PROFILE_IDS = [
   "OPERATIONS",
+  "OPERATIONS_WAREHOUSE",
   "WAREHOUSE",
   "TRANSPORT",
   "WAREHOUSE_TRANSPORT",
@@ -58,6 +59,12 @@ export const OPERATING_PROFILE_CATALOG: Record<OperatingProfileId, {
     label: "Commesse e operazioni",
     description: "Commesse, pianificazione, field, documenti e controllo operativo.",
     domains: ["operations"],
+    transportModes: [],
+  },
+  OPERATIONS_WAREHOUSE: {
+    label: "Commesse + magazzino",
+    description: "Commesse e scorte con ritiro diretto degli operatori, senza autisti o missioni di consegna.",
+    domains: ["operations", "warehouse"],
     transportModes: [],
   },
   WAREHOUSE: {
@@ -173,7 +180,9 @@ export function parseOperatingDomains(value: unknown): OperatingDomain[] {
 const CAPABILITY_DOMAIN_PREFIXES: Array<[string, OperatingDomain[]]> = [
   ["warehouse.", ["warehouse"]],
   ["mission.", ["transport"]],
-  ["asset.", ["transport"]],
+  // Operational equipment is not synonymous with a delivery fleet. A tenant
+  // can use tools and machinery on jobs without running transport missions.
+  ["asset.", ["operations", "transport"]],
   ["operations.", ["operations"]],
   ["field.", ["operations"]],
   // Transport tenants must be able to read DDT/POD and other delivery

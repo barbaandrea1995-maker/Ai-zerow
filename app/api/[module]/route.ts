@@ -234,6 +234,9 @@ export async function POST(request: Request, routeContext: RouteContext) {
   if (moduleKey === "assets" && entityType !== "vehicle" && assetUsageMode !== "OPERATIONAL") {
     return Response.json({ error: "non_vehicle_transport_usage_invalid" }, { status: 400 });
   }
+  if (moduleKey === "assets" && assetUsageMode !== "OPERATIONAL" && !context!.operatingDomains.includes("transport")) {
+    return Response.json({ error: "transport_domain_not_enabled" }, { status: 409 });
+  }
   if (moduleKey === "assets" && requestedTransportCapabilities.some((value) => !isTransportCapability(value))) {
     return Response.json({ error: "unknown_asset_transport_capability" }, { status: 400 });
   }

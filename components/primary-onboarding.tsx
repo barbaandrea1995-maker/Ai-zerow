@@ -118,7 +118,7 @@ export default function PrimaryOnboarding() {
         return;
       }
       if (selected.status === "active") {
-        router.replace("/command");
+        router.replace("/");
         return;
       }
       setTenant(selected);
@@ -237,7 +237,7 @@ export default function PrimaryOnboarding() {
       }
       setStage("complete");
       setNotice("Onboarding completato. Apertura della PWA…");
-      window.setTimeout(() => router.replace("/command"), 500);
+      window.setTimeout(() => router.replace("/"), 500);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Attivazione non completata.");
     } finally {

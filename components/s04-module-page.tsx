@@ -83,7 +83,7 @@ type AdapterRecord = {
 
 type AdapterResponse = {
   records?: AdapterRecord[];
-  context?: { role?: string; capabilities?: string[] };
+  context?: { role?: string; capabilities?: string[]; operatingDomains?: string[] };
 };
 
 type ActivityRow = {
@@ -299,6 +299,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
   const [adapterRows, setAdapterRows] = useState<RegisterRow[] | null>(null);
   const [authorityCapabilities, setAuthorityCapabilities] = useState<string[] | null>(null);
   const [authorityRole, setAuthorityRole] = useState<string | null>(null);
+  const [operatingDomains, setOperatingDomains] = useState<string[]>([]);
   const [adapterStatus, setAdapterStatus] = useState<"loading" | "online" | "empty" | "error">("loading");
   const rows = useMemo(() => adapterRows ?? config.rows, [adapterRows, config.rows]);
   const selected = rows.find((row) => row.id === selectedId) ?? emptyRegisterRow;
@@ -312,6 +313,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         const records = Array.isArray(body.records) ? body.records : [];
         setAuthorityRole(typeof body.context?.role === "string" ? body.context.role : null);
         setAuthorityCapabilities(Array.isArray(body.context?.capabilities) ? body.context.capabilities : []);
+        setOperatingDomains(Array.isArray(body.context?.operatingDomains) ? body.context.operatingDomains : []);
         setAdapterRows(records.length ? rowsFromAdapter(records, config.rows) : []);
         setAdapterStatus(records.length ? "online" : "empty");
       })
@@ -385,7 +387,7 @@ function S04ModulePage({ module }: { module: ModuleKey }) {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] pt-4 text-[10px] text-slate-600"><span>AI-ZEROW COMMAND · {config.code} · S04 / D1 READBACK</span><span className="flex items-center gap-2"><span className="size-1.5 rounded-full bg-lime-300 shadow-[0_0_8px_rgba(190,255,60,0.8)]" />Sites privato · riservato al titolare · nessuna modifica di dominio</span></div>
       </div>
     </section>
-  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{module === "assets" && createOpen && <ServerNamingDialog module="assets" open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
+  </div><CommandMobileNav active={module === "warehouse" ? "warehouse" : module === "mission" ? "mission" : "more"} allowedNavigation={allowedNavigation} role={authorityRole ?? undefined} />{module === "assets" && createOpen && <ServerNamingDialog module="assets" open={createOpen} onOpenChange={setCreateOpen} onCreated={() => { invalidateReadback(`s04:${module}`); setRefreshKey((value) => value + 1); }} onNotice={notify} transportEnabled={operatingDomains.includes("transport")} />}{toast && <div className="fixed bottom-5 right-5 z-50 max-w-[360px] rounded-xl border border-lime-300/25 bg-[#0a100c]/95 px-4 py-3 text-xs text-lime-100 shadow-[0_0_28px_rgba(190,255,60,0.14)] backdrop-blur-xl">{toast}</div>}</main>;
 }
 
 export default S04ModulePage;

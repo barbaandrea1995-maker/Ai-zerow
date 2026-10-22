@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { companyAiJobScopes, geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
+import { companyAiJobScopes, geofences, geoLocations, jobJourneyRecords, jobStockRegisters, s04Records, s06Events, s06Outbox, s06Reconciliations, s07AiLedger } from "@/db/schema";
 import {
   assertTenantScope,
   getAuthorityContext,
@@ -458,6 +458,7 @@ export async function POST(request: Request) {
     if (!naming) return Response.json({ error: "canonical_code_unavailable" }, { status: 503 });
 
     const id = `OPERATIONS-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const jobStockRegisterId = `job-stock:${id}`;
     const eventId = crypto.randomUUID();
     const scopeId = `COMPANY-AI-SCOPE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const scopeEventId = crypto.randomUUID();
@@ -586,6 +587,7 @@ export async function POST(request: Request) {
         geofenceRadiusMeters: geofenceRadius,
       },
       workItemCount: workItems.length,
+      jobStockRegister: { id: jobStockRegisterId, status: "ACTIVE", version: 1 },
       workPackageScopes: workItems.flatMap((item) => item.scope ? [{ workItemId: item.id, sectionId: item.scope.sectionId, groupId: item.scope.groupId, subgroupId: item.scope.subgroupId }] : []),
       version: 1,
       source: sourceMode === "COMPANY_AI" ? "company-ai-proposal-confirmed" : "manual-intake",
@@ -605,6 +607,19 @@ export async function POST(request: Request) {
         tone,
         progress: 0,
         payloadJson: serializedPayload,
+        createdBy: context.actorId,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.insert(jobStockRegisters).values({
+        id: jobStockRegisterId,
+        tenantId: context.tenantId,
+        jobId: id,
+        jobCode: naming.canonicalCode,
+        status: "ACTIVE",
+        version: 1,
+        openedAt: now,
+        closedAt: null,
         createdBy: context.actorId,
         createdAt: now,
         updatedAt: now,
@@ -853,6 +868,16 @@ export async function POST(request: Request) {
     const [geofenceReadback] = await db.select().from(geofences)
       .where(and(eq(geofences.tenantId, context.tenantId), eq(geofences.id, geofenceId)))
       .limit(1);
+    const [jobStockRegisterReadback] = await db.select().from(jobStockRegisters)
+      .where(and(
+        eq(jobStockRegisters.tenantId, context.tenantId),
+        eq(jobStockRegisters.id, jobStockRegisterId),
+        eq(jobStockRegisters.jobId, id),
+      ))
+      .limit(1);
+    if (!jobStockRegisterReadback || jobStockRegisterReadback.status !== "ACTIVE") {
+      return Response.json({ error: "job_stock_register_readback_unavailable" }, { status: 503, headers: { "cache-control": "private, no-store" } });
+    }
     const [commercialTermsRow] = await db.select().from(jobJourneyRecords).where(and(
       eq(jobJourneyRecords.tenantId, context.tenantId),
       eq(jobJourneyRecords.jobId, id),
@@ -889,6 +914,12 @@ export async function POST(request: Request) {
       created: recordForResponse(created),
       location: locationReadback ? locationForResponse(locationReadback) : null,
       geofence: geofenceReadback ? geofenceForResponse(geofenceReadback) : null,
+      jobStockRegister: {
+        id: jobStockRegisterReadback.id,
+        status: jobStockRegisterReadback.status,
+        version: jobStockRegisterReadback.version,
+        readback: "verified",
+      },
       commercialTermsReadback: { status: "verified", recordId: commercialTermsRow.id, version: commercialTermsRow.version },
       financeValueReadback: commercialValueReadback,
       event: { eventId, aggregateId: naming.canonicalCode, aggregateVersion: 1, readback: "verified" },

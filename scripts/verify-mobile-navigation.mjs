@@ -75,12 +75,13 @@ assert.equal(mixedControl?.profile, "control", "A supervisory role must retain t
 assert.equal(mobileNavigationForAuthority({ role: "unknown", roles: [], capabilities: [] }), null, "Unknown roles must fail closed");
 assert.equal(mobileNavigationForAuthority({ role: "warehouse_operator", roles: ["warehouse_operator"], capabilities: [] }), null, "Incomplete capability contracts must fail closed");
 
-const [rootEntry, loginEntry, invitationEntry, deniedEntry, onboardingEntry] = await Promise.all([
+const [rootEntry, loginEntry, invitationEntry, deniedEntry, onboardingEntry, primaryOnboardingEntry] = await Promise.all([
   readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/login/login-client.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/invite/accept/invite-accept-client.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/access-denied/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../app/onboarding/layout.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../components/primary-onboarding.tsx", import.meta.url), "utf8"),
 ]);
 
 assert(
@@ -93,6 +94,8 @@ assert(invitationEntry.includes('href="/">Apri la tua area'), "Invitation accept
 assert(!invitationEntry.includes('href="/command">Apri AI-ZEROW COMMAND'), "Invitation acceptance must not force Command");
 assert(deniedEntry.includes('const destination = context ? "/" : "/login"'), "Denied routes must return authenticated users to their role-aware area");
 assert(onboardingEntry.includes('redirect("/")'), "Established non-authority roles must leave onboarding through the role-aware root");
+assert(primaryOnboardingEntry.includes('router.replace("/")'), "Completed primary onboarding must enter through the role-aware root");
+assert(!primaryOnboardingEntry.includes('router.replace("/command")'), "Primary onboarding must not hard-code Command as the post-activation destination");
 
 console.log(JSON.stringify({
   status: "PASS",

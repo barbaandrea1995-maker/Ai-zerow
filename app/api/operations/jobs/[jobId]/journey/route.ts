@@ -6,6 +6,9 @@ import {
   inventoryItems,
   inventoryMovements,
   jobJourneyRecords,
+  jobStockBalances,
+  jobStockMovements,
+  jobStockRegisters,
   operationalDocuments,
   routePlans,
   routeStops,
@@ -702,6 +705,17 @@ type RouteStopMaterialAction = {
   quantityMilli: number | null;
 };
 
+type JobStockEffectGuard = {
+  registerId: string;
+  registerVersion: number;
+  itemId: string;
+  quantityMilli: number;
+  movementId: string;
+  movementKey: string;
+  sourceId: string;
+  eventId: string;
+};
+
 function routeStopMaterialActionEntries(row: typeof routeStops.$inferSelect, effect: MissionInventoryEffect): RouteStopMaterialAction[] {
   const metadata = parseJson(row.evidenceJson);
   if (!Array.isArray(metadata.cargoActions)) return [];
@@ -815,10 +829,10 @@ async function prepareMissionInventoryEffects({
   const sourceLines = missionMaterialLinesForRouteStop(payload, routeStop, effect);
   if (!sourceLines.length) {
     if (routeStopHasExplicitCargoActions(routeStop) && plannedMaterialActions.length === 0) {
-      return { statements: [] as never[], lineCount: 0 };
+      return { statements: [] as never[], lineCount: 0, jobStockGuards: [] as JobStockEffectGuard[] };
     }
     if (boundedText(payload.materialRequestId, 120)) throw new MissionInventoryError("mission_material_lines_required");
-    return { statements: [] as never[], lineCount: 0 };
+    return { statements: [] as never[], lineCount: 0, jobStockGuards: [] as JobStockEffectGuard[] };
   }
   const snapshot = payload.materialRequestSnapshot && typeof payload.materialRequestSnapshot === "object" && !Array.isArray(payload.materialRequestSnapshot)
     ? payload.materialRequestSnapshot as JsonObject
@@ -838,7 +852,12 @@ async function prepareMissionInventoryEffects({
   }
   const itemIds = [...quantityByItem.keys()];
   const db = getDb();
-  const [items, movements] = await Promise.all([
+  const stopMetadata = parseJson(routeStop.evidenceJson);
+  const creditsJobStock = effect === "DELIVER" && (
+    boundedText(payload.transportMode, 48).toUpperCase() === "WAREHOUSE_TO_JOB"
+      || (boundedText(stopMetadata.entityType, 48).toUpperCase() === "CANTIERE" && boundedText(stopMetadata.entityId, 160) === jobId)
+  );
+  const [items, movements, stockRegisters] = await Promise.all([
     db.select().from(inventoryItems).where(and(eq(inventoryItems.tenantId, tenantId), inArray(inventoryItems.id, itemIds))),
     db.select().from(inventoryMovements).where(and(
       eq(inventoryMovements.tenantId, tenantId),
@@ -846,9 +865,29 @@ async function prepareMissionInventoryEffects({
       eq(inventoryMovements.missionId, missionId),
       inArray(inventoryMovements.itemId, itemIds),
     )),
+    creditsJobStock
+      ? db.select().from(jobStockRegisters).where(and(
+        eq(jobStockRegisters.tenantId, tenantId),
+        eq(jobStockRegisters.jobId, jobId),
+        eq(jobStockRegisters.status, "ACTIVE"),
+      )).limit(1)
+      : Promise.resolve([]),
   ]);
+  const stockRegister = stockRegisters[0] ?? null;
+  if (creditsJobStock && !stockRegister) throw new MissionInventoryError("job_stock_register_not_provisioned", { jobId });
   const itemById = new Map(items.map((item) => [item.id, item]));
   const statements: never[] = [];
+  const jobStockGuards: JobStockEffectGuard[] = [];
+  const nextStockRegisterVersion = stockRegister ? stockRegister.version + 1 : null;
+  if (creditsJobStock && stockRegister && nextStockRegisterVersion) {
+    statements.push(db.update(jobStockRegisters).set({
+      version: sql`CASE WHEN ${jobStockRegisters.version} = ${stockRegister.version} AND ${jobStockRegisters.status} = 'ACTIVE' THEN ${jobStockRegisters.version} + 1 ELSE NULL END`,
+      updatedAt: now,
+    }).where(and(
+      eq(jobStockRegisters.tenantId, tenantId),
+      eq(jobStockRegisters.id, stockRegister.id),
+    )).returning() as never);
+  }
   for (const line of quantityByItem.values()) {
     const item = itemById.get(line.itemId);
     if (!item) throw new MissionInventoryError("mission_inventory_item_not_found", { itemId: line.itemId });
@@ -872,12 +911,11 @@ async function prepareMissionInventoryEffects({
     const movementId = crypto.randomUUID();
     const eventType = `warehouse.inventory.${effect.toLowerCase()}`;
     statements.push(db.update(inventoryItems).set({
-      version: nextVersion,
+      version: sql`CASE WHEN ${inventoryItems.version} = ${item.version} THEN ${inventoryItems.version} + 1 ELSE NULL END`,
       updatedAt: now,
     }).where(and(
       eq(inventoryItems.tenantId, tenantId),
       eq(inventoryItems.id, item.id),
-      eq(inventoryItems.version, item.version),
     )) as never);
     statements.push(db.insert(inventoryMovements).values({
       id: movementId,
@@ -929,8 +967,88 @@ async function prepareMissionInventoryEffects({
       detail: `${effect === "LOAD" ? "Carico missione" : "Scarico / consegna"} collegato alla journey e al magazzino sorgente.`,
       createdAt: now, updatedAt: now,
     }) as never);
+    if (creditsJobStock && stockRegister) {
+      const stockMovementId = crypto.randomUUID();
+      const stockMovementKey = `${idempotencyKey}:job-stock-deliver-${item.id}`.slice(0, 160);
+      const stockEventId = crypto.randomUUID();
+      statements.push(db.insert(jobStockMovements).values({
+        id: stockMovementId,
+        tenantId,
+        registerId: stockRegister.id,
+        jobId,
+        inventoryItemId: item.id,
+        warehouseId,
+        missionId,
+        movementType: "TRANSFER_IN",
+        quantityMilli: line.quantityMilli,
+        sourceType: "MISSION_DELIVERY",
+        sourceId: movementId,
+        note: note || `Consegna missione accreditata alla commessa · ${line.description}`,
+        idempotencyKey: stockMovementKey,
+        actorId,
+        createdAt: now,
+      }) as never);
+      statements.push(db.run(sql`
+        INSERT INTO job_stock_balances
+          (id, tenant_id, register_id, job_id, inventory_item_id, sku, name, unit,
+           on_hand_milli, version, created_at, updated_at)
+        VALUES (${`job-stock-balance:${jobId}:${item.id}`}, ${tenantId}, ${stockRegister.id}, ${jobId}, ${item.id},
+          ${item.sku}, ${item.name}, ${item.unit}, ${line.quantityMilli}, 1, ${now}, ${now})
+        ON CONFLICT(tenant_id, job_id, inventory_item_id) DO UPDATE SET
+          register_id = excluded.register_id,
+          sku = excluded.sku,
+          name = excluded.name,
+          unit = excluded.unit,
+          on_hand_milli = job_stock_balances.on_hand_milli + excluded.on_hand_milli,
+          version = job_stock_balances.version + 1,
+          updated_at = excluded.updated_at
+      `) as never);
+      statements.push(db.insert(s06Events).values({
+        eventId: stockEventId,
+        tenantId,
+        eventType: "warehouse.job_stock.received",
+        schemaVersion: "1",
+        actorType: "human",
+        actorId,
+        source: "sites-mission-control",
+        occurredAt: now,
+        observedAt: now,
+        aggregateType: "job.stock.movement",
+        aggregateId: stockMovementId,
+        aggregateVersion: 1,
+        payloadJson: JSON.stringify({ action: "TRANSFER_IN", sourceType: "MISSION_DELIVERY", registerId: stockRegister.id, jobId, missionId, inventoryMovementId: movementId, jobStockMovementId: stockMovementId, itemId: item.id, warehouseId, quantityMilli: line.quantityMilli, actorId, version: 1 }),
+        correlationId: crypto.randomUUID(),
+        causationId: eventId,
+        idempotencyKey: `${stockMovementKey}:event`.slice(0, 160),
+        status: "COMMITTED_SITES_READBACK",
+        createdAt: now,
+      }) as never);
+      statements.push(db.insert(s06Outbox).values({
+        id: crypto.randomUUID(), tenantId, eventId: stockEventId,
+        topic: "zerow.warehouse.job_stock.received", status: "PENDING_EXTERNAL_CONSUMER", attempts: 0,
+        createdAt: now, updatedAt: now,
+      }) as never);
+      statements.push(db.insert(s06Reconciliations).values({
+        id: crypto.randomUUID(), tenantId,
+        aggregateType: "job.stock.movement", aggregateId: stockMovementId,
+        expectedVersion: 1, observedVersion: 1,
+        status: "SITES_READBACK_VERIFIED",
+        detail: "Scarico missione accreditato al registro scorte della commessa.",
+        createdAt: now, updatedAt: now,
+      }) as never);
+      jobStockGuards.push({
+        registerId: stockRegister.id,
+        registerVersion: nextStockRegisterVersion!,
+        itemId: item.id,
+        quantityMilli: line.quantityMilli,
+        movementId: stockMovementId,
+        movementKey: stockMovementKey,
+        sourceId: movementId,
+        eventId: stockEventId,
+      });
+    }
   }
-  return { statements, lineCount: quantityByItem.size };
+  return { statements, lineCount: quantityByItem.size, jobStockGuards };
 }
 
 export async function GET(_request: Request, routeContext: RouteContext) {
@@ -1035,6 +1153,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
     let missionActionRoutePlanId = "";
     let missionActionEvent: JsonObject | null = null;
     let missionInventoryStatements: unknown[] = [];
+    let missionJobStockGuards: JobStockEffectGuard[] = [];
     const inventoryReservationUpdateIndexes: number[] = [];
     const inventoryReservationGuards: Array<{ itemId: string; version: number; reservedMilli: number; quantityMilli: number; sideKey: string; eventId: string }> = [];
 
@@ -1471,10 +1590,14 @@ export async function POST(request: Request, routeContext: RouteContext) {
             const lineId = boundedText(candidate.id, 80, `line-${index + 1}`);
             return lineId ? [[lineId, candidate] as const] : [];
           }));
+          const missionDeliveryEnabled = context.operatingDomains.includes("transport")
+            && context.operatingTransportModes.includes("WAREHOUSE_TO_JOB");
           const fulfillmentPlanLines = verifiedLines.map((line) => {
             const submitted = submittedLineById.get(line.id);
             const approvedQuantityMilli = quantityToMilli(line.quantity);
-            const directPickupMilli = quantityToMilli(submitted?.directPickupQuantity ?? 0, { allowZero: true });
+            const directPickupMilli = missionDeliveryEnabled
+              ? quantityToMilli(submitted?.directPickupQuantity ?? 0, { allowZero: true })
+              : approvedQuantityMilli;
             if (approvedQuantityMilli === null || directPickupMilli === null || directPickupMilli > approvedQuantityMilli) return null;
             return {
               lineId: line.id,
@@ -1482,6 +1605,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
               approvedQuantityMilli,
               directPickupMilli,
               missionDeliveryMilli: approvedQuantityMilli - directPickupMilli,
+              allocationPolicy: missionDeliveryEnabled ? "OPERATOR_OR_MISSION" : "DIRECT_PICKUP_ONLY",
             };
           });
           if (fulfillmentPlanLines.some((line) => !line)) {
@@ -1869,6 +1993,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
           now,
         });
         missionInventoryStatements = inventoryEffect.statements;
+        missionJobStockGuards = inventoryEffect.jobStockGuards;
         status = row.status;
         payload = {
           ...payload,
@@ -2535,6 +2660,69 @@ export async function POST(request: Request, routeContext: RouteContext) {
     if (reservationConflict) return Response.json({ error: "inventory_reservation_conflict", message: "Le giacenze sono cambiate durante la revisione. Rileggi il deposito e ripeti la verifica." }, { status: 409 });
     const changed = (results[missionInventoryStatements.length] as (typeof jobJourneyRecords.$inferSelect)[])[0];
     if (!changed) return Response.json({ error: "version_conflict" }, { status: 409 });
+    if (missionJobStockGuards.length) {
+      const movementKeys = missionJobStockGuards.map((guard) => guard.movementKey);
+      const movementIds = missionJobStockGuards.map((guard) => guard.movementId);
+      const eventIds = missionJobStockGuards.map((guard) => guard.eventId);
+      const itemIds = missionJobStockGuards.map((guard) => guard.itemId);
+      const [stockRegistersReadback, stockMovements, stockBalances, stockEvents, stockOutbox, stockReconciliations] = await Promise.all([
+        db.select().from(jobStockRegisters).where(and(
+          eq(jobStockRegisters.tenantId, context.tenantId),
+          eq(jobStockRegisters.jobId, job.id),
+        )).limit(1),
+        db.select().from(jobStockMovements).where(and(
+          eq(jobStockMovements.tenantId, context.tenantId),
+          inArray(jobStockMovements.idempotencyKey, movementKeys),
+        )),
+        db.select().from(jobStockBalances).where(and(
+          eq(jobStockBalances.tenantId, context.tenantId),
+          eq(jobStockBalances.jobId, job.id),
+          inArray(jobStockBalances.inventoryItemId, itemIds),
+        )),
+        db.select().from(s06Events).where(and(
+          eq(s06Events.tenantId, context.tenantId),
+          inArray(s06Events.eventId, eventIds),
+        )),
+        db.select().from(s06Outbox).where(and(
+          eq(s06Outbox.tenantId, context.tenantId),
+          inArray(s06Outbox.eventId, eventIds),
+        )),
+        db.select().from(s06Reconciliations).where(and(
+          eq(s06Reconciliations.tenantId, context.tenantId),
+          inArray(s06Reconciliations.aggregateId, movementIds),
+        )),
+      ]);
+      const stockRegisterById = new Map(stockRegistersReadback.map((register) => [register.id, register]));
+      const movementByKey = new Map(stockMovements.map((movement) => [movement.idempotencyKey, movement]));
+      const balanceByItem = new Map(stockBalances.map((balance) => [balance.inventoryItemId, balance]));
+      const eventIdSet = new Set(stockEvents.map((event) => event.eventId));
+      const outboxEventIds = new Set(stockOutbox.map((entry) => entry.eventId));
+      const reconciledIds = new Set(stockReconciliations
+        .filter((entry) => entry.aggregateType === "job.stock.movement" && entry.status === "SITES_READBACK_VERIFIED")
+        .map((entry) => entry.aggregateId));
+      const jobStockVerified = missionJobStockGuards.every((guard) => {
+        const movement = movementByKey.get(guard.movementKey);
+        const balance = balanceByItem.get(guard.itemId);
+        const register = stockRegisterById.get(guard.registerId);
+        return Boolean(register
+          && register.version === guard.registerVersion
+          && movement
+          && movement.id === guard.movementId
+          && movement.registerId === guard.registerId
+          && movement.sourceType === "MISSION_DELIVERY"
+          && movement.sourceId === guard.sourceId
+          && movement.quantityMilli === guard.quantityMilli
+          && balance
+          && balance.registerId === guard.registerId
+          && balance.onHandMilli >= guard.quantityMilli
+          && eventIdSet.has(guard.eventId)
+          && outboxEventIds.has(guard.eventId)
+          && reconciledIds.has(guard.movementId));
+      });
+      if (!jobStockVerified) {
+        return Response.json({ error: "mission_job_stock_readback_unavailable" }, { status: 503, headers: { "cache-control": "private, no-store" } });
+      }
+    }
     if (materialRequest) {
       const [linkedRequest] = await db.select().from(jobJourneyRecords).where(and(
         eq(jobJourneyRecords.tenantId, context.tenantId),

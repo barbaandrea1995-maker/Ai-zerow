@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 const baseUrl = (process.env.ZEROW_RUNTIME_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const RUN_ID = randomUUID().slice(0, 8).toLowerCase();
 const ADDRESS = "Via Catullo 93, 00071 Pomezia RM, Italia";
-const profiles = ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"];
+const profiles = ["OPERATIONS", "OPERATIONS_WAREHOUSE", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"];
+
+function profileHasWarehouse(profile) {
+  return ["OPERATIONS_WAREHOUSE", "WAREHOUSE", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"].includes(profile);
+}
 
 function actorFor(profile) {
   return `e2e-profile-${profile.toLowerCase().replaceAll("_", "-")}-${RUN_ID}`;
@@ -130,6 +134,8 @@ async function provisionProfile(profile) {
   assert.equal(created.payload.context?.operatingProfile, profile);
   const roles = profile === "OPERATIONS"
     ? ["owner", "field_supervisor", "worker"]
+    : profile === "OPERATIONS_WAREHOUSE"
+      ? ["owner", "field_supervisor", "worker", "warehouse_manager", "warehouse_operator"]
     : profile === "WAREHOUSE"
       ? ["owner", "warehouse_manager", "warehouse_operator"]
       : profile === "TRANSPORT"
@@ -152,8 +158,8 @@ async function provisionProfile(profile) {
 
 async function assertDomainBoundaries(state) {
   const { actorId, profile } = state;
-  const hasOperations = profile === "OPERATIONS" || profile === "FULL_OPERATIONS";
-  const hasWarehouse = profile === "WAREHOUSE" || profile === "WAREHOUSE_TRANSPORT" || profile === "FULL_OPERATIONS";
+  const hasOperations = profile === "OPERATIONS" || profile === "OPERATIONS_WAREHOUSE" || profile === "FULL_OPERATIONS";
+  const hasWarehouse = profile === "OPERATIONS_WAREHOUSE" || profile === "WAREHOUSE" || profile === "WAREHOUSE_TRANSPORT" || profile === "FULL_OPERATIONS";
   const hasTransport = profile === "TRANSPORT" || profile === "WAREHOUSE_TRANSPORT" || profile === "FULL_OPERATIONS";
 
   if (!hasOperations) {
@@ -164,11 +170,75 @@ async function assertDomainBoundaries(state) {
     const denied = await requestJson(actorId, "/api/authority/warehouses", { method: "POST", body: {}, expected: [403] });
     assert.match(String(denied.payload.capability || ""), /^warehouse\./);
   }
-  if (!hasTransport) {
+  if (!hasOperations && !hasTransport) {
     const deniedAsset = await requestJson(actorId, "/api/assets", { method: "POST", body: {}, expected: [403] });
     assert.equal(deniedAsset.payload.error, "forbidden");
+  }
+  if (!hasTransport) {
     const deniedMission = await requestJson(actorId, "/api/mission/control", { method: "POST", body: {}, expected: [403] });
     assert.equal(deniedMission.payload.error, "forbidden");
+  }
+  if (hasOperations && !hasTransport) {
+    const operationalVehicle = await requestJson(actorId, "/api/assets", {
+      method: "POST",
+      body: {
+        title: `Mezzo operativo ${RUN_ID}`,
+        detail: "Mezzo interno non abilitato alle consegne",
+        entityType: "vehicle",
+        usageMode: "OPERATIONAL",
+        transportCapabilities: [],
+        status: "AVAILABLE",
+        recordType: "asset-register",
+        idempotencyKey: `profile-operational-vehicle-${profile}-${RUN_ID}`,
+      },
+      expected: [201],
+    });
+    assert.equal(operationalVehicle.payload.created?.payload?.usageMode, "OPERATIONAL");
+
+    const deniedTransportCreate = await requestJson(actorId, "/api/assets", {
+      method: "POST",
+      body: {
+        title: `Mezzo trasporto vietato ${RUN_ID}`,
+        detail: "Non deve entrare nel catalogo missioni",
+        entityType: "vehicle",
+        usageMode: "TRANSPORT",
+        transportCapabilities: ["MATERIALS"],
+        status: "AVAILABLE",
+        recordType: "asset-register",
+        idempotencyKey: `profile-denied-transport-vehicle-${profile}-${RUN_ID}`,
+      },
+      expected: [409],
+    });
+    assert.equal(deniedTransportCreate.payload.error, "transport_domain_not_enabled");
+
+    const createdAsset = operationalVehicle.payload.created;
+    const deniedTransportUpdate = await requestJson(actorId, "/api/assets/profile", {
+      method: "POST",
+      body: {
+        assetId: createdAsset.id,
+        expectedUpdatedAt: createdAsset.updatedAt,
+        idempotencyKey: `profile-denied-transport-update-${profile}-${RUN_ID}`,
+        title: createdAsset.detail || "Mezzo operativo",
+        entityType: "vehicle",
+        usageMode: "TRANSPORT",
+        transportCapabilities: ["MATERIALS"],
+      },
+      expected: [409],
+    });
+    assert.equal(deniedTransportUpdate.payload.error, "transport_domain_not_enabled");
+  }
+  if (hasOperations && !hasWarehouse) {
+    const deniedStockReconciliation = await requestJson(actorId, "/api/operations/jobs/unknown/stock", {
+      method: "POST",
+      body: {
+        action: "reconcile_shift",
+        reportDate: new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" }).format(new Date()),
+        idempotencyKey: `profile-stock-domain-denied-${profile}-${RUN_ID}`,
+        lines: [],
+      },
+      expected: [403],
+    });
+    assert.equal(deniedStockReconciliation.payload.error, "warehouse_domain_not_enabled");
   }
 }
 
@@ -248,6 +318,7 @@ async function createJob(state) {
   const job = created.payload.created;
   assert(job?.id, `${state.profile}: commessa creation readback missing`);
   assert.equal(job.payload?.worksiteLocation?.status, "SERVER_VERIFIED");
+  assert.equal(created.payload.jobStockRegister?.status, "ACTIVE", `${state.profile}: commessa stock register must be provisioned atomically`);
   state.job = job;
   state.jobCandidate = candidate;
   state.jobVersion = job.payload.version;
@@ -400,13 +471,113 @@ async function completeOperationsFlow(state, { closeJob = true, planningDay = 1,
     detail: "Lavorazione verificata sul posto dal responsabile operativo.",
   });
   await mutateJob(state, "set_progress", { progress: 100 });
-  const submitted = await mutateJob(state, "submit_rapportino", {
-    answers: [
-      "Sono state completate posa, ripristino e verifica conclusiva con esito positivo.",
-      "Nessuna criticità, incidente, ritardo o carenza di materiali durante il turno.",
-      "L'ufficio deve archiviare il rapportino; non restano lavorazioni operative aperte.",
-    ],
-  });
+  const finalAnswers = [
+    "Sono state completate posa, ripristino e verifica conclusiva con esito positivo.",
+    "Nessuna criticità, incidente, ritardo o carenza di materiali durante il turno.",
+    "L'ufficio deve archiviare il rapportino; non restano lavorazioni operative aperte.",
+  ];
+  if (profileHasWarehouse(state.profile)) {
+    const stock = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+    const positiveBalances = stock.payload.balances?.filter((entry) => entry.onHand > 0) ?? [];
+    if (positiveBalances.length > 0) {
+      assert.equal(stock.payload.register?.version, 2, `${state.profile}: the first material intake must advance the commessa stock snapshot`);
+      const blockedByStock = await mutateJob(state, "submit_rapportino", { answers: finalAnswers }, [422]);
+      assert.equal(blockedByStock.payload.error, "job_stock_reconciliation_required", `${state.profile}: rapportino must fail closed before the shift stock reconciliation`);
+      const expectedRemainingByItem = new Map();
+      const reconciliationBody = {
+        action: "reconcile_shift",
+        reportDate: stock.payload.reportDate,
+        idempotencyKey: `profile-job-stock-reconciliation-${state.profile}-${RUN_ID}`,
+        lines: positiveBalances.map((entry) => {
+          const consumed = Math.min(1, entry.onHand);
+          expectedRemainingByItem.set(entry.inventoryItemId, entry.onHand - consumed);
+          return {
+            inventoryItemId: entry.inventoryItemId,
+            expectedVersion: entry.version,
+            consumed,
+          };
+        }),
+      };
+      const reconciled = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`, {
+        method: "POST",
+        body: reconciliationBody,
+        expected: [201],
+      });
+      assert.equal(reconciled.payload.readback?.status, "verified");
+      assert.equal(reconciled.payload.reconciliation?.status, "CONFIRMED");
+      assert.equal(reconciled.payload.readback?.registerVersion, stock.payload.register.version + 1, `${state.profile}: reconciliation must create a new stock snapshot`);
+      const replay = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`, {
+        method: "POST",
+        body: reconciliationBody,
+      });
+      assert.equal(replay.payload.idempotent, true, `${state.profile}: reconciliation retry must be idempotent`);
+      const duplicateSnapshot = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`, {
+        method: "POST",
+        body: { ...reconciliationBody, idempotencyKey: `profile-job-stock-duplicate-${state.profile}-${RUN_ID}` },
+        expected: [409],
+      });
+      assert.equal(duplicateSnapshot.payload.error, "job_stock_shift_already_reconciled", `${state.profile}: the same stock snapshot must not be reconciled twice`);
+      const stockReadback = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+      assert.equal(stockReadback.payload.todayReconciliation?.id, reconciled.payload.reconciliation.id);
+      assert.equal(stockReadback.payload.readback?.registerVersion, reconciled.payload.readback?.registerVersion);
+      for (const [inventoryItemId, expectedRemaining] of expectedRemainingByItem) {
+        assert.equal(
+          stockReadback.payload.balances?.find((entry) => entry.inventoryItemId === inventoryItemId)?.onHand,
+          expectedRemaining,
+          `${state.profile}: shift reconciliation must persist the remaining commessa stock`,
+        );
+        assert(
+          stockReadback.payload.movements?.some((entry) => entry.inventoryItemId === inventoryItemId
+            && entry.sourceType === "SHIFT_RECONCILIATION"
+            && entry.movementType === "CONSUME"
+            && entry.quantity === -1),
+          `${state.profile}: shift reconciliation must append a verifiable consumption movement`,
+        );
+      }
+      if (state.directPickupReplayBody) {
+        const replayAfterConsumption = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/material-pickup`, {
+          method: "POST",
+          body: state.directPickupReplayBody,
+        });
+        assert.equal(replayAfterConsumption.payload.idempotent, true, "OPERATIONS_WAREHOUSE: a historical pickup retry must remain idempotent after downstream consumption");
+        assert.equal(
+          replayAfterConsumption.payload.jobStock?.balance?.onHandQuantity,
+          expectedRemainingByItem.get(state.inventoryItem.id),
+          "OPERATIONS_WAREHOUSE: pickup replay must return the current commessa balance without duplicating intake",
+        );
+      }
+      if (state.lateDirectPickupBody) {
+        const latePickup = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/material-pickup`, {
+          method: "POST",
+          body: state.lateDirectPickupBody,
+          expected: [201],
+        });
+        assert.equal(latePickup.payload.jobStock?.registerVersion, reconciled.payload.readback.registerVersion + 1);
+        const staleSnapshot = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+        assert.equal(staleSnapshot.payload.todayReconciliation, null, "OPERATIONS_WAREHOUSE: a late intake must invalidate the previous shift reconciliation");
+        const blockedAfterLateIntake = await mutateJob(state, "submit_rapportino", { answers: finalAnswers }, [422]);
+        assert.equal(blockedAfterLateIntake.payload.error, "job_stock_reconciliation_required");
+        const secondReconciliation = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`, {
+          method: "POST",
+          body: {
+            action: "reconcile_shift",
+            reportDate: staleSnapshot.payload.reportDate,
+            idempotencyKey: `profile-job-stock-reconciliation-late-${state.profile}-${RUN_ID}`,
+            lines: staleSnapshot.payload.balances.filter((entry) => entry.onHand > 0).map((entry) => ({
+              inventoryItemId: entry.inventoryItemId,
+              expectedVersion: entry.version,
+              consumed: Math.min(1, entry.onHand),
+            })),
+          },
+          expected: [201],
+        });
+        assert.equal(secondReconciliation.payload.readback?.registerVersion, staleSnapshot.payload.register.version + 1);
+        const finalStockReadback = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+        assert.equal(finalStockReadback.payload.todayReconciliation?.id, secondReconciliation.payload.reconciliation.id);
+      }
+    }
+  }
+  const submitted = await mutateJob(state, "submit_rapportino", { answers: finalAnswers });
   assert.equal(submitted.payload.workspace?.rapportino?.status, "SUBMITTED");
 
   if (closeJob) {
@@ -909,11 +1080,102 @@ async function fullMaterialMissionFlow(state) {
   assert.equal(item?.reserved, 0, "FULL_OPERATIONS: delivered reservation must be reconciled");
   assert(inventory.payload.movements?.some((entry) => entry.movementType === "PICK" && entry.missionId === state.mission.id));
 
+  const jobStock = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+  assert.equal(jobStock.payload.balances?.find((entry) => entry.inventoryItemId === state.inventoryItem.id)?.onHand, 1, "FULL_OPERATIONS: delivered material must enter commessa stock");
+  assert(jobStock.payload.movements?.some((entry) => entry.sourceType === "MISSION_DELIVERY" && entry.missionId === state.mission.id));
+
   const requests = await requestJson(state.actorId, "/api/warehouse/requests");
   const storedRequest = requests.payload.requests?.find((entry) => entry.id === requestRecord.id);
   assert.equal(storedRequest?.payload?.missionId, state.mission.id);
   assert.equal(storedRequest?.mission?.id, state.mission.id);
   assert.equal(storedRequest?.payload?.stockReservation?.status, "RESERVED");
+}
+
+async function directPickupMaterialFlow(state) {
+  const window = futureWindow(40);
+  const materialRequest = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/journey`, {
+    method: "POST",
+    body: {
+      action: "material_request",
+      title: "Ritiro materiali senza trasporto E2E",
+      neededAt: window.startsAt,
+      deliveryInstructions: "Ritiro diretto dell’operatore assegnato.",
+      lines: [{ itemId: state.inventoryItem.id, quantity: 3 }],
+      idempotencyKey: `profile-direct-material-request-${state.profile}-${RUN_ID}`,
+    },
+    expected: [201],
+  });
+  let requestRecord = materialRequest.payload.mutation?.record;
+  assert.equal(requestRecord?.status, "REQUESTED");
+
+  const approved = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/journey`, {
+    method: "POST",
+    body: {
+      action: "material_review",
+      recordId: requestRecord.id,
+      expectedVersion: requestRecord.version,
+      decision: "APPROVED",
+      warehouseId: state.warehouse.id,
+      lines: requestRecord.payload.lines,
+      note: "Scorta riservata per ritiro diretto",
+      idempotencyKey: `profile-direct-material-review-${state.profile}-${RUN_ID}`,
+    },
+  });
+  requestRecord = approved.payload.mutation?.record;
+  const allocation = requestRecord?.payload?.fulfillmentPlan?.lines?.[0];
+  assert.equal(allocation?.directPickupMilli, 3_000, "OPERATIONS_WAREHOUSE: the server must allocate the whole quantity to direct pickup");
+  assert.equal(allocation?.missionDeliveryMilli, 0, "OPERATIONS_WAREHOUSE: no mission quota may be generated");
+  assert.equal(allocation?.allocationPolicy, "DIRECT_PICKUP_ONLY");
+
+  const pickupBody = {
+    requestId: requestRecord.id,
+    lineId: allocation.lineId,
+    itemId: state.inventoryItem.id,
+    quantity: 2,
+    location: {
+      lat: state.warehouse.coordinates.latitude,
+      lon: state.warehouse.coordinates.longitude,
+      accuracyM: 5,
+    },
+    idempotencyKey: `profile-direct-material-pickup-${state.profile}-${RUN_ID}`,
+  };
+  const pickup = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/material-pickup`, {
+    method: "POST",
+    body: pickupBody,
+    expected: [201],
+  });
+  assert.equal(pickup.payload.pickup?.status, "PARTIAL_PICKUP");
+  assert.equal(pickup.payload.jobStock?.balance?.onHandQuantity, 2);
+  const replay = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/material-pickup`, {
+    method: "POST",
+    body: pickupBody,
+  });
+  assert.equal(replay.payload.idempotent, true);
+  assert.equal(replay.payload.jobStock?.balance?.onHandQuantity, 2, "OPERATIONS_WAREHOUSE: retry must not duplicate commessa stock");
+  state.directPickupReplayBody = pickupBody;
+  state.lateDirectPickupBody = {
+    ...pickupBody,
+    quantity: 1,
+    idempotencyKey: `profile-direct-material-pickup-late-${state.profile}-${RUN_ID}`,
+  };
+
+  const stock = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}/stock`);
+  assert.equal(stock.payload.register?.status, "ACTIVE");
+  assert.equal(stock.payload.balances?.find((entry) => entry.inventoryItemId === state.inventoryItem.id)?.onHand, 2);
+  assert(stock.payload.movements?.some((entry) => entry.sourceType === "DIRECT_PICKUP" && entry.quantity === 2));
+
+  const inventory = await requestJson(state.actorId, `/api/warehouse/inventory?warehouseId=${encodeURIComponent(state.warehouse.id)}&itemId=${encodeURIComponent(state.inventoryItem.id)}`);
+  const item = inventory.payload.items?.find((entry) => entry.id === state.inventoryItem.id);
+  assert.equal(item?.onHand, 23);
+  assert.equal(item?.reserved, 1);
+}
+
+async function operationsWarehouseFlow(state) {
+  await registerInventory(state);
+  await completeOperationsFlow(state, {
+    planningDay: 39,
+    beforeFinalization: directPickupMaterialFlow,
+  });
 }
 
 async function fullOperationsFlow(state) {
@@ -938,6 +1200,7 @@ for (const profile of profiles) {
   const state = await provisionProfile(profile);
   await assertDomainBoundaries(state);
   if (profile === "OPERATIONS") await completeOperationsFlow(state, { planningDay: 1 });
+  if (profile === "OPERATIONS_WAREHOUSE") await operationsWarehouseFlow(state);
   if (profile === "WAREHOUSE") await warehouseOnlyFlow(state);
   if (profile === "TRANSPORT") await standaloneTransportFlow(state, { dayOffset: 10 });
   if (profile === "WAREHOUSE_TRANSPORT") {

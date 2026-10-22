@@ -29,6 +29,7 @@ import {
   OPERATING_PROFILE_CATALOG,
   TRANSPORT_MODE_CATALOG,
   filterCapabilitiesForDomains,
+  profileForDomains,
   transportModesForProfile,
 } from "../lib/tenant-operating-model.ts";
 
@@ -161,12 +162,14 @@ assert.deepEqual(multiRoleFixture, ["driver", "warehouse_manager"], "Multi-role 
 const multiRoleCapabilities = new Set(multiRoleFixture.flatMap((role) => ROLE_CAPABILITIES[role]));
 assert(multiRoleCapabilities.has("mission.write") && multiRoleCapabilities.has("warehouse.register"), "Multi-role capabilities must be unioned server-side");
 
-for (const profile of ["OPERATIONS", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
+for (const profile of ["OPERATIONS", "OPERATIONS_WAREHOUSE", "WAREHOUSE", "TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"]) {
   assert(OPERATING_PROFILE_CATALOG[profile]?.domains?.length, `${profile} must declare at least one operating domain`);
   assert(Array.isArray(OPERATING_PROFILE_CATALOG[profile]?.transportModes), `${profile} must declare transport modes`);
 }
 assert(Object.keys(TRANSPORT_MODE_CATALOG).length === 5, "Transport mode catalog must preserve the five canonical flows");
 assert(transportModesForProfile("OPERATIONS").length === 0, "Operations-only tenants must not receive internal transport modes by default");
+assert(transportModesForProfile("OPERATIONS_WAREHOUSE").length === 0, "Operations + warehouse tenants must support direct pickup without enabling mission delivery");
+assert.equal(profileForDomains(["operations", "warehouse"]), "OPERATIONS_WAREHOUSE", "Operations + warehouse domains must never fall back to the full transport profile");
 assert(transportModesForProfile("TRANSPORT").includes("ASSET_TRANSFER"), "Transport-only tenants must support asset transfer");
 assert(transportModesForProfile("WAREHOUSE").includes("WAREHOUSE_TO_RECIPIENT"), "Warehouse tenants must support warehouse-to-recipient requests");
 assert(transportModesForProfile("FULL_OPERATIONS").includes("WAREHOUSE_TO_JOB"), "Full tenants must support warehouse-to-job transport");
@@ -174,6 +177,9 @@ const warehouseOnlyCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES
 assert(warehouseOnlyCapabilities.includes("warehouse.read"), "Warehouse-only tenants must retain warehouse visibility");
 assert(!warehouseOnlyCapabilities.includes("mission.read"), "Warehouse-only tenants must not inherit mission visibility");
 assert(!warehouseOnlyCapabilities.includes("asset.read"), "Warehouse-only tenants must not inherit transport asset visibility");
+const operationsWarehouseCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["operations", "warehouse"]);
+assert(operationsWarehouseCapabilities.includes("asset.read"), "Operations + warehouse tenants must retain operational equipment visibility");
+assert(!operationsWarehouseCapabilities.includes("mission.read"), "Operations + warehouse tenants must not inherit mission visibility");
 const transportCapabilities = filterCapabilitiesForDomains(ROLE_CAPABILITIES.owner, ["transport"]);
 assert(transportCapabilities.includes("mission.read") && transportCapabilities.includes("workforce.read"), "Transport tenants must retain mission and workforce visibility");
 assert(transportCapabilities.includes("planning.read"), "Transport tenants must retain planning visibility");

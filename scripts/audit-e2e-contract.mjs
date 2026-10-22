@@ -55,6 +55,14 @@ const inventoryRoute = await read("app/api/warehouse/inventory/route.ts");
 const jobJourneyRoute = await read("app/api/operations/jobs/[jobId]/journey/route.ts");
 const materialFulfillment = await read("lib/material-fulfillment.ts");
 const materialPickupRoute = await read("app/api/operations/jobs/[jobId]/material-pickup/route.ts");
+const jobStockRoute = await read("app/api/operations/jobs/[jobId]/stock/route.ts");
+const operationsJobRoute = await read("app/api/operations/jobs/[jobId]/route.ts");
+const genericModuleRoute = await read("app/api/[module]/route.ts");
+const assetProfileRoute = await read("app/api/assets/profile/route.ts");
+const operationsRoute = await read("app/api/operations/route.ts");
+const operationsJobSurface = await read("components/operations-job-workspace.tsx");
+const operatingModel = await read("lib/tenant-operating-model.ts");
+const jobStockMigration = await read("drizzle/0028_tricky_human_fly.sql");
 const materialFulfillmentTests = await read("scripts/verify-material-fulfillment.mjs");
 const warehouseRequestsRoute = await read("app/api/warehouse/requests/route.ts");
 const attendanceRoute = await read("app/api/workforce/attendance/route.ts");
@@ -189,6 +197,7 @@ requireContract(jobJourneyRoute, /material_catalog_selection_unavailable/, "job 
 requireContract(jobJourneyRoute, /description: item\.name/, "job material name is resolved from canonical inventory");
 requireContract(jobJourneyRoute, /directPickupQuantity/, "warehouse approval accepts a per-line direct pickup allocation");
 requireContract(jobJourneyRoute, /missionDeliveryMilli: approvedQuantityMilli - directPickupMilli/, "approved line quantity is split exactly between pickup and delivery");
+requireContract(jobJourneyRoute, /missionDeliveryEnabled[\s\S]*?DIRECT_PICKUP_ONLY/, "no-transport profiles are forced server-side to direct pickup");
 requireContract(jobJourneyRoute, /fulfillmentPlan:\s*\{\s*version: 1/, "approved material split is persisted server-side");
 requireContract(jobJourneyRoute, /material_request_has_no_mission_delivery/, "direct-only requests cannot create an empty delivery mission");
 requireContract(materialFulfillment, /missionDeliveryMilli = approvedQuantityMilli/, "legacy approved requests remain mission-delivery compatible");
@@ -202,6 +211,33 @@ requireContract(materialPickupRoute, /reservedMilli: nextReserved/, "direct pick
 requireContract(materialPickupRoute, /'MATERIAL_PICKUP'/, "direct pickup writes its own append-only warehouse record");
 requireContract(materialPickupRoute, /warehouse\.material_pickup\.recorded/, "direct pickup publishes an S06 audit event");
 requireContract(materialPickupRoute, /SITES_READBACK_VERIFIED/, "direct pickup verifies ledger, outbox and reconciliation readback");
+requireContract(materialPickupRoute, /jobStockMovements/, "direct pickup appends a commessa stock movement");
+requireContract(materialPickupRoute, /job_stock_balances[\s\S]*?ON CONFLICT/, "direct pickup atomically projects the commessa stock balance");
+requireContract(materialPickupRoute, /warehouse\.job_stock\.received/, "direct pickup publishes the commessa stock event");
+requireContract(jobJourneyRoute, /sourceType: "MISSION_DELIVERY"/, "warehouse-to-job unload credits the commessa stock register");
+requireContract(jobJourneyRoute, /mission_job_stock_readback_unavailable/, "mission delivery fails closed when commessa stock readback is incomplete");
+requireContract(jobStockRoute, /hasCapability\(context, "warehouse\.read"\)/, "commessa stock readback has a warehouse capability gate");
+requireContract(jobStockRoute, /eq\(jobStockRegisters\.tenantId, context\.tenantId\)/, "commessa stock register is tenant scoped");
+requireContract(jobStockRoute, /rowMatchesContext\(job, context, teamScopeTokens/, "commessa stock visibility follows operational assignment scope");
+requireContract(jobStockRoute, /operations\.rapportino\.write/, "shift stock reconciliation is available only to a rapportino-authorized responsible");
+requireContract(jobStockRoute, /operatingDomains\.includes\("warehouse"\)/, "shift stock reconciliation is disabled outside the tenant warehouse domain");
+requireContract(jobStockRoute, /job_stock_reconciliation_catalog_changed/, "shift reconciliation fails closed when the server catalog changes");
+requireContract(jobStockRoute, /inventoryUnitForCode/, "shift consumption respects the server-owned unit precision catalog");
+requireContract(jobStockRoute, /movementType: "CONSUME"/, "confirmed shift consumption appends a negative commessa-stock movement");
+requireContract(jobStockRoute, /registerVersionAfter/, "a shift reconciliation is bound to one exact register snapshot");
+requireContract(jobStockRoute, /warehouse\.job_stock\.shift_reconciled/, "shift reconciliation publishes its governed ledger event");
+requireContract(jobStockRoute, /outboxReadback[\s\S]*?auditReadback/, "shift reconciliation verifies event, outbox and audit readback");
+requireContract(operationsJobRoute, /job_stock_reconciliation_required/, "rapportino submission requires current commessa-stock reconciliation when balances remain");
+requireContract(operationsRoute, /db\.insert\(jobStockRegisters\)/, "commessa creation provisions its stock register in the same batch");
+requireContract(operationsRoute, /job_stock_register_readback_unavailable/, "commessa creation verifies the stock register readback");
+requireContract(jobStockMigration, /INSERT OR IGNORE INTO `job_stock_registers`/, "existing commesse receive an idempotent stock-register backfill");
+requireContract(jobStockMigration, /'MISSION_DELIVERY'/, "existing warehouse-to-job deliveries are projected into commessa stock");
+requireContract(operationsJobSurface, /MAGAZZINO DI COMMESSA/, "commessa dossier exposes its server-side stock register");
+requireContract(operationsJobSurface, /\/stock`/, "commessa stock card reads the dedicated endpoint");
+requireContract(operationsJobSurface, /Conferma consumi del turno/, "rapportino exposes the end-of-shift stock reconciliation on mobile");
+requireContract(genericModuleRoute, /transport_domain_not_enabled/, "asset creation cannot enable transport outside the tenant operating profile");
+requireContract(assetProfileRoute, /transport_domain_not_enabled/, "asset profile updates cannot enable transport outside the tenant operating profile");
+requireContract(operatingModel, /OPERATIONS_WAREHOUSE/, "onboarding exposes operations plus warehouse without transport");
 requireContract(attendanceRoute, /directPickupsByJob/, "Presenze exposes only pending pickups for assigned commesse");
 requireContract(attendanceRoute, /GROUP BY requestId, lineId/, "Presenze totals every immutable pickup event without a history-page cap");
 requireContract(attendanceSurface, /\/material-pickup/, "Presenze records pickup through the server route");
@@ -210,6 +246,7 @@ requireContract(warehouseRequestsRoute, /directPickups:/, "warehouse queue reads
 requireContract(warehouseRequestsRoute, /GROUP BY job_id, requestId, lineId/, "warehouse queue receives complete server-side pickup totals despite bounded event details");
 requireContract(warehouseQueueSurface, /missionDeliveryLines\(request\.payload\)/, "warehouse mission controls use only the delivery allocation");
 requireContract(warehouseQueueSurface, /quota consegnata viene programmata in Missioni/, "warehouse UI explains the coexisting pickup and delivery paths");
+requireContract(warehouseQueueSurface, /missionDeliveryEnabled/, "warehouse approval adapts to the server operating profile");
 requireContract(missionCommandSurface, /missionDeliveryLines\(request\.payload\)/, "Missioni receives only its allocated delivery quantities");
 requireContract(materialFulfillmentTests, /legacy compatibility and mission-only quantities: PASS/, "fulfillment split regression tests cover mixed, direct-only and legacy requests");
 requireContract(jobJourneySurface, /name="itemId"/, "job material UI selects a server catalog item");
@@ -319,7 +356,7 @@ console.log(JSON.stringify({
       "authority team create → D1 s04 → s06 event/outbox/reconciliation → team GET readback",
       "warehouse create → server coordinate/geofence validation → D1 location readback",
       "warehouse manager register material → unit/warehouse catalog → append-only inventory readback",
-      "approved warehouse reservation → per-line direct pickup in Presenze or delivery mission → one shared quantity ledger",
+      "approved warehouse reservation → direct pickup or delivery mission → one shared commessa stock ledger",
       "warehouse operator movement allowed → material registration denied by warehouse.register",
       "multi-role membership → unioned capabilities → tenant-scoped access",
       "planning window → server resource-options → occupied resource disabled → planning write guard",

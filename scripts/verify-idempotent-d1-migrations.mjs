@@ -19,6 +19,8 @@ const migrations = await Promise.all(
     sql: await readFile(join(root, "drizzle", file), "utf8"),
   })),
 );
+const jobStockMigrationFile = "0028_tricky_human_fly.sql";
+const jobStockMigration = await readFile(join(root, "drizzle", jobStockMigrationFile), "utf8");
 
 for (const { file, sql } of migrations) {
   for (const statement of sql.split("--> statement-breakpoint")) {
@@ -29,6 +31,16 @@ for (const { file, sql } of migrations) {
       /^CREATE (?:TABLE|(?:UNIQUE )?INDEX) IF NOT EXISTS\b/,
       `${file} contains non-idempotent schema DDL: ${ddl.split("\n", 1)[0]}`,
     );
+  }
+}
+
+for (const statement of jobStockMigration.split("--> statement-breakpoint")) {
+  const sql = statement.trim();
+  if (!sql) continue;
+  if (/^CREATE\b/.test(sql)) {
+    assert.match(sql, /^CREATE (?:TABLE|(?:UNIQUE )?INDEX) IF NOT EXISTS\b/, `${jobStockMigrationFile} contains non-idempotent schema DDL: ${sql.split("\n", 1)[0]}`);
+  } else {
+    assert.match(sql, /^INSERT OR IGNORE\b/, `${jobStockMigrationFile} contains non-idempotent data backfill: ${sql.split("\n", 1)[0]}`);
   }
 }
 
@@ -65,5 +77,6 @@ try {
 console.log(JSON.stringify({
   status: "PASS",
   migrations: migrationFiles,
-  checks: ["all_schema_ddl_is_idempotent", "runtime_first_replay_safe", "expected_objects_present"],
+  additiveBackfillMigration: jobStockMigrationFile,
+  checks: ["all_schema_ddl_is_idempotent", "runtime_first_replay_safe", "expected_objects_present", "job_stock_backfill_is_idempotent"],
 }, null, 2));

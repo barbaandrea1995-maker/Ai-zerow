@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "@/db";
-import { geofences, geoLocations, jobJourneyRecords, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantMemberships } from "@/db/schema";
+import { geofences, geoLocations, jobJourneyRecords, jobStockBalances, jobStockRegisters, s04Records, s06Events, s06Outbox, s06Reconciliations, tenantMemberships } from "@/db/schema";
 import {
   getAuthorityContext,
   hasCapability,
@@ -1023,6 +1023,42 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
         eq(jobJourneyRecords.tenantId, context.tenantId),
         eq(jobJourneyRecords.jobId, jobRow.id),
       )).orderBy(desc(jobJourneyRecords.updatedAt)).limit(500);
+      if (context.operatingDomains.includes("warehouse")) {
+        const [stockRegister] = await db.select().from(jobStockRegisters).where(and(
+          eq(jobStockRegisters.tenantId, context.tenantId),
+          eq(jobStockRegisters.jobId, jobRow.id),
+          eq(jobStockRegisters.status, "ACTIVE"),
+        )).limit(1);
+        if (!stockRegister) {
+          return Response.json({
+            error: "job_stock_register_not_provisioned",
+            questions: ["Il magazzino di commessa non è disponibile: aggiorna la scheda prima di chiudere la giornata."],
+          }, { status: 409 });
+        }
+        const [positiveBalance] = await db.select({ id: jobStockBalances.id }).from(jobStockBalances).where(and(
+          eq(jobStockBalances.tenantId, context.tenantId),
+          eq(jobStockBalances.registerId, stockRegister.id),
+          eq(jobStockBalances.jobId, jobRow.id),
+          sql`${jobStockBalances.onHandMilli} > 0`,
+        )).limit(1);
+        const reportDate = activeRapportinoDate(current.rapportino);
+        const stockReconciled = journeyRows.some((row) => {
+          if (row.domain !== "warehouse" || row.recordType !== "MATERIAL_MOVEMENT") return false;
+          const payload = parsePayload(row.payloadJson);
+          return payload.kind === "SHIFT_RECONCILIATION"
+            && safeText(payload.reportDate) === reportDate
+            && safeText(payload.registerId) === stockRegister.id
+            && Number(payload.registerVersionAfter) === stockRegister.version;
+        });
+        if (positiveBalance && !stockReconciled) {
+          return Response.json({
+            error: "job_stock_reconciliation_required",
+            questions: ["Conferma i materiali consumati e le giacenze rimaste nel magazzino di commessa."],
+            reportDate,
+            registerVersion: stockRegister.version,
+          }, { status: 422 });
+        }
+      }
       rapportinoContext = reportContextFromJourneyAndRelated(
         journeyRows,
         related,
