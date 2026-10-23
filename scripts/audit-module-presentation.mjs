@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const headingSurfaces = [
-  "app/operations/page.tsx",
+  "components/operations-index-client.tsx",
   "app/onboarding/page.tsx",
   "components/planning-control.tsx",
   "components/attendance-overview.tsx",

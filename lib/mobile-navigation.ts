@@ -10,6 +10,7 @@ export type MobileNavigationItemId =
   | "map"
   | "ai"
   | "operations"
+  | "mission"
   | "communications"
   | "attendance"
   | "warehouse"
@@ -60,7 +61,8 @@ const CONTROL_ROLES = new Set<AuthorityRole>([
 const capabilityByItem: Partial<Record<MobileNavigationItemId, string>> = {
   map: "command.read",
   ai: "company_ai.read",
-  operations: "operations.read",
+  operations: "operations.index.read",
+  mission: "mission.read",
   communications: "communication.read",
   attendance: "workforce.read",
   warehouse: "warehouse.read",
@@ -93,12 +95,14 @@ function operationalItems(profile: Exclude<MobileNavigationProfile, "control">):
     : profile === "maintenance"
       ? ["home"]
       : profile === "driver"
-        ? ["home", "mission"]
-        : ["home", "operations"];
+        ? ["home"]
+        : ["home", "attendance"];
   const roleItem: MobileNavigationItem = profile === "warehouse"
     ? { id: "warehouse", label: "Magazzino", href: "/warehouse", activeNavigation: ["warehouse"] }
     : profile === "maintenance"
       ? { id: "assets", label: "Asset", href: "/assets", activeNavigation: ["assets"] }
+      : profile === "driver"
+        ? { id: "mission", label: "Missioni", href: "/mission", activeNavigation: ["mission"] }
       : { id: "attendance", label: "Presenze", href: "/presenze", activeNavigation: ["attendance"] };
 
   return [

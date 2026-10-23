@@ -96,7 +96,7 @@ type Snapshot = {
 
 const NAV = [
   { label: "CENTRALE", href: "/command", icon: Sparkles, capability: "command.read" },
-  { label: "COMMESSE", href: "/operations", icon: Boxes, capability: "operations.read" },
+  { label: "COMMESSE", href: "/operations", icon: Boxes, capability: "operations.index.read" },
   { label: "PERSONE", href: "/workforce", icon: Activity, capability: "workforce.read" },
   { label: "FINANZA", href: "/finance", icon: Database, capability: "finance.read" },
   { label: "ACQUISTI", href: "/procurement", icon: Link2, capability: "procurement.read" },
@@ -295,7 +295,7 @@ export default function ExternalIntegrationsControl() {
   }
 
   function goBack() {
-    router.push("/command");
+    router.push("/");
   }
 
   function selectAdapter(key: string) {

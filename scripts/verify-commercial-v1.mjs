@@ -4,6 +4,7 @@ import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { AUTHORITY_ROLES, ROLE_CAPABILITIES, normalizeAuthorityRoles } from "../lib/authority-catalog.ts";
+import { canWriteOperationsRapportino } from "../lib/operations-permissions.ts";
 import {
   COMMAND_WIDGET_CATALOG,
   defaultCommandWidgetLayout,
@@ -153,6 +154,11 @@ assert(!ROLE_CAPABILITIES.warehouse_operator.includes("finance.read"), "Warehous
 assert(ROLE_CAPABILITIES.worker.includes("warehouse.request"), "Field workers must be able to request materials");
 assert(!ROLE_CAPABILITIES.worker.includes("warehouse.write"), "Field workers must not mutate stock balances");
 assert(ROLE_CAPABILITIES.worker.includes("attendance.self"), "Field workers must retain self attendance capability");
+assert(ROLE_CAPABILITIES.worker.includes("operations.read"), "Field workers must retain scoped operation context for assigned attendance");
+assert(!ROLE_CAPABILITIES.worker.includes("operations.index.read"), "Field workers must not receive the commesse index capability");
+assert(!canWriteOperationsRapportino(ROLE_CAPABILITIES.worker), "A simple worker must not open or submit a Company AI rapportino");
+assert(canWriteOperationsRapportino(ROLE_CAPABILITIES.field_supervisor), "A field supervisor must retain the governed Company AI rapportino handoff");
+assert(ROLE_CAPABILITIES.field_supervisor.includes("operations.index.read"), "A field supervisor must retain the assigned commesse index");
 assert(ROLE_CAPABILITIES.manager.includes("attendance.approve"), "Managers must retain attendance approval capability");
 assert(ROLE_CAPABILITIES.worker.includes("pwa.read") && ROLE_CAPABILITIES.driver.includes("pwa.read"), "Operational roles must retain PWA diagnostics visibility");
 assert(ROLE_CAPABILITIES.delivery_driver.includes("mission.delivery.execute") && ROLE_CAPABILITIES.delivery_driver.includes("mission.report.write"), "Delivery drivers must execute delivery missions and write mission reports");
@@ -189,7 +195,7 @@ assert(operationsCapabilities.includes("workforce.read") && operationsCapabiliti
 
 const workerNavigation = getAllowedCommandNavigation(ROLE_CAPABILITIES.worker).map((item) => item.id);
 assert(!workerNavigation.includes("command"), "Worker navigation must hide Command");
-assert(workerNavigation.includes("operations"), "Worker navigation must expose authorized operations");
+assert(!workerNavigation.includes("operations"), "Worker navigation must not expose the commesse index");
 
 const managerDefaults = defaultCommandWidgetLayout(ROLE_CAPABILITIES.manager);
 const maliciousLayout = sanitizeCommandWidgetLayout([
@@ -306,7 +312,9 @@ const operationsLayout = await readFile(join(root, "app", "operations", "layout.
 assert(operationsLayout.includes("AuthorityAccessProvider"), "Operations must receive server-derived capability context");
 assert(operationsLayout.includes("role={authority.role}"), "Operations must expose the canonical role without hardcoding owner");
 
-const operationsPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
+const operationsIndexPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
+assert(operationsIndexPage.includes('requirePageCapability("operations.index.read")'), "The commesse index page must enforce its dedicated server capability");
+const operationsPage = await readFile(join(root, "components", "operations-index-client.tsx"), "utf8");
 assert(operationsPage.includes('authority.capabilities.has("operations.write")'), "Operations write controls must derive from operations.write");
 assert(operationsPage.includes("visibleNavItems"), "Operations navigation must hide unauthorized modules");
 assert(operationsPage.includes("canWriteOperations && newJobOpen"), "Read-only roles must not mount the new-job intake");
@@ -486,7 +494,7 @@ assert(operationalAttendanceDeck.includes('target.kind === "DRIVER" ? null') && 
 assert(operationsJobWorkspace.includes("useSearchParams") && operationsJobWorkspace.includes('searchParams.get("open") === "rapportino"') && operationsJobWorkspace.includes('setActiveSection("reports")') && operationsJobWorkspace.includes('setActionOpen("report")') && operationsJobWorkspace.includes("openReport();"), "Operations workspace must open the Company AI report from the attendance handoff");
 assert(operationsJobWorkspace.includes('value="overview"') && operationsJobWorkspace.includes('value="operations"') && operationsJobWorkspace.includes('value="reports"') && !operationsJobWorkspace.includes("Dossier completo"), "Commessa detail must keep its summary, operational flow and reports distinct without restoring the overloaded dossier");
 assert(operationsJobRoute.includes('hasCapability(context, "field.write")') && operationsJobRoute.includes('save_rapportino') && operationsJobRoute.includes('submit_rapportino') && operationsJobRoute.includes("reportActions"), "Field supervisors may write only the governed rapportino actions through the Operations API");
-assert(operationsJobPage.includes("canWriteReport") && operationsJobPage.includes("canReviewReport") && operationsJobPage.includes('hasCapability(authority, "field.write")'), "Operations workspace must expose the rapportino to field supervisors without granting full commessa write access");
+assert(operationsJobPage.includes("canWriteReport") && operationsJobPage.includes("canReviewReport") && operationsJobPage.includes("canWriteOperationsRapportino"), "Operations workspace must expose the rapportino through the shared field-lead permission contract");
 assert(operationsJobRoute.includes("review_rapportino") && operationsJobRoute.includes('operations.rapportino.review') && operationsJobRoute.includes("rapportino_self_review_forbidden") && operationsJobRoute.includes("rapportino_changes_requested"), "Rapportino review must use its dedicated office capability, prevent self-review, stay auditable and separate from commessa closure");
 assert(operationsJobWorkspace.includes("canReviewReport") && operationsJobWorkspace.includes("reviewNote") && operationsJobWorkspace.includes("Richiedi integrazione") && operationsJobWorkspace.includes("Approva rapportino"), "Operations workspace must expose office review without merging it into the job status flow");
 const trackingSessionRoute = await readFile(join(root, "app", "api", "location", "sessions", "route.ts"), "utf8");
@@ -501,7 +509,7 @@ const attendanceOverviewRoute = await readFile(join(root, "app", "api", "workfor
 assert(attendanceOverviewRoute.includes('hasCapability(context, "workforce.read")') && attendanceOverviewRoute.includes("ON_DUTY_ONLY") && attendanceOverviewRoute.includes("tenantId"), "Attendance overview must remain capability-gated, on-duty and tenant-scoped");
 
 const assetLifecycleRoute = await readFile(join(root, "app", "api", "assets", "lifecycle", "route.ts"), "utf8");
-assert(assetLifecycleRoute.includes('hasCapability(context, "asset.write")'), "Asset lifecycle mutations must require asset.write");
+assert(assetLifecycleRoute.includes('hasCapability(context, "asset.write")') && assetLifecycleRoute.includes('hasCapability(context, "asset.lifecycle.write")'), "Asset lifecycle mutations must require asset write or the narrow assigned-maintenance capability");
 assert(assetLifecycleRoute.includes("invalid_asset_lifecycle_transition"), "Asset lifecycle must enforce state transitions");
 assert(assetLifecycleRoute.includes("availabilityGuard"), "Unavailable assets must be guarded from assignment");
 const tenantOperatingModel = await readFile(join(root, "lib", "tenant-operating-model.ts"), "utf8");
@@ -526,7 +534,7 @@ const planningJourney = await readFile(join(root, "components", "job-commercial-
 assert(!planningJourney.includes('name="responsible"'), "Planning UI must not reintroduce a free-text responsible field");
 assert(missionControl.includes("transportMode") && missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes("operatingTransportModes"), "Mission UI must expose only tenant-enabled transport modes");
 assert(planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: "draft"') && planningSurface.includes("startsAt={startsAt}") && planningSurface.includes("endsAt={endsAt}"), "Central planning UI must select canonical resource IDs and send the server availability window");
-const operationsPlanningPage = await readFile(join(root, "app", "operations", "page.tsx"), "utf8");
+const operationsPlanningPage = await readFile(join(root, "components", "operations-index-client.tsx"), "utf8");
 assert(operationsPlanningPage.includes("/planning/resource-options") && operationsPlanningPage.includes("planningReadbackKey"), "Operations workspace must load server-side resource availability for the selected job");
 const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
 assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");

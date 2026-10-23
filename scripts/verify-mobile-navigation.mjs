@@ -6,7 +6,7 @@ import { mobileNavigationForAuthority } from "../lib/mobile-navigation.ts";
 const expectedLabels = {
   control: ["Home", "Mappa", "AI", "Commesse", "Altro"],
   field: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"],
-  driver: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"],
+  driver: ["Home", "Comunicazioni", "AI", "Missioni", "Impostazioni"],
   warehouse: ["Home", "Comunicazioni", "AI", "Magazzino", "Impostazioni"],
   maintenance: ["Home", "Comunicazioni", "AI", "Asset", "Impostazioni"],
 };
@@ -31,8 +31,9 @@ const expectedProfileByRole = {
 const capabilityByHref = {
   "/communications": "communication.read",
   "/ai": "company_ai.read",
-  "/operations": "operations.read",
+  "/operations": "operations.index.read",
   "/presenze": "workforce.read",
+  "/mission": "mission.read",
   "/warehouse": "warehouse.read",
   "/assets": "asset.read",
   "/settings": "settings.read",

@@ -3,7 +3,7 @@
 import Link from "@/components/app-link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ChevronDown, KeyRound, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,15 +98,6 @@ export function AccountMenu({ actor }: { actor: AccountActor }) {
           <Link href="/settings">
             <Settings className="size-3.5 text-lime-200" />
             Impostazioni account
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          asChild
-          className="text-xs text-slate-300 focus:bg-lime-300/10 focus:text-lime-100"
-        >
-          <Link href="/onboarding">
-            <ShieldCheck className="size-3.5 text-cyan-200" />
-            Configurazione azienda
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem

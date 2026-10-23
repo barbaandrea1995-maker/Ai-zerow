@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { jobJourneyRecords, locationEvents, s04Records, s06Events, s06Outbox, s06Reconciliations, trackingSessions } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { attendanceScopeTokens } from "@/lib/attendance-scope";
+import { canWriteOperationsRapportino } from "@/lib/operations-permissions";
 import {
   evaluateAttendanceGeofence,
   persistedOperationalContext,
@@ -156,8 +157,7 @@ export async function GET(_request: Request, routeContext: RouteContext) {
     const workerFor = (row: typeof jobJourneyRecords.$inferSelect) => bounded(parseJson(row.payloadJson).workerId, 120, row.createdBy);
     const records = allRecords.filter((row) => canApprove || workerFor(row) === context.actorId);
     const currentRecord = allRecords.find((row) => workerFor(row) === context.actorId) ?? null;
-    const canOpenReport = hasCapability(context, "operations.write")
-      || (hasCapability(context, "field.write") && hasCapability(context, "workforce.registry.read"));
+    const canOpenReport = canWriteOperationsRapportino(context.capabilities);
     return Response.json({
       context: { ...publicAuthorityContext(context), canOpenReport, canApprove },
       contract: {

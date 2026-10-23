@@ -86,7 +86,7 @@ export default function SettingsClient({ actor, canManageLocation, allowedNaviga
             <Link
               aria-label="Torna al command center"
               className="grid size-10 place-items-center rounded-xl border border-white/10 bg-black/30 text-slate-500 transition hover:border-lime-300/30 hover:text-lime-200"
-              href="/command"
+              href="/"
             >
               <ArrowLeft className="size-4" />
             </Link>
@@ -248,7 +248,7 @@ export default function SettingsClient({ actor, canManageLocation, allowedNaviga
         ) : null}
 
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] py-5 text-[10px] text-slate-600">
-          <Link className="text-slate-500 transition hover:text-lime-200" href="/command">Torna al command center</Link>
+          <Link className="text-slate-500 transition hover:text-lime-200" href="/">Torna al command center</Link>
           <span className="flex items-center gap-2">
             <span>account control</span>
             <span className="size-1 rounded-full bg-lime-300" />

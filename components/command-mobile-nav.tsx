@@ -12,6 +12,7 @@ import {
   Package,
   Settings2,
   Sparkles,
+  Truck,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -44,6 +45,7 @@ const iconByItem: Record<MobileNavigationItemId, LucideIcon> = {
   map: Map,
   ai: Sparkles,
   operations: BriefcaseBusiness,
+  mission: Truck,
   communications: MessageCircle,
   attendance: ClipboardCheck,
   warehouse: Package,

@@ -107,7 +107,7 @@ export const COMMAND_WIDGET_CATALOG = [
     id: "jobs",
     label: "Lavori",
     description: "Lista sintetica delle commesse accessibili.",
-    requiredCapabilities: ["operations.read"],
+    requiredCapabilities: ["operations.index.read"],
     allowedSizes: ["standard", "wide", "full"],
     defaultSize: "standard",
   },
@@ -173,7 +173,7 @@ export type CommandSurfaceAccess = {
 
 export const COMMAND_NAVIGATION = [
   { id: "command", path: "/command", requiredCapability: "command.read" },
-  { id: "operations", path: "/operations", requiredCapability: "operations.read" },
+  { id: "operations", path: "/operations", requiredCapability: "operations.index.read" },
   { id: "workforce", path: "/workforce", requiredCapability: "workforce.read" },
   { id: "planning", path: "/planning", requiredCapability: "planning.read" },
   { id: "attendance", path: "/presenze", requiredCapability: "workforce.read" },

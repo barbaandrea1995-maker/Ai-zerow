@@ -220,7 +220,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "asset.write")) return Response.json({ error: "forbidden", capability: "asset.write" }, { status: 403 });
+  if (!hasCapability(context, "asset.write") && !hasCapability(context, "asset.lifecycle.write")) {
+    return Response.json({ error: "forbidden", capability: "asset.lifecycle.write" }, { status: 403 });
+  }
   const parsed = await readJson(request);
   if ("error" in parsed) return Response.json({ error: parsed.error }, { status: parsed.error === "payload_too_large" ? 413 : 400 });
   const input = parsed.value;
@@ -258,7 +260,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const transition = {
       action,
-      at: bounded(input.at, 40, now),
+      at: now,
       by: context.actorId,
       note: bounded(input.note, 2_000),
       reason: bounded(input.reason, 240),

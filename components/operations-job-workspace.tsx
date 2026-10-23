@@ -35,6 +35,7 @@ import Image from "next/image";
 import Link from "@/components/app-link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { useAuthorityAccess } from "@/components/authority-access-provider";
 import {
   Dialog,
   DialogClose,
@@ -655,6 +656,8 @@ export default function OperationsJobWorkspace({
   jobId: string;
 }) {
   const router = useRouter();
+  const { capabilities } = useAuthorityAccess();
+  const canOpenOperationsIndex = capabilities.has("operations.index.read");
   const searchParams = useSearchParams();
   const openReportFromQuery = searchParams.get("open") === "rapportino";
   const autoOpenedReportJobRef = useRef("");
@@ -1353,10 +1356,10 @@ export default function OperationsJobWorkspace({
             <Button
               variant="outline"
               className="border-white/10 bg-black/20 text-xs text-slate-300"
-              onClick={() => router.push("/operations")}
+              onClick={() => router.push(canOpenOperationsIndex ? "/operations" : "/")}
             >
               <ArrowLeft className="size-3.5" />
-              Torna alle commesse
+              {canOpenOperationsIndex ? "Torna alle commesse" : "Torna alla tua area"}
             </Button>
             {state === "unauthenticated" && (
               <Button
@@ -1506,11 +1509,11 @@ export default function OperationsJobWorkspace({
       <div className="relative mx-auto max-w-[1320px] px-4 py-4 sm:px-7 sm:py-6">
         <header className="zw-command-topbar sticky top-0 z-20 -mx-4 mb-4 flex min-h-14 flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:-mx-7 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
-            <button aria-label="Apri Command" className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/35 bg-black" onClick={() => router.push("/command")} type="button">
+            <button aria-label="Torna alla tua area" className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/35 bg-black" onClick={() => router.push("/")} type="button">
               <Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" />
             </button>
-            <Button className="h-9 rounded-xl border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push("/operations")} variant="outline">
-              <ArrowLeft className="size-3.5" />Commesse
+            <Button className="h-9 rounded-xl border-white/10 bg-black/20 px-3 text-xs text-slate-300 hover:border-lime-300/30 hover:text-lime-100" onClick={() => router.push(canOpenOperationsIndex ? "/operations" : "/")} variant="outline">
+              <ArrowLeft className="size-3.5" />{canOpenOperationsIndex ? "Commesse" : "La mia area"}
             </Button>
             <div className="min-w-0">
               <p className="truncate text-[9px] font-semibold uppercase tracking-[.2em] text-lime-300/70">COMMESSE / DETTAGLIO</p>

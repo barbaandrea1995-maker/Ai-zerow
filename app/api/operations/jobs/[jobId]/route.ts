@@ -35,6 +35,7 @@ import { defaultGeofenceRadius } from "@/lib/location-intelligence/repository";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
 import { ensureJobStockSchema } from "@/lib/job-stock-schema.server";
+import { canWriteOperationsRapportino } from "@/lib/operations-permissions";
 import { generateCompanyAiRapportinoQuestion } from "@/lib/company-ai-openai";
 import {
   companyAiRateLimit,
@@ -810,9 +811,7 @@ const RAPPORTINO_INTERVIEW_STAGES = [
 export async function POST(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  const canWriteRapportino = hasCapability(context, "operations.write")
-    || hasCapability(context, "operations.rapportino.write")
-    || (hasCapability(context, "field.write") && hasCapability(context, "workforce.registry.read"));
+  const canWriteRapportino = canWriteOperationsRapportino(context.capabilities);
   if (!canWriteRapportino) {
     return Response.json({ error: "forbidden", capability: "operations.rapportino.write" }, { status: 403 });
   }
@@ -938,9 +937,7 @@ export async function PATCH(request: Request, routeContext: RouteContext) {
   const action = boundedText(input.action, 48, "update_job").toLowerCase();
   const reportActions = new Set(["save_rapportino", "submit_rapportino"]);
   const canWriteRapportinoAction = reportActions.has(action) || action === "resubmit_rapportino";
-  const canWriteRapportino = canWriteOperations
-    || hasCapability(context, "operations.rapportino.write")
-    || (canWriteField && hasCapability(context, "workforce.registry.read"));
+  const canWriteRapportino = canWriteOperationsRapportino(context.capabilities);
   if (action === "review_rapportino" && !canReviewRapportino) {
     return Response.json({ error: "forbidden", capability: "operations.rapportino.review", action }, { status: 403 });
   }

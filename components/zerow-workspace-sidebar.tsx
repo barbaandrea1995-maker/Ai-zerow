@@ -153,7 +153,7 @@ export function ZerowWorkspaceSidebar({
           <button
             aria-label="Apri Command"
             className="flex min-w-0 items-center gap-3 text-left"
-            onClick={() => navigate("/command")}
+            onClick={() => navigate("/")}
             type="button"
           >
             <span className="neon-pulse relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.12)]">
@@ -187,7 +187,7 @@ export function ZerowWorkspaceSidebar({
         <button
           aria-label="Workspace corrente"
           className="zw-command-tenant mt-7 flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:border-lime-300/25"
-          onClick={() => navigate("/command")}
+          onClick={() => navigate("/")}
           type="button"
         >
           <span className="grid size-9 place-items-center rounded-xl border border-lime-300/20 bg-lime-300/10 text-lime-200">

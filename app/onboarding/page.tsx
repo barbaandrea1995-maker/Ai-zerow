@@ -196,6 +196,7 @@ const permissionModules = [
   { module: "Command", read: "command.read", write: "command.customize" },
   { module: "Commesse", read: "operations.read", write: "operations.write" },
   { module: "Asset", read: "asset.read", write: "asset.write" },
+  { module: "Manutenzione asset", read: "asset.read", write: "asset.lifecycle.write" },
   { module: "Pianificazione", read: "planning.read", write: "planning.write" },
   { module: "Workforce", read: "workforce.read", write: "workforce.manage" },
   { module: "Presenze", read: "attendance.read", write: "attendance.manage" },
@@ -287,7 +288,7 @@ const authorityKpis = [
 
 const navItems: Array<{ label: string; id: string; icon: LucideIcon; capability?: string }> = [
   { label: "CONTROL", id: "command", icon: MessageSquareText, capability: "command.read" },
-  { label: "COMMESSE", id: "operations", icon: BriefcaseBusiness, capability: "operations.read" },
+  { label: "COMMESSE", id: "operations", icon: BriefcaseBusiness, capability: "operations.index.read" },
   { label: "PERSONE", id: "workforce", icon: Users, capability: "workforce.read" },
   { label: "FINANZA", id: "finance", icon: Gauge, capability: "finance.read" },
   { label: "ASSETS", id: "assets", icon: Package, capability: "asset.read" },
@@ -1531,7 +1532,7 @@ export default function OnboardingPage() {
   const navigate = (id: string, label: string) => {
     setMobileMenu(false);
     if (id === "command") {
-      router.push("/command");
+      router.push("/");
       return;
     }
     if (id === "operations") {
@@ -1696,7 +1697,7 @@ export default function OnboardingPage() {
               className="flex min-w-0 items-center gap-3 text-left"
               onClick={() => {
                 setMobileMenu(false);
-                router.push("/command");
+                router.push("/");
               }}
               type="button"
             >

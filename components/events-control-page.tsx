@@ -138,7 +138,7 @@ type NavItem = { id: CommandNavigationId; label: string; path: string; capabilit
 
 const navItems: NavItem[] = [
   { id: "command", label: "CONTROL", path: "/command", capability: "command.read", icon: MessageSquareText },
-  { id: "operations", label: "COMMESSE", path: "/operations", capability: "operations.read", icon: BriefcaseBusiness },
+  { id: "operations", label: "COMMESSE", path: "/operations", capability: "operations.index.read", icon: BriefcaseBusiness },
   { id: "workforce", label: "PERSONE", path: "/workforce", capability: "workforce.read", icon: Users },
   { id: "planning", label: "PIANIFICAZIONE", path: "/planning", capability: "planning.read", icon: Clock3 },
   { id: "attendance", label: "PRESENZE", path: "/presenze", capability: "workforce.read", icon: Clock3 },
@@ -383,9 +383,9 @@ export default function EventsControlPage() {
 <div className="flex min-h-screen">
 <aside className={cn("zw-command-sidebar z-40 shrink-0 flex-col border-r border-lime-300/10 bg-[#050806]/95 px-3 py-4 backdrop-blur-xl lg:relative lg:flex", sidebarCollapsed ? "w-[78px]" : "w-[252px]", mobileMenu ? "fixed inset-y-0 left-0 flex w-[280px] shadow-[0_0_60px_rgba(0,0,0,.7)]" : "hidden")}>
 <div className={cn("flex items-center gap-3 px-2", sidebarCollapsed && "justify-center px-0")}>
-<Link aria-label="Apri Command" className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.14)]" href="/command">
+<Link aria-label="Apri Command" className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black shadow-[0_0_22px_rgba(200,255,34,.14)]" href="/">
 <Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={40} height={40} className="size-full object-cover" />
-</Link>{!sidebarCollapsed && <Link className="min-w-0" href="/command">
+</Link>{!sidebarCollapsed && <Link className="min-w-0" href="/">
 <span className="block truncate text-sm font-bold tracking-[.18em] text-slate-50">AI-ZEROW</span>
 <span className="block truncate text-[10px] uppercase tracking-[.2em] text-lime-300/75">event authority</span>
 </Link>}<IconButton className="ml-auto hidden lg:grid" label={sidebarCollapsed ? "Espandi sidebar" : "Riduci sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</IconButton>
@@ -417,7 +417,7 @@ export default function EventsControlPage() {
 <IconButton className="lg:hidden" label="Apri menu" onClick={() => setMobileMenu(true)}>
 <Menu className="size-4" />
 </IconButton>
-<Link aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2" href="/command">
+<Link aria-label="Apri Command" className="zw-command-topbar__brand flex shrink-0 items-center gap-2" href="/">
 <span className="relative grid size-9 place-items-center overflow-hidden rounded-xl border border-lime-300/45 bg-black">
 <Image src="/ai-zerow-icon.jpeg" alt="ZEROW" width={36} height={36} className="size-full object-cover" />
 </span>
@@ -634,7 +634,7 @@ export default function EventsControlPage() {
 <h2 className="mt-1 text-base font-semibold text-slate-100">Company AI ledger</h2>
 <p className="mt-1 text-[11px] text-slate-500">Preview, approval e readback separati e tenant-scoped.</p>
 </div>
-<Link className="flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" href="/command">Apri Command <ExternalLink className="size-3.5" />
+<Link className="flex items-center gap-1.5 text-[10px] text-lime-300 hover:text-lime-100" href="/">Apri Command <ExternalLink className="size-3.5" />
 </Link>
 </div>
 <div className="mt-4 space-y-2">{filteredLedger.map((row) => { const styles = toneStyles[statusTone(row.status)] ?? toneStyles.cyan; return <button className={cn("w-full rounded-2xl border p-4 text-left transition", selectedLedger?.id === row.id ? "border-lime-300/35 bg-lime-300/[.06]" : "border-white/[.07] bg-black/20 hover:border-lime-300/25")} key={row.id} onClick={() => setSelectedLedgerId(row.id)} type="button">
