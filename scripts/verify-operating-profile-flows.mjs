@@ -301,7 +301,7 @@ async function createJob(state) {
         providerPlaceId: candidate.providerPlaceId,
         coordinates: { latitude: candidate.latitude, longitude: candidate.longitude },
       },
-      statusCode: "ACTIVE",
+      statusCode: "DRAFT",
       openingType: "NUOVA_COMMESSA",
       scope: {
         sectionId: "B",
@@ -386,6 +386,15 @@ async function planJob(state, dayOffset) {
 async function completeOperationsFlow(state, { closeJob = true, planningDay = 1, beforeFinalization } = {}) {
   await createJob(state);
   const workspace = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.job.id)}`);
+  assert.equal(workspace.payload.workspace?.statusTransitions?.[0]?.statusCode, "PROPOSED", `${state.profile}: a draft commessa must offer proposal as its next status`);
+  const proposed = await mutateJob(state, "set_status", { statusCode: "PROPOSED" });
+  assert.equal(proposed.payload.workspace?.statusTransitions?.[0]?.statusCode, "APPROVED", `${state.profile}: proposal must offer approval before returning to draft`);
+  assert(proposed.payload.workspace?.statusTransitions?.some((transition) => transition.statusCode === "DRAFT"), `${state.profile}: returning to draft remains an available explicit transition`);
+  const approved = await mutateJob(state, "set_status", { statusCode: "APPROVED" });
+  assert.equal(approved.payload.workspace?.statusTransitions?.[0]?.statusCode, "PLANNED", `${state.profile}: approval must offer planning next`);
+  const planned = await mutateJob(state, "set_status", { statusCode: "PLANNED" });
+  assert.equal(planned.payload.workspace?.statusTransitions?.[0]?.statusCode, "ACTIVE", `${state.profile}: planned jobs must offer start next`);
+  await mutateJob(state, "set_status", { statusCode: "ACTIVE" });
   const responsible = workspace.payload.workspace?.options?.assignment?.people?.find((entry) => entry.actorId === state.actorId);
   assert(responsible?.eligibleRoleCodes?.includes("RESPONSABILE_OPERATIVO"), `${state.profile}: responsible registry mismatch`);
 

@@ -142,6 +142,18 @@ const JOB_TRANSITIONS: Record<JobStatusCode, JobStatusCode[]> = {
   CANCELLED: [],
 };
 
+const JOB_TRANSITION_ORDER: Record<JobStatusCode, readonly JobStatusCode[]> = {
+  DRAFT: ["PROPOSED", "CANCELLED"],
+  PROPOSED: ["APPROVED", "DRAFT", "CANCELLED"],
+  APPROVED: ["PLANNED", "CANCELLED"],
+  PLANNED: ["ACTIVE", "CANCELLED"],
+  ACTIVE: ["COMPLETED", "BLOCKED", "PLANNED"],
+  BLOCKED: ["ACTIVE", "CANCELLED"],
+  COMPLETED: ["CLOSED", "ACTIVE"],
+  CLOSED: [],
+  CANCELLED: [],
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -589,6 +601,11 @@ export function parseJobPayload(payloadJson: string): JobPayload {
 
 export function canTransitionJob(from: JobStatusCode, to: JobStatusCode): boolean {
   return from === to || JOB_TRANSITIONS[from].includes(to);
+}
+
+export function jobStatusTransitions(from: JobStatusCode): JobStatusCode[] {
+  const order = JOB_TRANSITION_ORDER[from];
+  return [...JOB_TRANSITIONS[from]].sort((left, right) => order.indexOf(left) - order.indexOf(right));
 }
 
 export function validJobStatuses() {

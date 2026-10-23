@@ -21,6 +21,7 @@
     "audit:release": "pnpm run typecheck && pnpm run audit:language && node scripts/audit-release-surface.mjs && pnpm run audit:integrity && pnpm run audit:alignment && pnpm run verify:role-access",
     "audit:e2e": "node scripts/audit-e2e-contract.mjs",
     "verify:commercial": "node --experimental-strip-types scripts/verify-commercial-v1.mjs",
+    "verify:job-status-transitions": "node --experimental-strip-types scripts/verify-job-status-transitions.mjs",
     "verify:company-ai-macro-scope-v2": "node --experimental-strip-types scripts/verify-company-ai-macro-scope-v2.mjs",
     "verify:idempotent-d1-migrations": "node --experimental-strip-types --no-warnings scripts/verify-idempotent-d1-migrations.mjs",
     "verify:company-ai-assets": "node --experimental-strip-types scripts/verify-company-ai-personal-assets.mjs",

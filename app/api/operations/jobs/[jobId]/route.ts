@@ -11,7 +11,7 @@ import { recordForResponse } from "@/lib/s04-adapter";
 import {
   canTransitionJob,
   clampJobProgress,
-  JOB_STATUS_CODES,
+  jobStatusTransitions,
   activeRapportinoDate,
   buildRapportinoReadback,
   composeRapportinoNarrative,
@@ -67,6 +67,7 @@ function eligibleAssignmentRoleCodes(roles: readonly string[]): string[] {
     : []);
 }
 const STATUS_ACTION_LABELS: Record<string, string> = {
+  DRAFT: "Riporta in bozza",
   PROPOSED: "Invia in proposta",
   APPROVED: "Approva commessa",
   PLANNED: "Pianifica commessa",
@@ -76,8 +77,6 @@ const STATUS_ACTION_LABELS: Record<string, string> = {
   CLOSED: "Chiudi commessa",
   CANCELLED: "Annulla commessa",
 };
-const STATUS_TRANSITION_PRIORITY = ["PROPOSED", "APPROVED", "PLANNED", "ACTIVE", "COMPLETED", "CLOSED", "BLOCKED", "CANCELLED"];
-
 function workforceEntityType(row: typeof s04Records.$inferSelect) {
   const payload = parsePayload(row.payloadJson);
   return safeText(payload.entityType ?? payload.resourceKind ?? payload.kind, row.recordType).toLowerCase();
@@ -515,9 +514,7 @@ async function workspaceResponse(
     : { people: [], teams: [] };
   const statusCode = normalizeJobStatus(payload.statusCode ?? jobRow.status);
   const statusTransitions = canWriteOperations
-    ? JOB_STATUS_CODES
-      .filter((candidate) => candidate !== statusCode && canTransitionJob(statusCode, candidate))
-      .sort((left, right) => STATUS_TRANSITION_PRIORITY.indexOf(left) - STATUS_TRANSITION_PRIORITY.indexOf(right))
+    ? jobStatusTransitions(statusCode)
       .map((candidate) => ({ statusCode: candidate, label: jobStatusLabel(candidate), actionLabel: STATUS_ACTION_LABELS[candidate] ?? `Aggiorna stato · ${jobStatusLabel(candidate)}` }))
     : [];
   const canReadRapportinoDetails = hasCapability(context, "operations.write")

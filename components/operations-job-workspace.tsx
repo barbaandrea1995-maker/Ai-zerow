@@ -857,6 +857,8 @@ export default function OperationsJobWorkspace({
           } else if (nextPayload.error === "rapportino_day_already_approved") {
             notify(nextPayload.message ?? "Il rapportino della giornata è già approvato dall’ufficio.");
             await refresh();
+          } else if (nextPayload.error === "invalid_status_transition") {
+            notify("Il passaggio di stato non è più valido. Ho aggiornato la scheda: riprova con l’azione disponibile.");
           } else
             notify(
               nextPayload.error === "version_conflict"
