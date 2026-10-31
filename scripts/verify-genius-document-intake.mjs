@@ -43,7 +43,9 @@ assert(!scanner.includes("/analyze") && !scanner.includes("/api/finance/entries"
 
 assert(scannerPage.includes("NEXT_PUBLIC_GENIUS_SCAN_LICENSE_KEY"), "The server page must provide the configured domain license to the client scanner");
 assert(scannerPage.includes("canIntakeAssignedJobDocuments") && scannerPage.includes("target.assigned"), "The scanner page must verify assignment for scoped responsible users");
-assert(financeIntake.includes("Scanner grafico Genius"), "The canonical intake must expose the graphical scanner explicitly");
+assert(financeIntake.includes("Scansiona e correggi con Genius"), "The canonical intake must expose the graphical scanner as its primary capture action");
+assert(financeIntake.includes('disabled={busy || loading || files.length === 0}'), "The canonical upload action must remain disabled until at least one file is selected");
+assert(!financeIntake.includes('aria-label="File Finance"') && financeIntake.includes('aria-label="Scegli documenti dal dispositivo"'), "The intake must use the accessible custom file picker instead of the native browser field presentation");
 assert(financeIntake.includes('surface?: "finance" | "job"'), "The same document register must support Finance and job dossier surfaces");
 assert(jobWorkspace.includes('<FinanceDocumentIntake initialJobId={jobId} surface="job" />'), "The commessa dossier must reuse the canonical Finance document register");
 assert(jobWorkspace.includes("Date, turni, squadre e risorse si programmano nel modulo Pianificazione"), "The dossier must keep descriptive scope separate from scheduling");

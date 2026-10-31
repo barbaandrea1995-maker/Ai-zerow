@@ -2,7 +2,7 @@
 
 import Link from "@/components/app-link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { AlertTriangle, Archive, ArrowRight, Camera, CheckCircle2, CloudUpload, Download, FileText, LoaderCircle, LockKeyhole, Plus, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Archive, ArrowRight, Camera, CheckCircle2, ChevronDown, CloudUpload, Download, FileText, LoaderCircle, LockKeyhole, Plus, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FINANCE_DOCUMENT_CATEGORIES, MAX_FINANCE_DOCUMENT_BYTES } from "@/lib/finance-document-contract";
 import { FINANCE_EXTRACTED_DOCUMENT_TYPES } from "@/lib/finance-document-extraction-contract";
@@ -99,10 +99,10 @@ function sizeLabel(bytes: number) {
 }
 
 function statusLabel(document: FinanceDocument) {
-  if (document.downloadable) return "SICUREZZA VERIFICATA";
-  if (document.scanStatus === "INFECTED_PROVIDER") return "BLOCCATO DAL CONTROLLO SICUREZZA";
-  if (document.scanStatus === "PENDING_PROVIDER") return "CONTROLLO SICUREZZA IN CORSO";
-  return "IN QUARANTENA · CONTROLLO SICUREZZA NON ESEGUITO";
+  if (document.downloadable) return "FILE VERIFICATO";
+  if (document.scanStatus === "INFECTED_PROVIDER") return "FILE BLOCCATO";
+  if (document.scanStatus === "PENDING_PROVIDER") return "VERIFICA FILE IN CORSO";
+  return "DOWNLOAD IN ATTESA DI VERIFICA";
 }
 
 function errorLabel(code: string) {
@@ -448,7 +448,8 @@ export function FinanceDocumentIntake({
     }
   }
 
-  const documents = (payload?.documents ?? []).filter((document) => {
+  const allDocuments = payload?.documents ?? [];
+  const documents = allDocuments.filter((document) => {
     const query = documentQuery.trim().toLocaleLowerCase("it-IT");
     const counterparty = typeof document.latestReview?.fields.counterpartyName === "string" ? document.latestReview.fields.counterpartyName : "";
     const matchesQuery = !query || [document.fileName, document.category, document.job?.code, document.job?.title, counterparty].filter(Boolean).join(" ").toLocaleLowerCase("it-IT").includes(query);
@@ -461,53 +462,72 @@ export function FinanceDocumentIntake({
   const scannerQuery = new URLSearchParams({ category, origin: surface });
   if (selectedJobId) scannerQuery.set("jobId", selectedJobId);
   const selectedJob = payload?.jobs.find((job) => job.id === selectedJobId) ?? payload?.jobs[0] ?? null;
-  return <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5">
+  const awaitingAnalysis = allDocuments.filter((document) => !document.latestExtraction || document.latestExtraction.status === "FAILED").length;
+  const awaitingReview = allDocuments.filter((document) => document.latestExtraction?.proposal && !document.latestReview).length;
+  const activeFilterCount = [documentCategoryFilter !== "ALL", documentStatusFilter !== "ALL", Boolean(documentDateFrom)].filter(Boolean).length;
+  const clearFilters = () => {
+    setDocumentQuery("");
+    setDocumentCategoryFilter("ALL");
+    setDocumentStatusFilter("ALL");
+    setDocumentDateFrom("");
+  };
+  return <section className="carbon-card mt-4 overflow-hidden rounded-[24px] border border-lime-300/10 p-3.5 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/75">{surface === "job" ? "DOSSIER / DOCUMENTI DELLA COMMESSA" : "FINANZA / ARCHIVIO DOCUMENTI"}</p>
-        <h2 className="mt-1 text-base font-semibold text-slate-100">{surface === "job" ? "Acquisisci, analizza e archivia" : "Carica e collega le evidenze"}</h2>
-        <p className="mt-1 max-w-3xl text-[10px] leading-5 text-slate-500">{surface === "job" ? "Il dossier usa lo stesso registro canonico di Finance. Originale, analisi e collegamento restano distinti dagli effetti economici." : "Fatture, DDT, ricevute, preventivi e contratti restano documenti separati dai registri di costo e incasso. Il collegamento alla commessa è facoltativo."}</p>
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-[14px] border border-lime-300/20 bg-lime-300/[.06] text-lime-100"><Archive className="size-4.5" /></span>
+        <div className="min-w-0">
+          <p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">{surface === "job" ? "DOSSIER / DOCUMENTI" : "FINANZA / DOCUMENTI"}</p>
+          <h2 className="mt-1 text-[17px] font-semibold leading-tight text-slate-100">{surface === "job" ? "Archivio della commessa" : "Archivio documentale"}</h2>
+          <p className="mt-1 max-w-3xl text-[10px] leading-5 text-slate-500">{surface === "job" ? "Scansiona o carica l’originale, poi verifica la proposta Company AI nello stesso registro di Finance." : "Acquisisci gli originali e collegali al contesto corretto. Gli effetti economici restano separati e richiedono conferma."}</p>
+        </div>
       </div>
       <div className="flex items-center gap-2">
-        <span className="rounded-full border border-amber-200/15 bg-amber-200/[.04] px-2.5 py-1.5 font-mono text-[9px] text-amber-100/80">{loading ? "LETTURA…" : `${payload?.summary.total ?? 0} DOCUMENTI`}</span>
+        <span className="rounded-full border border-lime-300/15 bg-lime-300/[.04] px-2.5 py-1.5 font-mono text-[8px] text-lime-100/80">{loading ? "LETTURA…" : "READBACK OK"}</span>
         <Button aria-label="Aggiorna archivio Finance" className="size-9 border-white/10 bg-black/20 p-0 text-slate-400" disabled={loading} onClick={() => void refresh()} type="button" variant="outline"><RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} /></Button>
       </div>
     </div>
 
-    <div className="mt-4 grid gap-2 sm:grid-cols-3">
-      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">In quarantena</p><p className="mt-1 font-mono text-lg text-amber-100">{payload?.summary.quarantined ?? 0}</p></div>
-      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Sicurezza da verificare</p><p className="mt-1 font-mono text-lg text-slate-300">{payload?.summary.unscanned ?? 0}</p></div>
-      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Sicurezza verificata</p><p className="mt-1 font-mono text-lg text-lime-100">{payload?.summary.clean ?? 0}</p></div>
+    <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="min-w-0 rounded-xl border border-white/[.07] bg-black/20 px-2.5 py-2.5"><p className="truncate text-[7px] font-semibold uppercase tracking-[.12em] text-slate-600">In archivio</p><p className="mt-1 font-mono text-base text-slate-100">{payload?.summary.total ?? 0}</p></div>
+      <div className="min-w-0 rounded-xl border border-cyan-200/10 bg-cyan-200/[.025] px-2.5 py-2.5"><p className="truncate text-[7px] font-semibold uppercase tracking-[.12em] text-cyan-100/50">Da analizzare</p><p className="mt-1 font-mono text-base text-cyan-100">{awaitingAnalysis}</p></div>
+      <div className="min-w-0 rounded-xl border border-amber-200/10 bg-amber-200/[.025] px-2.5 py-2.5"><p className="truncate text-[7px] font-semibold uppercase tracking-[.12em] text-amber-100/50">Da revisionare</p><p className="mt-1 font-mono text-base text-amber-100">{awaitingReview}</p></div>
     </div>
 
-    {canWrite && <form className="mt-4 grid gap-3 rounded-xl border border-amber-200/15 bg-amber-200/[.025] p-3 sm:grid-cols-2" onSubmit={submit}>
-      <label className="text-[10px] text-slate-400">Tipo documento
-        <select aria-label="Tipo documento Finance" className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-amber-200/35" onChange={(event) => setCategory(event.target.value)} value={category}>
+    {canWrite && <form className="mt-4 grid gap-3 rounded-[20px] border border-lime-300/14 bg-[linear-gradient(145deg,rgba(190,255,40,0.035),rgba(0,0,0,0.18))] p-3.5 sm:grid-cols-2 sm:p-4" onSubmit={submit}>
+      <div className="flex items-start justify-between gap-3 sm:col-span-2">
+        <div><p className="text-[8px] font-semibold uppercase tracking-[.16em] text-lime-300/65">NUOVA ACQUISIZIONE</p><h3 className="mt-1 text-sm font-semibold text-slate-100">Aggiungi un documento</h3></div>
+        <span className="rounded-full border border-white/[.08] bg-black/20 px-2.5 py-1 font-mono text-[7px] text-slate-500">PDF · FOTO · FILE</span>
+      </div>
+      <label className="text-[9px] font-medium text-slate-400">Tipo documento
+        <select aria-label="Tipo documento Finance" className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-[12px] text-slate-100 outline-none focus:border-lime-300/35 focus:ring-2 focus:ring-lime-300/10" onChange={(event) => setCategory(event.target.value)} value={category}>
           {FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
         </select>
       </label>
-      {surface === "finance" ? <label className="text-[10px] text-slate-400">Commessa · facoltativa
-        <select aria-label="Commessa collegata al documento" className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-amber-200/35" onChange={(event) => setSelectedJobId(event.target.value)} value={selectedJobId}>
-          <option value="">Documento generale · nessuna commessa</option>
+      {surface === "finance" ? <label className="text-[9px] font-medium text-slate-400">Commessa · facoltativa
+        <select aria-label="Commessa collegata al documento" className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-[12px] text-slate-100 outline-none focus:border-lime-300/35 focus:ring-2 focus:ring-lime-300/10" onChange={(event) => setSelectedJobId(event.target.value)} value={selectedJobId}>
+          <option value="">Archivio generale</option>
           {(payload?.jobs ?? []).map((job) => <option key={job.id} value={job.id}>{job.code ? `${job.code} · ` : ""}{job.title}</option>)}
         </select>
-      </label> : <div className="rounded-lg border border-cyan-300/12 bg-cyan-300/[.025] p-3"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/60">COMMESSA DEL DOSSIER</p><p className="mt-1 truncate text-[10px] font-medium text-cyan-50/85">{selectedJob ? `${selectedJob.code ? `${selectedJob.code} · ` : ""}${selectedJob.title}` : initialJobId}</p><p className="mt-1 text-[8px] text-slate-600">Il server impedisce il cambio di perimetro da questa scheda.</p></div>}
-      <label className="text-[10px] text-slate-400 sm:col-span-2">File · selezione multipla · massimo 20 MB ciascuno
-        <input accept={ACCEPT} aria-label="File Finance" className="mt-1.5 block min-h-11 w-full cursor-pointer rounded-lg border border-dashed border-amber-200/20 bg-black/25 px-3 py-2.5 text-[10px] text-slate-400 file:mr-3 file:rounded-md file:border-0 file:bg-amber-200/10 file:px-2.5 file:py-1 file:text-[9px] file:font-semibold file:text-amber-100" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} required type="file" />
-      </label>
-      <div className="flex flex-wrap gap-2 sm:col-span-2">
-        <Link className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-lime-300 px-3 text-[9px] font-semibold text-[#050705]" href={`/documents/scan?${scannerQuery.toString()}`}><Camera className="size-3.5" />Scanner grafico Genius</Link>
-        <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-200/15 bg-cyan-200/[.035] px-3 text-[9px] font-semibold text-cyan-100"><Camera className="size-3.5" />Foto rapida<input accept="image/*" capture="environment" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} type="file" /></label>
+      </label> : <div className="rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] px-3 py-2.5"><p className="text-[7px] font-semibold uppercase tracking-[.14em] text-cyan-100/55">COMMESSA DEL DOSSIER · BLOCCATA DAL SERVER</p><p className="mt-1 truncate text-[10px] font-medium text-cyan-50/85">{selectedJob ? `${selectedJob.code ? `${selectedJob.code} · ` : ""}${selectedJob.title}` : initialJobId}</p></div>}
+      <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+        <Link className="col-span-2 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-lime-200/55 bg-[linear-gradient(135deg,#dfff54,#9ee800)] px-4 text-[10px] font-semibold text-[#050705] shadow-[0_10px_28px_rgba(180,255,30,.14)]" href={`/documents/scan?${scannerQuery.toString()}`}><Camera className="size-4" />Scansiona e correggi con Genius</Link>
+        <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/10 bg-black/25 px-3 text-[9px] font-semibold text-slate-300 transition-colors hover:border-lime-300/30 hover:text-lime-100"><FileText className="size-3.5" />Scegli file<input accept={ACCEPT} aria-label="Scegli documenti dal dispositivo" className="sr-only" multiple onChange={(event) => { setFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} type="file" /></label>
+        <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-cyan-200/15 bg-cyan-200/[.035] px-3 text-[9px] font-semibold text-cyan-100 transition-colors hover:border-cyan-200/35"><Camera className="size-3.5" />Foto rapida<input accept="image/*" aria-label="Scatta una foto rapida" capture="environment" className="sr-only" onChange={(event) => { setFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} type="file" /></label>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
-        <p className="flex min-w-0 items-start gap-2 text-[9px] leading-4 text-amber-100/70"><LockKeyhole className="mt-0.5 size-3.5 shrink-0" />Il file resta in quarantena e non è scaricabile finché non riceve un esito malware provider-backed.</p>
-        <Button className="shrink-0 bg-amber-200 text-[10px] font-semibold text-[#090a07] hover:bg-amber-100" disabled={busy || loading} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}Registra {files.length > 1 ? `${files.length} documenti` : "documento"}</Button>
+      {files.length > 0 && <div className="space-y-1.5 rounded-xl border border-lime-300/12 bg-lime-300/[.025] p-2.5 sm:col-span-2"><div className="flex items-center justify-between gap-2"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-lime-100/65">{files.length} {files.length === 1 ? "file pronto" : "file pronti"}</p><button className="text-[8px] text-slate-500 hover:text-slate-200" onClick={() => setFiles([])} type="button">Rimuovi tutti</button></div>{files.slice(0, 4).map((file, index) => <div className="flex items-center justify-between gap-2 rounded-lg bg-black/20 px-2.5 py-2" key={`${file.name}-${file.lastModified}-${index}`}><p className="min-w-0 truncate text-[9px] text-slate-300">{file.name}</p><div className="flex shrink-0 items-center gap-2"><span className="font-mono text-[7px] text-slate-600">{sizeLabel(file.size)}</span><button aria-label={`Rimuovi ${file.name}`} className="grid size-6 place-items-center rounded-md border border-white/[.07] text-slate-500 hover:text-slate-200" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} type="button"><X className="size-3" /></button></div></div>)}{files.length > 4 && <p className="px-1 text-[8px] text-slate-600">Altri {files.length - 4} file selezionati</p>}</div>}
+      <div className="grid gap-3 border-t border-white/[.06] pt-3 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <p className="flex min-w-0 items-start gap-2 text-[8px] leading-4 text-slate-500"><LockKeyhole className="mt-0.5 size-3.5 shrink-0 text-lime-100/55" />Originale, hash e collegamento vengono riletti dal server. L’analisi AI e gli effetti economici restano passaggi separati.</p>
+        <Button className="min-h-11 w-full px-5 text-[10px] font-semibold sm:w-auto" disabled={busy || loading || files.length === 0} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}{busy ? "Registrazione…" : files.length > 1 ? `Registra ${files.length} documenti` : "Registra documento"}</Button>
       </div>
     </form>}
     {!canWrite && <div className="mt-4 rounded-xl border border-white/[.07] bg-black/20 p-3 text-[10px] text-slate-500">Il tuo ruolo può consultare questo registro ma non acquisire documenti.</div>}
 
     {notice && <p aria-live="polite" className="mt-3 rounded-lg border border-amber-200/15 bg-amber-200/[.04] px-3 py-2 text-[10px] text-amber-100/80">{notice}</p>}
-    <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/15 p-3 sm:grid-cols-2 xl:grid-cols-4"><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Cerca<input className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="File, controparte, commessa…" value={documentQuery} /></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Tipologia<select className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentCategoryFilter(event.target.value)} value={documentCategoryFilter}><option value="ALL">Tutte</option>{FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Stato economico<select className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentStatusFilter(event.target.value)} value={documentStatusFilter}><option value="ALL">Tutti</option><option value="TO_REVIEW">Da revisionare</option><option value="DOCUMENT_ONLY">Solo documento</option><option value="PENDING_APPROVAL">Da approvare</option><option value="CONFIRMED">Confermato</option><option value="REVERSED">Stornato</option></select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Dal giorno<input className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentDateFrom(event.target.value)} type="date" value={documentDateFrom} /></label></div>
+    <div className="mt-4 rounded-[18px] border border-white/[.07] bg-black/15 p-3">
+      <div className="flex items-center justify-between gap-3"><div><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">REGISTRO DOCUMENTI</p><p className="mt-1 text-[10px] text-slate-400">{documents.length} {documents.length === 1 ? "risultato" : "risultati"}</p></div>{(documentQuery || activeFilterCount > 0) && <button className="text-[8px] font-medium text-lime-100" onClick={clearFilters} type="button">Azzera filtri</button>}</div>
+      <label className="relative mt-3 block"><span className="sr-only">Cerca nel registro documenti</span><Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-600" /><input className="h-11 w-full rounded-xl border border-white/10 bg-black/30 pl-9 pr-3 text-[11px] text-slate-100 outline-none placeholder:text-slate-600 focus:border-lime-300/30 focus:ring-2 focus:ring-lime-300/10" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="Cerca file, controparte o commessa…" value={documentQuery} /></label>
+      <details className="group mt-2"><summary className="flex min-h-10 cursor-pointer list-none items-center justify-between rounded-xl border border-white/[.07] bg-black/20 px-3 text-[9px] text-slate-400 [&::-webkit-details-marker]:hidden"><span className="flex items-center gap-2"><SlidersHorizontal className="size-3.5" />Filtri avanzati{activeFilterCount > 0 && <span className="rounded-full bg-lime-300 px-1.5 py-0.5 font-mono text-[7px] text-black">{activeFilterCount}</span>}</span><ChevronDown className="size-3.5 transition-transform group-open:rotate-180" /></summary><div className="mt-2 grid gap-2 border-t border-white/[.06] pt-3 sm:grid-cols-3"><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Tipologia<select className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[10px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentCategoryFilter(event.target.value)} value={documentCategoryFilter}><option value="ALL">Tutte</option>{FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Stato economico<select className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[10px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentStatusFilter(event.target.value)} value={documentStatusFilter}><option value="ALL">Tutti</option><option value="TO_REVIEW">Da revisionare</option><option value="DOCUMENT_ONLY">Solo documento</option><option value="PENDING_APPROVAL">Da approvare</option><option value="CONFIRMED">Confermato</option><option value="REVERSED">Stornato</option></select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Dal giorno<input className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[10px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentDateFrom(event.target.value)} type="date" value={documentDateFrom} /></label></div></details>
+    </div>
     <div className="mt-4 space-y-2">
       {documents.slice(0, 8).map((document) => {
         const extraction = document.latestExtraction;
