@@ -31,7 +31,6 @@ type RegisteredDocument = {
 
 function scannerError(error: unknown) {
   const code = error instanceof Error ? error.message : "";
-  if (/cancel|abort|closed/i.test(code)) return "Acquisizione annullata. Nessun file è stato registrato.";
   const labels: Record<string, string> = {
     genius_license_not_configured: "La licenza Genius Scan non è configurata per questo ambiente.",
     genius_camera_requires_secure_context: "La fotocamera richiede una connessione HTTPS sicura.",
@@ -41,7 +40,21 @@ function scannerError(error: unknown) {
     finance_job_not_found: "La commessa non è disponibile nel perimetro corrente.",
     forbidden: "Il ruolo corrente non può acquisire documenti in questa commessa.",
   };
-  return labels[code] ?? "Acquisizione non completata. Il file non viene considerato registrato senza readback del server.";
+  if (labels[code]) return labels[code];
+  if (/cancel|abort|closed/i.test(code)) return "Acquisizione annullata. Nessun file è stato registrato.";
+  if (/license|licence|expired|app.?id|hostname|domain/i.test(code)) {
+    return "La licenza Genius non è valida per questo indirizzo. Verifica nel portale Genius che l’App ID coincida con il dominio della PWA.";
+  }
+  if (/notallowed|permission|denied/i.test(code)) {
+    return "Accesso alla fotocamera non consentito. Abilitalo nelle impostazioni del browser e riprova.";
+  }
+  if (/camera|video|media|device|notfound/i.test(code)) {
+    return "Fotocamera non disponibile. Controlla i permessi del dispositivo oppure importa un’immagine nello scanner Genius.";
+  }
+  if (/webassembly|wasm|content security|unsafe-eval|worker/i.test(code)) {
+    return "Il motore grafico Genius non è riuscito ad avviarsi. Ricarica la pagina e riprova.";
+  }
+  return "Acquisizione non completata. Il file non viene considerato registrato senza readback del server.";
 }
 
 function fileSize(bytes: number) {
@@ -186,14 +199,6 @@ export default function GeniusDocumentScanner({
           </div>
         </div>
 
-        <div className="mt-5 grid gap-2 sm:grid-cols-3">
-          {[
-            ["1", "Genius Scan", "Cattura e migliora"],
-            ["2", "Registro server", "Originale, hash e readback"],
-            ["3", "Nutrient + OpenAI", "OCR e proposta controllata"],
-          ].map(([step, title, detail]) => <div className="rounded-xl border border-white/[.07] bg-black/20 p-3" key={step}><p className="font-mono text-[8px] text-lime-200/70">{step}</p><p className="mt-1 text-[10px] font-semibold text-slate-200">{title}</p><p className="mt-1 text-[9px] text-slate-600">{detail}</p></div>)}
-        </div>
-
         <label className="mt-5 block text-[10px] text-slate-400">Tipo documento
           <select className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-lime-300/35" disabled={busy} onChange={(event) => setCategory(event.target.value)} value={category}>
             {FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
@@ -203,9 +208,17 @@ export default function GeniusDocumentScanner({
           {jobId ? <>Il documento sarà collegato alla commessa server-side <span className="font-mono text-cyan-100">{jobId}</span>. Il server ricontrolla tenant, assegnazione e capability.</> : <>Documento aziendale senza commessa preimpostata. L’associazione potrà essere verificata successivamente nel registro Finance.</>}
         </div>
 
-        <div className="mt-5 grid gap-2 sm:grid-cols-2">
-          <Button className="min-h-12 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" disabled={busy || !licenseKey} onClick={() => void start("camera")} type="button">{phase === "loading" || phase === "scanning" ? <LoaderCircle className="size-4 animate-spin" /> : <Camera className="size-4" />}Scansiona con fotocamera</Button>
-          <Button className="min-h-12 border-cyan-300/18 bg-cyan-300/[.04] text-[11px] font-semibold text-cyan-100 hover:bg-cyan-300/[.08]" disabled={busy || !licenseKey} onClick={() => void start("gallery")} type="button" variant="outline"><ImageIcon className="size-4" />Importa immagine in Genius</Button>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <Button className="min-h-12 bg-lime-300 text-[11px] font-semibold text-[#050705] hover:bg-lime-200" data-genius-action="camera" disabled={busy || !licenseKey} onClick={() => void start("camera")} type="button">{phase === "loading" || phase === "scanning" ? <LoaderCircle className="size-4 animate-spin" /> : <Camera className="size-4" />}Scansiona con fotocamera</Button>
+          <Button className="min-h-12 border-cyan-300/18 bg-cyan-300/[.04] text-[11px] font-semibold text-cyan-100 hover:bg-cyan-300/[.08]" data-genius-action="gallery" disabled={busy || !licenseKey} onClick={() => void start("gallery")} type="button" variant="outline"><ImageIcon className="size-4" />Correggi immagine con Genius</Button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-1.5">
+          {[
+            ["1", "Genius", "Cattura"],
+            ["2", "Registro", "Salva"],
+            ["3", "AI", "Analizza"],
+          ].map(([step, title, detail]) => <div className="min-w-0 rounded-xl border border-white/[.07] bg-black/20 px-2.5 py-2.5" key={step}><p className="font-mono text-[7px] text-lime-200/70">{step}</p><p className="mt-1 truncate text-[9px] font-semibold text-slate-200">{title}</p><p className="mt-0.5 text-[8px] text-slate-600">{detail}</p></div>)}
         </div>
 
         {busy && <div aria-live="polite" className="mt-4 flex items-start gap-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3"><LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin text-lime-200" /><div><p className="text-[10px] font-medium text-lime-100">{phase === "uploading" ? "Registrazione server-side" : phase === "scanning" ? "Scanner grafico aperto" : "Avvio motore Genius Scan"}</p><p className="mt-1 text-[9px] leading-4 text-slate-500">{notice || "Completa i controlli mostrati sul dispositivo."}</p></div></div>}
