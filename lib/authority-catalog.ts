@@ -39,13 +39,14 @@ const PLANNING_WRITE = ["planning.read", "planning.write"];
 const ASSET_READ = ["asset.read"];
 const ASSET_WRITE = ["asset.read", "asset.write"];
 const ASSET_LIFECYCLE_WRITE = ["asset.read", "asset.lifecycle.write"];
-const FINANCE_READ = ["finance.read"];
+const FINANCE_DOCUMENT_READ = ["finance.documents.read"];
+const FINANCE_READ = ["finance.read", ...FINANCE_DOCUMENT_READ];
 // Finance capabilities are deliberately split by responsibility. The legacy
 // finance.write capability remains during the W10 compatibility window, but
 // canonical document and ledger routes use the granular capabilities below.
-const FINANCE_INTAKE = ["finance.read", "finance.documents.intake"];
-const FINANCE_DOCUMENT_REVIEW = ["finance.read", "finance.documents.review"];
-const FINANCE_DOCUMENT_SECURITY = ["finance.read", "finance.documents.security"];
+const FINANCE_INTAKE = [...FINANCE_READ, "finance.documents.intake"];
+const FINANCE_DOCUMENT_REVIEW = [...FINANCE_READ, "finance.documents.review"];
+const FINANCE_DOCUMENT_SECURITY = [...FINANCE_READ, "finance.documents.security"];
 const FINANCE_ENTRY_PREPARE = ["finance.read", "finance.entries.prepare"];
 const FINANCE_ENTRY_CONFIRM = ["finance.read", "finance.entries.confirm", "finance.approve"];
 const FINANCE_COMMITMENTS = ["finance.read", "finance.commitments.manage"];
@@ -64,6 +65,10 @@ const FINANCE_WRITE = capabilitySet(
 );
 const FINANCE_APPROVE = capabilitySet(FINANCE_WRITE, FINANCE_ENTRY_CONFIRM);
 const FINANCE_ADMIN = capabilitySet(FINANCE_APPROVE, FINANCE_POLICY);
+// Job-scoped document intake is intentionally not Finance access. It lets the
+// assigned operational responsible archive and analyze evidence for that job,
+// while ledger review and economic approval remain separate capabilities.
+const FINANCE_JOB_DOCUMENTS = ["finance.documents.job.read", "finance.documents.job.intake"];
 const PROCUREMENT_READ = ["procurement.read"];
 const PROCUREMENT_WRITE = ["procurement.read", "procurement.write"];
 const COMMUNICATION = ["communication.read", "communication.send"];
@@ -134,13 +139,13 @@ export const ROLE_CAPABILITIES = {
   ),
   technical: capabilitySet(
     PLATFORM, COMMAND, OPERATIONS_INDEX_READ, OPERATIONS_WRITE, WORKFORCE_SELF, ["workforce.registry.read"], ATTENDANCE_SELF, FIELD, WAREHOUSE_REQUEST,
-    MISSION_READ, DOCUMENTS_WRITE, PLANNING_WRITE, ASSET_WRITE, FINANCE_READ,
+    MISSION_READ, DOCUMENTS_WRITE, PLANNING_WRITE, ASSET_WRITE, FINANCE_INTAKE,
     PROCUREMENT_READ, COMMUNICATION, QR_WRITE, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY,
   ),
   field_supervisor: capabilitySet(
     PLATFORM, COMMAND, OPERATIONS_INDEX_READ, OPERATIONS_READ, OPERATIONS_REPORT_WRITE, WORKFORCE_SELF, ATTENDANCE_READ, ATTENDANCE_MANAGE, FIELD, WAREHOUSE_REQUEST,
     MISSION_READ, DOCUMENTS_READ, PLANNING_READ, ["workforce.registry.read"],
-    ASSET_READ, COMMUNICATION_CRITICAL, QR_READ, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY,
+    ASSET_READ, FINANCE_JOB_DOCUMENTS, COMMUNICATION_CRITICAL, QR_READ, LOCATION_READ_CURRENT, LOCATION_READ_HISTORY,
     LOCATION_DRIVER_TIMELINE,
   ),
   worker: capabilitySet(

@@ -3,19 +3,25 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   financeDocumentExtractions,
+  financeDocumentLinks,
   financeDocuments,
   s04Records,
   s06Events,
   s06Outbox,
   s06Reconciliations,
 } from "@/db/schema";
-import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { getAuthorityContext } from "@/lib/authority-context";
 import { CompanyAiFinanceExtractionError, isOpenAiFinanceExtractionConfigured, proposeFinanceDocumentExtraction } from "@/lib/company-ai-finance-document.server";
 import { buildFinanceDocumentProposal } from "@/lib/finance-document-extraction-contract";
 import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { safeDocumentFileName, sha256Hex } from "@/lib/document-contract";
 import { documentCanDownload } from "@/lib/document-security";
 import { isNutrientFinanceExtractionConfigured, NutrientFinanceExtractionError, parseFinanceDocumentWithNutrient } from "@/lib/nutrient-finance-document.server";
+import {
+  canIntakeAllFinanceDocuments,
+  canIntakeAssignedJobDocuments,
+  resolveJobDocumentTargets,
+} from "@/lib/job-document-access.server";
 
 export const dynamic = "force-dynamic";
 
@@ -134,13 +140,13 @@ function safeProviderFailure(error: unknown) {
   return "finance_document_ai_provider_unavailable";
 }
 
-async function jobCatalog(tenantId: string) {
+async function jobCatalog(tenantId: string, allowedJobIds: Set<string> | null = null) {
   const rows = await getDb().select().from(s04Records).where(and(
     eq(s04Records.tenantId, tenantId),
     eq(s04Records.module, "operations"),
     eq(s04Records.recordType, "job"),
   )).orderBy(desc(s04Records.updatedAt)).limit(160);
-  return rows.map((row) => {
+  return rows.filter((row) => !allowedJobIds || allowedJobIds.has(row.id)).map((row) => {
     const payload = parseObject(row.payloadJson);
     return {
       id: row.id,
@@ -153,8 +159,10 @@ async function jobCatalog(tenantId: string) {
 export async function POST(request: Request, routeContext: RouteContext) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "finance.documents.intake")) {
-    return Response.json({ error: "forbidden", capability: "finance.documents.intake" }, { status: 403 });
+  const canIntakeAll = canIntakeAllFinanceDocuments(context);
+  const canIntakeAssigned = canIntakeAssignedJobDocuments(context);
+  if (!canIntakeAll && !canIntakeAssigned) {
+    return Response.json({ error: "forbidden", requiredCapabilities: ["finance.documents.intake", "finance.documents.job.intake"] }, { status: 403 });
   }
 
   let documentId = "";
@@ -192,6 +200,22 @@ export async function POST(request: Request, routeContext: RouteContext) {
       eq(financeDocuments.id, documentId),
     )).limit(1);
     if (!document) return Response.json({ error: "finance_document_not_found" }, { status: 404 });
+    let allowedJobIds: Set<string> | null = null;
+    if (!canIntakeAll) {
+      const links = await db.select().from(financeDocumentLinks).where(and(
+        eq(financeDocumentLinks.tenantId, context.tenantId),
+        eq(financeDocumentLinks.documentId, document.id),
+        eq(financeDocumentLinks.entityType, "JOB"),
+        eq(financeDocumentLinks.status, "CONFIRMED"),
+      )).limit(100);
+      const references = [...new Set([
+        ...(document.jobId ? [document.jobId] : []),
+        ...links.map((link) => link.entityId),
+      ])];
+      const scopedTargets = await resolveJobDocumentTargets(context, references);
+      allowedJobIds = scopedTargets.assignedJobIds;
+      if (!allowedJobIds.size) return Response.json({ error: "finance_document_not_found" }, { status: 404 });
+    }
 
     const idempotent = await findByIdempotency(context.tenantId, idempotencyKey);
     if (idempotent) {
@@ -276,7 +300,7 @@ export async function POST(request: Request, routeContext: RouteContext) {
       throw new Error("finance_document_analysis_reservation_failed");
     }
 
-    const jobs = await jobCatalog(context.tenantId);
+    const jobs = await jobCatalog(context.tenantId, allowedJobIds);
     let providerMetadata: Record<string, unknown> = {};
     try {
       const nutrient = await parseFinanceDocumentWithNutrient({

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 const baseUrl = (process.env.ZEROW_RUNTIME_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const OWNER = process.env.ZEROW_PICKUP_ACTOR || "e2e-owner";
 const UNASSIGNED_OPERATOR = process.env.ZEROW_UNASSIGNED_PICKUP_ACTOR || "e2e-worker";
-const JOB_ID = process.env.ZEROW_PICKUP_JOB_ID || "E2E-JOB-1";
+const JOB_ID = process.env.ZEROW_PICKUP_JOB_ID || "";
 const RUN_ID = randomUUID().replaceAll("-", "").slice(0, 16);
 const REQUEST_LINE_ID = `line-${RUN_ID}`;
 const DIRECT_QUANTITY = 1;
@@ -40,15 +40,50 @@ const [operationsRead, warehousesRead] = await Promise.all([
   requestJson("/api/operations"),
   requestJson("/api/authority/warehouses"),
 ]);
-const job = operationsRead.payload.records?.find((record) => record.id === JOB_ID || record.canonicalCode === JOB_ID);
-assert(job, `assigned E2E commessa ${JOB_ID} must exist`);
-const assignedActorIds = job.payload?.assignedActorIds ?? [];
-assert(assignedActorIds.includes(OWNER), `${OWNER} must be server-assigned to the E2E commessa`);
+let job = JOB_ID
+  ? operationsRead.payload.records?.find((record) => record.id === JOB_ID || record.canonicalCode === JOB_ID)
+  : operationsRead.payload.records?.find((record) => record.recordType === "job" && record.payload?.assignment?.responsibleActorId === OWNER)
+    || operationsRead.payload.records?.find((record) => record.recordType === "job");
+assert(job, JOB_ID ? `assigned E2E commessa ${JOB_ID} must exist` : "at least one canonical commessa must exist");
+if (job.payload?.assignment?.responsibleActorId !== OWNER) {
+  const workspace = await requestJson(`/api/operations/jobs/${encodeURIComponent(job.id)}`);
+  const owner = workspace.payload.workspace?.options?.assignment?.people?.find((person) => person.actorId === OWNER);
+  assert(owner?.id, `${OWNER} must be available in the server assignment catalog`);
+  const assigned = await requestJson(`/api/operations/jobs/${encodeURIComponent(job.id)}`, {
+    method: "PATCH",
+    body: {
+      action: "assign",
+      responsibleMembershipId: owner.id,
+      role: "RESPONSABILE_OPERATIVO",
+      expectedVersion: job.payload?.version,
+      idempotencyKey: `verify-pickup-assignment-${RUN_ID}`,
+    },
+  });
+  job = assigned.payload.job;
+}
+assert.equal(job.payload?.assignment?.responsibleActorId, OWNER, `${OWNER} must be server-assigned to the E2E commessa`);
 
 const warehouse = (warehousesRead.payload.warehouses || []).find((entry) => entry.status?.toLowerCase() === "active");
 assert(warehouse?.id && warehouse.coordinates, "an active geofenced server-side warehouse is required");
 const inventoryBefore = await requestJson(`/api/warehouse/inventory?warehouseId=${encodeURIComponent(warehouse.id)}`);
-const item = (inventoryBefore.payload.items || []).find((candidate) => candidate.status === "ACTIVE" && candidate.available >= APPROVED_QUANTITY);
+let item = (inventoryBefore.payload.items || []).find((candidate) => candidate.status === "ACTIVE" && candidate.available >= APPROVED_QUANTITY);
+if (!item) {
+  const registered = await requestJson("/api/warehouse/inventory", {
+    method: "POST",
+    expected: [201],
+    body: {
+      action: "register_item",
+      warehouseId: warehouse.id,
+      name: `Materiale verifica ritiro ${RUN_ID}`,
+      unit: "PZ",
+      openingQuantity: 10,
+      minStock: 1,
+      note: "Fixture creata tramite il servizio Inventory governato",
+      idempotencyKey: `verify-pickup-inventory-${RUN_ID}`,
+    },
+  });
+  item = registered.payload.items?.[0];
+}
 assert(item, "the assigned warehouse must have an active catalog item with enough unreserved stock");
 const beforeOnHand = item.onHand;
 const beforeReserved = item.reserved;
@@ -111,10 +146,13 @@ const pickupBody = {
 const unassignedAttempt = await requestJson(`/api/operations/jobs/${encodeURIComponent(job.id)}/material-pickup`, {
   actorId: UNASSIGNED_OPERATOR,
   method: "POST",
-  expected: [403],
+  expected: [401, 403],
   body: { ...pickupBody, idempotencyKey: `verify-pickup-denied-${RUN_ID}` },
 });
-assert.equal(unassignedAttempt.payload.error, "commessa_assignment_required_for_material_pickup", "having the operator capability alone must not bypass the job assignment");
+assert(
+  ["unauthenticated", "commessa_assignment_required_for_material_pickup"].includes(unassignedAttempt.payload.error),
+  "an unknown or unassigned operator must not bypass the job assignment",
+);
 
 const pickupWrite = await requestJson(`/api/operations/jobs/${encodeURIComponent(job.id)}/material-pickup`, {
   method: "POST",

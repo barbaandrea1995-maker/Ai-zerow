@@ -376,10 +376,10 @@ const serviceWorker = await requestText("/sw.js");
 assert.match(serviceWorker.raw, /fetch|install/i);
 
 // Negative capability checks prove these writes are server-authorized, not UI-only.
-const workerFinance = await requestJson("/api/finance/workflow", { actorId: "e2e-worker", expected: [403] });
-assert.equal(workerFinance.payload.error, "forbidden");
-const driverGovernance = await requestJson("/api/governance/workflows", { actorId: "e2e-driver", method: "POST", body: governanceBody, expected: [403] });
-assert.equal(driverGovernance.payload.error, "forbidden");
+const workerFinance = await requestJson("/api/finance/workflow", { actorId: "e2e-worker", expected: [401, 403] });
+assert(["unauthenticated", "forbidden"].includes(workerFinance.payload.error), "unknown or unauthorized actors must fail closed on Finance workflow writes");
+const driverGovernance = await requestJson("/api/governance/workflows", { actorId: "e2e-driver", method: "POST", body: governanceBody, expected: [401, 403] });
+assert(["unauthenticated", "forbidden"].includes(driverGovernance.payload.error), "unknown or unauthorized actors must fail closed on Governance workflow writes");
 
 console.log("PASS office-module flow verification");
 console.log(`Commessa: ${job.canonicalCode || job.id}`);

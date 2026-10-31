@@ -50,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import JobCommercialJourney from "@/components/job-commercial-journey";
 import JobCommercialTermsPanel from "@/components/job-commercial-terms-panel";
+import { FinanceDocumentIntake } from "@/components/finance-document-intake";
 import { inventoryUnitForCode } from "@/lib/inventory-contract";
 import { composeRapportinoNarrative, normalizeRapportinoAnswers } from "@/lib/operations-contract";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
@@ -645,6 +646,7 @@ export default function OperationsJobWorkspace({
   canWriteReport,
   canReviewReport,
   canReadFinance,
+  canReadJobDocuments,
   canReadWarehouse,
   jobId,
 }: {
@@ -652,6 +654,7 @@ export default function OperationsJobWorkspace({
   canWriteReport: boolean;
   canReviewReport: boolean;
   canReadFinance: boolean;
+  canReadJobDocuments: boolean;
   canReadWarehouse: boolean;
   jobId: string;
 }) {
@@ -1647,17 +1650,17 @@ export default function OperationsJobWorkspace({
 
             <section className="carbon-card rounded-[22px] p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">GOVERNANCE OPERATIVA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Responsabilità ed evidenze</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Le fasi descrittive appartengono alla scheda commessa. I turni e le risorse pianificate, i materiali e i trasporti hanno registri operativi dedicati nel percorso qui sotto.</p></div>
+                <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[.18em] text-lime-300/65">GOVERNANCE OPERATIVA</p><h2 className="mt-1 text-[15px] font-semibold text-slate-100">Responsabilità e perimetro operativo</h2><p className="mt-1 max-w-2xl text-[10px] leading-5 text-slate-500">Qui restano responsabilità, obiettivi descrittivi e note osservate. Date, turni, squadre e risorse si programmano nel modulo Pianificazione; materiali e trasporti mantengono i propri registri.</p></div>
                 {canWriteOperations && <div className="flex flex-wrap gap-2">
-                  <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Aggiungi fase commessa</Button>
+                  <Button className="min-h-9 border-lime-300/20 bg-lime-300/[.04] px-3 text-[9px] text-lime-100 hover:bg-lime-300/10" onClick={() => setActionOpen("activity")} type="button" variant="outline"><Plus className="size-3.5" />Aggiungi attività descrittiva</Button>
                   <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={openAssignment} type="button" variant="outline"><Users className="size-3.5" />Assegna responsabile o squadra</Button>
-                  <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Registra evidenza</Button>
+                  <Button className="min-h-9 border-white/10 bg-black/20 px-3 text-[9px] text-slate-300 hover:border-white/20" onClick={() => setActionOpen("evidence")} type="button" variant="outline"><MapPin className="size-3.5" />Annota evidenza operativa</Button>
                 </div>}
               </div>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Responsabile della commessa</p><p className="mt-1 truncate text-[10px] font-medium text-slate-200">{workspace.sections.planning.records.find((record) => record.recordType === "assignment")?.title ?? "Da assegnare"}</p><p className="mt-0.5 text-[9px] text-slate-600">Registro assegnazioni server-side</p></div>
-                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Fasi descrittive</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.activities.count} {workspace.sections.activities.count === 1 ? "fase" : "fasi"}</p><p className="mt-0.5 text-[9px] text-slate-600">Obiettivi e attività generali della commessa</p></div>
-                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Evidenze archiviate</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.evidence.count} {workspace.sections.evidence.count === 1 ? "elemento" : "elementi"}</p><p className="mt-0.5 text-[9px] text-slate-600">Archivio della commessa · rilettura server</p></div>
+                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Attività descrittive</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.activities.count} attività</p><p className="mt-0.5 text-[9px] text-slate-600">Perimetro generale, non calendario di Pianificazione</p></div>
+                <div className="rounded-xl border border-white/[.06] bg-black/20 px-3 py-2.5"><p className="text-[8px] font-semibold uppercase tracking-[.14em] text-slate-600">Note operative</p><p className="mt-1 text-[10px] font-medium text-slate-200">{workspace.sections.evidence.count} {workspace.sections.evidence.count === 1 ? "elemento" : "elementi"}</p><p className="mt-0.5 text-[9px] text-slate-600">Annotazioni leggere; i file sono nel registro documenti</p></div>
               </div>
               {workspace.sections.activities.records.length > 0 && <details className="group mt-3 rounded-xl border border-white/[.06] bg-black/15">
                 <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 marker:hidden"><span className="text-[9px] font-semibold text-slate-400">Attività descrittive della commessa · {workspace.sections.activities.count}</span><span className="text-[8px] text-slate-600 group-open:hidden">Apri</span><span className="hidden text-[8px] text-slate-600 group-open:inline">Chiudi</span></summary>
@@ -1667,6 +1670,8 @@ export default function OperationsJobWorkspace({
                 })}</div>
               </details>}
             </section>
+
+            {canReadJobDocuments && <FinanceDocumentIntake initialJobId={jobId} surface="job" />}
 
             {canReadWarehouse && <JobStockPanel jobId={jobId} refreshToken={stockRefreshToken} />}
 

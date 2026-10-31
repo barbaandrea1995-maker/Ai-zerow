@@ -12,7 +12,7 @@ import {
   s06Outbox,
   s06Reconciliations,
 } from "@/db/schema";
-import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { getAuthorityContext, publicAuthorityContext } from "@/lib/authority-context";
 import { isOpenAiFinanceExtractionConfigured } from "@/lib/company-ai-finance-document.server";
 import { documentCanDownload } from "@/lib/document-security";
 import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
@@ -28,6 +28,13 @@ import {
   isFinanceDocumentCategory,
   MAX_FINANCE_DOCUMENT_BYTES,
 } from "@/lib/finance-document-contract";
+import {
+  canIntakeAllFinanceDocuments,
+  canIntakeAssignedJobDocuments,
+  canReadAllFinanceDocuments,
+  canReadAssignedJobDocuments,
+  resolveJobDocumentTarget,
+} from "@/lib/job-document-access.server";
 
 export const dynamic = "force-dynamic";
 
@@ -181,30 +188,54 @@ async function readCatalog(tenantId: string, jobId = "") {
 export async function GET(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "finance.read")) {
-    return Response.json({ error: "forbidden", capability: "finance.read" }, { status: 403 });
+  const canReadAll = canReadAllFinanceDocuments(context);
+  const canReadAssigned = canReadAssignedJobDocuments(context);
+  if (!canReadAll && !canReadAssigned) {
+    return Response.json({ error: "forbidden", requiredCapabilities: ["finance.documents.read", "finance.documents.job.read"] }, { status: 403 });
   }
 
   try {
     await ensureFinanceDocumentSchema();
-    const jobId = new URL(request.url).searchParams.get("jobId")?.trim() ?? "";
-    if (jobId.length > 160) return Response.json({ error: "invalid_job_id" }, { status: 400 });
-    const catalog = await readCatalog(context.tenantId, jobId);
-    if (jobId && !catalog.jobs.some((job) => job.id === jobId)) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
+    const jobReference = new URL(request.url).searchParams.get("jobId")?.trim() ?? "";
+    if (jobReference.length > 160) return Response.json({ error: "invalid_job_id" }, { status: 400 });
+    if (!canReadAll && !jobReference) {
+      return Response.json({ error: "job_context_required", capability: "finance.documents.job.read" }, { status: 400 });
+    }
+    const target = jobReference ? await resolveJobDocumentTarget(context, jobReference) : null;
+    if (jobReference && !target?.job) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
+    if (!canReadAll && (!target?.job || !target.assigned)) {
+      return Response.json({ error: "finance_job_not_found" }, { status: 404 });
+    }
+    const selectedJobId = target?.job?.id ?? "";
+    const catalog = await readCatalog(context.tenantId, selectedJobId);
+    const selectedJob = selectedJobId ? catalog.jobs.find((job) => job.id === selectedJobId) ?? null : null;
+    const responseCatalog = canReadAll
+      ? catalog
+      : {
+          jobs: selectedJob ? [selectedJob] : [],
+          documents: catalog.documents.map((document) => ({
+            ...document,
+            jobId: selectedJob?.id ?? document.jobId,
+            job: selectedJob,
+            jobs: selectedJob ? [selectedJob] : [],
+            latestReview: null,
+            economicEntry: null,
+          })),
+        };
     return Response.json({
       context: publicAuthorityContext(context),
-      ...catalog,
-      selectedJob: jobId ? catalog.jobs.find((job) => job.id === jobId) ?? null : null,
+      ...responseCatalog,
+      selectedJob,
       summary: {
-        total: catalog.documents.length,
-        quarantined: catalog.documents.filter((document) => !document.downloadable).length,
-        unscanned: catalog.documents.filter((document) => document.scanStatus === "NOT_RUN").length,
-        clean: catalog.documents.filter((document) => document.downloadable).length,
+        total: responseCatalog.documents.length,
+        quarantined: responseCatalog.documents.filter((document) => !document.downloadable).length,
+        unscanned: responseCatalog.documents.filter((document) => document.scanStatus === "NOT_RUN").length,
+        clean: responseCatalog.documents.filter((document) => document.downloadable).length,
       },
       categories: FINANCE_DOCUMENT_CATEGORIES,
       contract: {
         source: "finance_documents+r2",
-        authority: "server-context",
+        authority: canReadAll ? "server-context" : "server-assignment-scope",
         maxBytes: MAX_FINANCE_DOCUMENT_BYTES,
         scan: "NOT_RUN_UNTIL_PROVIDER_READBACK",
         aiExtraction: {
@@ -225,8 +256,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const context = await getAuthorityContext();
   if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
-  if (!hasCapability(context, "finance.documents.intake")) {
-    return Response.json({ error: "forbidden", capability: "finance.documents.intake" }, { status: 403 });
+  const canIntakeAll = canIntakeAllFinanceDocuments(context);
+  const canIntakeAssigned = canIntakeAssignedJobDocuments(context);
+  if (!canIntakeAll && !canIntakeAssigned) {
+    return Response.json({ error: "forbidden", requiredCapabilities: ["finance.documents.intake", "finance.documents.job.intake"] }, { status: 403 });
   }
   if (!env.BUCKET) return Response.json({ error: "object_storage_not_configured" }, { status: 503 });
 
@@ -270,14 +303,12 @@ export async function POST(request: Request) {
     const db = getDb();
     let job: typeof s04Records.$inferSelect | null = null;
     if (jobReference) {
-      const [row] = await db.select().from(s04Records).where(and(
-        eq(s04Records.tenantId, context.tenantId),
-        eq(s04Records.module, "operations"),
-        eq(s04Records.recordType, "job"),
-        eq(s04Records.id, jobReference),
-      )).limit(1);
-      if (!row) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
-      job = row;
+      const target = await resolveJobDocumentTarget(context, jobReference);
+      if (!target.job) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
+      if (!canIntakeAll && !target.assigned) return Response.json({ error: "finance_job_not_found" }, { status: 404 });
+      job = target.job;
+    } else if (!canIntakeAll) {
+      return Response.json({ error: "job_context_required", capability: "finance.documents.job.intake" }, { status: 400 });
     }
 
     const buffer = await candidate.arrayBuffer();
@@ -314,9 +345,100 @@ export async function POST(request: Request) {
       eq(financeDocuments.sha256, sha256),
     )).limit(1);
     if (duplicate) {
+      if (job) {
+        const [existingLink] = await db.select().from(financeDocumentLinks).where(and(
+          eq(financeDocumentLinks.tenantId, context.tenantId),
+          eq(financeDocumentLinks.documentId, duplicate.id),
+          eq(financeDocumentLinks.entityType, "JOB"),
+          eq(financeDocumentLinks.entityId, job.id),
+        )).limit(1);
+        if (existingLink && existingLink.status !== "CONFIRMED") {
+          return Response.json({ error: "finance_document_link_requires_review" }, { status: 409 });
+        }
+        if (!existingLink) {
+          const now = new Date().toISOString();
+          const linkId = `FIN-LNK-${crypto.randomUUID()}`;
+          const eventId = crypto.randomUUID();
+          const linkIdempotencyKey = `${idempotencyKey}:existing-document-job-link`;
+          await db.batch([
+            db.insert(financeDocumentLinks).values({
+              id: linkId,
+              tenantId: context.tenantId,
+              documentId: duplicate.id,
+              entityType: "JOB",
+              entityId: job.id,
+              status: "CONFIRMED",
+              source: "DUPLICATE_HASH_UPLOAD_CONTEXT",
+              version: 1,
+              idempotencyKey: linkIdempotencyKey,
+              createdBy: context.actorId,
+              confirmedBy: context.actorId,
+              createdAt: now,
+              updatedAt: now,
+            }),
+            db.insert(s06Events).values({
+              eventId,
+              tenantId: context.tenantId,
+              eventType: "finance.documents.existing_document_linked",
+              schemaVersion: "1",
+              actorType: "human",
+              actorId: context.actorId,
+              source: "sites-finance-documents",
+              occurredAt: now,
+              observedAt: now,
+              aggregateType: "finance.document.link",
+              aggregateId: linkId,
+              aggregateVersion: 1,
+              payloadJson: JSON.stringify({ documentId: duplicate.id, jobId: job.id, sha256, duplicateOriginalReused: true }),
+              correlationId: crypto.randomUUID(),
+              causationId: null,
+              idempotencyKey: `${linkIdempotencyKey}:event`,
+              status: "COMMITTED_SITES_READBACK",
+              createdAt: now,
+            }),
+            db.insert(s06Outbox).values({
+              id: crypto.randomUUID(),
+              tenantId: context.tenantId,
+              eventId,
+              topic: "zerow.finance.documents.existing_document_linked",
+              status: "PENDING_EXTERNAL_CONSUMER",
+              attempts: 0,
+              createdAt: now,
+              updatedAt: now,
+            }),
+            db.insert(s06Reconciliations).values({
+              id: crypto.randomUUID(),
+              tenantId: context.tenantId,
+              aggregateType: "finance.document.link",
+              aggregateId: linkId,
+              expectedVersion: 1,
+              observedVersion: 1,
+              status: "SITES_READBACK_VERIFIED",
+              detail: "Originale deduplicato riutilizzato e collegamento alla commessa confermato senza duplicare il file.",
+              createdAt: now,
+              updatedAt: now,
+            }),
+          ] as unknown as Parameters<typeof db.batch>[0]);
+          const [linkReadback] = await db.select().from(financeDocumentLinks).where(and(
+            eq(financeDocumentLinks.tenantId, context.tenantId),
+            eq(financeDocumentLinks.id, linkId),
+            eq(financeDocumentLinks.status, "CONFIRMED"),
+          )).limit(1);
+          if (!linkReadback) return Response.json({ error: "finance_document_link_readback_unavailable" }, { status: 503 });
+        }
+      }
       const catalog = await readCatalog(context.tenantId);
-      const jobsById = new Map(catalog.jobs.map((row) => [row.id, row]));
-      return Response.json({ document: documentResponse(duplicate, jobsById, null), duplicate: true, readback: { status: "verified", scope: "tenant", version: duplicate.version } }, {
+      const readbackDocument = catalog.documents.find((document) => document.id === duplicate.id);
+      if (!readbackDocument) return Response.json({ error: "finance_document_readback_unavailable" }, { status: 503 });
+      const responseDocument = canIntakeAll ? readbackDocument : {
+        ...readbackDocument,
+        jobId: job?.id ?? readbackDocument.jobId,
+        job: job ? jobResponse(job) : null,
+        jobs: job ? [jobResponse(job)] : [],
+        latestReview: null,
+        economicEntry: null,
+      };
+      return Response.json({ document: responseDocument, duplicate: true, readback: { status: "verified", scope: "tenant", version: duplicate.version } }, {
         headers: { "cache-control": "private, no-store" },
       });
     }

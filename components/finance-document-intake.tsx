@@ -99,10 +99,10 @@ function sizeLabel(bytes: number) {
 }
 
 function statusLabel(document: FinanceDocument) {
-  if (document.downloadable) return "VERIFICATO DAL PROVIDER";
-  if (document.scanStatus === "INFECTED_PROVIDER") return "BLOCCATO DAL PROVIDER";
-  if (document.scanStatus === "PENDING_PROVIDER") return "SCANSIONE IN CORSO";
-  return "IN QUARANTENA · SCANSIONE NON ESEGUITA";
+  if (document.downloadable) return "SICUREZZA VERIFICATA";
+  if (document.scanStatus === "INFECTED_PROVIDER") return "BLOCCATO DAL CONTROLLO SICUREZZA";
+  if (document.scanStatus === "PENDING_PROVIDER") return "CONTROLLO SICUREZZA IN CORSO";
+  return "IN QUARANTENA · CONTROLLO SICUREZZA NON ESEGUITO";
 }
 
 function errorLabel(code: string) {
@@ -337,7 +337,13 @@ function FinanceDocumentReview({
   </div>;
 }
 
-export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: string }) {
+export function FinanceDocumentIntake({
+  initialJobId = "",
+  surface = "finance",
+}: {
+  initialJobId?: string;
+  surface?: "finance" | "job";
+}) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -372,7 +378,7 @@ export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: st
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
-  const canWrite = payload?.context?.capabilities?.includes("finance.documents.intake") ?? false;
+  const canWrite = payload?.context?.capabilities?.some((capability) => capability === "finance.documents.intake" || capability === "finance.documents.job.intake") ?? false;
   const canReview = payload?.context?.capabilities?.includes("finance.documents.review") ?? false;
   const canConfirm = payload?.context?.capabilities?.includes("finance.entries.confirm") ?? false;
   const canReadDocuments = payload?.context?.capabilities?.includes("documents.read") ?? false;
@@ -452,12 +458,15 @@ export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: st
     const matchesDate = !documentDateFrom || document.createdAt.slice(0, 10) >= documentDateFrom;
     return matchesQuery && matchesCategory && matchesStatus && matchesDate;
   });
+  const scannerQuery = new URLSearchParams({ category, origin: surface });
+  if (selectedJobId) scannerQuery.set("jobId", selectedJobId);
+  const selectedJob = payload?.jobs.find((job) => job.id === selectedJobId) ?? payload?.jobs[0] ?? null;
   return <section className="carbon-card mt-4 rounded-2xl p-4 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/75">FINANZA / ARCHIVIO DOCUMENTI</p>
-        <h2 className="mt-1 text-base font-semibold text-slate-100">Carica e collega le evidenze</h2>
-        <p className="mt-1 max-w-3xl text-[10px] leading-5 text-slate-500">Fatture, DDT, ricevute, preventivi e contratti restano documenti separati dai registri di costo e incasso. Il collegamento alla commessa è facoltativo.</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[.18em] text-amber-200/75">{surface === "job" ? "DOSSIER / DOCUMENTI DELLA COMMESSA" : "FINANZA / ARCHIVIO DOCUMENTI"}</p>
+        <h2 className="mt-1 text-base font-semibold text-slate-100">{surface === "job" ? "Acquisisci, analizza e archivia" : "Carica e collega le evidenze"}</h2>
+        <p className="mt-1 max-w-3xl text-[10px] leading-5 text-slate-500">{surface === "job" ? "Il dossier usa lo stesso registro canonico di Finance. Originale, analisi e collegamento restano distinti dagli effetti economici." : "Fatture, DDT, ricevute, preventivi e contratti restano documenti separati dai registri di costo e incasso. Il collegamento alla commessa è facoltativo."}</p>
       </div>
       <div className="flex items-center gap-2">
         <span className="rounded-full border border-amber-200/15 bg-amber-200/[.04] px-2.5 py-1.5 font-mono text-[9px] text-amber-100/80">{loading ? "LETTURA…" : `${payload?.summary.total ?? 0} DOCUMENTI`}</span>
@@ -467,8 +476,8 @@ export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: st
 
     <div className="mt-4 grid gap-2 sm:grid-cols-3">
       <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">In quarantena</p><p className="mt-1 font-mono text-lg text-amber-100">{payload?.summary.quarantined ?? 0}</p></div>
-      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Scansione non eseguita</p><p className="mt-1 font-mono text-lg text-slate-300">{payload?.summary.unscanned ?? 0}</p></div>
-      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Verificati dal provider</p><p className="mt-1 font-mono text-lg text-lime-100">{payload?.summary.clean ?? 0}</p></div>
+      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Sicurezza da verificare</p><p className="mt-1 font-mono text-lg text-slate-300">{payload?.summary.unscanned ?? 0}</p></div>
+      <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[9px] uppercase tracking-[.12em] text-slate-600">Sicurezza verificata</p><p className="mt-1 font-mono text-lg text-lime-100">{payload?.summary.clean ?? 0}</p></div>
     </div>
 
     {canWrite && <form className="mt-4 grid gap-3 rounded-xl border border-amber-200/15 bg-amber-200/[.025] p-3 sm:grid-cols-2" onSubmit={submit}>
@@ -477,22 +486,25 @@ export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: st
           {FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
         </select>
       </label>
-      <label className="text-[10px] text-slate-400">Commessa · facoltativa
+      {surface === "finance" ? <label className="text-[10px] text-slate-400">Commessa · facoltativa
         <select aria-label="Commessa collegata al documento" className="mt-1.5 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-xs text-slate-100 outline-none focus:border-amber-200/35" onChange={(event) => setSelectedJobId(event.target.value)} value={selectedJobId}>
           <option value="">Documento generale · nessuna commessa</option>
           {(payload?.jobs ?? []).map((job) => <option key={job.id} value={job.id}>{job.code ? `${job.code} · ` : ""}{job.title}</option>)}
         </select>
-      </label>
+      </label> : <div className="rounded-lg border border-cyan-300/12 bg-cyan-300/[.025] p-3"><p className="text-[8px] font-semibold uppercase tracking-[.12em] text-cyan-100/60">COMMESSA DEL DOSSIER</p><p className="mt-1 truncate text-[10px] font-medium text-cyan-50/85">{selectedJob ? `${selectedJob.code ? `${selectedJob.code} · ` : ""}${selectedJob.title}` : initialJobId}</p><p className="mt-1 text-[8px] text-slate-600">Il server impedisce il cambio di perimetro da questa scheda.</p></div>}
       <label className="text-[10px] text-slate-400 sm:col-span-2">File · selezione multipla · massimo 20 MB ciascuno
         <input accept={ACCEPT} aria-label="File Finance" className="mt-1.5 block min-h-11 w-full cursor-pointer rounded-lg border border-dashed border-amber-200/20 bg-black/25 px-3 py-2.5 text-[10px] text-slate-400 file:mr-3 file:rounded-md file:border-0 file:bg-amber-200/10 file:px-2.5 file:py-1 file:text-[9px] file:font-semibold file:text-amber-100" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} required type="file" />
       </label>
-      <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-200/15 bg-cyan-200/[.035] px-3 text-[9px] font-semibold text-cyan-100 sm:col-span-2 sm:justify-self-start"><Camera className="size-3.5" />Scatta foto<input accept="image/*" capture="environment" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} type="file" /></label>
+      <div className="flex flex-wrap gap-2 sm:col-span-2">
+        <Link className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-lime-300 px-3 text-[9px] font-semibold text-[#050705]" href={`/documents/scan?${scannerQuery.toString()}`}><Camera className="size-3.5" />Scanner grafico Genius</Link>
+        <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-200/15 bg-cyan-200/[.035] px-3 text-[9px] font-semibold text-cyan-100"><Camera className="size-3.5" />Foto rapida<input accept="image/*" capture="environment" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} type="file" /></label>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
         <p className="flex min-w-0 items-start gap-2 text-[9px] leading-4 text-amber-100/70"><LockKeyhole className="mt-0.5 size-3.5 shrink-0" />Il file resta in quarantena e non è scaricabile finché non riceve un esito malware provider-backed.</p>
         <Button className="shrink-0 bg-amber-200 text-[10px] font-semibold text-[#090a07] hover:bg-amber-100" disabled={busy || loading} type="submit">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}Registra {files.length > 1 ? `${files.length} documenti` : "documento"}</Button>
       </div>
     </form>}
-    {!canWrite && <div className="mt-4 rounded-xl border border-white/[.07] bg-black/20 p-3 text-[10px] text-slate-500">Il tuo ruolo può consultare l’archivio Finance ma non caricare documenti.</div>}
+    {!canWrite && <div className="mt-4 rounded-xl border border-white/[.07] bg-black/20 p-3 text-[10px] text-slate-500">Il tuo ruolo può consultare questo registro ma non acquisire documenti.</div>}
 
     {notice && <p aria-live="polite" className="mt-3 rounded-lg border border-amber-200/15 bg-amber-200/[.04] px-3 py-2 text-[10px] text-amber-100/80">{notice}</p>}
     <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/15 p-3 sm:grid-cols-2 xl:grid-cols-4"><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Cerca<input className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="File, controparte, commessa…" value={documentQuery} /></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Tipologia<select className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentCategoryFilter(event.target.value)} value={documentCategoryFilter}><option value="ALL">Tutte</option>{FINANCE_DOCUMENT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Stato economico<select className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentStatusFilter(event.target.value)} value={documentStatusFilter}><option value="ALL">Tutti</option><option value="TO_REVIEW">Da revisionare</option><option value="DOCUMENT_ONLY">Solo documento</option><option value="PENDING_APPROVAL">Da approvare</option><option value="CONFIRMED">Confermato</option><option value="REVERSED">Stornato</option></select></label><label className="text-[8px] font-semibold uppercase tracking-[.12em] text-slate-600">Dal giorno<input className="mt-1.5 h-9 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 text-[9px] font-normal normal-case tracking-normal text-slate-100" onChange={(event) => setDocumentDateFrom(event.target.value)} type="date" value={documentDateFrom} /></label></div>
@@ -538,7 +550,7 @@ export function FinanceDocumentIntake({ initialJobId = "" }: { initialJobId?: st
         </article>;
       })}
       {!loading && documents.length === 0 && <div className="rounded-xl border border-dashed border-white/[.08] px-4 py-6 text-center"><Archive className="mx-auto size-5 text-slate-700" /><p className="mt-2 text-[10px] text-slate-500">Nessun documento Finance archiviato.</p></div>}
-      {documents.length > 8 && canReadDocuments && <Link className="inline-flex items-center gap-1.5 px-1 py-2 text-[10px] font-medium text-lime-100 hover:text-lime-300" href="/documents">Apri archivio documenti completo <ArrowRight className="size-3" /></Link>}
+      {surface === "finance" && documents.length > 8 && canReadDocuments && <Link className="inline-flex items-center gap-1.5 px-1 py-2 text-[10px] font-medium text-lime-100 hover:text-lime-300" href="/documents">Apri archivio documenti completo <ArrowRight className="size-3" /></Link>}
     </div>
     <div className="mt-4 flex items-start gap-2 border-t border-white/[.06] pt-3 text-[9px] leading-4 text-slate-600"><LockKeyhole className="mt-0.5 size-3.5 shrink-0" />Hash e catalogo vengono riletti dal server. Le proposte non sono registrazioni contabili: revisione e creazione dei movimenti resteranno azioni separate, con permessi e audit dedicati.</div>
   </section>;

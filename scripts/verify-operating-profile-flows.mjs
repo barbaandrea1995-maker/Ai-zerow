@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 const baseUrl = (process.env.ZEROW_RUNTIME_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
 const RUN_ID = randomUUID().slice(0, 8).toLowerCase();
@@ -8,6 +8,10 @@ const profiles = ["OPERATIONS", "OPERATIONS_WAREHOUSE", "WAREHOUSE", "TRANSPORT"
 
 function profileHasWarehouse(profile) {
   return ["OPERATIONS_WAREHOUSE", "WAREHOUSE", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"].includes(profile);
+}
+
+function profileHasTransport(profile) {
+  return ["TRANSPORT", "WAREHOUSE_TRANSPORT", "FULL_OPERATIONS"].includes(profile);
 }
 
 function actorFor(profile) {
@@ -23,12 +27,47 @@ function headers(actorId) {
   };
 }
 
-async function requestJson(actorId, path, { method = "GET", body, expected = [200] } = {}) {
+function neonFixtureCookie(actorId) {
+  const secret = process.env.ZEROW_TEST_NEON_COOKIE_SECRET || "";
+  assert(secret.length >= 32, "ZEROW_TEST_NEON_COOKIE_SECRET must match the local Neon Auth runtime fixture");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 10 * 60 * 1_000);
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const header = encode({ alg: "HS256", typ: "JWT" });
+  const payload = encode({
+    session: {
+      id: `session-${actorId}`,
+      token: `token-${actorId}`,
+      userId: actorId,
+      expiresAt: expiresAt.toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      ipAddress: "127.0.0.1",
+      userAgent: "AI-ZEROW governed E2E",
+    },
+    user: {
+      id: actorId,
+      name: `Verifica ${actorId}`,
+      email: `${actorId}@example.invalid`,
+      emailVerified: true,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    iat: Math.floor(now.getTime() / 1_000),
+    exp: Math.floor(expiresAt.getTime() / 1_000),
+    sub: actorId,
+  });
+  const unsigned = `${header}.${payload}`;
+  const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
+  return `__Secure-neon-auth.session_token=fixture; __Secure-neon-auth.local.session_data=${unsigned}.${signature}`;
+}
+
+async function requestJson(actorId, path, { method = "GET", body, expected = [200], neonSession = false } = {}) {
   const requestBody = body === undefined ? undefined : JSON.stringify(body);
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const response = await fetch(`${baseUrl}${path}`, {
       method,
-      headers: headers(actorId),
+      headers: { ...headers(actorId), ...(neonSession ? { cookie: neonFixtureCookie(actorId) } : {}) },
       body: requestBody,
     });
     const raw = await response.text();
@@ -119,6 +158,33 @@ async function setOwnRoles(actorId, roles) {
   return result;
 }
 
+async function provisionMissionReviewer(ownerActorId, profile) {
+  const reviewerActorId = `${ownerActorId}-reviewer`;
+  const reviewerEmail = `${reviewerActorId}@example.invalid`;
+  const invitation = await requestJson(ownerActorId, "/api/authority/memberships", {
+    method: "POST",
+    body: {
+      email: reviewerEmail,
+      roles: ["office"],
+      expiresInDays: 1,
+      idempotencyKey: `profile-reviewer-${profile}-${RUN_ID}`,
+    },
+    expected: [201],
+  });
+  const token = invitation.payload.inviteUrl
+    ? new URL(invitation.payload.inviteUrl).searchParams.get("token")
+    : null;
+  assert(token, `${profile}: reviewer invitation token missing`);
+  const accepted = await requestJson(reviewerActorId, "/api/authority/invitations/accept", {
+    method: "POST",
+    body: { token },
+    expected: [201],
+    neonSession: true,
+  });
+  assert(accepted.payload.membership?.roles?.includes("office"), `${profile}: independent office reviewer missing`);
+  return { actorId: reviewerActorId, membership: accepted.payload.membership };
+}
+
 async function provisionProfile(profile) {
   const actorId = actorFor(profile);
   const created = await requestJson(actorId, "/api/tenants", {
@@ -146,14 +212,29 @@ async function provisionProfile(profile) {
   const membership = await setOwnRoles(actorId, roles);
   let warehouse = null;
   let warehouseCandidate = null;
+  let warehouseAssignment = null;
   if (profile.includes("WAREHOUSE") || profile === "FULL_OPERATIONS") {
     const createdWarehouse = await createWarehouse(actorId, profile);
     warehouse = createdWarehouse.warehouse;
     warehouseCandidate = createdWarehouse.candidate;
+    const assigned = await requestJson(actorId, "/api/authority/warehouse-assignments", {
+      method: "POST",
+      body: {
+        membershipId: membership.id,
+        warehouseIds: [warehouse.id],
+        idempotencyKey: `profile-warehouse-scope-${profile}-${RUN_ID}`,
+      },
+      expected: [201],
+    });
+    warehouseAssignment = assigned.payload.assignment;
+    assert(warehouseAssignment?.warehouseIds?.includes(warehouse.id), `${profile}: warehouse authority scope missing`);
   }
   const completed = await requestJson(actorId, "/api/tenants/complete", { method: "POST" });
   assert.equal(completed.payload.complete, true, `${profile}: onboarding must complete`);
-  return { actorId, profile, membership, warehouse, warehouseCandidate };
+  const missionReviewer = profileHasTransport(profile)
+    ? await provisionMissionReviewer(actorId, profile)
+    : null;
+  return { actorId, profile, membership, missionReviewer, warehouse, warehouseAssignment, warehouseCandidate };
 }
 
 async function assertDomainBoundaries(state) {
@@ -892,6 +973,34 @@ async function executeMission(state, { origin, destination }) {
     text: "Missione completata: carico, viaggio, scarico e consegna verificati. Nessuna anomalia; prova di consegna acquisita e registri riconciliati.",
   });
   assert.equal(state.mission.payload?.missionReport?.status, "SUBMITTED");
+  const prematureClose = await requestJson(state.actorId, `/api/operations/jobs/${encodeURIComponent(state.missionJobId)}/journey`, {
+    method: "POST",
+    body: {
+      action: "mission_close",
+      recordId: state.mission.id,
+      expectedVersion: state.mission.version,
+      idempotencyKey: `profile-mission-close-before-review-${state.profile}-${RUN_ID}`,
+    },
+    expected: [422],
+  });
+  assert.equal(prematureClose.payload.error, "mission_report_required_before_close");
+  assert.equal(prematureClose.payload.reportStatus, "SUBMITTED");
+  assert(state.missionReviewer?.actorId, `${state.profile}: independent mission reviewer missing`);
+  const reviewed = await requestJson(state.missionReviewer.actorId, `/api/operations/jobs/${encodeURIComponent(state.missionJobId)}/journey`, {
+    method: "POST",
+    body: {
+      action: "mission_report_review",
+      recordId: state.mission.id,
+      expectedVersion: state.mission.version,
+      idempotencyKey: `profile-mission-report-review-${state.profile}-${RUN_ID}-${state.mission.version}`,
+      decision: "APPROVE",
+      reviewNote: "Rapportino verificato da un responsabile indipendente.",
+    },
+    neonSession: true,
+  });
+  state.mission = reviewed.payload.mutation?.record;
+  assert.equal(state.mission.payload?.missionReport?.status, "APPROVED");
+  assert.equal(state.mission.payload?.missionReport?.reviewedBy, state.missionReviewer.actorId);
   await missionMutation(state, "mission_close");
   assert.equal(state.mission.status, "CLOSED");
 
@@ -1187,6 +1296,42 @@ async function operationsWarehouseFlow(state) {
   });
 }
 
+async function warehouseAttendanceFlow(state) {
+  assert(state.warehouse?.id, `${state.profile}: warehouse attendance requires a warehouse`);
+  const location = {
+    lat: state.warehouse.coordinates.latitude,
+    lon: state.warehouse.coordinates.longitude,
+    accuracyM: 5,
+  };
+  const checkIn = await requestJson(state.actorId, "/api/warehouse/attendance", {
+    method: "POST",
+    body: {
+      action: "check_in",
+      warehouseId: state.warehouse.id,
+      location,
+      clientObservedAt: new Date().toISOString(),
+      idempotencyKey: `profile-warehouse-checkin-${state.profile}-${RUN_ID}`,
+    },
+    expected: [201],
+  });
+  assert.equal(checkIn.payload.attendance?.status, "CHECKED_IN");
+  assert.equal(checkIn.payload.attendance?.payload?.tracking?.status, "NOT_REQUIRED");
+  const checkOut = await requestJson(state.actorId, "/api/warehouse/attendance", {
+    method: "POST",
+    body: {
+      action: "check_out",
+      warehouseId: state.warehouse.id,
+      expectedVersion: checkIn.payload.attendance.version,
+      location,
+      clientObservedAt: new Date().toISOString(),
+      idempotencyKey: `profile-warehouse-checkout-${state.profile}-${RUN_ID}`,
+    },
+  });
+  assert.equal(checkOut.payload.attendance?.status, "CHECKED_OUT");
+  const overview = await requestJson(state.actorId, "/api/workforce/attendance");
+  assert(overview.payload.records?.some((record) => record.jobId === state.warehouse.id && record.status === "CHECKED_OUT"), `${state.profile}: warehouse check-out missing from workforce readback`);
+}
+
 async function fullOperationsFlow(state) {
   await registerInventory(state);
   await createTransportResources(state, { withCargo: true, dayOffset: 30 });
@@ -1208,6 +1353,7 @@ for (const profile of profiles) {
   process.stdout.write(`SETUP ${profile} ... `);
   const state = await provisionProfile(profile);
   await assertDomainBoundaries(state);
+  if (profileHasWarehouse(profile)) await warehouseAttendanceFlow(state);
   if (profile === "OPERATIONS") await completeOperationsFlow(state, { planningDay: 1 });
   if (profile === "OPERATIONS_WAREHOUSE") await operationsWarehouseFlow(state);
   if (profile === "WAREHOUSE") await warehouseOnlyFlow(state);

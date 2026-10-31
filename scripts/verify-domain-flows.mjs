@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 const baseUrl = (process.env.ZEROW_RUNTIME_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
+const OWNER = process.env.ZEROW_TEST_ACTOR_ID || "e2e-owner";
 
 function authHeaders(actorId, email = `${actorId}@example.invalid`) {
   return {
@@ -10,7 +11,7 @@ function authHeaders(actorId, email = `${actorId}@example.invalid`) {
   };
 }
 
-async function requestJson(path, { actorId = "e2e-owner", email, method = "GET", body, expected = [200] } = {}) {
+async function requestJson(path, { actorId = OWNER, email, method = "GET", body, expected = [200] } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: authHeaders(actorId, email),
@@ -96,12 +97,12 @@ assert(warehouseAssignmentsResponse.assignments.some((assignment) => assignment.
 const activeLongTermAssignments = (assetAssignmentsResponse.assignments || []).filter((assignment) => assignment.status === "ACTIVE" && assignment.kind === "LONG_TERM");
 const assignmentsByGroup = Map.groupBy(activeLongTermAssignments, (assignment) => assignment.assignmentGroupId || assignment.id);
 const multiResourceGroup = [...assignmentsByGroup.values()].find((group) => (
-  group.some((assignment) => assignment.entityType === "VEHICLE")
-  && group.some((assignment) => assignment.entityType === "ASSET")
+  group.some((assignment) => assignment.assignmentClass === "VEHICLE")
+  && group.some((assignment) => assignment.assignmentClass === "ASSET")
 ));
 assert(multiResourceGroup, "one long-term assignment group must support both a vehicle and an operational asset");
-const vehicleAssignment = multiResourceGroup.find((assignment) => assignment.entityType === "VEHICLE");
-const cargoAssignment = multiResourceGroup.find((assignment) => assignment.entityType === "ASSET");
+const vehicleAssignment = multiResourceGroup.find((assignment) => assignment.assignmentClass === "VEHICLE");
+const cargoAssignment = multiResourceGroup.find((assignment) => assignment.assignmentClass === "ASSET");
 assert(vehicleAssignment.assetId !== cargoAssignment.assetId, "vehicle and cargo asset must remain distinct registry entities");
 assert(multiResourceGroup.every((assignment) => assignment.assetIds.includes(vehicleAssignment.assetId) && assignment.assetIds.includes(cargoAssignment.assetId)), "the multi-assignment group must read back all assigned resource IDs");
 assert(!/^ASSET[-_ ]?\d+$/i.test(vehicleAssignment.assetTitle), "vehicle cards must show a recognizable title, not only a generic code");
@@ -214,13 +215,13 @@ assert(secondCompanyAi.payload.idempotent === true, "repeating the same Company 
 assert(secondCompanyAi.payload.result.actionId === firstCompanyAi.payload.result.actionId, "idempotent Company AI replay must return the same ledger action");
 
 await Promise.all([
-  requestJson("/api/authority/warehouse-assignments", { actorId: "e2e-worker", expected: [403] }),
-  requestJson("/api/warehouse/requests", { actorId: "e2e-driver", expected: [403] }),
-  requestJson("/api/workforce/attendance", { actorId: "e2e-worker" }),
-  requestJson("/api/workforce/attendance", { actorId: "e2e-driver" }),
-  requestJson("/api/mission/control", { actorId: "e2e-driver" }),
-  requestJson("/api/communications", { actorId: "e2e-worker" }),
-  requestJson("/api/communications", { actorId: "e2e-driver" }),
+  requestJson("/api/authority/warehouse-assignments", { actorId: "e2e-worker", expected: [401, 403] }),
+  requestJson("/api/warehouse/requests", { actorId: "e2e-driver", expected: [401, 403] }),
+  requestJson("/api/workforce/attendance", { actorId: "e2e-worker", expected: [401, 403] }),
+  requestJson("/api/workforce/attendance", { actorId: "e2e-driver", expected: [401, 403] }),
+  requestJson("/api/mission/control", { actorId: "e2e-driver", expected: [401, 403] }),
+  requestJson("/api/communications", { actorId: "e2e-worker", expected: [401, 403] }),
+  requestJson("/api/communications", { actorId: "e2e-driver", expected: [401, 403] }),
 ]);
 
 console.log("PASS domain-flow verification");

@@ -2410,12 +2410,13 @@ export async function POST(request: Request, routeContext: RouteContext) {
         payload = { ...payload, warehouseReadback };
         const reportReadback = buildMissionReportReadback(payload, { missionIdentity: row.title || row.id });
         const savedReport = isRecord(payload.missionReport) ? payload.missionReport : {};
-        if (!["SUBMITTED", "APPROVED"].includes(boundedText(savedReport.status, 24).toUpperCase()) || !reportReadback.completeness.ready) {
+        if (boundedText(savedReport.status, 24).toUpperCase() !== "APPROVED" || !reportReadback.completeness.ready) {
           return Response.json({
             error: "mission_report_required_before_close",
             completeness: reportReadback.completeness,
             questions: reportReadback.completeness.questions,
-            message: "La missione non può essere chiusa senza rapportino missione inviato e completo.",
+            reportStatus: boundedText(savedReport.status, 24).toUpperCase() || "MISSING",
+            message: "La missione non può essere chiusa finché il rapportino completo non è approvato da un responsabile autorizzato.",
           }, { status: 422 });
         }
         status = "CLOSED";

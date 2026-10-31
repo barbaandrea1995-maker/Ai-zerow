@@ -1,11 +1,16 @@
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { financeDocuments, operationalDocuments, s04Records } from "@/db/schema";
+import { financeDocumentLinks, financeDocuments, operationalDocuments, s04Records } from "@/db/schema";
 import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { documentCanDownload } from "@/lib/document-security";
 import { ensureFinanceDocumentSchema } from "@/lib/finance-document-schema.server";
 import { canReadAllOperations, rowMatchesContext, teamScopeTokens } from "@/lib/operational-scope";
+import {
+  canReadAllFinanceDocuments,
+  canReadAssignedJobDocuments,
+  resolveJobDocumentTargets,
+} from "@/lib/job-document-access.server";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +55,22 @@ export async function GET(_request: Request, routeContext: RouteContext) {
       eq(financeDocuments.id, documentId),
     )).limit(1);
     if (financeDocument) {
-      if (!hasCapability(context, "finance.read")) {
-        return Response.json({ error: "forbidden", capability: "finance.read" }, { status: 403 });
+      if (!canReadAllFinanceDocuments(context)) {
+        if (!canReadAssignedJobDocuments(context)) {
+          return Response.json({ error: "forbidden", requiredCapabilities: ["finance.documents.read", "finance.documents.job.read"] }, { status: 403 });
+        }
+        const links = await getDb().select().from(financeDocumentLinks).where(and(
+          eq(financeDocumentLinks.tenantId, context.tenantId),
+          eq(financeDocumentLinks.documentId, financeDocument.id),
+          eq(financeDocumentLinks.entityType, "JOB"),
+          eq(financeDocumentLinks.status, "CONFIRMED"),
+        )).limit(100);
+        const references = [...new Set([
+          ...(financeDocument.jobId ? [financeDocument.jobId] : []),
+          ...links.map((link) => link.entityId),
+        ])];
+        const targets = await resolveJobDocumentTargets(context, references);
+        if (!targets.assignedJobIds.size) return Response.json({ error: "document_not_found" }, { status: 404 });
       }
       if (!documentCanDownload(financeDocument.scanStatus, financeDocument.status)) {
         return Response.json({ error: "document_security_hold", scanStatus: financeDocument.scanStatus, status: financeDocument.status }, {

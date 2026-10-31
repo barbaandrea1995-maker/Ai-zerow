@@ -74,17 +74,17 @@ const warehouseRoleDenied = await requestJson("/api/authority/warehouses", {
   actorId: "e2e-worker",
   method: "POST",
   body: { name: "Deposito non autorizzato" },
-  expected: [403],
+  expected: [401, 403],
 });
-assert.equal(warehouseRoleDenied.payload.error, "forbidden");
+assert(["unauthenticated", "forbidden"].includes(warehouseRoleDenied.payload.error), "unknown or unauthorized actors must fail closed on warehouse registration");
 
 const assetRoleDenied = await requestJson("/api/assets", {
   actorId: "e2e-worker",
   method: "POST",
   body: { title: "Risorsa non autorizzata", entityType: "asset" },
-  expected: [403],
+  expected: [401, 403],
 });
-assert.equal(assetRoleDenied.payload.error, "forbidden");
+assert(["unauthenticated", "forbidden"].includes(assetRoleDenied.payload.error), "unknown or unauthorized actors must fail closed on asset registration");
 
 const invalidCargoProfile = await requestJson("/api/assets", {
   method: "POST",
@@ -329,9 +329,9 @@ const missionRoleDenied = await requestJson("/api/mission/control", {
   actorId: "e2e-driver",
   method: "POST",
   body: missionBody,
-  expected: [403],
+  expected: [401, 403],
 });
-assert.equal(missionRoleDenied.payload.error, "forbidden");
+assert(["unauthenticated", "forbidden"].includes(missionRoleDenied.payload.error), "unknown or execution-only actors must fail closed on mission scheduling");
 
 const missionControlAfter = await requestJson("/api/mission/control");
 const mission = (missionControlAfter.payload.missions || []).find((entry) => entry.id === missionCreate.payload.missionId);

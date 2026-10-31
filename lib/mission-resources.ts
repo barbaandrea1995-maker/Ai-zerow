@@ -2,7 +2,7 @@ import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { jobJourneyRecords, s04Records } from "@/db/schema";
 import { assetAssignmentCustodyEnd, assetAssignmentStatus, assetTransportCapabilities, assetUsageMode, vehicleCanTransport, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
-import { evaluateCargoCapacity, missionResourceKind, requiredVehicleCapabilities, sameCustodian } from "@/lib/mission-resource-rules";
+import { evaluateCargoCapacity, missionResourceKind, pairedCargoIdsFromAssignmentGroups, requiredVehicleCapabilities, sameCustodian } from "@/lib/mission-resource-rules";
 
 export type MissionResourceKind = "driver" | "vehicle" | "cargo";
 export type MissionAvailability = "READY" | "DATE_REQUIRED" | "NO_RESOURCES";
@@ -288,6 +288,7 @@ async function activeAssetCustody(tenantId: string) {
       return [{
         assignmentId: row.id,
         assetId,
+        assignmentGroupId: stringValue(payload.assignmentGroupId) || null,
         assignmentKind,
         assigneeName: stringValue(payload.assigneeName, "Persona assegnata"),
         assigneeActorId: stringValue(payload.assigneeActorId),
@@ -326,9 +327,24 @@ export async function getMissionResourceCatalog(args: {
   const window = args.plannedAt ? normalizedMissionWindow(args.plannedAt, args.plannedEndAt) : null;
   const [assignments, custodyRows] = window
     ? await Promise.all([activeAssignments(args.tenantId, args.excludeRecordId), activeAssetCustody(args.tenantId)])
-    : [[], []];
-  const selectedDriver = resources.find((resource) => resource.id === args.driverId && resource.kind === "driver") ?? null;
-  const withAvailability = resources.map((resource) => {
+    : [[], await activeAssetCustody(args.tenantId)];
+  const relevantCustodyRows = custodyRows.filter((assignment) => !window || overlaps(
+    Date.parse(window.startsAt),
+    Date.parse(window.endsAt),
+    Date.parse(assignment.startsAt),
+    assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY,
+  ));
+  const cargoResourceIds = new Set(resources.filter((resource) => resource.kind === "cargo").map((resource) => resource.id));
+  const groupedCargoIds = pairedCargoIdsFromAssignmentGroups(resources, relevantCustodyRows);
+  const resourcesWithPairing = resources.map((resource) => resource.kind === "vehicle" ? {
+    ...resource,
+    pairedCargoAssetIds: [...new Set([
+      ...resource.pairedCargoAssetIds,
+      ...(groupedCargoIds[resource.id] ?? []),
+    ])].filter((assetId) => cargoResourceIds.has(assetId)).slice(0, 50),
+  } : resource);
+  const selectedDriver = resourcesWithPairing.find((resource) => resource.id === args.driverId && resource.kind === "driver") ?? null;
+  const withAvailability = resourcesWithPairing.map((resource) => {
     const conflict = window
       ? assignments.find((assignment) => assignment.references.includes(resource.id) && overlaps(
         Date.parse(window.startsAt),
@@ -338,12 +354,7 @@ export async function getMissionResourceCatalog(args: {
       ))
         : undefined;
     const custody = window && resource.kind !== "driver"
-      ? custodyRows.find((assignment) => assignment.assetId === resource.id && overlaps(
-        Date.parse(window.startsAt),
-        Date.parse(window.endsAt),
-        Date.parse(assignment.startsAt),
-        assignment.endsAt ? Date.parse(assignment.endsAt) : Number.POSITIVE_INFINITY,
-      ))
+      ? relevantCustodyRows.find((assignment) => assignment.assetId === resource.id)
       : undefined;
     const custodyMismatch = resource.kind === "vehicle" && custody && (!selectedDriver || !sameCustodian(custody, selectedDriver))
       ? { recordId: custody.assignmentId, title: `Affidata a ${custody.assigneeName}`, startsAt: custody.startsAt, endsAt: custody.endsAt ?? window?.endsAt ?? custody.startsAt }

@@ -16,7 +16,7 @@ const verifyCreationDialogs = process.env.ZEROW_VERIFY_CREATION_DIALOGS === "1";
 
 const ownerRoutes = [
   "/", "/command", "/onboarding", "/operations", "/workforce", "/planning", "/presenze",
-  "/assets", "/warehouse", "/mission", "/documents", "/finance", "/procurement",
+  "/assets", "/warehouse", "/mission", "/documents", "/documents/scan", "/finance", "/procurement",
   "/events", "/governance", "/communications", "/ai", "/externals", "/pwa/diagnostics",
   "/governance/security", "/release", "/settings", "/qr", "/tenants",
 ];

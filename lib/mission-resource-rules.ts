@@ -8,11 +8,54 @@ export type MissionCustodyIdentity = {
   assigneeMembershipId: string;
 };
 
+export type MissionPairableResource = {
+  id: string;
+  kind: "driver" | "vehicle" | "cargo";
+};
+
+export type MissionAssignmentGroupLink = {
+  assetId: string;
+  assignmentGroupId: string | null;
+};
+
 export function sameCustodian(custody: MissionCustodyIdentity, driver: MissionDriverIdentity) {
   return Boolean(
     (driver.actorId && custody.assigneeActorId && driver.actorId === custody.assigneeActorId)
     || (driver.membershipId && custody.assigneeMembershipId && driver.membershipId === custody.assigneeMembershipId),
   );
+}
+
+/**
+ * A batch assignment links resources for operational readback, but it never
+ * changes their catalog identity or custody. Only cargo records from the same
+ * server-side group are suggested for a vehicle; drivers and other vehicles
+ * can therefore never leak into the cargo selector.
+ */
+export function pairedCargoIdsFromAssignmentGroups(
+  resources: readonly MissionPairableResource[],
+  assignments: readonly MissionAssignmentGroupLink[],
+) {
+  const resourceKindById = new Map(resources.map((resource) => [resource.id, resource.kind]));
+  const assetIdsByGroup = new Map<string, Set<string>>();
+
+  for (const assignment of assignments) {
+    if (!assignment.assignmentGroupId || !resourceKindById.has(assignment.assetId)) continue;
+    const group = assetIdsByGroup.get(assignment.assignmentGroupId) ?? new Set<string>();
+    group.add(assignment.assetId);
+    assetIdsByGroup.set(assignment.assignmentGroupId, group);
+  }
+
+  const cargoIdsByVehicle: Record<string, string[]> = {};
+  for (const assetIds of assetIdsByGroup.values()) {
+    const vehicleIds = [...assetIds].filter((assetId) => resourceKindById.get(assetId) === "vehicle");
+    const cargoIds = [...assetIds].filter((assetId) => resourceKindById.get(assetId) === "cargo");
+    if (!vehicleIds.length || !cargoIds.length) continue;
+    for (const vehicleId of vehicleIds) {
+      cargoIdsByVehicle[vehicleId] = [...new Set([...(cargoIdsByVehicle[vehicleId] ?? []), ...cargoIds])];
+    }
+  }
+
+  return cargoIdsByVehicle;
 }
 
 export function missionResourceKind(module: string, entityType: string, recordType: string) {

@@ -16,6 +16,7 @@ export default async function OperationsJobPage({ params }: PageProps) {
       canWriteReport={canWriteOperationsRapportino(authority.capabilities)}
       canReviewReport={hasCapability(authority, "operations.rapportino.review")}
       canReadFinance={hasCapability(authority, "finance.read")}
+      canReadJobDocuments={hasCapability(authority, "finance.documents.read") || hasCapability(authority, "finance.documents.job.read")}
       canReadWarehouse={hasCapability(authority, "warehouse.read")}
       jobId={decodeURIComponent(jobId)}
     />
