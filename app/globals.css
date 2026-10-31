@@ -2949,3 +2949,16 @@ body.zw-commercial-shell [data-slot="dialog-overlay"] {
     transition: none !important;
   }
 }
+
+/* Genius owns the viewport while its camera surface is open. The application
+   chrome otherwise sits above the provider shutter and top controls on mobile. */
+html.zw-genius-scanner-active,
+body.zw-genius-scanner-active {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+body.zw-genius-scanner-active :is(.zw-mobile-shell-header, .zw-mobile-nav--global) {
+  display: none !important;
+  pointer-events: none !important;
+}

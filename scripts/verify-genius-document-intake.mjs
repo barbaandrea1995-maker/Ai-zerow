@@ -18,6 +18,7 @@ const [
   downloadRoute,
   accessHelper,
   nextConfig,
+  globalStyles,
 ] = await Promise.all([
   read("package.json"),
   read("components/genius-document-scanner.tsx"),
@@ -29,6 +30,7 @@ const [
   read("app/api/documents/[documentId]/route.ts"),
   read("lib/job-document-access.server.ts"),
   read("next.config.ts"),
+  read("app/globals.css"),
 ]);
 
 const dependencies = JSON.parse(packageJson).dependencies;
@@ -42,6 +44,9 @@ assert(scanner.includes('fetch("/api/finance/documents"'), "Genius output must e
 assert(scanner.includes("idempotencyKey.current") && scanner.includes('readback?.status !== "verified"'), "Upload retry must remain idempotent and fail closed without readback");
 assert(!scanner.includes("/analyze") && !scanner.includes("/api/finance/entries"), "Graphical scanning must not trigger AI analysis or economic writes automatically");
 assert(scanner.includes("La licenza Genius non è valida per questo indirizzo") && scanner.includes("Accesso alla fotocamera non consentito"), "The scanner must explain provider and camera failures instead of collapsing them into a generic error");
+assert(scanner.includes('document.documentElement.classList.add(scannerClass)') && scanner.includes('document.body.classList.add(scannerClass)'), "The scanner must suspend application chrome while the provider camera owns the viewport");
+assert(scanner.includes("Bordi automatici · scatto manuale") && scanner.includes("la versione Web non esegue lo scatto automatico"), "The capture contract must distinguish automatic edge detection from the manual Web SDK shutter");
+assert(globalStyles.includes("body.zw-genius-scanner-active :is(.zw-mobile-shell-header, .zw-mobile-nav--global)") && globalStyles.includes("display: none !important"), "The global shell must not cover the Genius top controls or manual shutter");
 
 assert(scannerPage.includes("NEXT_PUBLIC_GENIUS_SCAN_LICENSE_KEY"), "The server page must provide the configured domain license to the client scanner");
 assert(scannerPage.includes("canIntakeAssignedJobDocuments") && scannerPage.includes("target.assigned"), "The scanner page must verify assignment for scoped responsible users");
@@ -82,6 +87,8 @@ console.log(JSON.stringify({
     "native_scanner_navigation",
     "camera_and_gallery",
     "mobile_primary_action_above_guidance",
+    "scanner_shell_suppression",
+    "manual_shutter_contract",
     "no_redundant_raw_photo",
     "pdf_generation_fallback",
     "canonical_finance_intake",

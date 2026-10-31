@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "@/components/app-link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -87,6 +87,20 @@ export default function GeniusDocumentScanner({
   const initializedLicense = useRef("");
   const idempotencyKey = useRef("");
   const busy = phase === "loading" || phase === "scanning" || phase === "uploading";
+  const scannerOverlayActive = phase === "loading" || phase === "scanning";
+
+  useEffect(() => {
+    if (!scannerOverlayActive) return;
+
+    const scannerClass = "zw-genius-scanner-active";
+    document.documentElement.classList.add(scannerClass);
+    document.body.classList.add(scannerClass);
+
+    return () => {
+      document.documentElement.classList.remove(scannerClass);
+      document.body.classList.remove(scannerClass);
+    };
+  }, [scannerOverlayActive]);
 
   async function upload(file: File) {
     setPhase("uploading");
@@ -206,6 +220,11 @@ export default function GeniusDocumentScanner({
         </label>
         <div className="mt-3 rounded-xl border border-cyan-300/12 bg-cyan-300/[.025] p-3 text-[9px] leading-5 text-cyan-50/70">
           {jobId ? <>Il documento sarà collegato alla commessa server-side <span className="font-mono text-cyan-100">{jobId}</span>. Il server ricontrolla tenant, assegnazione e capability.</> : <>Documento aziendale senza commessa preimpostata. L’associazione potrà essere verificata successivamente nel registro Finance.</>}
+        </div>
+
+        <div className="mt-3 rounded-xl border border-lime-300/15 bg-lime-300/[.035] p-3" data-genius-capture-contract>
+          <p className="text-[10px] font-semibold text-lime-100">Bordi automatici · scatto manuale</p>
+          <p className="mt-1 text-[9px] leading-5 text-slate-400">Genius riconosce e corregge automaticamente il foglio. Quando il contorno è corretto, premi il pulsante circolare di acquisizione in basso; la versione Web non esegue lo scatto automatico.</p>
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
