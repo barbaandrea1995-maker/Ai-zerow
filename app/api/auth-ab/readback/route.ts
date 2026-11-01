@@ -54,10 +54,10 @@ export async function GET(request: Request) {
     ok: true,
     gate: "AUTH-AB",
     actor: contextResult.context.actor,
-    sessionId: contextResult.context.sessionId,
     selectedTenant: tenant,
     authorization: "server_side_membership_check",
     clientSuppliedTenantAccepted: false,
+    sessionIdentifierExposed: false,
   });
 }
 

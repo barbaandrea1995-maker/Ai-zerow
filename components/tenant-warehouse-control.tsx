@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Building2, CheckCircle2, LoaderCircle, MapPin, Plus, RefreshCw, Search, ShieldCheck, Warehouse, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -75,6 +75,7 @@ export default function TenantWarehouseControl({
   const [locationQuery, setLocationQuery] = useState("");
   const [locationCandidates, setLocationCandidates] = useState<LocationCandidate[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<LocationCandidate | null>(null);
+  const createRequestRef = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -148,20 +149,26 @@ export default function TenantWarehouseControl({
       const value = form.get(key);
       return typeof value === "string" ? value.trim() : "";
     };
+    const requestPayload = {
+      name: field("name"),
+      locationQuery: locationQuery.trim(),
+      locationLabel: selectedLocation.formattedAddress,
+      provider: selectedLocation.provider,
+      providerPlaceId: selectedLocation.providerPlaceId,
+      confidence: selectedLocation.confidence,
+      geofenceRadiusMeters: field("geofenceRadiusMeters"),
+    };
+    const fingerprint = JSON.stringify(requestPayload);
+    const idempotencyKey = createRequestRef.current?.fingerprint === fingerprint
+      ? createRequestRef.current.idempotencyKey
+      : `warehouse-create-${crypto.randomUUID()}`;
+    createRequestRef.current = { fingerprint, idempotencyKey };
     setBusy(true);
     try {
       const response = await fetch("/api/authority/warehouses", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: field("name"),
-          locationQuery: locationQuery.trim(),
-          locationLabel: selectedLocation.formattedAddress,
-          provider: selectedLocation.provider,
-          providerPlaceId: selectedLocation.providerPlaceId,
-          confidence: selectedLocation.confidence,
-          geofenceRadiusMeters: field("geofenceRadiusMeters"),
-        }),
+        body: JSON.stringify({ ...requestPayload, idempotencyKey }),
       });
       const payload = await response.json() as WarehousePayload;
       if (!response.ok) {
@@ -175,6 +182,7 @@ export default function TenantWarehouseControl({
       setLocationQuery("");
       setLocationCandidates([]);
       setSelectedLocation(null);
+      createRequestRef.current = null;
       onNotify("Magazzino creato: luogo server-side, geofence e registro scorte pronti.");
     } catch {
       onNotify("Servizio magazzini temporaneamente non disponibile.");

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CommandSurfaceAccess } from "@/lib/command-dashboard";
 import { authorityRoleLabel } from "@/lib/authority-catalog";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type ApiResponse = {
   result?: { message?: string; aiRuntime?: { status?: string }; limitations?: string[] };
@@ -50,10 +51,11 @@ export default function OperationalAiControl({
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/command/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: nextPrompt, actionType: "query", idempotencyKey: `operational-ai-${crypto.randomUUID()}` }),
+      const response = await idempotentJsonMutation({
+        url: "/api/command/ask",
+        namespace: "operational-ai",
+        operation: "query",
+        payload: { prompt: nextPrompt, actionType: "query" },
       });
       const payload = await response.json() as ApiResponse;
       if (!response.ok) throw new Error(payload.error ?? "operational_ai_unavailable");

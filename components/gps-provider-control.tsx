@@ -173,7 +173,7 @@ export default function GpsProviderControl() {
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Server</p><p className="mt-2 truncate text-xs text-slate-200">demo.traccar.org</p></div>
+        <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Provider</p><p className="mt-2 truncate text-xs text-slate-200">Traccar · configurazione server-side</p></div>
         <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Catalogo remoto</p><p className="mt-2 text-xs text-lime-200">{remoteDevices.length} dispositivi</p></div>
         <div className="carbon-inset rounded-xl p-3"><p className="text-[9px] uppercase tracking-[0.14em] text-slate-600">Registro ZEROW</p><p className="mt-2 text-xs text-lime-200">{localDevices.length} importati</p></div>
       </div>

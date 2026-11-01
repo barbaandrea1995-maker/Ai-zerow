@@ -127,6 +127,7 @@ async function createWarehouse(actorId, label) {
       locationProvider: "GEOAPIFY",
       providerPlaceId: candidate.providerPlaceId,
       geofenceRadiusMeters: 100,
+      idempotencyKey: `profile-warehouse-${label}-${RUN_ID}`.slice(0, 160),
     },
     expected: [201],
   });

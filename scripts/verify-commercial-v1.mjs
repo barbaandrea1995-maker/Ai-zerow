@@ -297,10 +297,10 @@ assert(
 
 const pageAccess = await readFile(join(root, "lib", "page-access.ts"), "utf8");
 assert(
-  pageAccess.includes('identity.status === "error"') &&
+  !pageAccess.includes('if (identity.status === "error")') &&
     pageAccess.includes('context.identityProvider !== "neon"') &&
     pageAccess.includes('context.identityProvider !== "sites"'),
-  "Page access must fail closed on configured Neon auth failures",
+  "Page access must preserve the server-derived Sites owner fallback while keeping Neon/Sites provider mismatches fail-closed",
 );
 assert(pageAccess.includes('context.identityProvider !== "sites"'), "Sites page fallback must require a server-derived Sites identity");
 for (const page of ["app/page.tsx", "app/command/page.tsx", "app/settings/page.tsx"]) {
@@ -436,8 +436,7 @@ assert(missionControlRoute.includes("mission_free_text_resources_not_allowed") &
 assert(missionControlRoute.includes("transport_mode_not_enabled") && missionControlRoute.includes("operatingTransportModes"), "Standalone transport must respect tenant-enabled transport modes");
 assert(missionControlRoute.includes("trackingReadback") && missionControlRoute.includes("READ_MISSION_TRACKING") && missionControlRoute.includes("driver_check_in_required"), "Mission control must expose audited attendance-bound tracking readback");
 assert(missionControlRoute.includes("currentStopId") && missionControlRoute.includes("lastLocationEvent") && missionControlRoute.includes("routeStateObservedAt"), "Mission tracking must expose the current stop and server-side geofence evidence");
-const missionControl = await readFile(join(root, "components", "mission-control.tsx"), "utf8");
-assert(missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes('name="transportMode"') && missionControl.includes("operatingTransportModes"), "Standalone mission UI must expose only tenant-enabled transport modes");
+assert(missionDeck.includes("TRANSPORT_MODE_CATALOG") && missionDeck.includes('name="transportMode"') && missionDeck.includes("operatingTransportModes"), "Standalone mission UI must expose only tenant-enabled transport modes");
 
 const planningRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "planning", "route.ts"), "utf8");
 assert(planningRoute.includes('hasCapability(context, "planning.write")'), "Advanced planning mutations must require planning.write");
@@ -533,12 +532,11 @@ const missionResourceRules = await readFile(join(root, "lib", "mission-resource-
 assert(missionResourceRules.includes("missionResourceKind") && missionResourceRules.includes("sameCustodian") && missionResourceRules.includes("evaluateCargoCapacity"), "Mission resource rules must separate type, custody and physical capacity");
 const planningJourney = await readFile(join(root, "components", "job-commercial-journey.tsx"), "utf8");
 assert(!planningJourney.includes('name="responsible"'), "Planning UI must not reintroduce a free-text responsible field");
-assert(missionControl.includes("transportMode") && missionControl.includes("TRANSPORT_MODE_CATALOG") && missionControl.includes("operatingTransportModes"), "Mission UI must expose only tenant-enabled transport modes");
+assert(missionDeck.includes("transportMode") && missionDeck.includes("TRANSPORT_MODE_CATALOG") && missionDeck.includes("operatingTransportModes"), "Mission UI must expose only tenant-enabled transport modes");
 assert(planningSurface.includes("PlanningResourceFields") && planningSurface.includes('action: "draft"') && planningSurface.includes("startsAt={startsAt}") && planningSurface.includes("endsAt={endsAt}"), "Central planning UI must select canonical resource IDs and send the server availability window");
 const operationsPlanningPage = await readFile(join(root, "components", "operations-index-client.tsx"), "utf8");
 assert(operationsPlanningPage.includes("/planning/resource-options") && operationsPlanningPage.includes("planningReadbackKey"), "Operations workspace must load server-side resource availability for the selected job");
-const commandHero = await readFile(join(root, "components", "command-hero.tsx"), "utf8");
-assert(commandHero.includes("/ai-zerow-icon.png") && !commandHero.includes("zw-command-hero__z"), "Command animation must use the supplied official ZEROW icon");
+assert(commandSurface.includes("/ai-zerow-icon.jpeg") && commandSurface.includes("AI-ZEROW · COMMAND CENTER"), "Command heading must use the supplied official ZEROW identity");
 
 const documentRoute = await readFile(join(root, "app", "api", "operations", "jobs", "[jobId]", "documents", "route.ts"), "utf8");
 assert(documentRoute.includes("MAX_OPERATIONAL_DOCUMENT_BYTES"), "Document upload must enforce the 20 MB contract");

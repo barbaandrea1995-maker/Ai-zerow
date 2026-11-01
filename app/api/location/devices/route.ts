@@ -1,10 +1,11 @@
 import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { trackingDevices, trackingProviders, trackingSessions, vehicleDeviceBindings } from "@/db/schema";
+import { s04Records, trackingDevices, trackingProviders, trackingSessions, vehicleDeviceBindings } from "@/db/schema";
 import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
 import { auditLocationAccess } from "@/lib/location-intelligence/repository";
 import { ingestLocationPosition } from "@/lib/location-intelligence/ingest";
 import { getLocationProviderStatus, trackingProviderFor } from "@/lib/location-intelligence/providers";
+import { missionResourceKind } from "@/lib/mission-resource-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,14 @@ function bounded(value: unknown, max: number, fallback = "") {
 
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
+}
+
+function payloadObject(value: string) {
+  try {
+    return objectValue(JSON.parse(value));
+  } catch {
+    return {};
+  }
 }
 
 function responseHeaders() {
@@ -222,8 +231,19 @@ export async function POST(request: Request) {
       const vehicleId = bounded(input.vehicleId, 160);
       const deviceId = bounded(input.deviceId, 160);
       if (!vehicleId || !deviceId) return Response.json({ error: "vehicle_and_device_required" }, { status: 400 });
-      const [device] = await db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), eq(trackingDevices.id, deviceId), eq(trackingDevices.status, "ACTIVE"))).limit(1);
+      const [[device], [vehicle]] = await Promise.all([
+        db.select().from(trackingDevices).where(and(eq(trackingDevices.tenantId, context.tenantId), eq(trackingDevices.id, deviceId), eq(trackingDevices.status, "ACTIVE"))).limit(1),
+        db.select().from(s04Records).where(and(eq(s04Records.tenantId, context.tenantId), eq(s04Records.module, "assets"), eq(s04Records.id, vehicleId))).limit(1),
+      ]);
       if (!device) return Response.json({ error: "tracking_device_not_found" }, { status: 404 });
+      if (!vehicle) return Response.json({ error: "tracking_vehicle_not_found" }, { status: 404 });
+      const vehiclePayload = payloadObject(vehicle.payloadJson);
+      if (missionResourceKind(vehicle.module, bounded(vehiclePayload.entityType, 32), vehicle.recordType) !== "vehicle") {
+        return Response.json({ error: "tracking_binding_requires_vehicle" }, { status: 400 });
+      }
+      if (["ARCHIVED", "REMOVED", "INACTIVE"].includes(vehicle.status.toUpperCase())) {
+        return Response.json({ error: "tracking_vehicle_not_active" }, { status: 409 });
+      }
       const active = await db.select().from(vehicleDeviceBindings).where(and(eq(vehicleDeviceBindings.tenantId, context.tenantId), eq(vehicleDeviceBindings.status, "ACTIVE"))).limit(500);
       const sameVehicle = active.find((binding) => binding.vehicleId === vehicleId);
       const sameDevice = active.find((binding) => binding.deviceId === deviceId);

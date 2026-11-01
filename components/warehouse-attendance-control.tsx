@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, LogIn, LogOut, MapPin, Pause, Play, RefreshCw, ShieldCheck, Warehouse } from "lucide-react";
+import { clientRequestFingerprint, idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type WarehouseOption = { id: string; code: string; name: string; locationLabel: string };
 type AttendanceRecord = { id: string; warehouseId: string; status: string; version: number; payload: { warehouse?: { name?: string; locationLabel?: string }; lastTransition?: { recordedAt?: string; location?: unknown; geofence?: { status?: string } } }; updatedAt: string };
@@ -60,7 +61,7 @@ export function WarehouseAttendanceControl({ warehouses, onChanged }: Props) {
     setLocationSeen(Boolean(location));
     if ((action === "check_in" || action === "check_out") && !location) { setNotice("Per entrata e uscita devi consentire la posizione: il server verificherà la geofence del magazzino."); setBusy(""); return; }
     try {
-      const response = await fetch("/api/warehouse/attendance", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, warehouseId: activeWarehouseId, expectedVersion: latest?.version, clientObservedAt: new Date().toISOString(), location, idempotencyKey: `warehouse-attendance-${activeWarehouseId}-${action}-${crypto.randomUUID()}` }) });
+      const response = await idempotentJsonMutation({ url: "/api/warehouse/attendance", namespace: "warehouse-attendance", operation: `${activeWarehouseId}:${action}`, fingerprint: clientRequestFingerprint({ action, warehouseId: activeWarehouseId, expectedVersion: latest?.version }), payload: { action, warehouseId: activeWarehouseId, expectedVersion: latest?.version, clientObservedAt: new Date().toISOString(), location } });
       const result = await response.json() as { error?: string };
       if (!response.ok) {
         setNotice(result.error === "warehouse_geofence_required" ? "Timbratura rifiutata: devi essere dentro la geofence del magazzino." : "La timbratura non è stata registrata.");

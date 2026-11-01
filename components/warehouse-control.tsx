@@ -58,6 +58,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type StockFilter = "ALL" | "ACTIVE" | "LOW_STOCK" | "OUT_OF_STOCK";
@@ -506,10 +507,9 @@ export default function WarehouseControl() {
     const body: Record<string, unknown> = modal === "register"
       ? { action, name: field("name"), barcode: registrationMode === "barcode" ? registrationBarcode : "", unit: field("unit"), warehouseId: field("warehouseId") || selectedWarehouseId, shelf: field("shelf"), openingQuantity: field("openingQuantity"), minStock: field("minStock"), note: field("note") }
       : { action, itemId: movementItem?.id, identifier: movementMode === "scan" ? movementIdentifier : "", warehouseId: selectedWarehouseId, expectedVersion: movementItem?.version, quantity: field("quantity"), note: field("note") };
-    body.idempotencyKey = "warehouse-" + action + "-" + crypto.randomUUID();
     setBusy(true);
     try {
-      const response = await fetch("/api/warehouse/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await idempotentJsonMutation({ url: "/api/warehouse/inventory", namespace: "warehouse-inventory", operation: action, payload: body });
       const result = await response.json() as InventoryPayload & { error?: string };
       if (!response.ok) {
         if (response.status === 409) await refresh();

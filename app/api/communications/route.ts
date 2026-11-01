@@ -1,11 +1,10 @@
 import { and, eq, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { s04Records } from "@/db/schema";
+import { s04Records, tenantMemberships } from "@/db/schema";
 import { GET as read, POST as write } from "@/app/api/s05/[module]/route";
-import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
+import { getAuthorityContext, hasCapability, publicAuthorityContext } from "@/lib/authority-context";
+import { AUTHORITY_ROLES, authorityRoleLabel, isAuthorityRole, normalizeAuthorityRoles } from "@/lib/authority-catalog";
 import { parseJobPayload } from "@/lib/operations-contract";
-
-export const GET = (request: Request) => read(request, { params: Promise.resolve({ module: "communications" }) });
 
 const RECORD_TYPES = new Set(["SHIFT_BRIEFING", "TEAM_BROADCAST", "ACK_REQUEST", "VOICE_PROPOSAL"]);
 const CHANNELS = new Set(["IN_APP", "PUSH", "EMAIL", "VOICE"]);
@@ -21,6 +20,50 @@ function bounded(value: unknown, max: number, fallback = "") {
 
 function bool(value: unknown) {
   return value === true || value === "true";
+}
+
+async function getAudienceCatalog(tenantId: string) {
+  const db = getDb();
+  const [teamRows, memberships] = await Promise.all([
+    db.select({ id: s04Records.id, code: s04Records.canonicalCode, name: s04Records.title, status: s04Records.status, recordType: s04Records.recordType })
+      .from(s04Records)
+      .where(and(eq(s04Records.tenantId, tenantId), eq(s04Records.module, "workforce")))
+      .limit(500),
+    db.select({ role: tenantMemberships.role, rolesJson: tenantMemberships.rolesJson })
+      .from(tenantMemberships)
+      .where(and(eq(tenantMemberships.tenantId, tenantId), eq(tenantMemberships.status, "active")))
+      .limit(1_000),
+  ]);
+  const activeRoleIds = new Set(memberships.flatMap((membership) => normalizeAuthorityRoles(membership.rolesJson, membership.role)));
+  return {
+    teams: teamRows
+      .filter((team) => team.recordType.toLowerCase() === "team" && !["ARCHIVED", "REMOVED", "INACTIVE"].includes(team.status.toUpperCase()))
+      .map((team) => ({ id: team.id, code: team.code, label: team.name })),
+    roles: AUTHORITY_ROLES.filter((role) => activeRoleIds.has(role)).map((role) => ({ id: role, label: authorityRoleLabel(role) })),
+  };
+}
+
+export async function GET(request: Request) {
+  const context = await getAuthorityContext();
+  if (!context) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  if (!hasCapability(context, "communication.read")) {
+    return Response.json({ error: "forbidden", capability: "communication.read" }, { status: 403 });
+  }
+  try {
+    const [base, audienceCatalog] = await Promise.all([
+      read(request, { params: Promise.resolve({ module: "communications" }) }),
+      getAudienceCatalog(context.tenantId),
+    ]);
+    if (!base.ok) return base;
+    const payload = await base.json() as Record<string, unknown>;
+    return Response.json({
+      ...payload,
+      context: payload.context ?? publicAuthorityContext(context),
+      audienceCatalog,
+    }, { headers: { "cache-control": "private, no-store" } });
+  } catch {
+    return Response.json({ error: "communication_audience_catalog_unavailable" }, { status: 503 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -56,6 +99,10 @@ export async function POST(request: Request) {
   if (!CHANNELS.has(channel)) return Response.json({ error: "unknown_communication_channel" }, { status: 400 });
   if (!AUDIENCES.has(audienceType)) return Response.json({ error: "unknown_communication_audience" }, { status: 400 });
   if (audienceType === "JOB" && !jobRef) return Response.json({ error: "job_audience_requires_canonical_job" }, { status: 400 });
+  if (audienceType !== "JOB" && jobRef) return Response.json({ error: "job_reference_requires_job_audience" }, { status: 400 });
+  if ((audienceType === "TEAM" || audienceType === "ROLE") && !audienceRef) {
+    return Response.json({ error: "audience_catalog_selection_required" }, { status: 400 });
+  }
   if (recordType === "VOICE_PROPOSAL" && channel !== "VOICE") return Response.json({ error: "voice_proposal_requires_voice_channel" }, { status: 400 });
   if (channel === "VOICE" && !requiresAcknowledgement) return Response.json({ error: "voice_requires_acknowledgement" }, { status: 400 });
 
@@ -73,6 +120,32 @@ export async function POST(request: Request) {
     if (!job) return Response.json({ error: "job_not_found_in_tenant" }, { status: 404 });
   }
 
+  let resolvedAudienceRef = context.tenantId;
+  let audienceLabel = "Tenant corrente";
+  if (audienceType === "JOB" && job) {
+    resolvedAudienceRef = job.id;
+    audienceLabel = job.canonicalCode ?? job.id;
+  } else if (audienceType === "TEAM" || audienceType === "ROLE") {
+    let catalog: Awaited<ReturnType<typeof getAudienceCatalog>>;
+    try {
+      catalog = await getAudienceCatalog(context.tenantId);
+    } catch {
+      return Response.json({ error: "communication_audience_catalog_unavailable" }, { status: 503 });
+    }
+    if (audienceType === "TEAM") {
+      const team = catalog.teams.find((entry) => entry.id === audienceRef);
+      if (!team) return Response.json({ error: "team_audience_not_found_in_tenant" }, { status: 404 });
+      resolvedAudienceRef = team.id;
+      audienceLabel = team.code ? `${team.code} · ${team.label}` : team.label;
+    } else {
+      if (!isAuthorityRole(audienceRef) || !catalog.roles.some((entry) => entry.id === audienceRef)) {
+        return Response.json({ error: "role_audience_not_active_in_tenant" }, { status: 404 });
+      }
+      resolvedAudienceRef = audienceRef;
+      audienceLabel = authorityRoleLabel(audienceRef);
+    }
+  }
+
   const providerStatus = channel === "VOICE" ? "EXTERNAL_DEFERRED" : "SITES_READBACK_ONLY";
   const jobTitle = job ? parseJobPayload(job.payloadJson).title || job.title : null;
   const safePayload = {
@@ -86,7 +159,8 @@ export async function POST(request: Request) {
     recordType,
     channel,
     audienceType,
-    audienceRef,
+    audienceRef: resolvedAudienceRef,
+    audienceLabel,
     jobId: job?.id ?? null,
     jobCode: job?.canonicalCode ?? null,
     jobTitle,

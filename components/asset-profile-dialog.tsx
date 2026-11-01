@@ -7,6 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ASSET_USAGE_MODES, TRANSPORT_CAPABILITIES, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type AssetProfileRecord = {
   id: string;
@@ -123,13 +124,13 @@ function AssetProfileForm({ asset, assets, transportEnabled, onOpenChange, onSav
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/assets/profile", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: "/api/assets/profile",
+        namespace: "asset-profile",
+        operation: asset.id,
+        payload: {
           assetId: asset.id,
           expectedUpdatedAt: asset.updatedAt,
-          idempotencyKey: `asset-profile-${asset.id}-${crypto.randomUUID()}`,
           title,
           entityType,
           usageMode,
@@ -145,7 +146,7 @@ function AssetProfileForm({ asset, assets, transportEnabled, onOpenChange, onSav
           transportable: entityType === "vehicle" ? false : transportable,
           pairedCargoAssetIds: entityType === "vehicle" && usageMode !== "OPERATIONAL" ? pairedCargoAssetIds : [],
           notes,
-        }),
+        },
       });
       const result = await response.json() as SaveResponse;
       if (!response.ok) throw new Error(result.error ?? "asset_profile_write_unavailable");

@@ -45,6 +45,7 @@ import { Input } from "@/components/ui/input";
 import { OPERATIONAL_DOCUMENT_CATEGORIES } from "@/lib/document-contract";
 import { FINANCE_DOCUMENT_CATEGORIES } from "@/lib/finance-document-contract";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
+import { clientRequestFingerprint, idempotentFormMutation, idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 type SecurityAction = "queue_scan" | "manual_review" | "quarantine";
@@ -262,10 +263,11 @@ export default function DocumentsControlDeck() {
   const mutateSecurity = useCallback(async (document: DocumentRecord, action: SecurityAction) => {
     setSecurityBusy(document.id + ":" + action);
     try {
-      const response = await fetch("/api/documents/" + encodeURIComponent(document.id) + "/security", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, idempotencyKey: "documents-security-" + action + "-" + document.id + "-" + crypto.randomUUID() }),
+      const response = await idempotentJsonMutation({
+        url: "/api/documents/" + encodeURIComponent(document.id) + "/security",
+        namespace: "document-security",
+        operation: `${action}:${document.id}`,
+        payload: { action },
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) { notify("Sicurezza non aggiornata: " + (result.error ?? "errore")); return; }
@@ -283,10 +285,10 @@ export default function DocumentsControlDeck() {
     if (!(file instanceof File) || !file.size) { notify("Seleziona un file."); return; }
     if (file.size > (payload?.contract.maxBytes ?? 20 * 1024 * 1024)) { notify("Il file supera il limite di 20 MB."); return; }
     form.set("category", uploadCategory);
-    form.set("idempotencyKey", "document-upload-" + crypto.randomUUID());
     setBusy(true);
     try {
-      const response = await fetch("/api/operations/jobs/" + encodeURIComponent(uploadJobId) + "/documents", { method: "POST", body: form });
+      const fingerprint = clientRequestFingerprint({ category: uploadCategory, jobId: uploadJobId, file: { name: file.name, size: file.size, type: file.type, lastModified: file.lastModified } });
+      const response = await idempotentFormMutation({ url: "/api/operations/jobs/" + encodeURIComponent(uploadJobId) + "/documents", namespace: "operational-document", operation: "upload", fingerprint, formData: form });
       const result = await response.json() as { document?: { id?: string }; error?: string };
       if (!response.ok) { notify("Upload non eseguito: " + (result.error ?? "errore")); return; }
       await refresh();

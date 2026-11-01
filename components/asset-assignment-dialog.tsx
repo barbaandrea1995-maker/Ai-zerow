@@ -7,6 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { assetAssignmentCustodyEnd, assetAssignmentStatus } from "@/lib/asset-contract";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type AssignmentKind = "SHORT_TERM" | "LONG_TERM";
 
@@ -198,10 +199,11 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignments, assig
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/assets/assignments", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: "/api/assets/assignments",
+        namespace: "asset-assignment",
+        operation: "create",
+        payload: {
           assetId: selectedAssets[0].id,
           assetIds: selectedAssets.map((asset) => asset.id),
           assigneeMembershipId,
@@ -210,8 +212,7 @@ export function AssetAssignmentDialog({ assets, initialAsset, assignments, assig
           endsAt: kind === "SHORT_TERM" ? toIso(endsAt) : undefined,
           purpose: purpose.trim(),
           notes: notes.trim(),
-          idempotencyKey: `asset-assignment-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "asset_assignment_write_failed");

@@ -21,7 +21,6 @@ import {
   FileCheck2,
   Fingerprint,
   GitBranch,
-  GitCompareArrows,
   KeyRound,
   Layers3,
   LockKeyhole,
@@ -207,7 +206,7 @@ const navItems = [
 
 const viewItems: Array<{ id: ViewKey; label: string; icon: LucideIcon }> = [
   { id: "overview", label: "Readiness", icon: CircleGauge },
-  { id: "alignment", label: "Riallineamento", icon: GitCompareArrows },
+  { id: "alignment", label: "Integrità", icon: ShieldCheck },
   { id: "knowledge", label: "Knowledge pack", icon: BookOpenCheck },
   { id: "scope", label: "Scope bindings", icon: Target },
   { id: "approvals", label: "Approval ledger", icon: CheckCircle2 },

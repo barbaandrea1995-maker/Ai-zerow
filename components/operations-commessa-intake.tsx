@@ -42,6 +42,7 @@ import {
 import { resolveCompanyAiScopeSelection } from "@/lib/company-ai-scope";
 import type { GeocodeCandidate } from "@/lib/location-intelligence/provider-types";
 import { commercialModelLabel } from "@/lib/job-commercial-terms";
+import { clientRequestFingerprint, usePendingRequestKeys } from "@/lib/client-request-idempotency";
 
 export type IntakeAdapterRecord = {
   id: string;
@@ -668,6 +669,7 @@ function modeHeading(mode: IntakeMode) {
 }
 
 export default function OperationsCommessaIntake({ open, catalog, onOpenChange, onCreated }: Props) {
+  const requestKeys = usePendingRequestKeys("operations-intake");
   const [mode, setMode] = useState<IntakeMode>("chooser");
   const [draft, setDraft] = useState<IntakeDraft>(DEFAULT_INTAKE_DRAFT);
   const [sourceText, setSourceText] = useState("");
@@ -699,7 +701,8 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
     setWorksiteCandidates([]);
     setWorksiteGeocodeBusy(false);
     setWorksiteGeocodeNotice("");
-  }, []);
+    requestKeys.clearAll();
+  }, [requestKeys]);
 
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen) reset();
@@ -900,8 +903,13 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
     setError("");
     setMacroScope(null);
     setNotice("Company AI sta leggendo il preventivo e preparando una proposta controllabile…");
+    const fingerprint = clientRequestFingerprint({
+      sourceFile: sourceFile ? { name: sourceFile.name, size: sourceFile.size, lastModified: sourceFile.lastModified } : null,
+      sourceFileName,
+      sourceText,
+    });
+    const idempotencyKey = requestKeys.keyFor("company-ai-preview", fingerprint);
     try {
-      const idempotencyKey = `company-ai-intake-${crypto.randomUUID()}`;
       const response = sourceFile
         ? await fetch("/api/operations/intake", (() => {
           const formData = new FormData();
@@ -912,7 +920,11 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
         })())
         : await fetch("/api/operations/intake", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceText, sourceName: sourceFileName, idempotencyKey }) });
       const data = await response.json() as IntakePreview & { error?: string };
-      if (!response.ok) throw new Error(data.error || "company_ai_preview_failed");
+      if (!response.ok) {
+        if (response.status < 500) requestKeys.settle("company-ai-preview", fingerprint);
+        throw new Error(data.error || "company_ai_preview_failed");
+      }
+      requestKeys.settle("company-ai-preview", fingerprint);
       setPreview(data);
       const workItems = data.draft.workItems ?? data.workItems ?? draft.workItems;
       const nextCommercialModel = data.draft.commercialModel ?? draft.commercialModel;
@@ -946,11 +958,13 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
     setError("");
     setMacroScope(null);
     setNotice("Company AI sta analizzando la descrizione rispetto al catalogo lato server…");
+    const fingerprint = clientRequestFingerprint({ description: descriptionOriginal });
+    const idempotencyKey = requestKeys.keyFor("macro-scope", fingerprint);
     try {
       const response = await fetch("/api/operations/intake/macro-scope", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ description: descriptionOriginal, idempotencyKey: `company-ai-macro-scope-${crypto.randomUUID()}` }),
+        body: JSON.stringify({ description: descriptionOriginal, idempotencyKey }),
       });
       const data = await response.json() as {
         previewId?: string;
@@ -959,7 +973,11 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
         aiRuntime?: { status?: "used" | "not_configured" | "unavailable"; model?: string };
         error?: string;
       };
-      if (!response.ok) throw new Error(data.error || "company_ai_scope_preview_failed");
+      if (!response.ok) {
+        if (response.status < 500) requestKeys.settle("macro-scope", fingerprint);
+        throw new Error(data.error || "company_ai_scope_preview_failed");
+      }
+      requestKeys.settle("macro-scope", fingerprint);
       if (!data.previewId || !data.scopeV2 || !data.catalog || data.scopeV2.descriptionOriginal !== descriptionOriginal) {
         throw new Error("La preview non corrisponde alla descrizione attuale. Ripeti l’analisi.");
       }
@@ -1035,11 +1053,15 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
     }
     setBusy(true);
     setError("");
+    const macroGroupLabels = macroScope?.groupsConfirmed.map((id) => macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label ?? (id === macroScope.catalog.fallback.id ? macroScope.catalog.fallback.label : id)) ?? [];
+    const createPayload = { ...draft, workItems, commercialTerms: { model: draft.commercialModel, amount: draft.commercialValueAmount, basis: draft.commercialValueBasis, currency: "EUR" }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: macroGroupLabels.join(" · ") || "Attività da classificare", jobType: "", specialization: "", sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: macroScope?.previewId ?? preview?.previewId, ...(macroScope ? { scopeV2: { previewId: macroScope.previewId, confirmed: macroScope.confirmed, descriptionOriginal: macroScope.proposal.descriptionOriginal, groupsConfirmed: macroScope.groupsConfirmed, activities: macroScope.activities.map(({ included, ...activity }) => ({ ...activity, included })) } } : {}) };
+    const fingerprint = clientRequestFingerprint(createPayload);
+    const idempotencyKey = requestKeys.keyFor("create-job", fingerprint);
     try {
-      const macroGroupLabels = macroScope?.groupsConfirmed.map((id) => macroScope.catalog.enabledGroups.find((group) => group.id === id)?.label ?? (id === macroScope.catalog.fallback.id ? macroScope.catalog.fallback.label : id)) ?? [];
-      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, workItems, commercialTerms: { model: draft.commercialModel, amount: draft.commercialValueAmount, basis: draft.commercialValueBasis, currency: "EUR" }, statusCode: draft.statusCode === "PROPOSED" ? "PROPOSED" : "DRAFT", client: draft.clientName, location: draft.worksite, worksiteLocation, category: macroGroupLabels.join(" · ") || "Attività da classificare", jobType: "", specialization: "", sourceMode: mode === "company-ai" ? "COMPANY_AI" : "MANUAL", aiPreviewId: macroScope?.previewId ?? preview?.previewId, ...(macroScope ? { scopeV2: { previewId: macroScope.previewId, confirmed: macroScope.confirmed, descriptionOriginal: macroScope.proposal.descriptionOriginal, groupsConfirmed: macroScope.groupsConfirmed, activities: macroScope.activities.map(({ included, ...activity }) => ({ ...activity, included })) } } : {}), idempotencyKey: `operations-intake-${crypto.randomUUID()}` }) });
+      const response = await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...createPayload, idempotencyKey }) });
       const data = await response.json() as IntakeCreateResponse & { error?: string; message?: string };
       if (!response.ok) {
+        if (response.status < 500) requestKeys.settle("create-job", fingerprint);
         const message = data.error === "worksite_location_confirmation_required"
           ? "Conferma l’indirizzo del cantiere prima di salvare."
           : data.error === "worksite_location_candidate_mismatch"
@@ -1055,6 +1077,7 @@ export default function OperationsCommessaIntake({ open, catalog, onOpenChange, 
               : "La commessa non è stata salvata.";
         throw new Error(message);
       }
+      requestKeys.settle("create-job", fingerprint);
       onCreated(data);
       handleOpenChange(false);
     } catch (caught) {

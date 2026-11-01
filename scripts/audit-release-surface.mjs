@@ -82,14 +82,12 @@ for (const file of layoutFiles) {
 }
 
 const commandSurface = await read(path.join(root, "components/command-surface.tsx"));
-const legacyCommand = await read(path.join(root, "app/page-client.tsx"));
 function unboundIconButtons(source, file) {
   return [...source.matchAll(/<IconButton\b([^>]*)>/g)]
     .filter((match) => !match[1].includes("onClick="))
     .map((match) => ({ file, label: match[1].match(/label="([^"]+)"/)?.[1] ?? "unknown" }));
 }
 const activeUnboundControls = unboundIconButtons(commandSurface, "components/command-surface.tsx");
-const legacyUnboundControls = unboundIconButtons(legacyCommand, "app/page-client.tsx");
 
 const allSource = await Promise.all(sourceFiles.map(read)).then((sources) => sources.join("\n"));
 const gpsBrowserApi = /navigator\.geolocation|getCurrentPosition|watchPosition/.test(allSource);
@@ -120,7 +118,6 @@ console.log(JSON.stringify({
     dynamicApiEndpointBindings: dynamicApiCallBindings,
     navigationGaps,
     activeCommandUnboundIconButtons: activeUnboundControls,
-    legacyUnboundIconButtons: legacyUnboundControls,
   },
   integrations: {
     companyAiOpenAiAdapterPresent: openAiAdapter,

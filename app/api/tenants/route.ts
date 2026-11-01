@@ -256,13 +256,36 @@ export async function POST(request: Request) {
     const actor = context ?? gate.identity;
     if (!actor) return Response.json({ error: "authenticated_identity_required" }, { status: 401 });
     const existing = await tenantRows(actor.identityProvider, actor.actorId);
+    const accessibleTenant = existing.find((row) => row.slug === slug);
+    if (accessibleTenant) {
+      const response = NextResponse.json({
+        context: context ? publicAuthorityContext(context) : null,
+        canonicalTenantId: accessibleTenant.tenantId,
+        provisioned: true,
+        setupRequired: accessibleTenant.tenantStatus === "onboarding",
+        created: false,
+        selectedTenant: toTenantView(accessibleTenant),
+        tenants: existing.map(toTenantView),
+        readback: "verified",
+      });
+      response.cookies.set({ name: "zerow_tenant_id", value: accessibleTenant.tenantId, httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+      return response;
+    }
+
+    const [claimedSlug] = await db.select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.slug, slug))
+      .limit(1);
+    if (claimedSlug) {
+      return Response.json({ error: "tenant_slug_already_exists" }, { status: 409 });
+    }
+
     const now = new Date().toISOString();
     const tenantId = existing.length === 0 && actor.identityProvider === "sites" && actor.actorId === context?.actorId && context?.tenantId === SITES_TENANT_ID
       ? context!.tenantId
       : `tenant:${crypto.randomUUID()}`;
-    await db
-      .insert(tenants)
-      .values({
+    await db.batch([
+      db.insert(tenants).values({
         id: tenantId,
         slug,
         name,
@@ -287,12 +310,8 @@ export async function POST(request: Request) {
         createdBy: actor.actorId,
         createdAt: now,
         updatedAt: now,
-      })
-      .onConflictDoNothing();
-
-    await db
-      .insert(tenantMemberships)
-      .values({
+      }),
+      db.insert(tenantMemberships).values({
         id: `tenant-owner:${tenantId}:${actor.identityProvider}:${actor.actorId}`,
         tenantId,
         identityProvider: actor.identityProvider,
@@ -304,20 +323,25 @@ export async function POST(request: Request) {
         status: "active",
         createdAt: now,
         updatedAt: now,
-      })
-      .onConflictDoNothing();
+      }),
+    ] as const);
 
     const rows = await tenantRows(actor.identityProvider, actor.actorId);
+    const createdTenant = rows.find((row) => row.tenantId === tenantId);
+    if (!createdTenant || createdTenant.membershipRole !== "owner" || createdTenant.membershipStatus !== "active") {
+      return Response.json({ error: "tenant_readback_unavailable" }, { status: 503 });
+    }
     const createdContext = await getAuthorityContext();
-    if (!createdContext) return Response.json({ error: "tenant_context_unavailable_after_provisioning" }, { status: 503 });
     const response = NextResponse.json(
       {
-        context: publicAuthorityContext(createdContext),
+        context: createdContext ? publicAuthorityContext(createdContext) : null,
         canonicalTenantId: tenantId,
-        provisioned: rows.length > 0,
-        setupRequired: true,
+        provisioned: true,
+        setupRequired: createdTenant.tenantStatus === "onboarding",
         created: true,
+        selectedTenant: toTenantView(createdTenant),
         tenants: rows.map(toTenantView),
+        readback: "verified",
       },
       { status: 201 },
     );

@@ -74,7 +74,6 @@ const [indexPage, jobPage, attendance, home, attendanceApi, operationsApi, repor
 const navigationSurfaces = await Promise.all([
   "components/mission-command-deck.tsx",
   "components/events-control-page.tsx",
-  "components/s04-module-page.tsx",
   "app/onboarding/page.tsx",
   "components/asset-control.tsx",
   "components/documents-control-deck.tsx",

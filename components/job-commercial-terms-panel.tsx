@@ -13,6 +13,7 @@ import {
   type JobWorkOrderEconomics,
   type JobWorkOrderStatus,
 } from "@/lib/job-commercial-terms";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type CommercialPayload = {
   job: { id: string; code: string | null; title: string; status: string };
@@ -88,10 +89,11 @@ export default function JobCommercialTermsPanel({ jobId }: { jobId: string }) {
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/commercial`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...body, idempotencyKey: `job-commercial-${crypto.randomUUID()}` }),
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(jobId)}/commercial`,
+        namespace: "job-commercial",
+        operation: `${String(body.action ?? "mutation")}:${jobId}`,
+        payload: body,
       });
       const result = await response.json() as CommercialPayload;
       if (!response.ok) {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { FINANCE_DOCUMENT_CATEGORIES, MAX_FINANCE_DOCUMENT_BYTES } from "@/lib/finance-document-contract";
 import { FINANCE_EXTRACTED_DOCUMENT_TYPES } from "@/lib/finance-document-extraction-contract";
 import { allowedTreatmentsForClassification, FINANCE_COST_CATEGORIES, FINANCE_VALUATION_BASES } from "@/lib/finance-ledger-contract";
+import { clientRequestFingerprint, idempotentFormMutation, idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type JobOption = { id: string; code: string | null; title: string; client: string | null; location: string | null; status: string };
 type FinanceDocument = {
@@ -258,10 +259,11 @@ function FinanceDocumentReview({
   async function submitReview(decision: "CONFIRM" | "REJECT") {
     setBusy(true);
     try {
-      const response = await fetch(`/api/finance/documents/${encodeURIComponent(document.id)}/review`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: `/api/finance/documents/${encodeURIComponent(document.id)}/review`,
+        namespace: "finance-document-review",
+        operation: `${decision.toLowerCase()}:${document.id}`,
+        payload: {
           decision,
           extractionId: extraction.id,
           expectedDocumentVersion: document.version,
@@ -274,8 +276,7 @@ function FinanceDocumentReview({
           jobIds: decision === "CONFIRM" ? linkedJobIds : [],
           allocations: decision === "CONFIRM" && economicTreatment !== "DOCUMENT_ONLY" ? allocations.filter((row) => row.jobId && row.amount) : [],
           reviewNote,
-          idempotencyKey: crypto.randomUUID(),
-        }),
+        },
       });
       const result = await response.json() as { error?: string; entry?: { status: string }; duplicateWarning?: unknown };
       if (!response.ok) throw new Error(result.error ?? "finance_review_unavailable");
@@ -292,10 +293,11 @@ function FinanceDocumentReview({
     if (!entry) return;
     setConfirmBusy(true);
     try {
-      const response = await fetch("/api/finance/entries", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "confirm", entryId: entry.id, expectedVersion: entry.version, idempotencyKey: crypto.randomUUID() }),
+      const response = await idempotentJsonMutation({
+        url: "/api/finance/entries",
+        namespace: "finance-entry",
+        operation: `confirm:${entry.id}`,
+        payload: { action: "confirm", entryId: entry.id, expectedVersion: entry.version },
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "finance_entry_confirm_unavailable");
@@ -403,8 +405,8 @@ export function FinanceDocumentIntake({
         body.append("file", file);
         body.append("category", category);
         if (selectedJobId) body.append("jobId", selectedJobId);
-        body.append("idempotencyKey", crypto.randomUUID());
-        const response = await fetch("/api/finance/documents", { method: "POST", body });
+        const fingerprint = clientRequestFingerprint({ category, jobId: selectedJobId, file: { name: file.name, size: file.size, type: file.type, lastModified: file.lastModified } });
+        const response = await idempotentFormMutation({ url: "/api/finance/documents", namespace: "finance-document", operation: "upload", fingerprint, formData: body });
         const result = await response.json() as { error?: string; duplicate?: boolean; document?: FinanceDocument };
         outcomes.push({ fileName: file.name, ok: response.ok, duplicate: Boolean(result.duplicate), error: result.error });
       }
@@ -430,10 +432,11 @@ export function FinanceDocumentIntake({
     setAnalyzingId(documentId);
     setNotice("");
     try {
-      const response = await fetch(`/api/finance/documents/${encodeURIComponent(documentId)}/analyze`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ externalProcessingConsent: true, idempotencyKey: crypto.randomUUID() }),
+      const response = await idempotentJsonMutation({
+        url: `/api/finance/documents/${encodeURIComponent(documentId)}/analyze`,
+        namespace: "finance-document",
+        operation: `analyze:${documentId}`,
+        payload: { externalProcessingConsent: true },
       });
       const result = await response.json() as { error?: string; extraction?: { status: string } };
       if (!response.ok) throw new Error(result.error ?? "finance_document_analysis_unavailable");

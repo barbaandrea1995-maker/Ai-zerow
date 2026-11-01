@@ -8,10 +8,6 @@ type PageAccessOptions = {
 
 export async function requirePageContext(options: PageAccessOptions = {}) {
   const identity = await getNeonAuthIdentity();
-  if (identity.status === "error") {
-    redirect("/login");
-  }
-
   const context = await getAuthorityContext();
   if (!context) {
     redirect(identity.status === "authenticated" ? "/onboarding?mode=setup" : "/login");

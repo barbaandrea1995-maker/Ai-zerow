@@ -52,7 +52,7 @@ assert(warehouse.geofence?.radiusMeters >= 25, "warehouse must expose a valid ge
 
 const missingWarehouseLocation = await requestJson("/api/authority/warehouses", {
   method: "POST",
-  body: { name: "Deposito verifica" },
+  body: { name: "Deposito verifica", idempotencyKey: `verify-missing-warehouse-location-${RUN_ID}` },
   expected: [400],
 });
 assert.equal(missingWarehouseLocation.payload.error, "warehouse_location_required");
@@ -65,6 +65,7 @@ const invalidWarehouseRadius = await requestJson("/api/authority/warehouses", {
     locationProvider: "GEOAPIFY",
     providerPlaceId: "verification-only",
     geofenceRadiusMeters: 10,
+    idempotencyKey: `verify-invalid-warehouse-radius-${RUN_ID}`,
   },
   expected: [400],
 });
@@ -93,6 +94,7 @@ const invalidCargoProfile = await requestJson("/api/assets", {
     entityType: "equipment",
     usageMode: "TRANSPORT",
     transportCapabilities: ["ASSETS"],
+    idempotencyKey: `verify-invalid-cargo-profile-${RUN_ID}`,
   },
   expected: [400],
 });
@@ -105,6 +107,7 @@ const missingVehicleCapability = await requestJson("/api/assets", {
     entityType: "vehicle",
     usageMode: "TRANSPORT",
     transportCapabilities: [],
+    idempotencyKey: `verify-missing-vehicle-capability-${RUN_ID}`,
   },
   expected: [400],
 });
@@ -118,6 +121,7 @@ const unknownWarehouse = await requestJson("/api/assets", {
     usageMode: "OPERATIONAL",
     transportCapabilities: [],
     warehouseId: "warehouse-does-not-exist",
+    idempotencyKey: `verify-unknown-asset-warehouse-${RUN_ID}`,
   },
   expected: [400],
 });

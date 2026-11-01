@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -13,6 +14,7 @@ const requestedProfiles = new Set((process.env.ZEROW_BROWSER_PROFILES || "").spl
 const requestedRoutes = new Set((process.env.ZEROW_BROWSER_ROUTES || "").split(",").map((value) => value.trim()).filter(Boolean));
 const includeWarehouseProfile = process.env.ZEROW_INCLUDE_WAREHOUSE_PROFILE === "1";
 const verifyCreationDialogs = process.env.ZEROW_VERIFY_CREATION_DIALOGS === "1";
+const neonCookieSecret = process.env.ZEROW_TEST_NEON_COOKIE_SECRET || "";
 
 const ownerRoutes = [
   "/", "/command", "/onboarding", "/operations", "/workforce", "/planning", "/presenze",
@@ -22,52 +24,99 @@ const ownerRoutes = [
 ];
 
 const operationalRoutes = [
-  "/", "/operations", "/workforce", "/presenze", "/warehouse", "/mission", "/documents",
+  "/", "/workforce", "/presenze", "/warehouse", "/mission", "/documents",
   "/communications", "/ai", "/pwa/diagnostics", "/settings", "/qr",
 ];
 
 const profiles = [
   {
     id: "owner-desktop",
+    identityProvider: "sites",
     actorId: "e2e-owner",
     email: "e2e-owner@example.invalid",
     name: "E2E Owner",
     viewport: { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false },
     routes: ownerRoutes,
+    deniedRoutes: [],
   },
   {
     id: "owner-mobile",
+    identityProvider: "sites",
     actorId: "e2e-owner",
     email: "e2e-owner@example.invalid",
     name: "E2E Owner",
     viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     routes: ownerRoutes,
+    deniedRoutes: [],
   },
   {
     id: "worker-mobile",
+    identityProvider: "neon",
     actorId: "e2e-worker",
     email: "e2e-worker@example.invalid",
     name: "Operatore E2E",
     viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     routes: operationalRoutes,
+    deniedRoutes: ["/operations", "/command", "/assets", "/planning", "/finance", "/governance"],
   },
   {
     id: "delivery-driver-mobile",
+    identityProvider: "neon",
     actorId: "e2e-driver",
     email: "e2e-driver@example.invalid",
     name: "Autista Consegna E2E",
     viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     routes: operationalRoutes,
+    deniedRoutes: ["/operations", "/command", "/planning", "/finance", "/governance"],
   },
   ...(includeWarehouseProfile ? [{
     id: "warehouse-mobile",
+    identityProvider: "neon",
     actorId: process.env.ZEROW_WAREHOUSE_ACTOR_ID || "e2e-reviewer",
     email: process.env.ZEROW_WAREHOUSE_ACTOR_EMAIL || "e2e-reviewer@example.invalid",
     name: process.env.ZEROW_WAREHOUSE_ACTOR_NAME || "Magazziniere E2E",
     viewport: { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     routes: operationalRoutes,
+    deniedRoutes: ["/operations", "/planning", "/finance", "/governance"],
   }] : []),
 ].filter((profile) => requestedProfiles.size === 0 || requestedProfiles.has(profile.id));
+
+function neonFixtureCookie(profile) {
+  assert(
+    neonCookieSecret.length >= 32,
+    `ZEROW_TEST_NEON_COOKIE_SECRET is required for the ${profile.id} browser profile`,
+  );
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 60 * 60 * 1_000);
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const header = encode({ alg: "HS256", typ: "JWT" });
+  const payload = encode({
+    session: {
+      id: `session-${profile.actorId}`,
+      token: `token-${profile.actorId}`,
+      userId: profile.actorId,
+      expiresAt: expiresAt.toISOString(),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      ipAddress: "127.0.0.1",
+      userAgent: "AI-ZEROW governed browser audit",
+    },
+    user: {
+      id: profile.actorId,
+      name: profile.name,
+      email: profile.email,
+      emailVerified: true,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    iat: Math.floor(now.getTime() / 1_000),
+    exp: Math.floor(expiresAt.getTime() / 1_000),
+    sub: profile.actorId,
+  });
+  const unsigned = `${header}.${payload}`;
+  const signature = createHmac("sha256", neonCookieSecret).update(unsigned).digest("base64url");
+  return `__Secure-neon-auth.session_token=fixture; __Secure-neon-auth.local.session_data=${unsigned}.${signature}`;
+}
 
 const terminologyRules = [
   { id: "legacy-brand", pattern: /\bGEXY\b/i },
@@ -82,7 +131,7 @@ const expectedNavigation = {
   "owner-desktop": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: false, links: [] },
   "owner-mobile": { profile: "control", labels: ["Home", "Mappa", "AI", "Commesse", "Altro"], visible: true, links: [["Home", "/command"], ["Mappa", "/command#operational-map"], ["AI", "/command#company-ai"], ["Commesse", "/operations"]] },
   "worker-mobile": { profile: "field", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Presenze", "/presenze"], ["Impostazioni", "/settings"]] },
-  "delivery-driver-mobile": { profile: "driver", labels: ["Home", "Comunicazioni", "AI", "Presenze", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Presenze", "/presenze"], ["Impostazioni", "/settings"]] },
+  "delivery-driver-mobile": { profile: "driver", labels: ["Home", "Comunicazioni", "AI", "Missioni", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Missioni", "/mission"], ["Impostazioni", "/settings"]] },
   "warehouse-mobile": { profile: "warehouse", labels: ["Home", "Comunicazioni", "AI", "Magazzino", "Impostazioni"], visible: true, links: [["Home", "/"], ["Comunicazioni", "/communications"], ["AI", "/ai"], ["Magazzino", "/warehouse"], ["Impostazioni", "/settings"]] },
 };
 
@@ -186,13 +235,31 @@ try {
     cdp.send("Page.enable", {}, sessionId),
     cdp.send("Runtime.enable", {}, sessionId),
     cdp.send("Network.enable", {}, sessionId),
+    cdp.send("Network.setBypassServiceWorker", { bypass: true }, sessionId),
     cdp.send("Log.enable", {}, sessionId),
+    cdp.send("Fetch.enable", { patterns: [{ urlPattern: `${baseUrl}/*`, requestStage: "Request" }] }, sessionId),
   ]);
 
   const errors = [];
   const requests = new Map();
   const networkIssues = [];
   let currentCase = null;
+  let activeNeonCookie = "";
+  let activeAuthHeaders = {};
+  cdp.on("Fetch.requestPaused", (event) => {
+    const headers = Object.entries(event.request?.headers || {})
+      .filter(([name]) => {
+        const normalized = name.toLowerCase();
+        return normalized !== "cookie" && !normalized.startsWith("oai-authenticated-user-");
+      })
+      .map(([name, value]) => ({ name, value: String(value) }));
+    for (const [name, value] of Object.entries(activeAuthHeaders)) {
+      headers.push({ name, value });
+    }
+    if (activeNeonCookie) headers.push({ name: "Cookie", value: activeNeonCookie });
+    cdp.send("Fetch.continueRequest", { requestId: event.requestId, headers }, sessionId)
+      .catch((error) => errors.push({ type: "auth.fixture", detail: error instanceof Error ? error.message : String(error) }));
+  });
   cdp.on("Runtime.exceptionThrown", (event) => errors.push({ type: "exception", detail: event.exceptionDetails?.text || "runtime exception" }));
   cdp.on("Runtime.consoleAPICalled", (event) => {
     if (event.type !== "error" && event.type !== "assert") return;
@@ -239,17 +306,20 @@ try {
   const results = [];
   const navigationInteractions = [];
   const creationFormInteractions = [];
+  const deniedRouteInteractions = [];
   for (const profile of profiles) {
     currentCase = null;
+    activeNeonCookie = profile.identityProvider === "neon" ? neonFixtureCookie(profile) : "";
+    activeAuthHeaders = {
+      "oai-authenticated-user-id": profile.actorId,
+      "oai-authenticated-user-email": profile.email,
+      "oai-authenticated-user-full-name": encodeURIComponent(profile.name),
+      "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
+    };
     await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
     await delay(250);
     await cdp.send("Network.setExtraHTTPHeaders", {
-      headers: {
-        "oai-authenticated-user-id": profile.actorId,
-        "oai-authenticated-user-email": profile.email,
-        "oai-authenticated-user-full-name": encodeURIComponent(profile.name),
-        "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
-      },
+      headers: activeAuthHeaders,
     }, sessionId);
     await cdp.send("Emulation.setDeviceMetricsOverride", profile.viewport, sessionId);
 
@@ -557,6 +627,34 @@ try {
       currentCase = null;
     }
 
+    for (const route of profile.deniedRoutes || []) {
+      currentCase = { profile: profile.id, route: `denied:${route}` };
+      await cdp.send("Page.navigate", { url: `${baseUrl}${route}` }, sessionId);
+      const deadline = Date.now() + 12_000;
+      let denial = null;
+      while (Date.now() < deadline) {
+        await delay(200);
+        const evaluation = await cdp.send("Runtime.evaluate", {
+          expression: `(() => ({
+            ready: document.readyState,
+            pathname: location.pathname,
+            accessDenied: (document.body?.innerText || "").includes("Accesso non autorizzato")
+              || (document.body?.innerText || "").includes("ACCESSO NEGATO"),
+          }))()`,
+          returnByValue: true,
+        }, sessionId);
+        denial = evaluation.result?.value || null;
+        if (denial?.ready === "complete" && denial.accessDenied) break;
+      }
+      deniedRouteInteractions.push({
+        profile: profile.id,
+        route,
+        pathname: denial?.pathname || "",
+        passed: denial?.accessDenied === true && denial?.pathname === "/access-denied",
+      });
+      currentCase = null;
+    }
+
     const expectedProfileNavigation = expectedNavigation[profile.id];
     if (expectedProfileNavigation?.visible) {
       const interactionStart = expectedProfileNavigation.profile === "control" ? "/command" : "/";
@@ -645,8 +743,9 @@ try {
   });
   const navigationInteractionIssues = navigationInteractions.filter((item) => !item.passed);
   const creationFormIssues = creationFormInteractions.filter((item) => !item.passed);
+  const deniedRouteIssues = deniedRouteInteractions.filter((item) => !item.passed);
 
-  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues, navigationInteractions, navigationInteractionIssues, creationFormInteractions, creationFormIssues }, null, 2));
+  if (outputPath) await writeFile(outputPath, JSON.stringify({ results, routeFailures, overflows, browserErrors, networkIssues, expectedDegradations, unexpectedNetworkIssues, terminologyIssues, navigationIssues, navigationInteractions, navigationInteractionIssues, creationFormInteractions, creationFormIssues, deniedRouteInteractions, deniedRouteIssues }, null, 2));
 
   assert.deepEqual(routeFailures.map(({ profile, route }) => ({ profile, route })), [], "Every authorized browser surface must render");
   assert.deepEqual(overflows.map(({ profile, route, horizontalOverflow }) => ({ profile, route, horizontalOverflow })), [], "Browser surfaces must not overflow horizontally");
@@ -656,6 +755,7 @@ try {
   assert.deepEqual(navigationIssues, [], "Every browser surface must use one canonical server-derived role navigation");
   assert.deepEqual(navigationInteractionIssues, [], "Every mobile-navigation destination and module-menu action must work in the browser");
   assert.deepEqual(creationFormIssues, [], "Warehouse, asset and mission creation dialogs must remain complete and scrollable on mobile");
+  assert.deepEqual(deniedRouteIssues, [], "Restricted roles must reach the controlled access-denied surface without loading protected modules");
 
   console.log(JSON.stringify({
     status: "PASS",
@@ -672,6 +772,7 @@ try {
     navigationIssues: navigationIssues.length,
     navigationInteractions: navigationInteractions.length,
     creationFormInteractions: creationFormInteractions.length,
+    deniedRouteInteractions: deniedRouteInteractions.length,
     outputPath: outputPath || null,
     screenshotDirectory: screenshotDirectory || null,
   }, null, 2));

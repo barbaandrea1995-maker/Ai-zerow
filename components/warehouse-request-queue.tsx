@@ -8,6 +8,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { materialFulfillmentLines, missionDeliveryLines } from "@/lib/material-fulfillment";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type WarehouseOption = { id: string; code: string; name: string; locationLabel: string; status: string };
 type ReviewLine = { id: string; itemId: string; description: string; sku: string; unit: string; quantity: number; directPickupQuantity: number };
@@ -235,18 +236,18 @@ export function WarehouseRequestQueue({
     }
     setBusy(true);
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(activeRequest.jobId)}/journey`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(activeRequest.jobId)}/journey`,
+        namespace: "warehouse-request",
+        operation: `review:${activeRequest.id}`,
+        payload: {
           action: "material_review",
           recordId: activeRequest.id,
           expectedVersion: activeRequest.version,
           decision,
           ...(decision === "REJECTED" ? {} : { warehouseId: reviewWarehouseId, lines: reviewLines }),
           note,
-          idempotencyKey: `warehouse-review-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const result = await response.json() as { error?: string; readback?: { status?: string }; mutation?: { action?: string; eventId?: string; record?: { version?: number } } };
       if (!response.ok) {
@@ -298,10 +299,11 @@ export function WarehouseRequestQueue({
     if (remaining <= 0) return;
     setPickBusyId(itemId);
     try {
-      const response = await fetch("/api/warehouse/inventory", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: "/api/warehouse/inventory",
+        namespace: "warehouse-request",
+        operation: `pick:${request.id}:${itemId}`,
+        payload: {
           action: "pick",
           itemId,
           warehouseId,
@@ -310,8 +312,7 @@ export function WarehouseRequestQueue({
           jobId: request.jobId,
           missionId: request.mission.id,
           note: `Prelievo richiesta ${request.id} · ${request.mission.title}`,
-          idempotencyKey: `warehouse-pick-${request.id}-${itemId}-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const result = await response.json() as { error?: string; eventId?: string; readback?: { status?: string } };
       if (!response.ok) { onNotice(serverErrorMessage(result.error)); return; }

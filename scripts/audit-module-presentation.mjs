@@ -38,13 +38,14 @@ assert(css.includes(".zw-module-heading h1"), "Shared heading typography must be
 assert(css.includes("font-size: clamp(1.6rem, 2.8vw, 2rem) !important"), "Module titles must stay compact and consistent");
 assert(css.includes(".zw-operational-home__summary h1"), "Role-based Home must use a compact summary title");
 
-const commandHero = await fs.readFile(path.join(root, "components/command-hero.tsx"), "utf8");
-assert(commandHero.includes('className="zw-command-hero zw-page-enter"'), "Centrale must retain its distinctive hero");
+const commandSurface = await fs.readFile(path.join(root, "components/command-surface.tsx"), "utf8");
+assert(commandSurface.includes("AI-ZEROW · COMMAND CENTER") && commandSurface.includes("Centrale operativa"), "Centrale must retain its distinctive command heading");
+assert(commandSurface.includes("/ai-zerow-icon.jpeg"), "Centrale must render the official ZEROW identity");
 
 console.log(JSON.stringify({
   status: "PASS",
   compactModuleHeadings: headingSurfaces.length,
-  distinctiveCommandHero: "components/command-hero.tsx",
+  distinctiveCommandHeading: "components/command-surface.tsx",
   roleHome: "compact summary",
   checks: ["shared module typography", "no module hero", "no reused command artwork", "central hero retained"],
 }, null, 2));

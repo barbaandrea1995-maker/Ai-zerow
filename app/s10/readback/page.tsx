@@ -1,18 +1,10 @@
-import { getAuthorityContext, hasCapability } from "@/lib/authority-context";
 import { getNeonReadback, NeonReadbackError } from "@/lib/neon-readback";
+import { requirePageCapability } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
 
 export default async function S10ReadbackPage() {
-  const context = await getAuthorityContext();
-
-  if (!context) {
-    return <ReadbackState title="S10 Neon readback" message="unauthenticated" />;
-  }
-
-  if (!hasCapability(context, "command.read")) {
-    return <ReadbackState title="S10 Neon readback" message="forbidden" />;
-  }
+  const context = await requirePageCapability("external_adapters.read");
 
   let readback: Awaited<ReturnType<typeof getNeonReadback>> | null = null;
   let errorMessage = "neon_runtime_readback_failed";
@@ -29,10 +21,10 @@ export default async function S10ReadbackPage() {
     return <ReadbackState title="S10 Neon readback" message={errorMessage} />;
   }
 
-  return <NeonReadbackView readback={readback} />;
+  return <NeonReadbackView readback={readback} roles={context.roles} />;
 }
 
-function NeonReadbackView({ readback }: { readback: Awaited<ReturnType<typeof getNeonReadback>> }) {
+function NeonReadbackView({ readback, roles }: { readback: Awaited<ReturnType<typeof getNeonReadback>>; roles: string[] }) {
   return (
     <main className="min-h-screen bg-[#050607] px-5 py-10 font-mono text-slate-200 sm:px-10">
       <div className="mx-auto max-w-5xl">
@@ -40,13 +32,14 @@ function NeonReadbackView({ readback }: { readback: Awaited<ReturnType<typeof ge
           <div>
             <p className="text-[10px] uppercase tracking-[0.22em] text-lime-300/70">AI-ZEROW / S10</p>
             <h1 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-50">Neon readback</h1>
-            <p className="mt-2 text-xs text-slate-500">Riservato al titolare, sola lettura · nessuna scrittura esterna</p>
+            <p className="mt-2 text-xs text-slate-500">Riservato ai ruoli autorizzati agli adapter, sola lettura · nessuna scrittura esterna</p>
           </div>
           <a className="text-xs text-lime-200 underline decoration-lime-300/30 underline-offset-4" href="/externals">Torna agli adapter</a>
         </div>
         <pre className="overflow-x-auto rounded-2xl border border-lime-300/20 bg-black/30 p-5 text-[11px] leading-6 text-lime-100/90 shadow-[0_0_30px_rgba(190,255,60,0.06)]">
           {JSON.stringify({
-            ownerOnly: true,
+            requiredCapability: "external_adapters.read",
+            authorizedRoles: roles,
             runtimeBinding: "DATABASE_URL",
             ...readback,
           }, null, 2)}

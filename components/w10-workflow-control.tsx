@@ -50,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FinanceDocumentIntake } from "@/components/finance-document-intake";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
 import type { W10Module } from "@/lib/w10-contract";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Tone = "lime" | "cyan" | "amber" | "red" | "muted";
 
@@ -390,10 +391,11 @@ export default function W10WorkflowControl({ module }: { module: W10Module }) {
     if (isProcurement && !validProcurementLines) { notify("Controlla gli articoli: descrizione, unità e quantità con massimo 3 decimali."); return; }
     setSaving(true);
     try {
-      const response = await fetch(`/api/${module}/workflow`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: `/api/${module}/workflow`,
+        namespace: "workflow",
+        operation: `create:${module}`,
+        payload: {
           action: "create",
           title: form.title,
           detail: form.detail,
@@ -401,8 +403,7 @@ export default function W10WorkflowControl({ module }: { module: W10Module }) {
           supplier: form.supplier,
           jobId: form.jobId || undefined,
           lines: isProcurement ? lines : [],
-          idempotencyKey: "w10-create-" + module + "-" + crypto.randomUUID(),
-        }),
+        },
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) { notify(result.error === "procurement_lines_invalid" ? "Controlla la descrizione, l’unità e la quantità (massimo 3 decimali)." : "Voce non creata: " + (result.error ?? "errore")); return; }

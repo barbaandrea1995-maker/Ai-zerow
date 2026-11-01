@@ -46,6 +46,27 @@ function capabilityLike(value) {
   return /^[a-z][a-z0-9_]*(?:\.[a-z0-9_-]+)+$/.test(value);
 }
 
+function pageCapabilityGuards(source, file) {
+  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const guards = new Set();
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const callName = ts.isIdentifier(node.expression)
+        ? node.expression.text
+        : ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : "";
+      if (callName === "requirePageCapability" || callName === "hasCapability") {
+        const value = stringLiteral(node.arguments[callName === "hasCapability" ? 1 : 0]);
+        if (value) guards.add(value);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return guards;
+}
+
 const sourceFiles = [
   ...(await walk(path.join(root, "app"), (file) => /\.(ts|tsx)$/.test(file))),
   ...(await walk(path.join(root, "components"), (file) => /\.(ts|tsx)$/.test(file))),
@@ -136,8 +157,8 @@ for (const moduleEntry of registry) {
   const firstSegment = moduleEntry.route.split("/").filter(Boolean)[0];
   const layout = firstSegment ? `app/${firstSegment}/layout.tsx` : "app/layout.tsx";
   const guardSources = [moduleEntry.page, ...(await exists(layout) ? [layout] : [])];
-  const guardSource = (await Promise.all(guardSources.map((file) => fs.readFile(path.join(root, file), "utf8")))).join("\n");
-  assert(guardSource.includes(moduleEntry.capability), `${moduleEntry.id}: page/layout guard must reference ${moduleEntry.capability}`);
+  const guardSets = await Promise.all(guardSources.map(async (file) => pageCapabilityGuards(await fs.readFile(path.join(root, file), "utf8"), file)));
+  assert(guardSets.some((guards) => guards.has(moduleEntry.capability)), `${moduleEntry.id}: page/layout must enforce ${JSON.stringify(moduleEntry.capability)} through requirePageCapability or an explicit server context check`);
 }
 
 for (const item of COMMAND_NAVIGATION) {

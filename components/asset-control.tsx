@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "@/components/app-link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 import QRCode from "qrcode";
 import {
   Activity,
@@ -431,7 +432,7 @@ export default function AssetControl() {
     if ((action === "maintenance_open" || action === "block") && !note.trim()) { setNotice("Inserisci una motivazione prima di cambiare lo stato dell’asset."); return; }
     setBusy(action); setNotice("");
     try {
-      const response = await fetch("/api/assets/lifecycle", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, assetId: selectedAsset.id, reason: note.trim(), note: note.trim(), idempotencyKey: `asset-lifecycle-${action}-${selectedAsset.id}-${crypto.randomUUID()}` }) });
+      const response = await idempotentJsonMutation({ url: "/api/assets/lifecycle", namespace: "asset-lifecycle", operation: `${action}:${selectedAsset.id}`, payload: { action, assetId: selectedAsset.id, reason: note.trim(), note: note.trim() } });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "asset_lifecycle_write_failed");
       setNote(""); await refresh();
@@ -445,7 +446,7 @@ export default function AssetControl() {
     if (!window.confirm(action === "RETURN" ? `Confermi il rientro di ${assetLabel} da ${assignment.assignee.name}?` : `Annulli la consegna programmata di ${assetLabel} a ${assignment.assignee.name}?`)) return;
     setReturningId(assignment.id);
     try {
-      const response = await fetch("/api/assets/assignments", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ assignmentId: assignment.id, action, idempotencyKey: `asset-${action.toLowerCase()}-${assignment.id}-${crypto.randomUUID()}` }) });
+      const response = await idempotentJsonMutation({ url: "/api/assets/assignments", namespace: "asset-assignment", operation: `${action.toLowerCase()}:${assignment.id}`, method: "PATCH", payload: { assignmentId: assignment.id, action } });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "asset_assignment_return_failed");
       await refresh(); setNotice(action === "RETURN" ? "Rientro registrato: la risorsa è nuovamente disponibile." : "Consegna programmata annullata.");

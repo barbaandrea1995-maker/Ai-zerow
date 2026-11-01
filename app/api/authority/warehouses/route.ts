@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   s04Records,
@@ -82,13 +82,36 @@ export async function POST(request: Request) {
   const locationQuery = boundedText(input.locationQuery ?? input.locationLabel ?? input.location, 240);
   const provider = boundedText(input.locationProvider ?? input.provider, 32).toUpperCase();
   const providerPlaceId = boundedText(input.providerPlaceId, 160);
+  const idempotencyKey = boundedText(input.idempotencyKey, 160);
   const radius = numberValue(input.geofenceRadiusMeters ?? input.radiusMeters) ?? 100;
 
   if (name.length < 2) return Response.json({ error: "warehouse_name_required" }, { status: 400 });
   if (locationQuery.length < 5) return Response.json({ error: "warehouse_location_required" }, { status: 400 });
   if (provider !== ACTIVE_GEOCODING_PROVIDER || !providerPlaceId) return Response.json({ error: "warehouse_server_location_required" }, { status: 400 });
+  if (!/^[A-Za-z0-9:_-]{12,160}$/.test(idempotencyKey)) return Response.json({ error: "idempotency_key_required" }, { status: 400 });
   if (!Number.isInteger(radius) || radius < 25 || radius > 5_000) {
     return Response.json({ error: "geofence_radius_must_be_25_to_5000_meters" }, { status: 400 });
+  }
+
+  const db = getDb();
+  try {
+    const [priorEvent] = await db.select({ eventId: s06Events.eventId, eventType: s06Events.eventType, aggregateId: s06Events.aggregateId })
+      .from(s06Events)
+      .where(and(eq(s06Events.tenantId, context.tenantId), eq(s06Events.idempotencyKey, idempotencyKey)))
+      .limit(1);
+    if (priorEvent) {
+      if (priorEvent.eventType !== "warehouse.location.created") {
+        return Response.json({ error: "warehouse_idempotency_key_conflict" }, { status: 409 });
+      }
+      const rows = await readback(context.tenantId);
+      const created = rows.warehouses.find((warehouse) => warehouse.id === priorEvent.aggregateId);
+      if (!created) return Response.json({ error: "warehouse_idempotent_readback_unavailable" }, { status: 503 });
+      return Response.json({ context: publicAuthorityContext(context), ...rows, created, eventId: priorEvent.eventId, idempotent: true }, {
+        headers: { "cache-control": "private, no-store" },
+      });
+    }
+  } catch {
+    return Response.json({ error: "warehouse_location_readback_unavailable" }, { status: 503 });
   }
 
   const geocoded = await geocodeAddress(locationQuery);
@@ -108,7 +131,6 @@ export async function POST(request: Request) {
   const geofenceId = `GEOFENCE-WAREHOUSE-${warehouseId}`;
   const eventId = crypto.randomUUID();
   try {
-    const db = getDb();
     const naming = await allocateServerName({
       tenantId: context.tenantId,
       module: "warehouse",
@@ -225,7 +247,7 @@ export async function POST(request: Request) {
         payloadJson,
         correlationId: crypto.randomUUID(),
         causationId: null,
-        idempotencyKey: `warehouse-create:${warehouseId}`,
+        idempotencyKey,
         status: "COMMITTED_SITES_READBACK",
         createdAt: now,
       }),
@@ -246,13 +268,13 @@ export async function POST(request: Request) {
     const rows = await readback(context.tenantId);
     const created = rows.warehouses.find((warehouse) => warehouse.id === warehouseId);
     if (!created) return Response.json({ error: "warehouse_readback_unavailable" }, { status: 503 });
-    return Response.json({ context: publicAuthorityContext(context), ...rows, created, eventId }, {
+    return Response.json({ context: publicAuthorityContext(context), ...rows, created, eventId, idempotent: false }, {
       status: 201,
       headers: { "cache-control": "private, no-store" },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (/unique|constraint/i.test(message)) return Response.json({ error: "warehouse_code_conflict" }, { status: 409 });
+    if (/unique|constraint/i.test(message)) return Response.json({ error: "warehouse_idempotency_or_code_conflict" }, { status: 409 });
     return Response.json({ error: "warehouse_location_write_unavailable" }, { status: 503 });
   }
 }

@@ -7,6 +7,7 @@ import { WarehouseAttendanceControl } from "@/components/warehouse-attendance-co
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AttendanceTarget } from "@/lib/attendance-scope";
+import { clientRequestFingerprint, idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Props = {
   targets: AttendanceTarget[];
@@ -72,17 +73,18 @@ function MaterialPickupPanel({
         setNotice("Posizione non disponibile. Attiva il GPS per registrare il ritiro nel geofence del deposito.");
         return;
       }
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(jobId)}/material-pickup`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(jobId)}/material-pickup`,
+        namespace: "material-pickup",
+        operation: key,
+        fingerprint: clientRequestFingerprint({ jobId, requestId: entry.requestId, lineId: entry.lineId, itemId: entry.itemId, quantity }),
+        payload: {
           requestId: entry.requestId,
           lineId: entry.lineId,
           itemId: entry.itemId,
           quantity,
           location,
-          idempotencyKey: `direct-pickup-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const result = await response.json() as { error?: string; readback?: { status?: string }; remainingDirectQuantity?: number };
       if (!response.ok) {

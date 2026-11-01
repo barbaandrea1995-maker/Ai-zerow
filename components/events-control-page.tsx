@@ -48,6 +48,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { Button } from "@/components/ui/button";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { getAllowedCommandNavigation, type CommandNavigationId } from "@/lib/command-dashboard";
@@ -349,8 +350,7 @@ export default function EventsControlPage() {
     if (note.length > 2_000 || reference.length > 120) { setToast("La nota o il riferimento supera la lunghezza consentita."); return; }
     setBusy("append");
     try {
-      const idempotencyKey = `ui:audit-note:${crypto.randomUUID()}`;
-      const response = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventType: "command.audit.note", idempotencyKey, payload: { note, reference } }) });
+      const response = await idempotentJsonMutation({ url: "/api/events", namespace: "event-authority", operation: "audit-note", payload: { eventType: "command.audit.note", payload: { note, reference } } });
       const data = await response.json() as EventsPayload & { error?: string };
       if (!response.ok) throw new Error(data.error || "event_append_failed");
       setComposerOpen(false);
@@ -367,7 +367,7 @@ export default function EventsControlPage() {
   async function controlOutbox(row: OutboxRow, action: OutboxAction) {
     setBusy(`${row.id}:${action}`);
     try {
-      const response = await fetch("/api/events/outbox", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ outboxId: row.id, action, note: "Controllo avviato da W11 Event Authority", idempotencyKey: `ui:outbox:${action}:${row.id}:${crypto.randomUUID()}` }) });
+      const response = await idempotentJsonMutation({ url: "/api/events/outbox", namespace: "event-authority", operation: `outbox:${action}:${row.id}`, payload: { outboxId: row.id, action, note: "Controllo avviato da W11 Event Authority" } });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "outbox_action_failed");
       setToast(`Outbox aggiornato: ${action.replace("_", " ")}.`);

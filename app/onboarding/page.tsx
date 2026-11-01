@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -1243,6 +1244,7 @@ export default function OnboardingPage() {
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileLabel, setProfileLabel] = useState("");
+  const profileRequestRef = useRef<{ label: string; role: AuthorityRole; idempotencyKey: string } | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [teamDescription, setTeamDescription] = useState("");
@@ -1595,10 +1597,15 @@ export default function OnboardingPage() {
 
     setProfileSubmitting(true);
     try {
+      const priorRequest = profileRequestRef.current;
+      const idempotencyKey = priorRequest?.label === label && priorRequest.role === selectedRole
+        ? priorRequest.idempotencyKey
+        : crypto.randomUUID();
+      profileRequestRef.current = { label, role: selectedRole, idempotencyKey };
       const response = await fetch("/api/authority/access-profiles", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label, role: selectedRole }),
+        body: JSON.stringify({ label, role: selectedRole, idempotencyKey }),
       });
       const payload = (await response.json()) as {
         profile?: AccessProfile;
@@ -1617,6 +1624,7 @@ export default function OnboardingPage() {
       setAuthorityContext(payload.context ?? authorityContext);
       setProfileOpen(false);
       setProfileLabel("");
+      profileRequestRef.current = null;
       notify(`Profilo salvato su Sites: ${payload.profile.label}`);
     } catch {
       notify("Profilo non salvato: errore di rete");
@@ -2466,7 +2474,7 @@ export default function OnboardingPage() {
         </DialogContent>
       </Dialog>
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className="border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[520px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto border-lime-300/20 bg-[#0a0d0e] text-slate-100 sm:max-w-[620px]">
           <DialogHeader>
             <DialogTitle className="text-slate-100">
               Crea profilo accesso
@@ -2492,7 +2500,7 @@ export default function OnboardingPage() {
             <div className="space-y-2">
               <p className="text-xs text-slate-400">Ruolo base</p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {AUTHORITY_ROLES.slice(0, 6).map((role) => (
+                {AUTHORITY_ROLES.map((role) => (
                   <button
                     className={`rounded-lg border px-3 py-2 text-left text-[11px] transition ${selectedRole === role ? "border-lime-300/35 bg-lime-300/10 text-lime-100" : "border-white/10 bg-black/20 text-slate-400 hover:border-lime-300/25"}`}
                     key={role}

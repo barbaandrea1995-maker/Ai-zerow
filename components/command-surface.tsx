@@ -48,7 +48,7 @@ import {
   toActivities,
   toAssets,
   toJobs,
-} from "@/app/page-client";
+} from "@/components/command-read-model";
 import { AccountMenu, type AccountActor } from "@/components/account-menu";
 import { CommandMobileNav } from "@/components/command-mobile-nav";
 import { CommandFinanceJobKpi } from "@/components/command-finance-job-kpi";

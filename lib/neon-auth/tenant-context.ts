@@ -13,7 +13,6 @@ export type NeonTenantContext = {
     email: string;
     name: string;
   };
-  sessionId: string;
   tenants: NeonTenantMembership[];
 };
 
@@ -192,7 +191,6 @@ export async function getNeonAuthContext(): Promise<NeonAuthContextResult> {
           email: sessionData.user.email,
           name: safeActorName(sessionData.user.name, sessionData.user.email),
         },
-        sessionId: sessionData.session.id,
         tenants,
       },
     };

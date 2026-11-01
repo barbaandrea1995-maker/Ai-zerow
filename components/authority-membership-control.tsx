@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { AUTHORITY_ROLES, ROLE_METADATA, type AuthorityRole } from "@/lib/authority-catalog";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 export type AuthorityMembershipView = {
   id: string;
@@ -137,16 +138,16 @@ export default function AuthorityMembershipControl({
     setInviteBusy(true);
     setInviteUrl("");
     try {
-      const response = await fetch("/api/authority/memberships", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: "/api/authority/memberships",
+        namespace: "authority-membership",
+        operation: "invite",
+        payload: {
           email: inviteEmail,
           role: inviteRoles[0],
           roles: inviteRoles,
           expiresInDays: 7,
-          idempotencyKey: `authority-invite-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const payload = await response.json() as DirectoryPayload;
       if (!response.ok || !payload.invitation) {
@@ -185,18 +186,19 @@ export default function AuthorityMembershipControl({
     if (!canManage) return;
     setBusyTarget(targetId);
     try {
-      const response = await fetch("/api/authority/memberships", {
+      const response = await idempotentJsonMutation({
+        url: "/api/authority/memberships",
+        namespace: "authority-membership",
+        operation: `${action}:${targetType}:${targetId}`,
         method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+        payload: {
           targetType,
           targetId,
           expectedVersion,
           action,
           role,
           roles,
-          idempotencyKey: `authority-${action}-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const payload = await response.json() as DirectoryPayload;
       if (!response.ok || !payload.memberships || !payload.invitations) {

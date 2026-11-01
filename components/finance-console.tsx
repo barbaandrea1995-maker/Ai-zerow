@@ -25,6 +25,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { commercialModelLabel, commercialValueLabel, type JobCommercialTerms, type JobWorkOrderEconomics } from "@/lib/job-commercial-terms";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Job = { id: string; code: string | null; title: string; client: string | null; status: string };
 type Allocation = { id: string; jobId: string; amountMinor: number; currency: string; version: number };
@@ -150,15 +151,15 @@ function EntryComposer({ jobs, selectedJobId, capabilities, onSaved }: { jobs: J
     event.preventDefault();
     setBusy(true);
     try {
-      const response = await fetch("/api/finance/entries", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: "/api/finance/entries",
+        namespace: "finance-entry",
+        operation: "prepare",
+        payload: {
           action: "prepare",
           ...form,
           allocations: form.jobId ? [{ jobId: form.jobId, amount: form.amount }] : [],
-          idempotencyKey: crypto.randomUUID(),
-        }),
+        },
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "finance_entry_write_unavailable");
@@ -205,7 +206,7 @@ function ReconciliationPanel({ entries, capabilities, onSaved }: { entries: Entr
     event.preventDefault();
     setBusy(true);
     try {
-      const response = await fetch("/api/finance/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "relate", entryId: sourceId, relationType: mode, relatedEntityType: "FINANCE_ENTRY", relatedEntityId: targetId, amount, idempotencyKey: crypto.randomUUID() }) });
+      const response = await idempotentJsonMutation({ url: "/api/finance/entries", namespace: "finance-entry", operation: `relate:${mode}:${sourceId}:${targetId}`, payload: { action: "relate", entryId: sourceId, relationType: mode, relatedEntityType: "FINANCE_ENTRY", relatedEntityId: targetId, amount } });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "finance_relation_unavailable");
       setSourceId(""); setTargetId(""); setAmount("");
@@ -261,7 +262,7 @@ export default function FinanceConsole() {
   async function confirmEntry(entry: Entry) {
     setConfirmingId(entry.id);
     try {
-      const response = await fetch("/api/finance/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "confirm", entryId: entry.id, expectedVersion: entry.version, idempotencyKey: crypto.randomUUID() }) });
+      const response = await idempotentJsonMutation({ url: "/api/finance/entries", namespace: "finance-entry", operation: `confirm:${entry.id}`, payload: { action: "confirm", entryId: entry.id, expectedVersion: entry.version } });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "finance_entry_confirm_unavailable");
       await saved("Registrazione approvata e inclusa nelle proiezioni confermate.");
@@ -273,7 +274,7 @@ export default function FinanceConsole() {
     if (reason.length < 4) { setNotice("Indica il motivo della rettifica."); return; }
     setConfirmingId(entry.id);
     try {
-      const response = await fetch("/api/finance/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reverse", entryId: entry.id, expectedVersion: entry.version, reason, idempotencyKey: crypto.randomUUID() }) });
+      const response = await idempotentJsonMutation({ url: "/api/finance/entries", namespace: "finance-entry", operation: `reverse:${entry.id}`, payload: { action: "reverse", entryId: entry.id, expectedVersion: entry.version, reason } });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "finance_entry_reverse_unavailable");
       await saved("Registrazione stornata con rettifica esplicita; l’originale resta nello storico.");
@@ -283,7 +284,7 @@ export default function FinanceConsole() {
   async function resolveIssue(issue: LedgerPayload["issues"][number]) {
     const resolution = resolutions[issue.id]?.trim() ?? "";
     if (resolution.length < 4) { setNotice("Indica come è stato verificato il controllo."); return; }
-    const response = await fetch("/api/finance/entries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "resolve_issue", issueId: issue.id, expectedVersion: issue.version, resolution, idempotencyKey: crypto.randomUUID() }) });
+    const response = await idempotentJsonMutation({ url: "/api/finance/entries", namespace: "finance-entry", operation: `resolve-issue:${issue.id}`, payload: { action: "resolve_issue", issueId: issue.id, expectedVersion: issue.version, resolution } });
     const result = await response.json() as { error?: string };
     if (!response.ok) { setNotice(errorLabel(result.error ?? "finance_issue_unavailable")); return; }
     await saved("Controllo risolto, auditato e riletto.");

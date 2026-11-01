@@ -76,7 +76,6 @@ const jobJourneySurface = await read("components/job-commercial-journey.tsx");
 const membershipRoute = await read("app/api/authority/memberships/route.ts");
 const warehouseComponent = await read("components/tenant-warehouse-control.tsx");
 const warehouseControl = await read("components/warehouse-control.tsx");
-const legacyS04Page = await read("components/s04-module-page.tsx");
 const assetNamingDialog = await read("components/server-naming-dialog.tsx");
 const genericS04Route = await read("app/api/[module]/route.ts");
 const communicationsSurface = await read("components/communications-control.tsx");
@@ -277,9 +276,6 @@ requireContract(warehouseControl, /Scansiona sul posto/, "movement scan-first pa
 requireContract(warehouseControl, /Catalogo da remoto/, "movement remote catalog path");
 requireContract(warehouseControl, /name="shelf"/, "warehouse shelf field");
 requireContract(warehouseComponent, /fetch\("\/api\/authority\/warehouses"/, "onboarding warehouse readback");
-requireContract(legacyS04Page, /module === "warehouse"\)\s*\{\s*router\.push\("\/warehouse"\)/, "legacy warehouse CTA redirects to canonical module");
-requireContract(legacyS04Page, /module === "assets" && createOpen && <ServerNamingDialog module="assets"/, "legacy S04 naming dialog restricted to assets");
-assert.doesNotMatch(legacyS04Page, /ServerNamingDialog module=\{module\}/, "legacy S04 must not mount a warehouse naming dialog");
 assert.equal((assetNamingDialog.match(/Registra materiale/g) ?? []).length, 0, "asset naming dialog must not contain warehouse registration copy");
 requireContract(genericS04Route, /warehouse_material_registration_moved_to_inventory/, "legacy generic warehouse material write blocked");
 requireContract(genericS04Route, /status: 410/, "legacy generic warehouse material write returns gone");

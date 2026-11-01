@@ -2,6 +2,6 @@ import ReleaseCertificationCenter from "@/components/release-certification-cente
 import { requirePageCapability } from "@/lib/page-access";
 
 export default async function ReleasePage() {
-  await requirePageCapability("authority.read");
+  await requirePageCapability("governance.read");
   return <ReleaseCertificationCenter />;
 }

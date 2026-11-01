@@ -122,11 +122,13 @@ const routeSource = await fs.readFile(path.join(root, "app/api/governance/alignm
 const serverSource = await fs.readFile(path.join(root, "lib/system-alignment.server.ts"), "utf8");
 assert(!/export\s+async\s+function\s+(POST|PUT|PATCH|DELETE)/.test(routeSource), "Alignment API must remain GET-only");
 assert(!/\.\s*(insert|update|delete)\s*\(/.test(serverSource), "Alignment readback must not mutate D1");
-assert(serverSource.includes("tenantAlignmentRuns"), "Alignment readback must load the durable execution receipt");
-assert(serverSource.includes("tenantAlignmentLinks"), "Alignment readback must count provenance links");
+assert(serverSource.includes("getSystemAlignmentReport(tenantId: string)"), "Integrity readback must require the authority-selected tenant");
+assert(serverSource.includes("eq(tenants.id, tenantId)"), "Integrity readback must select exactly one tenant root");
+assert(!serverSource.includes("tenantAlignmentRuns") && !serverSource.includes("tenantAlignmentLinks"), "Commercial integrity readback must not depend on a historical one-off alignment");
+assert(routeSource.includes("getSystemAlignmentReport(context.tenantId)"), "Governance must pass the server-derived tenant scope");
 
 console.log(JSON.stringify({
   status: "PASS", contract: report.contract.version, targetRecommendation: report.summary.recommendedTargetTenantId,
   blockedGates: report.summary.blockedGates, reviewGates: report.summary.reviewGates, conflicts: report.summary.conflicts,
-  checks: ["read_only_contract", "post_alignment_receipt", "provenance_readback", "target_scoring", "canonical_places", "qr_registry", "identity_review", "route_integrity", "collision_manifest"],
+  checks: ["read_only_contract", "tenant_scoped_runtime", "historical_executor_retired", "target_scoring", "canonical_places", "qr_registry", "identity_review", "route_integrity", "collision_manifest"],
 }, null, 2));

@@ -7,6 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ASSET_USAGE_MODES, TRANSPORT_CAPABILITIES, type AssetUsageMode, type TransportCapability } from "@/lib/asset-contract";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type CreateModule = "assets";
 type AssetType = "asset" | "vehicle" | "equipment";
@@ -115,10 +116,11 @@ export function ServerNamingDialog({ module, transportEnabled, open, onOpenChang
     setSaving(true);
     setError("");
     try {
-      const response = await fetch(`/api/${module}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const response = await idempotentJsonMutation({
+        url: `/api/${module}`,
+        namespace: "asset-catalog",
+        operation: "create",
+        payload: {
           title: cleanDescription,
           detail: cleanDescription,
           meta: assetType === "vehicle" ? "Mezzo da catalogare" : assetType === "equipment" ? "Attrezzatura da catalogare" : "Asset da catalogare",
@@ -143,8 +145,7 @@ export function ServerNamingDialog({ module, transportEnabled, open, onOpenChang
           notes: notes.trim() || undefined,
           lifecycleStatus: "AVAILABLE",
           availabilityGuard: "ASSIGNABLE",
-          idempotencyKey: `s04-${module}-${crypto.randomUUID()}`,
-        }),
+        },
       });
       const payload = (await response.json()) as CreateResponse;
       if (!response.ok) throw new Error(payload.error ?? "server_naming_failed");

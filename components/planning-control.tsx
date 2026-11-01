@@ -50,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { getAllowedCommandNavigation } from "@/lib/command-dashboard";
 import { missionExceptionLabel } from "@/lib/mission-exception-contract";
 import type { PlanningActivityType, PlanningJobModule, PlanningPriority } from "@/lib/planning-catalog";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type Tone = "lime" | "cyan" | "amber" | "red";
 type PlanningView = "today" | "plans" | "perimeters";
@@ -635,7 +636,6 @@ export default function PlanningControl() {
       notes: notes.trim(),
       resourceIds,
       ...(editingPlan ? { recordId: editingPlan.id, expectedVersion: editingPlan.version } : {}),
-      idempotencyKey: `planning-${action}-${crypto.randomUUID()}`,
     };
   }
 
@@ -664,10 +664,11 @@ export default function PlanningControl() {
     if (!selectedJob || !validWindow || !resourceIds.length) return;
     setSimulation({ status: "checking", evaluation: null });
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(selectedJob.id)}/planning`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(requestBody("what_if")),
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(selectedJob.id)}/planning`,
+        namespace: "planning",
+        operation: `what-if:${selectedJob.id}`,
+        payload: requestBody("what_if"),
       });
       const result = await response.json() as { error?: string; detail?: string; evaluation?: Evaluation };
       if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail ?? result.evaluation?.conflicts?.[0]?.detail));
@@ -688,10 +689,11 @@ export default function PlanningControl() {
     setNotice("");
     try {
       const action = editingPlan ? "revise" : "draft";
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(selectedJob.id)}/planning`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...requestBody(action), action }),
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(selectedJob.id)}/planning`,
+        namespace: "planning",
+        operation: `${action}:${selectedJob.id}`,
+        payload: { ...requestBody(action), action },
       });
       const result = await response.json() as { error?: string; detail?: string; evaluation?: Evaluation };
       if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail ?? result.evaluation?.conflicts?.[0]?.detail));
@@ -710,10 +712,11 @@ export default function PlanningControl() {
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(plan.jobId)}/planning`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "publish", recordId: plan.id, expectedVersion: plan.version, idempotencyKey: `planning-publish-${crypto.randomUUID()}` }),
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(plan.jobId)}/planning`,
+        namespace: "planning",
+        operation: `publish:${plan.id}`,
+        payload: { action: "publish", recordId: plan.id, expectedVersion: plan.version },
       });
       const result = await response.json() as { error?: string; detail?: string; evaluation?: Evaluation };
       if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail ?? result.evaluation?.conflicts?.[0]?.detail));
@@ -731,10 +734,11 @@ export default function PlanningControl() {
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch(`/api/operations/jobs/${encodeURIComponent(plan.jobId)}/planning`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "cancel", recordId: plan.id, expectedVersion: plan.version, idempotencyKey: `planning-cancel-${crypto.randomUUID()}` }),
+      const response = await idempotentJsonMutation({
+        url: `/api/operations/jobs/${encodeURIComponent(plan.jobId)}/planning`,
+        namespace: "planning",
+        operation: `cancel:${plan.id}`,
+        payload: { action: "cancel", recordId: plan.id, expectedVersion: plan.version },
       });
       const result = await response.json() as { error?: string; detail?: string };
       if (!response.ok) throw new Error(planningErrorMessage(result.error, result.detail));

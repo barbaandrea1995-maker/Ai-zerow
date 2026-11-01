@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, LoaderCircle, RefreshCw, ShieldCheck, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AuthorityMembershipView } from "@/components/authority-membership-control";
+import { idempotentJsonMutation } from "@/lib/client-request-idempotency";
 
 type WarehouseChoice = {
   id: string;
@@ -103,13 +104,13 @@ export default function WarehouseAssignmentControl({
   async function save(membership: AuthorityMembershipView) {
     if (!canManage) return;
     const current = assignments.find((assignment) => assignment.membershipId === membership.id);
-    const idempotencyKey = `warehouse-scope-${membership.id}-${crypto.randomUUID()}`;
     setSavingId(membership.id);
     try {
-      const response = await fetch("/api/authority/warehouse-assignments", {
-        method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
-        body: JSON.stringify({ membershipId: membership.id, warehouseIds: selectedIds(membership.id), expectedVersion: current?.version ?? null, idempotencyKey }),
+      const response = await idempotentJsonMutation({
+        url: "/api/authority/warehouse-assignments",
+        namespace: "warehouse-scope",
+        operation: membership.id,
+        payload: { membershipId: membership.id, warehouseIds: selectedIds(membership.id), expectedVersion: current?.version ?? null },
       });
       const next = await response.json() as AssignmentPayload & { assignment?: WarehouseAssignment };
       if (!response.ok) {
